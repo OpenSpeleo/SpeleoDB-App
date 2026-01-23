@@ -1,0 +1,8 @@
+{
+  "name": "SpeleoDB",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "react-vite",
+  "id": "6ce3a5d6"
+}
