@@ -77,8 +77,14 @@
   --ion-color-dark-tint: #334155;
 }
 
-/* Dark theme - always on for SpeleoDB */
-:root {
+/*
+ * Dark theme - always on for SpeleoDB.
+ *
+ * Uses :root.ios to match the specificity of Ionic's dark.always.css
+ * (:root.ios sets --ion-background-color: #000000 at specificity 0,2,0).
+ * A plain :root or .ios selector (0,1,0) would lose, leaving backgrounds black.
+ */
+:root.ios {
   --ion-background-color: #0f172a;
   --ion-background-color-rgb: 15, 23, 42;
 
@@ -114,13 +120,6 @@
   --ion-border-color: #334155;
 }
 
-/* iOS specific overrides */
-.ios {
-  --ion-background-color: #0f172a;
-  --ion-toolbar-background: #0f172a;
-  --ion-tab-bar-background: #0f172a;
-}
-
 /* Disable Ionic header for custom header */
 ion-header {
   display: none;
@@ -130,6 +129,16 @@ ion-header {
 ion-content::part(scroll) {
   scrollbar-width: thin;
   scrollbar-color: #475569 transparent;
+}
+
+/* Pull-to-refresh: grow the refresher so text/spinner sit below the notch */
+ion-refresher {
+  height: calc(60px + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
+}
+
+ion-refresher-content {
+  --color: #94a3b8; /* slate-400 */
 }
 
 /* Hide the native Ionic back button */

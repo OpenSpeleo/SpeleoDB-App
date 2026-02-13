@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { HttpClient } from '../services/HttpClient';
 import { SpeleoDBService } from '../services/SpeleoDBService';
+import { ProjectCacheService } from '../services/ProjectCacheService';
 import { SpeleoDBController, type PreferencesPort } from '../controllers/SpeleoDBController';
 import { PREFERENCES } from '../constants';
 import { canRunIntegrationTests, TEST_ENV } from './env';
@@ -38,7 +39,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
     const http = new HttpClient();
     const service = new SpeleoDBService(http);
     prefs = createMemoryPrefs();
-    controller = new SpeleoDBController(service, prefs);
+    controller = new SpeleoDBController(service, prefs, new ProjectCacheService());
   });
 
   // ---- login ----------------------------------------------------------------
@@ -81,7 +82,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
 
       const http = new HttpClient();
       const service = new SpeleoDBService(http);
-      const ctrl = new SpeleoDBController(service, prefs);
+      const ctrl = new SpeleoDBController(service, prefs, new ProjectCacheService());
 
       const result = await ctrl.validateSession();
 
@@ -94,7 +95,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
 
       const http = new HttpClient();
       const service = new SpeleoDBService(http);
-      const ctrl = new SpeleoDBController(service, prefs);
+      const ctrl = new SpeleoDBController(service, prefs, new ProjectCacheService());
 
       const result = await ctrl.validateSession();
 
@@ -108,7 +109,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
       // Build a new controller that will restore session from prefs
       const http = new HttpClient();
       const service = new SpeleoDBService(http);
-      const freshCtrl = new SpeleoDBController(service, prefs);
+      const freshCtrl = new SpeleoDBController(service, prefs, new ProjectCacheService());
 
       // freshCtrl restored the session from prefs — now validate it
       expect(freshCtrl.isAuthenticated()).toBe(true);

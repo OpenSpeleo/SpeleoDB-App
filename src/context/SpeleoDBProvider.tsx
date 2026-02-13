@@ -12,13 +12,16 @@ import { IonModal, IonContent, IonButton } from '@ionic/react';
 
 import { HttpClient } from '../services/HttpClient';
 import { SpeleoDBService } from '../services/SpeleoDBService';
+import { ProjectCacheService } from '../services/ProjectCacheService';
 import {
   getPreferences,
   setPreferences,
   clearPreferences,
 } from '../services/PreferencesService';
 import { SpeleoDBController } from '../controllers/SpeleoDBController';
+import type { SyncStatus } from '../controllers/SpeleoDBController';
 import type { AuthState } from '../types';
+import type { Project } from '../types/project';
 
 // ==================== Context value shape ====================
 
@@ -26,6 +29,8 @@ export interface SpeleoDBContextValue {
   controller: SpeleoDBController;
   authState: AuthState;
   isOnline: boolean;
+  projects: Project[];
+  syncStatus: SyncStatus;
 }
 
 const SpeleoDBContext = createContext<SpeleoDBContextValue | null>(null);
@@ -57,11 +62,12 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   if (!controllerRef.current) {
     const http = new HttpClient();
     const service = new SpeleoDBService(http);
-    controllerRef.current = new SpeleoDBController(service, {
-      getPreferences,
-      setPreferences,
-      clearPreferences,
-    });
+    const projectCache = new ProjectCacheService();
+    controllerRef.current = new SpeleoDBController(
+      service,
+      { getPreferences, setPreferences, clearPreferences },
+      projectCache,
+    );
   }
   const controller = controllerRef.current;
 
@@ -75,6 +81,16 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   const isOnline = useSyncExternalStore(
     (cb) => controller.subscribe(cb),
     () => controller.isOnline,
+  );
+
+  const projects = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.projects,
+  );
+
+  const syncStatus = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.syncStatus,
   );
 
   // ---- Offline modal local state -------------------------------------------
@@ -116,7 +132,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
 
   // ---- Render ---------------------------------------------------------------
 
-  const value: SpeleoDBContextValue = { controller, authState, isOnline };
+  const value: SpeleoDBContextValue = { controller, authState, isOnline, projects, syncStatus };
 
   return (
     <SpeleoDBContext.Provider value={value}>

@@ -10,6 +10,7 @@ import { API, HEADERS } from '../constants';
 import { getInstanceBaseUrl } from '../utils/url';
 import type { HttpClient, HttpResponse } from './HttpClient';
 import type { AuthTokenResponse, SignupCredentials } from '../types';
+import type { ProjectsGeoJSONResponse } from '../types/project';
 
 export class SpeleoDBService {
   constructor(private http: HttpClient) {}
@@ -56,6 +57,39 @@ export class SpeleoDBService {
       headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
     });
   }
+
+  // ==================== Projects ====================
+
+  /**
+   * GET /api/v1/projects/geojson/  (with Token header)
+   *
+   * Returns the full project list with geojson metadata.
+   */
+  async getProjectsGeoJSON(
+    instance: string,
+    token: string,
+  ): Promise<HttpResponse<ProjectsGeoJSONResponse>> {
+    const baseUrl = getInstanceBaseUrl(instance);
+    const url = baseUrl + API.PROJECTS_GEOJSON_ENDPOINT;
+
+    return this.http.request<ProjectsGeoJSONResponse>({
+      url,
+      method: 'GET',
+      headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
+    });
+  }
+
+  /**
+   * GET any URL and return parsed JSON.
+   *
+   * Used to download pre-signed CloudFront geojson files. No auth header
+   * is needed because the URL itself carries the signature.
+   */
+  async downloadJSON<T = unknown>(url: string): Promise<HttpResponse<T>> {
+    return this.http.request<T>({ url, method: 'GET' });
+  }
+
+  // ==================== Signup ====================
 
   /**
    * POST /api/v1/auth/signup

@@ -11,6 +11,7 @@
 
 import { HTTP_STATUS, PREFERENCES } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
+import type { ProjectCacheService } from '../services/ProjectCacheService';
 import type {
   AuthResponse,
   AuthState,
@@ -18,6 +19,11 @@ import type {
   SignupCredentials,
   User,
 } from '../types';
+import type { Project } from '../types/project';
+
+// ==================== Sync status ====================
+
+export type SyncStatus = 'idle' | 'syncing' | 'done' | 'error';
 
 // ==================== Preferences interface (for DI) ====================
 
@@ -41,15 +47,20 @@ export class SpeleoDBController {
   // ---- Observable state -----------------------------------------------------
   private _authState: AuthState = { isAuthenticated: false, user: null, token: null };
   private _isOnline = false;
+  private _projects: Project[] = [];
+  private _syncStatus: SyncStatus = 'idle';
   private _listeners = new Set<() => void>();
 
   // Snapshot references for useSyncExternalStore (identity-stable between notifies)
   private _authStateSnapshot: AuthState = this._authState;
   private _isOnlineSnapshot: boolean = this._isOnline;
+  private _projectsSnapshot: Project[] = this._projects;
+  private _syncStatusSnapshot: SyncStatus = this._syncStatus;
 
   constructor(
     private service: SpeleoDBService,
     private prefs: PreferencesPort,
+    private cache: ProjectCacheService,
   ) {
     this.restoreSession();
   }
@@ -68,6 +79,14 @@ export class SpeleoDBController {
     return this._authState.user;
   }
 
+  get projects(): Project[] {
+    return this._projectsSnapshot;
+  }
+
+  get syncStatus(): SyncStatus {
+    return this._syncStatusSnapshot;
+  }
+
   isAuthenticated(): boolean {
     return this._authState.isAuthenticated;
   }
@@ -83,6 +102,8 @@ export class SpeleoDBController {
     // Produce new snapshot references so useSyncExternalStore detects changes.
     this._authStateSnapshot = { ...this._authState };
     this._isOnlineSnapshot = this._isOnline;
+    this._projectsSnapshot = [...this._projects];
+    this._syncStatusSnapshot = this._syncStatus;
     this._listeners.forEach((fn) => fn());
   }
 
@@ -216,7 +237,10 @@ export class SpeleoDBController {
   logout(): void {
     this._authState = { isAuthenticated: false, user: null, token: null };
     this._isOnline = false;
+    this._projects = [];
+    this._syncStatus = 'idle';
     this.prefs.setPreferences({ email: undefined, token: undefined });
+    this.cache.clearAll();
     this.notify();
   }
 
@@ -245,6 +269,109 @@ export class SpeleoDBController {
     }
 
     localStorage.setItem(STORAGE_KEYS.PENDING_SYNC, JSON.stringify(remaining));
+  }
+
+  // ---- Project sync ---------------------------------------------------------
+
+  /**
+   * Main sync orchestrator.
+   *
+   * 1. Load cached projects immediately so the UI can render without waiting.
+   * 2. If online, fetch the fresh list from the API, cache it, then
+   *    download any new/changed geojson files in the background.
+   */
+  async syncProjects(): Promise<void> {
+    // Step 1 -- serve from cache instantly
+    try {
+      const cached = await this.cache.getProjects();
+      if (cached && cached.length > 0) {
+        this._projects = cached;
+        this.notify();
+      }
+    } catch (error) {
+      console.warn('Failed to load cached projects:', error);
+    }
+
+    // Step 2 -- fetch fresh data if online
+    if (!navigator.onLine) {
+      // Already showing cached data (if any); nothing more to do offline.
+      if (this._projects.length === 0) {
+        this._syncStatus = 'error';
+      }
+      this.notify();
+      return;
+    }
+
+    const prefs = this.prefs.getPreferences();
+    const token = prefs.token;
+    const instance = prefs.instance?.trim();
+    if (!token || !instance) return;
+
+    this._syncStatus = 'syncing';
+    this.notify();
+
+    try {
+      const response = await this.service.getProjectsGeoJSON(instance, token);
+
+      if (response.status >= 200 && response.status < 300 && response.data?.data) {
+        const freshProjects = response.data.data;
+        this._projects = freshProjects;
+        this._isOnline = true;
+        await this.cache.setProjects(freshProjects);
+        this.notify();
+
+        // Step 3 -- download geojson files in background (non-blocking)
+        await this.downloadGeoJSONFiles(freshProjects);
+      }
+
+      this._syncStatus = 'done';
+    } catch (error) {
+      console.warn('syncProjects: API fetch failed:', error);
+      this._syncStatus = this._projects.length > 0 ? 'done' : 'error';
+    }
+
+    this.notify();
+  }
+
+  /**
+   * Read a single project's geojson from the cache.
+   */
+  async getProjectGeoJSON(projectId: string): Promise<unknown | null> {
+    return this.cache.getGeoJSON(projectId);
+  }
+
+  /**
+   * Download geojson files for all eligible projects, skipping those whose
+   * cached version already matches the latest commit.
+   *
+   * Uses a simple worker-pool to limit concurrency to 3 parallel downloads.
+   */
+  private async downloadGeoJSONFiles(projects: Project[]): Promise<void> {
+    const eligible = projects.filter(
+      (p) => p.geojson_file && !p.exclude_geojson,
+    );
+    if (eligible.length === 0) return;
+
+    // Shared mutable queue consumed by the workers.
+    const queue = [...eligible];
+
+    const worker = async (): Promise<void> => {
+      while (queue.length > 0) {
+        const project = queue.shift()!;
+        try {
+          const cachedCommit = await this.cache.getCachedCommitId(project.id);
+          if (cachedCommit === project.latest_commit.id) continue; // already up to date
+
+          const res = await this.service.downloadJSON(project.geojson_file!);
+          await this.cache.setGeoJSON(project.id, res.data, project.latest_commit.id);
+        } catch (error) {
+          console.warn(`Failed to cache geojson for project ${project.id}:`, error);
+        }
+      }
+    };
+
+    const concurrency = Math.min(3, eligible.length);
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
   }
 
   // ---- Validation helpers ---------------------------------------------------

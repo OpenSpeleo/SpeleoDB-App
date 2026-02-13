@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useHistory } from 'react-router-dom';
-import { IonPage, IonContent } from '@ionic/react';
+import { IonPage, IonContent, IonRefresher, IonRefresherContent } from '@ionic/react';
 import { useSpeleoDB } from '../context/SpeleoDBProvider';
 import type { User } from '../types';
 import logoSvg from '../assets/media/logo.png';
 
 const Dashboard: React.FC = () => {
   const history = useHistory();
-  const { controller, isOnline } = useSpeleoDB();
+  const { controller, isOnline, projects, syncStatus } = useSpeleoDB();
   const [user, setUser] = useState<User | null>(null);
+  const didSyncRef = React.useRef(false);
 
   useEffect(() => {
     if (!controller.isAuthenticated()) {
@@ -16,7 +17,18 @@ const Dashboard: React.FC = () => {
       return;
     }
     setUser(controller.currentUser);
+
+    // Trigger project sync once when the dashboard mounts.
+    if (!didSyncRef.current) {
+      didSyncRef.current = true;
+      controller.syncProjects();
+    }
   }, [history, controller]);
+
+  const handleRefresh = async (event: CustomEvent) => {
+    await controller.syncProjects();
+    event.detail.complete();
+  };
 
   const handleLogout = () => {
     controller.logout();
@@ -30,6 +42,14 @@ const Dashboard: React.FC = () => {
   return (
     <IonPage>
       <IonContent fullscreen className="ion-no-padding">
+        <IonRefresher slot="fixed" onIonRefresh={handleRefresh} pullFactor={0.5} pullMin={60} pullMax={200}>
+          <IonRefresherContent
+            pullingIcon="arrow-down-outline"
+            pullingText="Pull down to refresh"
+            refreshingSpinner="crescent"
+            refreshingText="Syncing projects…"
+          />
+        </IonRefresher>
         <div className="font-sans antialiased bg-slate-900 text-slate-100 tracking-tight min-h-screen flex flex-col">
           {/* Header */}
           <header className="border-b border-slate-800 pt-[env(safe-area-inset-top)]">
@@ -42,8 +62,14 @@ const Dashboard: React.FC = () => {
                   </Link>
                 </div>
 
-                {/* User menu */}
+                {/* Sync indicator + User menu */}
                 <div className="flex items-center gap-4">
+                  {syncStatus === 'syncing' && (
+                    <span className="flex items-center gap-1.5 text-xs text-slate-400">
+                      <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+                      Syncing…
+                    </span>
+                  )}
                   <span className="text-sm text-slate-300">{user.name}</span>
                   <button
                     onClick={handleLogout}
@@ -66,6 +92,12 @@ const Dashboard: React.FC = () => {
               <p className="text-slate-400">
                 This is your SpeleoDB dashboard. From here, you can manage your cave surveys and collaborate with your team.
               </p>
+              {projects.length > 0 && (
+                <p className="text-sm text-slate-500 mt-2">
+                  {projects.length} project{projects.length !== 1 ? 's' : ''} cached for offline access
+                  {syncStatus === 'done' && <span className="text-green-500 ml-1">· up to date</span>}
+                </p>
+              )}
             </div>
 
             {/* Dashboard Cards */}

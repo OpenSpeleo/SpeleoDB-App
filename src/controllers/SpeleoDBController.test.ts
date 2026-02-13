@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SpeleoDBController, type PreferencesPort } from './SpeleoDBController';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
+import type { ProjectCacheService } from '../services/ProjectCacheService';
 import type { HttpResponse } from '../services/HttpClient';
 import type { AuthTokenResponse } from '../types';
 import { PREFERENCES } from '../constants';
@@ -30,6 +31,17 @@ function createMockPrefs(initial?: { email?: string; token?: string; instance?: 
   };
 }
 
+function createMockCache(): ProjectCacheService {
+  return {
+    getProjects: vi.fn(async () => null),
+    setProjects: vi.fn(async () => {}),
+    getGeoJSON: vi.fn(async () => null),
+    setGeoJSON: vi.fn(async () => {}),
+    getCachedCommitId: vi.fn(async () => null),
+    clearAll: vi.fn(async () => {}),
+  } as unknown as ProjectCacheService;
+}
+
 // ==================== Tests ====================
 
 describe('SpeleoDBController', () => {
@@ -41,13 +53,15 @@ describe('SpeleoDBController', () => {
 
   let service: ReturnType<typeof createMockService>;
   let prefs: ReturnType<typeof createMockPrefs>;
+  let cache: ReturnType<typeof createMockCache>;
   let controller: SpeleoDBController;
 
   beforeEach(() => {
     localStorage.clear();
     service = createMockService();
     prefs = createMockPrefs();
-    controller = new SpeleoDBController(service, prefs);
+    cache = createMockCache();
+    controller = new SpeleoDBController(service, prefs, cache);
     vi.restoreAllMocks();
   });
 
@@ -82,7 +96,7 @@ describe('SpeleoDBController', () => {
           data: {},
         }) as HttpResponse<AuthTokenResponse>),
       });
-      controller = new SpeleoDBController(service, prefs);
+      controller = new SpeleoDBController(service, prefs, cache);
 
       const result = await controller.login(validCreds);
 
@@ -143,7 +157,7 @@ describe('SpeleoDBController', () => {
         instance: 'https://www.speleodb.org',
       });
 
-      const fresh = new SpeleoDBController(service, restoredPrefs);
+      const fresh = new SpeleoDBController(service, restoredPrefs, cache);
 
       expect(fresh.isAuthenticated()).toBe(true);
       expect(fresh.currentUser?.email).toBe('restored@example.com');
@@ -151,7 +165,7 @@ describe('SpeleoDBController', () => {
 
     it('stays unauthenticated when preferences are empty', () => {
       const emptyPrefs = createMockPrefs();
-      const fresh = new SpeleoDBController(service, emptyPrefs);
+      const fresh = new SpeleoDBController(service, emptyPrefs, cache);
 
       expect(fresh.isAuthenticated()).toBe(false);
       expect(fresh.currentUser).toBeNull();
@@ -166,7 +180,7 @@ describe('SpeleoDBController', () => {
         token: 't',
         instance: 'https://www.speleodb.org',
       });
-      const ctrl = new SpeleoDBController(service, withToken);
+      const ctrl = new SpeleoDBController(service, withToken, cache);
 
       const result = await ctrl.validateSession();
 
@@ -182,7 +196,7 @@ describe('SpeleoDBController', () => {
         token: 't',
         instance: 'https://www.speleodb.org',
       });
-      const ctrl = new SpeleoDBController(service, withToken);
+      const ctrl = new SpeleoDBController(service, withToken, cache);
 
       const result = await ctrl.validateSession();
       expect(result).toBe('unauthorized');
@@ -196,7 +210,7 @@ describe('SpeleoDBController', () => {
         token: 't',
         instance: 'https://www.speleodb.org',
       });
-      const ctrl = new SpeleoDBController(service, withToken);
+      const ctrl = new SpeleoDBController(service, withToken, cache);
 
       const result = await ctrl.validateSession();
       expect(result).toBe('network_error');
