@@ -1,0 +1,158 @@
+/**
+ * SpeleoDBProvider -- React bridge for the SpeleoDBController.
+ *
+ * Creates the controller once, subscribes via useSyncExternalStore, and
+ * exposes everything through the useSpeleoDB() hook. Replaces the old
+ * OnlineStateProvider.
+ */
+
+import React, { createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react';
+import { useHistory, useLocation } from 'react-router-dom';
+import { IonModal, IonContent, IonButton } from '@ionic/react';
+
+import { HttpClient } from '../services/HttpClient';
+import { SpeleoDBService } from '../services/SpeleoDBService';
+import {
+  getPreferences,
+  setPreferences,
+  clearPreferences,
+} from '../services/PreferencesService';
+import { SpeleoDBController } from '../controllers/SpeleoDBController';
+import type { AuthState } from '../types';
+
+// ==================== Context value shape ====================
+
+export interface SpeleoDBContextValue {
+  controller: SpeleoDBController;
+  authState: AuthState;
+  isOnline: boolean;
+}
+
+const SpeleoDBContext = createContext<SpeleoDBContextValue | null>(null);
+
+// ==================== Hook ====================
+
+export function useSpeleoDB(): SpeleoDBContextValue {
+  const ctx = useContext(SpeleoDBContext);
+  if (!ctx) {
+    throw new Error('useSpeleoDB must be used within SpeleoDBProvider');
+  }
+  return ctx;
+}
+
+// ==================== Provider ====================
+
+interface SpeleoDBProviderProps {
+  children: React.ReactNode;
+}
+
+export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
+  const history = useHistory();
+  const location = useLocation();
+  const didValidateRef = useRef(false);
+
+  // ---- Create controller once (stable across re-renders) --------------------
+
+  const controllerRef = useRef<SpeleoDBController | null>(null);
+  if (!controllerRef.current) {
+    const http = new HttpClient();
+    const service = new SpeleoDBService(http);
+    controllerRef.current = new SpeleoDBController(service, {
+      getPreferences,
+      setPreferences,
+      clearPreferences,
+    });
+  }
+  const controller = controllerRef.current;
+
+  // ---- Subscribe to controller state via useSyncExternalStore ---------------
+
+  const authState = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.authState,
+  );
+
+  const isOnline = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.isOnline,
+  );
+
+  // ---- Offline modal local state -------------------------------------------
+  const [showOfflineModal, setShowOfflineModal] = React.useState(false);
+
+  // ---- Startup: redirect + validate stored token ---------------------------
+
+  useEffect(() => {
+    const prefs = getPreferences();
+    const hasCredentials = Boolean(prefs.email?.trim() && prefs.token?.trim());
+
+    if (!hasCredentials) return;
+
+    // If user has credentials and is on a public page, go to dashboard.
+    const pathname = location.pathname;
+    if (pathname === '/' || pathname === '/login') {
+      history.replace('/dashboard');
+    }
+
+    // Validate once per app lifetime.
+    if (didValidateRef.current) return;
+    didValidateRef.current = true;
+
+    controller.validateSession().then((result) => {
+      if (result === 'unauthorized') {
+        clearPreferences();
+        controller.logout();
+        history.replace('/');
+        return;
+      }
+      if (result === 'ok') {
+        // isOnline is updated inside the controller; React picks it up via useSyncExternalStore.
+        return;
+      }
+      // network_error
+      setShowOfflineModal(true);
+    });
+  }, [history, location.pathname, controller]);
+
+  // ---- Render ---------------------------------------------------------------
+
+  const value: SpeleoDBContextValue = { controller, authState, isOnline };
+
+  return (
+    <SpeleoDBContext.Provider value={value}>
+      {children}
+
+      {/* Offline warning modal */}
+      <IonModal
+        isOpen={showOfflineModal}
+        onDidDismiss={() => setShowOfflineModal(false)}
+        initialBreakpoint={0.5}
+        breakpoints={[0, 0.5]}
+      >
+        <IonContent className="ion-padding">
+          <div className="flex flex-col h-full justify-center max-w-sm mx-auto text-center">
+            <div className="mb-6">
+              <span className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-amber-500/20 text-amber-400 mb-4">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+              </span>
+              <h2 className="text-xl font-semibold text-slate-100 mb-2">Offline mode</h2>
+              <p className="text-slate-400 text-sm">
+                The app could not reach the server. You are operating in offline mode. Some features may be limited.
+              </p>
+            </div>
+            <IonButton expand="block" onClick={() => setShowOfflineModal(false)}>
+              OK
+            </IonButton>
+          </div>
+        </IonContent>
+      </IonModal>
+    </SpeleoDBContext.Provider>
+  );
+}

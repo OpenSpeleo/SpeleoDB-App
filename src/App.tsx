@@ -2,7 +2,7 @@ import { Redirect, Route, Switch } from 'react-router-dom';
 import { IonApp, IonRouterOutlet, setupIonicReact } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
 
-import { OnlineStateProvider } from './context/OnlineState';
+import { SpeleoDBProvider } from './context/SpeleoDBProvider';
 
 /* Pages */
 import Home from './pages/Home';
@@ -47,7 +47,7 @@ setupIonicReact({
 const App: React.FC = () => (
   <IonApp>
     <IonReactRouter>
-      <OnlineStateProvider>
+      <SpeleoDBProvider>
         <IonRouterOutlet>
           <Switch>
             <Route exact path="/" component={Home} />
@@ -60,7 +60,7 @@ const App: React.FC = () => (
             </Route>
           </Switch>
         </IonRouterOutlet>
-      </OnlineStateProvider>
+      </SpeleoDBProvider>
     </IonReactRouter>
   </IonApp>
 );

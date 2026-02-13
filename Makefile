@@ -168,3 +168,7 @@ ios-log: ## Stream logs from the booted simulator
 		exit 1; \
 	fi
 	xcrun simctl spawn $(DEVICE_UDID) log stream --level debug --predicate 'processImagePath CONTAINS "$(SCHEME)"'
+
+generate-assets:
+	npm install @capacitor/assets --save-dev
+	npx capacitor-assets generate --iconBackgroundColor "#0f182a"

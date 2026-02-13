@@ -5,25 +5,24 @@ import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import Login from './Login';
-import { OnlineStateProvider } from '../context/OnlineState';
 import { PREFERENCES } from '../constants';
-import * as AuthServiceModule from '../services/AuthService';
 
-vi.mock('../services/AuthService', () => ({
-  authService: {
-    login: vi.fn(),
-  },
+// Mock the SpeleoDBProvider hook -- return a fake controller.
+const mockLogin = vi.fn();
+
+vi.mock('../context/SpeleoDBProvider', () => ({
+  useSpeleoDB: () => ({
+    controller: { login: mockLogin },
+    authState: { isAuthenticated: false, user: null, token: null },
+    isOnline: true,
+  }),
 }));
-
-const authService = AuthServiceModule.authService as unknown as { login: ReturnType<typeof vi.fn> };
 
 function renderLogin() {
   const history = createMemoryHistory();
   render(
     <Router history={history}>
-      <OnlineStateProvider>
-        <Login />
-      </OnlineStateProvider>
+      <Login />
     </Router>
   );
   return history;
@@ -31,7 +30,7 @@ function renderLogin() {
 
 describe('Login page', () => {
   beforeEach(() => {
-    vi.mocked(authService.login).mockReset();
+    mockLogin.mockReset();
   });
 
   it('renders email, password, and instance fields', () => {
@@ -48,10 +47,7 @@ describe('Login page', () => {
   });
 
   it('on successful login redirects to /dashboard', async () => {
-    vi.mocked(authService.login).mockResolvedValue({
-      success: true,
-      message: 'Login successful',
-    });
+    mockLogin.mockResolvedValue({ success: true, message: 'Login successful' });
     const history = renderLogin();
 
     await userEvent.type(screen.getByLabelText(/email/i), 'user@example.com');
@@ -59,18 +55,13 @@ describe('Login page', () => {
     await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(
-      () => {
-        expect(history.location.pathname).toBe('/dashboard');
-      },
+      () => { expect(history.location.pathname).toBe('/dashboard'); },
       { timeout: 2000 }
     );
   });
 
   it('on failed login shows error and does not redirect', async () => {
-    vi.mocked(authService.login).mockResolvedValue({
-      success: false,
-      message: 'Invalid email or password',
-    });
+    mockLogin.mockResolvedValue({ success: false, message: 'Invalid email or password' });
     const history = renderLogin();
 
     await userEvent.type(screen.getByLabelText(/email/i), 'user@example.com');
@@ -83,12 +74,9 @@ describe('Login page', () => {
     expect(history.location.pathname).not.toBe('/dashboard');
   });
 
-  it('passes instance to authService.login', async () => {
-    vi.mocked(authService.login).mockResolvedValue({
-      success: true,
-      message: 'OK',
-    });
-    const history = renderLogin();
+  it('passes instance to controller.login', async () => {
+    mockLogin.mockResolvedValue({ success: true, message: 'OK' });
+    renderLogin();
     const instanceInput = screen.getByLabelText(/speleodb instance/i);
 
     await userEvent.clear(instanceInput);
@@ -98,7 +86,7 @@ describe('Login page', () => {
     await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
-      expect(authService.login).toHaveBeenCalledWith({
+      expect(mockLogin).toHaveBeenCalledWith({
         email: 'u@x.com',
         password: 'pass',
         instance: 'https://custom.speleodb.org',

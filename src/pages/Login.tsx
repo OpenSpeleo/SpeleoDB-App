@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useHistory } from 'react-router-dom';
 import { IonPage, IonContent } from '@ionic/react';
-import { authService } from '../services/AuthService';
-import { useOnlineState } from '../context/OnlineState';
+import { useSpeleoDB } from '../context/SpeleoDBProvider';
 import { PREFERENCES } from '../constants';
 import { getInstanceBaseUrl, INSTANCE_PATHS } from '../utils/url';
 import logoSvg from '../assets/media/logo.png';
@@ -10,7 +9,7 @@ import authIllustrationSvg from '../assets/media/auth-illustration.svg';
 
 const Login: React.FC = () => {
   const history = useHistory();
-  const { setOnline } = useOnlineState();
+  const { controller } = useSpeleoDB();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [instance, setInstance] = useState<string>(PREFERENCES.DEFAULT_INSTANCE);
@@ -25,10 +24,9 @@ const Login: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const result = await authService.login({ email, password, instance });
+      const result = await controller.login({ email, password, instance });
       
       if (result.success) {
-        setOnline(true);
         setSuccess(result.message);
         setTimeout(() => {
           history.push('/dashboard');

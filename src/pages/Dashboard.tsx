@@ -1,25 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useHistory } from 'react-router-dom';
 import { IonPage, IonContent } from '@ionic/react';
-import { authService, User } from '../services/AuthService';
-import { useOnlineState } from '../context/OnlineState';
+import { useSpeleoDB } from '../context/SpeleoDBProvider';
+import type { User } from '../types';
 import logoSvg from '../assets/media/logo.png';
 
 const Dashboard: React.FC = () => {
   const history = useHistory();
-  const { isOnline } = useOnlineState();
+  const { controller, isOnline } = useSpeleoDB();
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    if (!authService.isAuthenticated()) {
+    if (!controller.isAuthenticated()) {
       history.push('/login');
       return;
     }
-    setUser(authService.getCurrentUser());
-  }, [history]);
+    setUser(controller.currentUser);
+  }, [history, controller]);
 
   const handleLogout = () => {
-    authService.logout();
+    controller.logout();
     history.push('/');
   };
 

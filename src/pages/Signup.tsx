@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useHistory } from 'react-router-dom';
 import { IonPage, IonContent } from '@ionic/react';
-import { authService } from '../services/AuthService';
+import { useSpeleoDB } from '../context/SpeleoDBProvider';
 import logoSvg from '../assets/media/logo.png';
 import authIllustrationSvg from '../assets/media/auth-illustration.svg';
 
@@ -51,6 +51,7 @@ const COUNTRIES = [
 
 const Signup: React.FC = () => {
   const history = useHistory();
+  const { controller } = useSpeleoDB();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -89,7 +90,7 @@ const Signup: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const result = await authService.signup({
+      const result = await controller.signup({
         name: formData.name,
         email: formData.email,
         password: formData.password,
