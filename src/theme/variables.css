@@ -1,2 +1,138 @@
-/* For information on how to create your own theme, please refer to:
-http://ionicframework.com/docs/theming/ */
+/**
+ * SpeleoDB Theme Variables
+ * Customized for the dark purple/slate theme
+ */
+
+:root {
+  /* Primary Colors - Purple */
+  --ion-color-primary: #a855f7;
+  --ion-color-primary-rgb: 168, 85, 247;
+  --ion-color-primary-contrast: #ffffff;
+  --ion-color-primary-contrast-rgb: 255, 255, 255;
+  --ion-color-primary-shade: #9333ea;
+  --ion-color-primary-tint: #c084fc;
+
+  /* Secondary Colors - Indigo */
+  --ion-color-secondary: #6366f1;
+  --ion-color-secondary-rgb: 99, 102, 241;
+  --ion-color-secondary-contrast: #ffffff;
+  --ion-color-secondary-contrast-rgb: 255, 255, 255;
+  --ion-color-secondary-shade: #4f46e5;
+  --ion-color-secondary-tint: #818cf8;
+
+  /* Tertiary Colors */
+  --ion-color-tertiary: #22d3ee;
+  --ion-color-tertiary-rgb: 34, 211, 238;
+  --ion-color-tertiary-contrast: #000000;
+  --ion-color-tertiary-contrast-rgb: 0, 0, 0;
+  --ion-color-tertiary-shade: #06b6d4;
+  --ion-color-tertiary-tint: #67e8f9;
+
+  /* Success - Green */
+  --ion-color-success: #22c55e;
+  --ion-color-success-rgb: 34, 197, 94;
+  --ion-color-success-contrast: #000000;
+  --ion-color-success-contrast-rgb: 0, 0, 0;
+  --ion-color-success-shade: #16a34a;
+  --ion-color-success-tint: #4ade80;
+
+  /* Warning - Yellow */
+  --ion-color-warning: #eab308;
+  --ion-color-warning-rgb: 234, 179, 8;
+  --ion-color-warning-contrast: #000000;
+  --ion-color-warning-contrast-rgb: 0, 0, 0;
+  --ion-color-warning-shade: #ca8a04;
+  --ion-color-warning-tint: #facc15;
+
+  /* Danger - Red */
+  --ion-color-danger: #ef4444;
+  --ion-color-danger-rgb: 239, 68, 68;
+  --ion-color-danger-contrast: #ffffff;
+  --ion-color-danger-contrast-rgb: 255, 255, 255;
+  --ion-color-danger-shade: #dc2626;
+  --ion-color-danger-tint: #f87171;
+
+  /* Light */
+  --ion-color-light: #f8fafc;
+  --ion-color-light-rgb: 248, 250, 252;
+  --ion-color-light-contrast: #0f172a;
+  --ion-color-light-contrast-rgb: 15, 23, 42;
+  --ion-color-light-shade: #e2e8f0;
+  --ion-color-light-tint: #ffffff;
+
+  /* Medium - Slate */
+  --ion-color-medium: #64748b;
+  --ion-color-medium-rgb: 100, 116, 139;
+  --ion-color-medium-contrast: #ffffff;
+  --ion-color-medium-contrast-rgb: 255, 255, 255;
+  --ion-color-medium-shade: #475569;
+  --ion-color-medium-tint: #94a3b8;
+
+  /* Dark - Slate Dark */
+  --ion-color-dark: #1e293b;
+  --ion-color-dark-rgb: 30, 41, 59;
+  --ion-color-dark-contrast: #f1f5f9;
+  --ion-color-dark-contrast-rgb: 241, 245, 249;
+  --ion-color-dark-shade: #0f172a;
+  --ion-color-dark-tint: #334155;
+}
+
+/* Dark theme - always on for SpeleoDB */
+:root {
+  --ion-background-color: #0f172a;
+  --ion-background-color-rgb: 15, 23, 42;
+
+  --ion-text-color: #f1f5f9;
+  --ion-text-color-rgb: 241, 245, 249;
+
+  --ion-color-step-50: #1e293b;
+  --ion-color-step-100: #1e293b;
+  --ion-color-step-150: #334155;
+  --ion-color-step-200: #334155;
+  --ion-color-step-250: #475569;
+  --ion-color-step-300: #475569;
+  --ion-color-step-350: #64748b;
+  --ion-color-step-400: #64748b;
+  --ion-color-step-450: #94a3b8;
+  --ion-color-step-500: #94a3b8;
+  --ion-color-step-550: #cbd5e1;
+  --ion-color-step-600: #cbd5e1;
+  --ion-color-step-650: #e2e8f0;
+  --ion-color-step-700: #e2e8f0;
+  --ion-color-step-750: #f1f5f9;
+  --ion-color-step-800: #f1f5f9;
+  --ion-color-step-850: #f8fafc;
+  --ion-color-step-900: #f8fafc;
+  --ion-color-step-950: #ffffff;
+
+  --ion-item-background: #1e293b;
+  --ion-card-background: #1e293b;
+
+  --ion-toolbar-background: #0f172a;
+  --ion-tab-bar-background: #0f172a;
+
+  --ion-border-color: #334155;
+}
+
+/* iOS specific overrides */
+.ios {
+  --ion-background-color: #0f172a;
+  --ion-toolbar-background: #0f172a;
+  --ion-tab-bar-background: #0f172a;
+}
+
+/* Disable Ionic header for custom header */
+ion-header {
+  display: none;
+}
+
+/* Custom scrollbar for iOS */
+ion-content::part(scroll) {
+  scrollbar-width: thin;
+  scrollbar-color: #475569 transparent;
+}
+
+/* Hide the native Ionic back button */
+ion-back-button {
+  display: none !important;
+}
