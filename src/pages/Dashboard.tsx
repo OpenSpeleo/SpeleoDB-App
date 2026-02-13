@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Link, useHistory } from 'react-router-dom';
 import { IonPage, IonContent } from '@ionic/react';
 import { authService, User } from '../services/AuthService';
+import { useOnlineState } from '../context/OnlineState';
 import logoSvg from '../assets/media/logo.png';
 
 const Dashboard: React.FC = () => {
   const history = useHistory();
+  const { isOnline } = useOnlineState();
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
@@ -121,8 +123,8 @@ const Dashboard: React.FC = () => {
                 <div className="flex justify-between items-center py-2">
                   <span className="text-slate-400">Status</span>
                   <span className="flex items-center gap-2 text-slate-200">
-                    <span className={`w-2 h-2 rounded-full ${navigator.onLine ? 'bg-green-500' : 'bg-yellow-500'}`} />
-                    {navigator.onLine ? 'Online' : 'Offline'}
+                    <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                    {isOnline ? 'Online' : 'Offline'}
                   </span>
                 </div>
               </div>

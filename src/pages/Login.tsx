@@ -2,13 +2,18 @@ import React, { useState } from 'react';
 import { Link, useHistory } from 'react-router-dom';
 import { IonPage, IonContent } from '@ionic/react';
 import { authService } from '../services/AuthService';
+import { useOnlineState } from '../context/OnlineState';
+import { PREFERENCES } from '../constants';
+import { getInstanceBaseUrl, INSTANCE_PATHS } from '../utils/url';
 import logoSvg from '../assets/media/logo.png';
 import authIllustrationSvg from '../assets/media/auth-illustration.svg';
 
 const Login: React.FC = () => {
   const history = useHistory();
+  const { setOnline } = useOnlineState();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [instance, setInstance] = useState<string>(PREFERENCES.DEFAULT_INSTANCE);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -20,9 +25,10 @@ const Login: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const result = await authService.login({ email, password });
+      const result = await authService.login({ email, password, instance });
       
       if (result.success) {
+        setOnline(true);
         setSuccess(result.message);
         setTimeout(() => {
           history.push('/dashboard');
@@ -36,6 +42,10 @@ const Login: React.FC = () => {
       setIsLoading(false);
     }
   };
+
+  const instanceBase = getInstanceBaseUrl(instance);
+  const signupUrl = instanceBase + INSTANCE_PATHS.SIGNUP;
+  const forgotPasswordUrl = instanceBase + INSTANCE_PATHS.PASSWORD_RESET;
 
   return (
     <IonPage>
@@ -83,7 +93,7 @@ const Login: React.FC = () => {
                   )}
 
                   <form onSubmit={handleSubmit}>
-                    <div className="space-y-4">
+                    <div className="space-y-6">
                       <div>
                         <label className="block text-sm text-slate-300 font-medium mb-1" htmlFor="email">
                           Email
@@ -104,12 +114,14 @@ const Login: React.FC = () => {
                           <label className="block text-sm text-slate-300 font-medium mb-1" htmlFor="password">
                             Password
                           </label>
-                          <Link 
-                            to="/forgot-password" 
+                          <a
+                            href={forgotPasswordUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
                             className="text-sm font-medium text-purple-500 hover:text-purple-400 transition-colors"
                           >
                             Forgot?
-                          </Link>
+                          </a>
                         </div>
                         <input
                           id="password"
@@ -120,6 +132,21 @@ const Login: React.FC = () => {
                           onChange={(e) => setPassword(e.target.value)}
                           required
                           autoComplete="current-password"
+                        />
+                      </div>
+                      <div className="pt-2">
+                        <label className="block text-sm text-slate-300 font-medium mb-1" htmlFor="instance">
+                          SpeleoDB instance
+                        </label>
+                        <input
+                          id="instance"
+                          name="instance"
+                          className="w-full px-4 py-2.5 text-sm text-slate-300 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-500"
+                          type="url"
+                          value={instance}
+                          onChange={(e) => setInstance(e.target.value)}
+                          placeholder={PREFERENCES.DEFAULT_INSTANCE}
+                          autoComplete="url"
                         />
                       </div>
                     </div>
@@ -141,15 +168,17 @@ const Login: React.FC = () => {
                     </div>
                   </form>
 
-                  <div className="text-center mt-4">
+                  <div className="text-center mt-6">
                     <p className="text-sm text-slate-400">
                       Don't have an account?{' '}
-                      <Link 
-                        to="/signup" 
+                      <a
+                        href={signupUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="font-medium text-purple-500 hover:text-purple-400 transition-colors"
                       >
                         Sign up
-                      </Link>
+                      </a>
                     </p>
                   </div>
 

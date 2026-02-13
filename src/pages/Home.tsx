@@ -1,12 +1,18 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { IonPage, IonContent } from '@ionic/react';
+import { PREFERENCES } from '../constants';
+import { getPreferences } from '../services/PreferencesService';
+import { getInstanceBaseUrl, INSTANCE_PATHS } from '../utils/url';
 import ParticleAnimation from '../components/ParticleAnimation';
 import logoSvg from '../assets/media/logo.png';
 import glowTopSvg from '../assets/media/glow-top.svg';
 import caveSvg from '../assets/media/cave.svg';
 
 const Home: React.FC = () => {
+  const instance = getPreferences().instance ?? PREFERENCES.DEFAULT_INSTANCE;
+  const signupUrl = getInstanceBaseUrl(instance) + INSTANCE_PATHS.SIGNUP;
+
   return (
     <IonPage>
       <IonContent fullscreen className="ion-no-padding">
@@ -15,13 +21,15 @@ const Home: React.FC = () => {
           <header className="absolute w-full z-30 pt-[env(safe-area-inset-top)]">
             <div className="max-w-6xl mx-auto px-4 sm:px-6">
               <div className="flex items-center justify-end h-16 md:h-20">
-                <Link 
-                  to="/signup" 
+                <a
+                  href={signupUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-300 hover:text-white rounded-full border border-slate-700 bg-slate-900/50 backdrop-blur-sm transition-colors duration-150 group"
                 >
                   Sign Up
                   <span className="ml-1 text-purple-500 group-hover:translate-x-0.5 transition-transform duration-150">→</span>
-                </Link>
+                </a>
               </div>
             </div>
           </header>

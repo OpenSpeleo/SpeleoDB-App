@@ -2,6 +2,8 @@ import { Redirect, Route, Switch } from 'react-router-dom';
 import { IonApp, IonRouterOutlet, setupIonicReact } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
 
+import { OnlineStateProvider } from './context/OnlineState';
+
 /* Pages */
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -45,18 +47,20 @@ setupIonicReact({
 const App: React.FC = () => (
   <IonApp>
     <IonReactRouter>
-      <IonRouterOutlet>
-        <Switch>
-          <Route exact path="/" component={Home} />
-          <Route exact path="/login" component={Login} />
-          <Route exact path="/signup" component={Signup} />
-          <Route exact path="/dashboard" component={Dashboard} />
-          {/* Fallback route */}
-          <Route>
-            <Redirect to="/" />
-          </Route>
-        </Switch>
-      </IonRouterOutlet>
+      <OnlineStateProvider>
+        <IonRouterOutlet>
+          <Switch>
+            <Route exact path="/" component={Home} />
+            <Route exact path="/login" component={Login} />
+            <Route exact path="/signup" component={Signup} />
+            <Route exact path="/dashboard" component={Dashboard} />
+            {/* Fallback route */}
+            <Route>
+              <Redirect to="/" />
+            </Route>
+          </Switch>
+        </IonRouterOutlet>
+      </OnlineStateProvider>
     </IonReactRouter>
   </IonApp>
 );

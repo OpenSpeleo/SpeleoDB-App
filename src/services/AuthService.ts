@@ -1,7 +1,27 @@
 /**
  * Offline-first Authentication Service
- * Stores credentials locally and syncs when online
+ * Uses POST /api/v1/user/auth-token/; on native (iOS/Android) uses CapacitorHttp to avoid CORS; on web uses fetch + FormData.
+ * See docs/AUTH-CORS-ANALYSIS.md for why CORS appears and when native HTTP is used.
  */
+
+import { Capacitor } from '@capacitor/core';
+import { CapacitorHttp } from '@capacitor/core';
+import { API, HEADERS, HTTP_STATUS, NETWORK, PREFERENCES } from '../constants';
+
+/** True only when running inside the native app (Xcode/Android Studio), so we must use CapacitorHttp to avoid CORS. */
+function useNativeHttp(): boolean {
+  try {
+    return typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform?.() === true;
+  } catch {
+    return false;
+  }
+}
+import {
+  getPreferences,
+  setPreferences,
+  clearPreferences,
+  type UserPreferences,
+} from './PreferencesService';
 
 interface User {
   id: string;
@@ -16,9 +36,10 @@ interface AuthState {
   token: string | null;
 }
 
-interface LoginCredentials {
+export interface LoginCredentials {
   email: string;
   password: string;
+  instance: string;
 }
 
 interface SignupCredentials {
@@ -35,15 +56,36 @@ interface AuthResponse {
   token?: string;
 }
 
-// Storage keys
-const STORAGE_KEYS = {
-  AUTH_STATE: 'speleo_auth_state',
-  PENDING_SYNC: 'speleo_pending_sync',
-  USERS_DB: 'speleo_users_db', // For offline demo/testing
-};
+interface AuthTokenResponse {
+  user: string;
+  token: string;
+}
 
-// API base URL - configure for your backend
-const API_BASE_URL = 'https://api.speleodb.org';
+// Legacy storage keys (for offline users DB and pending sync only)
+const STORAGE_KEYS = {
+  PENDING_SYNC: 'speleo_pending_sync',
+  USERS_DB: 'speleo_users_db',
+} as const;
+
+/**
+ * Normalizes instance to a comparable base (trim, default https, no trailing slash).
+ */
+function normalizeInstanceBase(instance: string): string {
+  const base = instance.trim();
+  const withScheme =
+    base.startsWith('http://') || base.startsWith('https://')
+      ? base
+      : `https://${base}`;
+  return withScheme.replace(/\/+$/, '');
+}
+
+/**
+ * Builds auth-token request URL from the given instance base.
+ */
+export function buildAuthTokenUrl(instance: string): string {
+  const base = normalizeInstanceBase(instance);
+  return base + API.AUTH_TOKEN_ENDPOINT;
+}
 
 class AuthService {
   private authState: AuthState = {
@@ -57,27 +99,25 @@ class AuthService {
   }
 
   /**
-   * Load auth state from local storage
+   * Load auth state from PreferencesService at startup.
    */
   private loadAuthState(): void {
     try {
-      const stored = localStorage.getItem(STORAGE_KEYS.AUTH_STATE);
-      if (stored) {
-        this.authState = JSON.parse(stored);
+      const prefs = getPreferences();
+      if (prefs.token && prefs.instance) {
+        const email = prefs.email ?? '';
+        this.authState = {
+          isAuthenticated: true,
+          user: {
+            id: 'restored',
+            email,
+            name: email,
+          },
+          token: prefs.token,
+        };
       }
     } catch (error) {
       console.error('Failed to load auth state:', error);
-    }
-  }
-
-  /**
-   * Save auth state to local storage
-   */
-  private saveAuthState(): void {
-    try {
-      localStorage.setItem(STORAGE_KEYS.AUTH_STATE, JSON.stringify(this.authState));
-    } catch (error) {
-      console.error('Failed to save auth state:', error);
     }
   }
 
@@ -94,7 +134,7 @@ class AuthService {
   }
 
   /**
-   * Save user to local database
+   * Save user to local database (offline use)
    */
   private saveLocalUser(email: string, password: string, user: User): void {
     try {
@@ -106,42 +146,75 @@ class AuthService {
     }
   }
 
-  /**
-   * Check if online
-   */
   private isOnline(): boolean {
     return navigator.onLine;
   }
 
-  /**
-   * Generate a simple token (for offline use)
-   */
   private generateOfflineToken(): string {
     return 'offline_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
   }
 
-  /**
-   * Generate a simple user ID
-   */
   private generateUserId(): string {
     return 'user_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
   }
 
-  /**
-   * Validate email format
-   */
   validateEmail(email: string): boolean {
     const re = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
     return re.test(email);
   }
 
+  /** Handle CapacitorHttp response (native iOS/Android). */
+  private handleAuthTokenResponse(
+    response: { status: number; data: unknown },
+    email: string,
+    instance: string
+  ): AuthResponse {
+    if (response.status === HTTP_STATUS.OK) {
+      const data = response.data as AuthTokenResponse;
+      const userEmail = data.user ?? email;
+      const user: User = {
+        id: 'auth',
+        email: userEmail,
+        name: userEmail,
+      };
+      this.authState = { isAuthenticated: true, user, token: data.token };
+      setPreferences({ email: userEmail, token: data.token, instance: instance.trim() });
+      return { success: true, message: 'Login successful', user, token: data.token };
+    }
+    const body = response.data as { detail?: string; message?: string } | undefined;
+    const message =
+      body?.detail ?? body?.message ?? (response.status === HTTP_STATUS.UNAUTHORIZED ? 'Invalid email or password' : 'Login failed');
+    return { success: false, message };
+  }
+
+  /** Handle fetch Response (web). */
+  private async handleAuthTokenFetchResponse(
+    response: Response,
+    email: string,
+    instance: string
+  ): Promise<AuthResponse> {
+    if (response.status === HTTP_STATUS.OK) {
+      const data = (await response.json()) as AuthTokenResponse;
+      const userEmail = data.user ?? email;
+      const user: User = { id: 'auth', email: userEmail, name: userEmail };
+      this.authState = { isAuthenticated: true, user, token: data.token };
+      setPreferences({ email: userEmail, token: data.token, instance: instance.trim() });
+      return { success: true, message: 'Login successful', user, token: data.token };
+    }
+    const errorBody = await response.json().catch(() => ({}));
+    const message =
+      (errorBody as { detail?: string }).detail ??
+      (errorBody as { message?: string }).message ??
+      (response.status === HTTP_STATUS.UNAUTHORIZED ? 'Invalid email or password' : 'Login failed');
+    return { success: false, message };
+  }
+
   /**
-   * Login - works offline by checking local storage
+   * Login: POST auth-token. On native uses CapacitorHttp (JSON); on web uses fetch (FormData).
    */
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
-    const { email, password } = credentials;
+    const { email, password, instance } = credentials;
 
-    // Validate inputs
     if (!this.validateEmail(email)) {
       return { success: false, message: 'Invalid email address' };
     }
@@ -150,32 +223,61 @@ class AuthService {
       return { success: false, message: 'Password is required' };
     }
 
-    // Try online login first
+    if (!instance?.trim()) {
+      return { success: false, message: 'SpeleoDB instance URL is required' };
+    }
+
+    // Online: use native HTTP on iOS/Android (avoids CORS); use fetch on web.
     if (this.isOnline()) {
+      const url = buildAuthTokenUrl(instance);
+      const isNative = useNativeHttp();
+      const platform = typeof Capacitor !== 'undefined' ? Capacitor.getPlatform?.() ?? 'unknown' : 'unknown';
+      if (typeof console !== 'undefined' && console.log) {
+        console.log(`SpeleoDB auth: platform=${platform}, transport=${isNative ? 'native' : 'fetch'}`);
+      }
+
+      if (isNative) {
+        try {
+          const response = await CapacitorHttp.request({
+            url,
+            method: 'POST',
+            headers: { [HEADERS.CONTENT_TYPE]: HEADERS.APPLICATION_JSON_UTF8 },
+            data: { email, password },
+            connectTimeout: NETWORK.REQUEST_TIMEOUT_MS,
+            readTimeout: NETWORK.REQUEST_TIMEOUT_MS,
+          });
+          return this.handleAuthTokenResponse(response, email, instance);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.warn('SpeleoDB native auth request failed:', error);
+          return {
+            success: false,
+            message: `Login failed: ${msg}. Ensure the app was built with "npx cap sync" and run from Xcode/Android Studio.`,
+          };
+        }
+      }
+
       try {
-        const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        const formData = new FormData();
+        formData.append('email', email);
+        formData.append('password', password);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), NETWORK.REQUEST_TIMEOUT_MS);
+
+        const response = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
+          body: formData,
+          redirect: 'follow',
+          signal: controller.signal,
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          this.authState = {
-            isAuthenticated: true,
-            user: data.user,
-            token: data.token,
-          };
-          this.saveAuthState();
-          // Also save locally for offline access
-          this.saveLocalUser(email, password, data.user);
-          return { success: true, message: 'Login successful', user: data.user, token: data.token };
-        } else {
-          const error = await response.json();
-          return { success: false, message: error.message || 'Login failed' };
-        }
+        clearTimeout(timeoutId);
+        return this.handleAuthTokenFetchResponse(response, email, instance);
       } catch (error) {
-        console.log('Online login failed, trying offline...', error);
+        if ((error as Error).name === 'AbortError') {
+          return { success: false, message: 'Request timed out' };
+        }
+        console.warn('Online login failed, trying offline...', error);
       }
     }
 
@@ -190,20 +292,28 @@ class AuthService {
         user: localUser.user,
         token,
       };
-      this.saveAuthState();
-      return { success: true, message: 'Login successful (offline)', user: localUser.user, token };
+      setPreferences({
+        email: localUser.user.email,
+        token,
+        instance: instance.trim() || getPreferences().instance,
+      });
+      return {
+        success: true,
+        message: 'Login successful (offline)',
+        user: localUser.user,
+        token,
+      };
     }
 
     return { success: false, message: 'Invalid email or password' };
   }
 
   /**
-   * Signup - stores locally and syncs when online
+   * Signup - stores locally and syncs when online. Uses instance from preferences.
    */
   async signup(credentials: SignupCredentials): Promise<AuthResponse> {
     const { name, email, password, country } = credentials;
 
-    // Validate inputs
     if (!name) {
       return { success: false, message: 'Name is required' };
     }
@@ -220,13 +330,11 @@ class AuthService {
       return { success: false, message: 'Country is required' };
     }
 
-    // Check if user already exists locally
     const localUsers = this.getLocalUsers();
     if (localUsers[email.toLowerCase()]) {
       return { success: false, message: 'An account with this email already exists' };
     }
 
-    // Create user object
     const user: User = {
       id: this.generateUserId(),
       email,
@@ -234,43 +342,52 @@ class AuthService {
       country,
     };
 
-    // Try online signup first
     if (this.isOnline()) {
       try {
-        const response = await fetch(`${API_BASE_URL}/auth/signup`, {
+        const prefs = getPreferences();
+        const base = (prefs.instance ?? PREFERENCES.DEFAULT_INSTANCE).trim();
+        const withScheme =
+          base.startsWith('http://') || base.startsWith('https://')
+            ? base
+            : `https://${base}`;
+        const baseUrl = withScheme.replace(/\/+$/, '');
+        const signupUrl = `${baseUrl}${API.BASE_PATH}/auth/signup`;
+
+        const response = await fetch(signupUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            [HEADERS.CONTENT_TYPE]: HEADERS.APPLICATION_JSON,
+          },
           body: JSON.stringify({ name, email, password, country }),
         });
 
-        if (response.ok) {
+        if (response.status === HTTP_STATUS.OK || response.status === HTTP_STATUS.CREATED) {
           const data = await response.json();
-          // Save locally
           this.saveLocalUser(email, password, data.user || user);
-          return { success: true, message: 'Account created! Please check your email to verify.', user: data.user };
-        } else {
-          const error = await response.json();
-          return { success: false, message: error.message || 'Signup failed' };
+          return {
+            success: true,
+            message: 'Account created! Please check your email to verify.',
+            user: data.user,
+          };
         }
+
+        const error = await response.json();
+        return { success: false, message: (error as { message?: string }).message ?? 'Signup failed' };
       } catch (error) {
-        console.log('Online signup failed, creating locally...', error);
+        console.warn('Online signup failed, creating locally...', error);
       }
     }
 
-    // Offline signup - store locally and mark for sync
     this.saveLocalUser(email, password, user);
     this.addPendingSync({ type: 'signup', data: { name, email, password, country } });
 
-    return { 
-      success: true, 
-      message: 'Account created locally. It will sync when you\'re online.',
-      user 
+    return {
+      success: true,
+      message: "Account created locally. It will sync when you're online.",
+      user,
     };
   }
 
-  /**
-   * Add item to pending sync queue
-   */
   private addPendingSync(item: { type: string; data: unknown }): void {
     try {
       const pending = this.getPendingSync();
@@ -281,9 +398,6 @@ class AuthService {
     }
   }
 
-  /**
-   * Get pending sync items
-   */
   private getPendingSync(): Array<{ type: string; data: unknown; timestamp: number }> {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.PENDING_SYNC);
@@ -293,11 +407,15 @@ class AuthService {
     }
   }
 
-  /**
-   * Sync pending items when online
-   */
   async syncPending(): Promise<void> {
     if (!this.isOnline()) return;
+
+    const prefs = getPreferences();
+    const base = (prefs.instance ?? PREFERENCES.DEFAULT_INSTANCE).trim();
+    const withScheme =
+      base.startsWith('http://') || base.startsWith('https://') ? base : `https://${base}`;
+    const baseUrl = withScheme.replace(/\/+$/, '');
+    const signupUrl = `${baseUrl}${API.BASE_PATH}/auth/signup`;
 
     const pending = this.getPendingSync();
     const remaining: typeof pending = [];
@@ -305,12 +423,11 @@ class AuthService {
     for (const item of pending) {
       try {
         if (item.type === 'signup') {
-          const response = await fetch(`${API_BASE_URL}/auth/signup`, {
+          const response = await fetch(signupUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { [HEADERS.CONTENT_TYPE]: HEADERS.APPLICATION_JSON },
             body: JSON.stringify(item.data),
           });
-
           if (!response.ok) {
             remaining.push(item);
           }
@@ -324,7 +441,55 @@ class AuthService {
   }
 
   /**
-   * Logout
+   * Validates the stored token with the server. Call after app open when user has credentials.
+   * - 2xx → 'ok' (app is online)
+   * - 4xx (e.g. 401) → 'unauthorized' (clear prefs and go to home)
+   * - Network error → 'network_error' (show offline modal, app is offline)
+   */
+  async validateStoredToken(): Promise<'ok' | 'unauthorized' | 'network_error'> {
+    const prefs = getPreferences();
+    const token = prefs.token;
+    const instance = prefs.instance?.trim();
+    if (!token || !instance) {
+      return 'unauthorized';
+    }
+
+    const url = buildAuthTokenUrl(instance);
+    const headers = { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` };
+
+    try {
+      if (useNativeHttp()) {
+        const response = await CapacitorHttp.request({
+          url,
+          method: 'GET',
+          headers,
+          connectTimeout: NETWORK.REQUEST_TIMEOUT_MS,
+          readTimeout: NETWORK.REQUEST_TIMEOUT_MS,
+        });
+        if (response.status >= 200 && response.status < 300) return 'ok';
+        if (response.status >= 400 && response.status < 500) return 'unauthorized';
+        return 'unauthorized';
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), NETWORK.REQUEST_TIMEOUT_MS);
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (response.status >= 200 && response.status < 300) return 'ok';
+      if (response.status >= 400 && response.status < 500) return 'unauthorized';
+      return 'unauthorized';
+    } catch {
+      return 'network_error';
+    }
+  }
+
+  /**
+   * Logout: clear in-memory state and remove email/token from preferences (keep instance).
    */
   logout(): void {
     this.authState = {
@@ -332,31 +497,21 @@ class AuthService {
       user: null,
       token: null,
     };
-    this.saveAuthState();
+    setPreferences({ email: undefined, token: undefined });
   }
 
-  /**
-   * Get current auth state
-   */
   getAuthState(): AuthState {
     return { ...this.authState };
   }
 
-  /**
-   * Check if authenticated
-   */
   isAuthenticated(): boolean {
     return this.authState.isAuthenticated;
   }
 
-  /**
-   * Get current user
-   */
   getCurrentUser(): User | null {
     return this.authState.user;
   }
 }
 
-// Export singleton instance
 export const authService = new AuthService();
-export type { User, AuthState, LoginCredentials, SignupCredentials, AuthResponse };
+export type { User, AuthState, SignupCredentials, AuthResponse };
