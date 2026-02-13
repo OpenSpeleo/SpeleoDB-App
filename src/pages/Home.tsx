@@ -14,41 +14,21 @@ const Home: React.FC = () => {
           {/* Header */}
           <header className="absolute w-full z-30 pt-[env(safe-area-inset-top)]">
             <div className="max-w-6xl mx-auto px-4 sm:px-6">
-              <div className="flex items-center justify-between h-16 md:h-20">
-                {/* Logo */}
-                <div className="flex-1">
-                  <Link to="/" className="inline-flex items-center py-2">
-                    <img className="max-w-none h-8 md:h-10" src={logoSvg} alt="SpeleoDB" />
-                  </Link>
-                </div>
-
-                {/* Auth Links */}
-                <ul className="flex items-center gap-4">
-                  <li>
-                    <Link 
-                      to="/login" 
-                      className="font-medium text-sm text-slate-300 hover:text-white whitespace-nowrap transition-colors duration-150"
-                    >
-                      Sign In
-                    </Link>
-                  </li>
-                  <li>
-                    <Link 
-                      to="/signup" 
-                      className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-300 hover:text-white rounded-full border border-slate-700 bg-slate-900/50 backdrop-blur-sm transition-colors duration-150 group"
-                    >
-                      Sign Up
-                      <span className="ml-1 text-purple-500 group-hover:translate-x-0.5 transition-transform duration-150">→</span>
-                    </Link>
-                  </li>
-                </ul>
+              <div className="flex items-center justify-end h-16 md:h-20">
+                <Link 
+                  to="/signup" 
+                  className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-300 hover:text-white rounded-full border border-slate-700 bg-slate-900/50 backdrop-blur-sm transition-colors duration-150 group"
+                >
+                  Sign Up
+                  <span className="ml-1 text-purple-500 group-hover:translate-x-0.5 transition-transform duration-150">→</span>
+                </Link>
               </div>
             </div>
           </header>
 
           {/* Hero Section */}
           <section>
-            <div className="relative max-w-7xl mx-auto px-4 sm:px-6 min-h-screen">
+            <div className="relative max-w-7xl mx-auto px-4 sm:px-6 min-h-screen flex flex-col justify-center">
               {/* Particles animation */}
               <div className="absolute inset-0 -z-10" aria-hidden="true">
                 <ParticleAnimation quantity={30} staticity={50} ease={50} />
@@ -61,33 +41,12 @@ const Home: React.FC = () => {
                 </div>
               </div>
 
-              <div className="pt-40 pb-16 md:pt-52 md:pb-32">
+              <div className="py-8">
                 {/* Hero content */}
-                <div className="max-w-3xl mx-auto text-center">
-                  {/* Beta Badge */}
-                  <div className="mb-6 pb-8">
-                    <div className="inline-flex relative before:absolute before:inset-0 before:bg-purple-500 before:blur-md">
-                      <Link
-                        to="/login"
-                        className="relative inline-flex items-center px-4 py-1.5 text-sm text-slate-300 hover:text-white rounded-full bg-purple-500/20 border border-purple-500/50 shadow-lg shadow-purple-500/25 transition-colors duration-150 group"
-                      >
-                        SpeleoDB is now in Beta 
-                        <span className="ml-1 text-purple-400 group-hover:translate-x-0.5 transition-transform duration-150">→</span>
-                      </Link>
-                    </div>
-                  </div>
+                <div className="w-full max-w-3xl mx-auto text-center">
                   
-                  {/* Main Title */}
-                  <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-slate-200/60 via-slate-200 to-slate-200/60 bg-clip-text text-transparent pb-4">
-                    SpeleoDB
-                  </h1>
-                  
-                  <hr className="border-slate-700 my-4" />
-                  
-                  {/* Subtitle */}
-                  <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-slate-200/60 via-slate-200 to-slate-200/60 bg-clip-text text-transparent pb-4">
-                    Explore as One, Survey as Many
-                  </h2>
+                  {/* Full width logo */}
+                  <img src={logoSvg} alt="SpeleoDB" className="w-full" />
                   
                   <p className="text-lg text-slate-300 my-8 leading-relaxed">
                     We are a US-registered 501c3 non-profit organization aiming to provide
