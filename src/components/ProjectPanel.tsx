@@ -12,6 +12,7 @@
 import React from 'react';
 import type { Project } from '../types/project';
 import { COLOR_PALETTE } from '../constants';
+import type { TilePrefetchJobState } from '../types/tilePrefetch';
 
 // ==================== Props ====================
 
@@ -19,6 +20,7 @@ export interface ProjectPanelProps {
   projects: Project[];
   activeProjectIds: Set<string>;
   geoJsonData: Record<string, unknown>;
+  tilePrefetchByProject: Record<string, TilePrefetchJobState | undefined>;
   onToggleProject: (projectId: string) => void;
   onZoomToProject: (projectId: string) => void;
   onShowAll: () => void;
@@ -27,12 +29,27 @@ export interface ProjectPanelProps {
   isOpen: boolean;
 }
 
+function prefetchStatusLabel(job: TilePrefetchJobState | undefined): string | null {
+  if (!job) return null;
+  const processed = job.completedTiles + job.failedTiles;
+  const pct = job.totalTiles > 0 ? Math.floor((processed / job.totalTiles) * 100) : 0;
+
+  if (job.status === 'done') return `Tiles ready (${pct}%)`;
+  if (job.status === 'error') return `Tile prefetch failed (${pct}%)`;
+  if (job.status === 'paused') return `Tile prefetch paused (${pct}%)`;
+  if (job.status === 'downloading' || job.status === 'queued') {
+    return `Caching tiles (${pct}%)`;
+  }
+  return null;
+}
+
 // ==================== Component ====================
 
 const ProjectPanel: React.FC<ProjectPanelProps> = ({
   projects,
   activeProjectIds,
   geoJsonData,
+  tilePrefetchByProject,
   onToggleProject,
   onZoomToProject,
   onShowAll,
@@ -113,6 +130,7 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
                 const color = COLOR_PALETTE[idx % COLOR_PALETTE.length];
                 const isActive = activeProjectIds.has(project.id);
                 const hasGeoJson = project.id in geoJsonData;
+                const prefetchLabel = prefetchStatusLabel(tilePrefetchByProject[project.id]);
 
                 return (
                   <li
@@ -138,13 +156,20 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
                         />
 
                         {/* Project name */}
-                        <span
-                          className={`min-w-0 flex-1 text-sm truncate ${
-                            isActive ? 'text-slate-100' : 'text-slate-500'
-                          }`}
-                        >
-                          {project.name}
-                        </span>
+                        <div className="min-w-0 flex-1">
+                          <span
+                            className={`block text-sm truncate ${
+                              isActive ? 'text-slate-100' : 'text-slate-500'
+                            }`}
+                          >
+                            {project.name}
+                          </span>
+                          {prefetchLabel && (
+                            <span className="block text-[10px] text-emerald-300/90 truncate">
+                              {prefetchLabel}
+                            </span>
+                          )}
+                        </div>
                       </button>
 
                       {/* Toggle switch -- kept in normal flow to prevent overflow */}

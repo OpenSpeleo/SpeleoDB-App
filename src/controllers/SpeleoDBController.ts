@@ -9,9 +9,11 @@
  * re-render via useSyncExternalStore.
  */
 
-import { HTTP_STATUS, PREFERENCES } from '../constants';
+import { HTTP_STATUS, MAP, PREFERENCES } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
+import { clearPrefetchJobs } from '../services/TileCacheService';
+import { TilePrefetchService } from '../services/TilePrefetchService';
 import type {
   AuthResponse,
   AuthState,
@@ -20,6 +22,7 @@ import type {
   User,
 } from '../types';
 import type { Project } from '../types/project';
+import type { TilePrefetchJobState } from '../types/tilePrefetch';
 
 // ==================== Sync status ====================
 
@@ -41,6 +44,69 @@ const STORAGE_KEYS = {
   USERS_DB: 'speleo_users_db',
 } as const;
 
+function normalizeGeoJSON(data: unknown): GeoJSON.FeatureCollection | null {
+  let current: unknown = data;
+
+  for (let i = 0; i < 4; i += 1) {
+    if (typeof current === 'string') {
+      const trimmed = current.trim();
+      if (!trimmed) return null;
+      try {
+        current = JSON.parse(trimmed);
+      } catch {
+        return null;
+      }
+      continue;
+    }
+
+    if (!current || typeof current !== 'object') break;
+    const envelope = current as Record<string, unknown>;
+    if (typeof envelope.type === 'string' || Array.isArray(envelope.features)) break;
+    if ('data' in envelope) {
+      current = envelope.data;
+      continue;
+    }
+    if ('geojson' in envelope) {
+      current = envelope.geojson;
+      continue;
+    }
+    break;
+  }
+
+  if (!current || typeof current !== 'object') return null;
+  const obj = current as Record<string, unknown>;
+
+  if (obj.type === 'FeatureCollection' && Array.isArray(obj.features)) {
+    return obj as unknown as GeoJSON.FeatureCollection;
+  }
+  if (Array.isArray(obj.features)) {
+    return {
+      type: 'FeatureCollection',
+      features: obj.features as GeoJSON.Feature[],
+    };
+  }
+  if (obj.type === 'Feature') {
+    return {
+      type: 'FeatureCollection',
+      features: [obj as unknown as GeoJSON.Feature],
+    };
+  }
+  if (typeof obj.type === 'string' && ('coordinates' in obj || 'geometries' in obj)) {
+    return {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: obj as unknown as GeoJSON.Geometry,
+        },
+      ],
+    };
+  }
+
+  return null;
+}
+
 // ==================== Controller ====================
 
 export class SpeleoDBController {
@@ -49,19 +115,28 @@ export class SpeleoDBController {
   private _isOnline = false;
   private _projects: Project[] = [];
   private _syncStatus: SyncStatus = 'idle';
+  private _tilePrefetchJobs: TilePrefetchJobState[] = [];
   private _listeners = new Set<() => void>();
+  private tilePrefetch: TilePrefetchService;
 
   // Snapshot references for useSyncExternalStore (identity-stable between notifies)
   private _authStateSnapshot: AuthState = this._authState;
   private _isOnlineSnapshot: boolean = this._isOnline;
   private _projectsSnapshot: Project[] = this._projects;
   private _syncStatusSnapshot: SyncStatus = this._syncStatus;
+  private _tilePrefetchJobsSnapshot: TilePrefetchJobState[] = this._tilePrefetchJobs;
 
   constructor(
     private service: SpeleoDBService,
     private prefs: PreferencesPort,
     private cache: ProjectCacheService,
+    tilePrefetch?: TilePrefetchService,
   ) {
+    this.tilePrefetch = tilePrefetch ?? new TilePrefetchService();
+    this.tilePrefetch.subscribe((jobs) => {
+      this._tilePrefetchJobs = jobs;
+      this.notify();
+    });
     this.restoreSession();
   }
 
@@ -87,6 +162,10 @@ export class SpeleoDBController {
     return this._syncStatusSnapshot;
   }
 
+  get tilePrefetchJobs(): TilePrefetchJobState[] {
+    return this._tilePrefetchJobsSnapshot;
+  }
+
   isAuthenticated(): boolean {
     return this._authState.isAuthenticated;
   }
@@ -104,6 +183,7 @@ export class SpeleoDBController {
     this._isOnlineSnapshot = this._isOnline;
     this._projectsSnapshot = [...this._projects];
     this._syncStatusSnapshot = this._syncStatus;
+    this._tilePrefetchJobsSnapshot = [...this._tilePrefetchJobs];
     this._listeners.forEach((fn) => fn());
   }
 
@@ -239,8 +319,10 @@ export class SpeleoDBController {
     this._isOnline = false;
     this._projects = [];
     this._syncStatus = 'idle';
+    this._tilePrefetchJobs = [];
     this.prefs.setPreferences({ email: undefined, token: undefined });
     this.cache.clearAll();
+    clearPrefetchJobs();
     this.notify();
   }
 
@@ -322,6 +404,9 @@ export class SpeleoDBController {
 
         // Step 3 -- download geojson files in background (non-blocking)
         await this.downloadGeoJSONFiles(freshProjects);
+
+        // Step 4 -- start aggressive tile prefetch in background for offline mode.
+        void this.scheduleTilePrefetch(freshProjects);
       }
 
       this._syncStatus = 'done';
@@ -372,6 +457,51 @@ export class SpeleoDBController {
 
     const concurrency = Math.min(3, eligible.length);
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  }
+
+  /**
+   * Build and enqueue tile prefetch jobs for every project with cached GeoJSON.
+   * Uses bbox+50m and zoom levels 0..18 so map imagery is available offline.
+   */
+  private async scheduleTilePrefetch(projects: Project[]): Promise<void> {
+    if (!navigator.onLine) return;
+
+    const eligible = projects.filter((p) => p.geojson_file && !p.exclude_geojson);
+    if (eligible.length === 0) return;
+
+    const inputs: Array<{
+      projectId: string;
+      commitId: string;
+      geojson: GeoJSON.FeatureCollection;
+    }> = [];
+
+    for (const project of eligible) {
+      try {
+        const raw = await this.cache.getGeoJSON(project.id);
+        const normalized = normalizeGeoJSON(raw);
+        if (!normalized || normalized.features.length === 0) continue;
+        inputs.push({
+          projectId: project.id,
+          commitId: project.latest_commit.id,
+          geojson: normalized,
+        });
+      } catch (error) {
+        console.warn(`Failed preparing tile prefetch for project ${project.id}:`, error);
+      }
+    }
+
+    if (inputs.length === 0) return;
+
+    try {
+      await this.tilePrefetch.enqueueProjects(inputs, {
+        tileUrlTemplate: MAP.TILE_URL_TEMPLATE,
+        minZoom: 0,
+        maxZoom: 18,
+        padMeters: 50,
+      });
+    } catch (error) {
+      console.warn('Tile prefetch scheduling failed:', error);
+    }
   }
 
   // ---- Validation helpers ---------------------------------------------------

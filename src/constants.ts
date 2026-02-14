@@ -49,10 +49,13 @@ export const MAP = {
   // Using a local style avoids provider key requirements while keeping
   // URLs rewriteable by TileCacheService for offline tile caching.
   STYLE_URL: '/map-style-satellite.json',
+  // Tile URL template used for proactive offline prefetch jobs.
+  TILE_URL_TEMPLATE:
+    'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   DEFAULT_CENTER: [2.3, 46.6] as [number, number], // France center
   DEFAULT_ZOOM: 5,
   // Hard cap to avoid provider "map data not available" tiles.
-  MAX_ZOOM: 19,
+  MAX_ZOOM: 18,
 } as const;
 
 // ==================== COLOR PALETTE ====================

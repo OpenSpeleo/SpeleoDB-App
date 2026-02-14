@@ -5,14 +5,54 @@ import type { ProjectCacheService } from '../services/ProjectCacheService';
 import type { HttpResponse } from '../services/HttpClient';
 import type { AuthTokenResponse } from '../types';
 import { PREFERENCES } from '../constants';
+import { TilePrefetchService } from '../services/TilePrefetchService';
+import type { Project } from '../types/project';
 
 // ==================== Mocks ====================
 
 function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBService {
+  const project: Project = {
+    id: 'p1',
+    name: 'Prefetch project',
+    description: '',
+    country: 'FR',
+    type: 'survey',
+    visibility: 'public',
+    is_active: true,
+    created_by: 'u',
+    creation_date: '2025-01-01',
+    modified_date: '2025-01-01',
+    commit_count: 1,
+    active_mutex: null,
+    fork_from: null,
+    exclude_geojson: false,
+    geojson_file: 'https://example.com/p1.geojson',
+    latest_commit: {
+      id: 'commit-1',
+      message: 'init',
+      author_email: 'u@example.com',
+      author_name: 'User',
+      authored_date: '2025-01-01',
+      dt_since: 'today',
+      parent_ids: [],
+      url: '',
+      formats: [],
+      tree: [],
+    },
+  };
+
   return {
     authenticate: vi.fn(async () => ({ status: 200, data: { user: 'u@x.com', token: 'tok' } }) as HttpResponse<AuthTokenResponse>),
     validateToken: vi.fn(async () => ({ status: 200, data: {} }) as HttpResponse<unknown>),
     signup: vi.fn(async () => ({ status: 201, data: { user: { id: '1', email: 'a@b.com', name: 'A' } } }) as HttpResponse),
+    getProjectsGeoJSON: vi.fn(async () => ({ status: 200, data: { data: [project] } }) as HttpResponse<unknown>),
+    downloadJSON: vi.fn(async () => ({
+      status: 200,
+      data: {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } }],
+      },
+    }) as HttpResponse<unknown>),
     ...overrides,
   } as SpeleoDBService;
 }
@@ -251,6 +291,47 @@ describe('SpeleoDBController', () => {
       controller.logout();
 
       expect(listener).toHaveBeenCalled();
+    });
+  });
+
+  describe('syncProjects tile prefetch', () => {
+    it('enqueues prefetch jobs after geojson sync', async () => {
+      const enqueueProjects = vi.fn(async () => {});
+      const subscribe = vi.fn((_listener: (jobs: unknown[]) => void) => () => {});
+      const mockTilePrefetch = {
+        enqueueProjects,
+        subscribe,
+      } as unknown as TilePrefetchService;
+
+      cache.getGeoJSON = vi.fn(async () => ({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } }],
+      }));
+
+      const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+      prefs.setPreferences({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+
+      await controller.syncProjects();
+      await Promise.resolve();
+
+      expect(enqueueProjects).toHaveBeenCalledOnce();
+      const firstCall = enqueueProjects.mock.calls.at(0);
+      expect(firstCall).toBeDefined();
+      if (!firstCall) return;
+      const [projects, request] = firstCall as unknown as [
+        Array<{ projectId: string }>,
+        { minZoom: number; maxZoom: number; padMeters: number },
+      ];
+      expect(projects[0].projectId).toBe('p1');
+      expect(request.minZoom).toBe(0);
+      expect(request.maxZoom).toBe(18);
+      expect(request.padMeters).toBe(50);
+
+      onlineSpy.mockRestore();
     });
   });
 });

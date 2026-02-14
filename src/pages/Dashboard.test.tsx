@@ -80,6 +80,7 @@ vi.mock('../context/SpeleoDBProvider', () => ({
     projects: mockProjects,
     syncStatus: 'idle' as const,
     isOnline: true,
+    tilePrefetchJobs: [],
   }),
 }));
 

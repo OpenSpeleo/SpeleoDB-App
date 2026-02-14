@@ -22,6 +22,7 @@ import { SpeleoDBController } from '../controllers/SpeleoDBController';
 import type { SyncStatus } from '../controllers/SpeleoDBController';
 import type { AuthState } from '../types';
 import type { Project } from '../types/project';
+import type { TilePrefetchJobState } from '../types/tilePrefetch';
 
 // ==================== Context value shape ====================
 
@@ -31,6 +32,7 @@ export interface SpeleoDBContextValue {
   isOnline: boolean;
   projects: Project[];
   syncStatus: SyncStatus;
+  tilePrefetchJobs: TilePrefetchJobState[];
 }
 
 const SpeleoDBContext = createContext<SpeleoDBContextValue | null>(null);
@@ -93,6 +95,11 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     () => controller.syncStatus,
   );
 
+  const tilePrefetchJobs = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.tilePrefetchJobs,
+  );
+
   // ---- Offline modal local state -------------------------------------------
   const [showOfflineModal, setShowOfflineModal] = React.useState(false);
 
@@ -132,7 +139,14 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
 
   // ---- Render ---------------------------------------------------------------
 
-  const value: SpeleoDBContextValue = { controller, authState, isOnline, projects, syncStatus };
+  const value: SpeleoDBContextValue = {
+    controller,
+    authState,
+    isOnline,
+    projects,
+    syncStatus,
+    tilePrefetchJobs,
+  };
 
   return (
     <SpeleoDBContext.Provider value={value}>

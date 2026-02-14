@@ -187,7 +187,7 @@ registerTileCacheProtocol();
 
 const Dashboard: React.FC = () => {
   const history = useHistory();
-  const { controller, projects, syncStatus } = useSpeleoDB();
+  const { controller, projects, syncStatus, tilePrefetchJobs } = useSpeleoDB();
   const didSyncRef = useRef(false);
   const didFitRef = useRef(false);
   const mapRef = useRef<MapRef>(null);
@@ -241,6 +241,39 @@ const Dashboard: React.FC = () => {
     () => sortedProjects.filter((p) => !p.exclude_geojson && Boolean(p.geojson_file)),
     [sortedProjects],
   );
+  const panelProjects = useMemo(
+    () => sortedProjects.filter((p) => Boolean(geoJsonData[p.id])),
+    [sortedProjects, geoJsonData],
+  );
+  const panelActiveProjectIds = useMemo(
+    () =>
+      new Set(
+        [...activeProjectIds].filter((projectId) => Boolean(geoJsonData[projectId])),
+      ),
+    [activeProjectIds, geoJsonData],
+  );
+  const tilePrefetchByProject = useMemo(
+    () =>
+      Object.fromEntries(
+        tilePrefetchJobs.map((job) => [job.projectId, job] as const),
+      ),
+    [tilePrefetchJobs],
+  );
+  const tilePrefetchSummary = useMemo(() => {
+    if (tilePrefetchJobs.length === 0) return null;
+    const activeJobs = tilePrefetchJobs.filter(
+      (job) => job.status === 'queued' || job.status === 'downloading' || job.status === 'paused',
+    );
+    if (activeJobs.length === 0) return null;
+
+    const totalTiles = activeJobs.reduce((sum, job) => sum + job.totalTiles, 0);
+    const doneTiles = activeJobs.reduce(
+      (sum, job) => sum + job.completedTiles + job.failedTiles,
+      0,
+    );
+    const pct = totalTiles > 0 ? Math.floor((doneTiles / totalTiles) * 100) : 0;
+    return `${pct}% offline tiles`;
+  }, [tilePrefetchJobs]);
 
   useEffect(() => {
     // Only load when triggered (after sync completes)
@@ -323,10 +356,9 @@ const Dashboard: React.FC = () => {
   }, []);
 
   const handleShowAll = useCallback(() => {
-    // Activate every project (not just those with loaded GeoJSON).
-    // Projects without data simply won't render layers.
-    setActiveProjectIds(new Set(sortedProjects.map((p) => p.id)));
-  }, [sortedProjects]);
+    // Activate only projects that currently have loaded GeoJSON.
+    setActiveProjectIds(new Set(panelProjects.map((p) => p.id)));
+  }, [panelProjects]);
 
   const handleHideAll = useCallback(() => {
     setActiveProjectIds(new Set());
@@ -361,19 +393,6 @@ const Dashboard: React.FC = () => {
         return current; // no change
       });
     }, 0);
-  }, []);
-
-  const handleFitBounds = useCallback(() => {
-    setGeoJsonData((current) => {
-      setActiveProjectIds((activeIds) => {
-        const bounds = computeBounds(current, activeIds);
-        if (bounds && mapRef.current) {
-          mapRef.current.fitBounds(bounds, { padding: 50, maxZoom: 14, duration: 800 });
-        }
-        return activeIds;
-      });
-      return current;
-    });
   }, []);
 
   // ---- Render ---------------------------------------------------------------
@@ -514,28 +533,18 @@ const Dashboard: React.FC = () => {
                   Syncing…
                 </span>
               )}
-              {syncStatus === 'done' && projects.length > 0 && (
+              {tilePrefetchSummary && (
+                <span className="text-xs text-emerald-300">{tilePrefetchSummary}</span>
+              )}
+              {syncStatus === 'done' && panelProjects.length > 0 && (
                 <span className="text-xs text-slate-400">
-                  {projects.length} project{projects.length !== 1 ? 's' : ''}
+                  {panelProjects.length} project{panelProjects.length !== 1 ? 's' : ''}
                 </span>
               )}
             </div>
 
-            {/* Fit bounds + Logout */}
+            {/* Logout */}
             <div className="flex items-center gap-2">
-              {activeProjectIds.size > 0 && Object.keys(geoJsonData).length > 0 && (
-                <button
-                  onClick={handleFitBounds}
-                  className="w-10 h-10 flex items-center justify-center rounded-xl
-                             bg-slate-800/60 text-slate-200 hover:bg-slate-700/60 transition-colors"
-                  aria-label="Fit map to projects"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                          d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                  </svg>
-                </button>
-              )}
               <button
                 onClick={handleLogout}
                 className="px-3 py-2 text-xs font-medium text-slate-300 hover:text-white
@@ -548,9 +557,10 @@ const Dashboard: React.FC = () => {
 
           {/* ---- Project panel ---- */}
           <ProjectPanel
-            projects={sortedProjects}
-            activeProjectIds={activeProjectIds}
+            projects={panelProjects}
+            activeProjectIds={panelActiveProjectIds}
             geoJsonData={geoJsonData}
+            tilePrefetchByProject={tilePrefetchByProject}
             onToggleProject={handleToggleProject}
             onZoomToProject={handleZoomToProject}
             onShowAll={handleShowAll}

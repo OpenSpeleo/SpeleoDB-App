@@ -49,6 +49,7 @@ const defaultProps: ProjectPanelProps = {
   ],
   activeProjectIds: new Set(['p1', 'p2', 'p3']),
   geoJsonData: { p1: {}, p2: {}, p3: {} },
+  tilePrefetchByProject: {},
   onToggleProject: vi.fn(),
   onZoomToProject: vi.fn(),
   onShowAll: vi.fn(),
