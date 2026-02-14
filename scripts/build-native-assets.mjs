@@ -70,11 +70,38 @@ function run(command, args, options) {
   });
 
   if (result.error) {
-    throw result.error;
+    console.error(`[sentry] Failed to execute "${command}": ${result.error.message}`);
+    console.error(
+      '[sentry] If this is an Xcode build, ensure NODE_BINARY and/or NPM_BINARY are set.',
+    );
+    process.exit(1);
   }
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
+}
+
+function resolveNpmCommand(env) {
+  const explicitNpmBinary = env.NPM_BINARY?.trim();
+  if (explicitNpmBinary) {
+    return { command: explicitNpmBinary, argsPrefix: [] };
+  }
+
+  const npmExecPath = env.npm_execpath?.trim();
+  if (npmExecPath) {
+    return {
+      command: process.execPath,
+      argsPrefix: [npmExecPath],
+    };
+  }
+
+  const npmBinaryName = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const npmNextToNode = path.join(path.dirname(process.execPath), npmBinaryName);
+  if (existsSync(npmNextToNode)) {
+    return { command: npmNextToNode, argsPrefix: [] };
+  }
+
+  return { command: npmBinaryName, argsPrefix: [] };
 }
 
 function main() {
@@ -101,13 +128,25 @@ function main() {
     process.exit(1);
   }
 
+  const pathSeparator = process.platform === 'win32' ? ';' : ':';
+  const nodeDir = path.dirname(process.execPath);
+  const currentPath = resolvedEnv.PATH ?? '';
+  const pathWithNode = currentPath
+    .split(pathSeparator)
+    .filter(Boolean)
+    .includes(nodeDir)
+    ? currentPath
+    : `${nodeDir}${currentPath ? `${pathSeparator}${currentPath}` : ''}`;
+
   const buildEnv = {
     ...resolvedEnv,
+    PATH: pathWithNode,
     VITE_SENTRY_DSN: dsn,
   };
+  const npm = resolveNpmCommand(buildEnv);
 
   console.log(`[sentry] Building web assets for ${platform}...`);
-  run('npm', ['run', 'build'], { cwd: repoRoot, env: buildEnv });
+  run(npm.command, [...npm.argsPrefix, 'run', 'build'], { cwd: repoRoot, env: buildEnv });
 
   const distDir = path.join(repoRoot, 'dist');
   if (!existsSync(distDir)) {

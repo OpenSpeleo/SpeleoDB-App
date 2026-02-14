@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "test.e2e": "cypress run",
     "test.unit": "vitest",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "node scripts/patch-sentry-capacitor-package.mjs"
   },
   "dependencies": {
     "@capacitor/android": "8.1.0",
