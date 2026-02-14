@@ -3,11 +3,15 @@ import { createRoot } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
 import { addIcons } from 'ionicons';
 import { arrowDownOutline } from 'ionicons/icons';
+import * as SentryReact from '@sentry/react';
 import App from './App';
+import { initSentry } from './monitoring/sentry';
 
 addIcons({
   'arrow-down-outline': arrowDownOutline,
 });
+
+initSentry();
 
 function registerServiceWorker(): void {
   if (import.meta.env.DEV) return;
@@ -35,7 +39,9 @@ const container = document.getElementById('root');
 const root = createRoot(container!);
 root.render(
   <React.StrictMode>
-    <App />
+    <SentryReact.ErrorBoundary fallback={<div>Something went wrong.</div>}>
+      <App />
+    </SentryReact.ErrorBoundary>
   </React.StrictMode>
 );
 

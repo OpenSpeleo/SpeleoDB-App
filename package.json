@@ -1,11 +1,13 @@
 {
-  "name": "speleo-db",
+  "name": "SpeleoDB",
   "private": true,
   "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:native:ios:assets": "node scripts/build-native-assets.mjs ios",
+    "build:native:android:assets": "node scripts/build-native-assets.mjs android",
     "preview": "vite preview",
     "test.e2e": "cypress run",
     "test.unit": "vitest",
@@ -21,6 +23,8 @@
     "@capacitor/status-bar": "8.0.0",
     "@ionic/react": "^8.5.0",
     "@ionic/react-router": "^8.5.0",
+    "@sentry/capacitor": "^3.0.0",
+    "@sentry/react": "^10.36.0",
     "@types/react-router": "^5.1.20",
     "@types/react-router-dom": "^5.3.3",
     "ionicons": "^7.4.0",

@@ -42,6 +42,16 @@ dependencies {
     implementation project(':capacitor-cordova-android-plugins')
 }
 
+def repoRootDir = rootProject.projectDir.parentFile.absolutePath
+def nodeBinary = System.getenv("NODE_BINARY") ?: "node"
+
+tasks.register("buildWebAssetsWithAndroidSentry", Exec) {
+    workingDir repoRootDir
+    commandLine nodeBinary, "scripts/build-native-assets.mjs", "android"
+}
+
+preBuild.dependsOn("buildWebAssetsWithAndroidSentry")
+
 apply from: 'capacitor.build.gradle'
 
 try {

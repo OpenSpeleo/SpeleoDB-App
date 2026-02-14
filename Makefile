@@ -160,7 +160,10 @@ ios-device: sync ## Build + run on a connected physical device
 		build
 
 ios-live: ## Live-reload on iOS simulator (Ionic + Capacitor)
-	npx ionic cap run ios --livereload --external
+	@set -a; \
+	if [ -f .env ]; then . ./.env; fi; \
+	set +a; \
+	VITE_SENTRY_DSN="$${VITE_SENTRY_DSN:-$${SENTRY_DSN_IOS}}" npx ionic cap run ios --livereload --external
 
 ios-log: ## Stream logs from the booted simulator
 	@if [ -z "$(DEVICE_UDID)" ]; then \

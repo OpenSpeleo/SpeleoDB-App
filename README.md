@@ -36,6 +36,24 @@ make dev
 
 Open [http://localhost:8100](http://localhost:8100) in your browser.
 
+## Sentry Configuration
+
+This app uses `@sentry/capacitor` with strict per-platform DSN bundling.
+
+1. Copy `.env.dist` to `.env`.
+2. Set:
+   - `SENTRY_DSN_IOS`
+   - `SENTRY_DSN_ANDROID`
+3. Build from Xcode or Android Studio as usual.
+
+Native pre-build hooks regenerate web assets before compile and inject the
+platform-specific DSN into `VITE_SENTRY_DSN`, so iOS and Android builds do not
+share the same DSN in their bundled web assets.
+
+If Node is not available in your IDE build environment, set `NODE_BINARY` to
+your Node executable path (or launch the IDE from a shell where Node is on
+`PATH`).
+
 ## Make Targets
 
 Run `make help` to see all targets. Here is the full reference:
