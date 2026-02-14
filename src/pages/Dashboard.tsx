@@ -1,48 +1,395 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useHistory } from 'react-router-dom';
+/**
+ * Dashboard -- full-screen map with per-project GeoJSON layers.
+ *
+ * Replaces the old card-based dashboard with a maplibre-gl map.
+ * Each project's cached GeoJSON is rendered as a colored layer that
+ * can be toggled on/off via the ProjectPanel.
+ */
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useHistory } from 'react-router-dom';
 import { IonPage, IonContent, IonRefresher, IonRefresherContent } from '@ionic/react';
+import Map, { Layer, Source, NavigationControl } from 'react-map-gl/maplibre';
+import type { MapRef } from 'react-map-gl/maplibre';
+import type { LngLatBoundsLike } from 'maplibre-gl';
+
 import { useSpeleoDB } from '../context/SpeleoDBProvider';
-import type { User } from '../types';
-import logoSvg from '../assets/media/logo.png';
+import { COLOR_PALETTE, MAP } from '../constants';
+import { registerTileCacheProtocol, getCachedStyle } from '../services/TileCacheService';
+import ProjectPanel from '../components/ProjectPanel';
+import type { Project } from '../types/project';
+
+// ==================== GeoJSON type alias ====================
+
+type GeoJsonRecord = Record<string, GeoJSON.FeatureCollection>;
+
+// ==================== Helpers ====================
+
+/** Sort projects by name for stable color assignment. */
+function sortProjects(projects: Project[]): Project[] {
+  return [...projects].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Normalize any valid GeoJSON into a FeatureCollection.
+ * Handles: FeatureCollection, Feature, bare Geometry, wrapped payloads,
+ * and JSON strings returned by some native transports.
+ */
+function normalizeGeoJSON(data: unknown): GeoJSON.FeatureCollection | null {
+  let current: unknown = data;
+
+  // Unwrap a few common envelope shapes:
+  // - raw JSON string
+  // - { data: <geojson> }
+  // - { geojson: <geojson> }
+  // iOS native HTTP responses can surface JSON as strings.
+  for (let i = 0; i < 4; i += 1) {
+    if (typeof current === 'string') {
+      const trimmed = current.trim();
+      if (!trimmed) return null;
+      try {
+        current = JSON.parse(trimmed);
+      } catch {
+        return null;
+      }
+      continue;
+    }
+
+    if (!current || typeof current !== 'object') break;
+    const envelope = current as Record<string, unknown>;
+
+    if (typeof envelope.type === 'string' || Array.isArray(envelope.features)) {
+      break;
+    }
+
+    if ('data' in envelope) {
+      current = envelope.data;
+      continue;
+    }
+
+    if ('geojson' in envelope) {
+      current = envelope.geojson;
+      continue;
+    }
+
+    break;
+  }
+
+  if (!current || typeof current !== 'object') return null;
+  const obj = current as Record<string, unknown>;
+
+  // Already a FeatureCollection
+  if (obj.type === 'FeatureCollection' && Array.isArray(obj.features)) {
+    return obj as unknown as GeoJSON.FeatureCollection;
+  }
+
+  // Some payloads omit "type" but still expose a features array.
+  if (Array.isArray(obj.features)) {
+    return {
+      type: 'FeatureCollection',
+      features: obj.features as GeoJSON.Feature[],
+    };
+  }
+
+  // Single Feature → wrap in a FeatureCollection
+  if (obj.type === 'Feature') {
+    return {
+      type: 'FeatureCollection',
+      features: [obj as unknown as GeoJSON.Feature],
+    };
+  }
+
+  // Bare Geometry → wrap in Feature → FeatureCollection
+  if (typeof obj.type === 'string' && ('coordinates' in obj || 'geometries' in obj)) {
+    return {
+      type: 'FeatureCollection',
+      features: [
+        { type: 'Feature', properties: {}, geometry: obj as unknown as GeoJSON.Geometry },
+      ],
+    };
+  }
+
+  return null;
+}
+
+/** Compute combined bounding box for the given project IDs. */
+function computeBounds(
+  geoJsonData: GeoJsonRecord,
+  ids: Set<string>,
+): LngLatBoundsLike | null {
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let hasCoords = false;
+
+  for (const id of ids) {
+    const fc = geoJsonData[id];
+    if (!fc?.features) continue;
+
+    for (const feature of fc.features) {
+      if (!feature.geometry) continue;
+      visitCoords(feature.geometry, (lng: number, lat: number) => {
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        hasCoords = true;
+      });
+    }
+  }
+
+  if (!hasCoords) return null;
+
+  const lngPad = Math.max((maxLng - minLng) * 0.1, 0.01);
+  const latPad = Math.max((maxLat - minLat) * 0.1, 0.01);
+
+  return [
+    [minLng - lngPad, minLat - latPad],
+    [maxLng + lngPad, maxLat + latPad],
+  ];
+}
+
+/** Walk every coordinate in a GeoJSON geometry. */
+function visitCoords(
+  geometry: GeoJSON.Geometry,
+  fn: (lng: number, lat: number) => void,
+): void {
+  switch (geometry.type) {
+    case 'Point':
+      fn(geometry.coordinates[0], geometry.coordinates[1]);
+      break;
+    case 'MultiPoint':
+    case 'LineString':
+      for (const c of geometry.coordinates) fn(c[0], c[1]);
+      break;
+    case 'MultiLineString':
+    case 'Polygon':
+      for (const ring of geometry.coordinates)
+        for (const c of ring) fn(c[0], c[1]);
+      break;
+    case 'MultiPolygon':
+      for (const poly of geometry.coordinates)
+        for (const ring of poly)
+          for (const c of ring) fn(c[0], c[1]);
+      break;
+    case 'GeometryCollection':
+      for (const g of geometry.geometries) visitCoords(g, fn);
+      break;
+  }
+}
+
+// ==================== Register tile caching protocol once ====================
+
+registerTileCacheProtocol();
+
+// ==================== Component ====================
 
 const Dashboard: React.FC = () => {
   const history = useHistory();
-  const { controller, isOnline, projects, syncStatus } = useSpeleoDB();
-  const [user, setUser] = useState<User | null>(null);
-  const didSyncRef = React.useRef(false);
+  const { controller, projects, syncStatus } = useSpeleoDB();
+  const didSyncRef = useRef(false);
+  const didFitRef = useRef(false);
+  const mapRef = useRef<MapRef>(null);
+
+  // Panel state
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
+
+  // Active projects (which layers are visible)
+  const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
+
+  // Loaded GeoJSON keyed by project ID
+  const [geoJsonData, setGeoJsonData] = useState<GeoJsonRecord>({});
+
+  // Map style (loaded from cache/network)
+  const [mapStyle, setMapStyle] = useState<Record<string, unknown> | null>(null);
+
+  // Monotonic counter -- incremented after each sync to trigger a reload.
+  const [loadTrigger, setLoadTrigger] = useState(0);
+
+  // ---- Auth guard -----------------------------------------------------------
 
   useEffect(() => {
     if (!controller.isAuthenticated()) {
       history.push('/login');
-      return;
-    }
-    setUser(controller.currentUser);
-
-    // Trigger project sync once when the dashboard mounts.
-    if (!didSyncRef.current) {
-      didSyncRef.current = true;
-      controller.syncProjects();
     }
   }, [history, controller]);
 
-  const handleRefresh = async (event: CustomEvent) => {
-    await controller.syncProjects();
-    event.detail.complete();
-  };
+  // ---- Load map style -------------------------------------------------------
 
-  const handleLogout = () => {
+  useEffect(() => {
+    getCachedStyle(MAP.STYLE_URL)
+      .then(setMapStyle)
+      .catch((err) => console.error('Failed to load map style:', err));
+  }, []);
+
+  // ---- Sync projects on mount -----------------------------------------------
+
+  useEffect(() => {
+    if (!didSyncRef.current) {
+      didSyncRef.current = true;
+      controller.syncProjects().then(() => {
+        setLoadTrigger((n) => n + 1);
+      });
+    }
+  }, [controller]);
+
+  // ---- Load GeoJSON from cache after sync completes -------------------------
+
+  const sortedProjects = useMemo(() => sortProjects(projects), [projects]);
+  const geoJsonProjects = useMemo(
+    () => sortedProjects.filter((p) => !p.exclude_geojson && Boolean(p.geojson_file)),
+    [sortedProjects],
+  );
+
+  useEffect(() => {
+    // Only load when triggered (after sync completes)
+    if (loadTrigger === 0) return;
+    if (geoJsonProjects.length === 0) {
+      setGeoJsonData({});
+      return;
+    }
+
+    let stale = false;
+
+    (async () => {
+      const newData: GeoJsonRecord = {};
+
+      for (const project of geoJsonProjects) {
+        try {
+          const raw = await controller.getProjectGeoJSON(project.id);
+          if (stale) return;
+
+          const fc = normalizeGeoJSON(raw);
+          if (fc && fc.features.length > 0) {
+            newData[project.id] = fc;
+          }
+        } catch (err) {
+          console.warn(`Failed to load GeoJSON for ${project.id}:`, err);
+        }
+      }
+
+      if (stale) return;
+
+      setGeoJsonData(newData);
+
+      // On first meaningful load, activate all projects that have data
+      setActiveProjectIds((prev) => {
+        if (prev.size === 0) return new Set(Object.keys(newData));
+        return prev;
+      });
+    })();
+
+    return () => { stale = true; };
+  }, [loadTrigger, controller, geoJsonProjects]);
+
+  // ---- Auto-fit bounds on first data load -----------------------------------
+
+  useEffect(() => {
+    if (didFitRef.current) return;
+    if (activeProjectIds.size === 0 || Object.keys(geoJsonData).length === 0) return;
+
+    const bounds = computeBounds(geoJsonData, activeProjectIds);
+    if (bounds && mapRef.current) {
+      didFitRef.current = true;
+      mapRef.current.fitBounds(bounds, { padding: 50, maxZoom: 14, duration: 800 });
+    }
+  }, [activeProjectIds, geoJsonData]);
+
+  // ---- Handlers -------------------------------------------------------------
+
+  const handleRefresh = useCallback(async (event: CustomEvent) => {
+    didFitRef.current = false;
+    await controller.syncProjects();
+    setLoadTrigger((n) => n + 1);
+    event.detail.complete();
+  }, [controller]);
+
+  const handleLogout = useCallback(() => {
     controller.logout();
     history.push('/');
-  };
+  }, [controller, history]);
 
-  if (!user) {
-    return null;
-  }
+  const handleToggleProject = useCallback((projectId: string) => {
+    setActiveProjectIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleShowAll = useCallback(() => {
+    // Activate every project (not just those with loaded GeoJSON).
+    // Projects without data simply won't render layers.
+    setActiveProjectIds(new Set(sortedProjects.map((p) => p.id)));
+  }, [sortedProjects]);
+
+  const handleHideAll = useCallback(() => {
+    setActiveProjectIds(new Set());
+  }, []);
+
+  const handleZoomToProject = useCallback((projectId: string) => {
+    // Activate the project
+    setActiveProjectIds((prev) => {
+      if (prev.has(projectId)) return prev;
+      const next = new Set(prev);
+      next.add(projectId);
+      return next;
+    });
+
+    // Zoom to this project's bounds — read geoJsonData from the latest state
+    // via a functional update trick: we schedule the zoom after React processes
+    // the activation above.
+    setTimeout(() => {
+      // Access the ref-stable map and read geoJsonData at call time
+      const map = mapRef.current;
+      if (!map) return;
+
+      // Get the source data directly from the map if available
+      setGeoJsonData((current) => {
+        const fc = current[projectId];
+        if (fc) {
+          const bounds = computeBounds(current, new Set([projectId]));
+          if (bounds) {
+            map.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 800 });
+          }
+        }
+        return current; // no change
+      });
+    }, 0);
+  }, []);
+
+  const handleFitBounds = useCallback(() => {
+    setGeoJsonData((current) => {
+      setActiveProjectIds((activeIds) => {
+        const bounds = computeBounds(current, activeIds);
+        if (bounds && mapRef.current) {
+          mapRef.current.fitBounds(bounds, { padding: 50, maxZoom: 14, duration: 800 });
+        }
+        return activeIds;
+      });
+      return current;
+    });
+  }, []);
+
+  // ---- Render ---------------------------------------------------------------
+
+  if (!controller.isAuthenticated()) return null;
 
   return (
     <IonPage>
-      <IonContent fullscreen className="ion-no-padding">
-        <IonRefresher slot="fixed" onIonRefresh={handleRefresh} pullFactor={0.5} pullMin={60} pullMax={200}>
+      <IonContent fullscreen className="ion-no-padding" scrollY={false}>
+        <IonRefresher
+          slot="fixed"
+          onIonRefresh={handleRefresh}
+          pullFactor={0.5}
+          pullMin={60}
+          pullMax={200}
+        >
           <IonRefresherContent
             pullingIcon="arrow-down-outline"
             pullingText="Pull down to refresh"
@@ -50,144 +397,181 @@ const Dashboard: React.FC = () => {
             refreshingText="Syncing projects…"
           />
         </IonRefresher>
-        <div className="font-sans antialiased bg-slate-900 text-slate-100 tracking-tight min-h-screen flex flex-col">
-          {/* Header */}
-          <header className="border-b border-slate-800 pt-[env(safe-area-inset-top)]">
-            <div className="max-w-6xl mx-auto px-4 sm:px-6">
-              <div className="flex items-center justify-between h-16 md:h-20">
-                {/* Logo */}
-                <div className="flex-1">
-                  <Link to="/" className="inline-flex items-center py-2">
-                    <img className="max-w-none h-8 md:h-10" src={logoSvg} alt="SpeleoDB" />
-                  </Link>
-                </div>
 
-                {/* Sync indicator + User menu */}
-                <div className="flex items-center gap-4">
-                  {syncStatus === 'syncing' && (
-                    <span className="flex items-center gap-1.5 text-xs text-slate-400">
-                      <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
-                      Syncing…
-                    </span>
-                  )}
-                  <span className="text-sm text-slate-300">{user.name}</span>
-                  <button
-                    onClick={handleLogout}
-                    className="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-300 hover:text-white rounded-full border border-slate-700 bg-slate-900/50 transition-colors group"
+        <div className="relative w-full h-full" style={{ height: '100dvh' }}>
+          {/* ---- Map ---- */}
+          {mapStyle && (
+            <Map
+              ref={mapRef}
+              initialViewState={{
+                longitude: MAP.DEFAULT_CENTER[0],
+                latitude: MAP.DEFAULT_CENTER[1],
+                zoom: MAP.DEFAULT_ZOOM,
+              }}
+              maxZoom={MAP.MAX_ZOOM}
+              style={{ width: '100%', height: '100%' }}
+              mapStyle={mapStyle as maplibregl.StyleSpecification}
+              attributionControl={{ compact: true }}
+            >
+              <NavigationControl position="bottom-right" showCompass={true} />
+
+              {/* GeoJSON layers for each active project */}
+              {sortedProjects.map((project, idx) => {
+                if (!activeProjectIds.has(project.id) || !geoJsonData[project.id]) {
+                  return null;
+                }
+                const color = COLOR_PALETTE[idx % COLOR_PALETTE.length];
+                const sourceId = `project-${project.id}`;
+
+                return (
+                  <Source
+                    key={project.id}
+                    id={sourceId}
+                    type="geojson"
+                    data={geoJsonData[project.id]}
                   >
-                    Sign Out
-                    <span className="ml-1 text-purple-500 group-hover:translate-x-0.5 transition-transform duration-150">→</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </header>
+                    {/* Polygon fills */}
+                    <Layer
+                      id={`${sourceId}-fill`}
+                      type="fill"
+                      filter={[
+                        'match',
+                        ['geometry-type'],
+                        ['Polygon', 'MultiPolygon'],
+                        true,
+                        false,
+                      ]}
+                      paint={{
+                        'fill-color': color,
+                        'fill-opacity': 0.25,
+                      }}
+                    />
 
-          {/* Main Content */}
-          <main className="flex-1 max-w-6xl mx-auto px-4 sm:px-6 py-12 w-full">
-            <div className="mb-8">
-              <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-slate-200/60 via-slate-200 to-slate-200/60 bg-clip-text text-transparent mb-4">
-                Welcome, {user.name}!
-              </h1>
-              <p className="text-slate-400">
-                This is your SpeleoDB dashboard. From here, you can manage your cave surveys and collaborate with your team.
-              </p>
-              {projects.length > 0 && (
-                <p className="text-sm text-slate-500 mt-2">
-                  {projects.length} project{projects.length !== 1 ? 's' : ''} cached for offline access
-                  {syncStatus === 'done' && <span className="text-green-500 ml-1">· up to date</span>}
-                </p>
+                    {/* Lines + polygon outlines */}
+                    <Layer
+                      id={`${sourceId}-line`}
+                      type="line"
+                      filter={[
+                        'match',
+                        ['geometry-type'],
+                        ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'],
+                        true,
+                        false,
+                      ]}
+                      paint={{
+                        'line-color': color,
+                        'line-width': 2.5,
+                      }}
+                    />
+
+                    {/* Point circles */}
+                    <Layer
+                      id={`${sourceId}-circle`}
+                      type="circle"
+                      filter={[
+                        'match',
+                        ['geometry-type'],
+                        ['Point', 'MultiPoint'],
+                        true,
+                        false,
+                      ]}
+                      paint={{
+                        'circle-color': color,
+                        'circle-radius': 6,
+                        'circle-stroke-width': 1.5,
+                        'circle-stroke-color': '#ffffff',
+                      }}
+                    />
+                  </Source>
+                );
+              })}
+            </Map>
+          )}
+
+          {/* ---- Floating header ---- */}
+          <div
+            className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between
+                        px-3 py-2 bg-slate-900/70 backdrop-blur-sm border-b border-slate-700/30"
+            style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}
+          >
+            {/* Menu toggle */}
+            <button
+              onClick={() => setIsPanelOpen(true)}
+              className="w-10 h-10 flex items-center justify-center rounded-xl
+                         bg-slate-800/60 text-slate-200 hover:bg-slate-700/60 transition-colors"
+              aria-label="Open project panel"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+
+            {/* Sync status */}
+            <div className="flex items-center gap-2">
+              {syncStatus === 'syncing' && (
+                <span className="flex items-center gap-1.5 text-xs text-slate-300">
+                  <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+                  Syncing…
+                </span>
+              )}
+              {syncStatus === 'done' && projects.length > 0 && (
+                <span className="text-xs text-slate-400">
+                  {projects.length} project{projects.length !== 1 ? 's' : ''}
+                </span>
               )}
             </div>
 
-            {/* Dashboard Cards */}
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <DashboardCard
-                title="My Surveys"
-                description="View and manage your cave survey projects."
-                icon={
-                  <svg className="w-8 h-8 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+            {/* Fit bounds + Logout */}
+            <div className="flex items-center gap-2">
+              {activeProjectIds.size > 0 && Object.keys(geoJsonData).length > 0 && (
+                <button
+                  onClick={handleFitBounds}
+                  className="w-10 h-10 flex items-center justify-center rounded-xl
+                             bg-slate-800/60 text-slate-200 hover:bg-slate-700/60 transition-colors"
+                  aria-label="Fit map to projects"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
                   </svg>
-                }
-              />
-
-              <DashboardCard
-                title="Team"
-                description="Collaborate with your survey team members."
-                icon={
-                  <svg className="w-8 h-8 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                  </svg>
-                }
-              />
-
-              <DashboardCard
-                title="Settings"
-                description="Configure your account and preferences."
-                icon={
-                  <svg className="w-8 h-8 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                }
-              />
+                </button>
+              )}
+              <button
+                onClick={handleLogout}
+                className="px-3 py-2 text-xs font-medium text-slate-300 hover:text-white
+                           rounded-xl bg-slate-800/60 hover:bg-slate-700/60 transition-colors"
+              >
+                Sign Out
+              </button>
             </div>
+          </div>
 
-            {/* Account Info */}
-            <div className="mt-12 p-6 bg-slate-800/50 rounded-2xl border border-slate-700">
-              <h2 className="text-lg font-semibold text-slate-100 mb-4">Account Information</h2>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center py-2 border-b border-slate-700">
-                  <span className="text-slate-400">Email</span>
-                  <span className="text-slate-200">{user.email}</span>
-                </div>
-                <div className="flex justify-between items-center py-2 border-b border-slate-700">
-                  <span className="text-slate-400">Name</span>
-                  <span className="text-slate-200">{user.name}</span>
-                </div>
-                {user.country && (
-                  <div className="flex justify-between items-center py-2 border-b border-slate-700">
-                    <span className="text-slate-400">Country</span>
-                    <span className="text-slate-200">{user.country}</span>
-                  </div>
-                )}
-                <div className="flex justify-between items-center py-2">
-                  <span className="text-slate-400">Status</span>
-                  <span className="flex items-center gap-2 text-slate-200">
-                    <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-yellow-500'}`} />
-                    {isOnline ? 'Online' : 'Offline'}
-                  </span>
-                </div>
+          {/* ---- Project panel ---- */}
+          <ProjectPanel
+            projects={sortedProjects}
+            activeProjectIds={activeProjectIds}
+            geoJsonData={geoJsonData}
+            onToggleProject={handleToggleProject}
+            onZoomToProject={handleZoomToProject}
+            onShowAll={handleShowAll}
+            onHideAll={handleHideAll}
+            onClose={() => setIsPanelOpen(false)}
+            isOpen={isPanelOpen}
+          />
+
+          {/* ---- Loading state when style not yet loaded ---- */}
+          {!mapStyle && (
+            <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm text-slate-400">Loading map…</span>
               </div>
             </div>
-          </main>
-
-          {/* Footer */}
-          <footer className="border-t border-slate-800 mt-auto pb-[env(safe-area-inset-bottom)]">
-            <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-              <div className="text-center text-sm text-slate-400">
-                © {new Date().getFullYear()} SpeleoDB. All rights reserved.
-              </div>
-            </div>
-          </footer>
+          )}
         </div>
       </IonContent>
     </IonPage>
   );
 };
-
-// Dashboard Card Component
-const DashboardCard: React.FC<{ title: string; description: string; icon: React.ReactNode }> = ({ 
-  title, 
-  description, 
-  icon 
-}) => (
-  <div className="p-6 bg-slate-800/50 rounded-2xl border border-slate-700 hover:border-purple-500/50 transition-colors cursor-pointer">
-    <div className="mb-4">{icon}</div>
-    <h3 className="text-lg font-semibold text-slate-100 mb-2">{title}</h3>
-    <p className="text-sm text-slate-400">{description}</p>
-  </div>
-);
 
 export default Dashboard;

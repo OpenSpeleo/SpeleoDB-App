@@ -1,0 +1,23 @@
+{
+  "version": 8,
+  "name": "SpeleoDB Satellite",
+  "sources": {
+    "esri-world-imagery": {
+      "type": "raster",
+      "tiles": [
+        "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+      ],
+      "maxzoom": 18,
+      "tileSize": 256
+    }
+  },
+  "layers": [
+    {
+      "id": "esri-world-imagery",
+      "type": "raster",
+      "source": "esri-world-imagery",
+      "minzoom": 0,
+      "maxzoom": 20
+    }
+  ]
+}

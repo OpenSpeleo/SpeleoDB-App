@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { API, HTTP_STATUS, HEADERS, PREFERENCES, NETWORK } from './constants';
+import { API, HTTP_STATUS, HEADERS, PREFERENCES, NETWORK, MAP, COLOR_PALETTE } from './constants';
 
 describe('constants', () => {
   describe('API', () => {
@@ -50,6 +50,51 @@ describe('constants', () => {
   describe('NETWORK', () => {
     it('has REQUEST_TIMEOUT_MS', () => {
       expect(NETWORK.REQUEST_TIMEOUT_MS).toBe(10000);
+    });
+  });
+
+  describe('MAP', () => {
+    it('has STYLE_URL as a non-empty string', () => {
+      expect(typeof MAP.STYLE_URL).toBe('string');
+      expect(MAP.STYLE_URL.length).toBeGreaterThan(0);
+    });
+
+    it('has DEFAULT_CENTER as [longitude, latitude]', () => {
+      expect(MAP.DEFAULT_CENTER).toHaveLength(2);
+      expect(MAP.DEFAULT_CENTER[0]).toBeGreaterThanOrEqual(-180);
+      expect(MAP.DEFAULT_CENTER[0]).toBeLessThanOrEqual(180);
+      expect(MAP.DEFAULT_CENTER[1]).toBeGreaterThanOrEqual(-90);
+      expect(MAP.DEFAULT_CENTER[1]).toBeLessThanOrEqual(90);
+    });
+
+    it('has DEFAULT_ZOOM as a positive number', () => {
+      expect(MAP.DEFAULT_ZOOM).toBeGreaterThan(0);
+    });
+
+    it('has MAX_ZOOM greater than or equal to DEFAULT_ZOOM', () => {
+      expect(MAP.MAX_ZOOM).toBeGreaterThanOrEqual(MAP.DEFAULT_ZOOM);
+    });
+
+    it('caps MAX_ZOOM at 18 for satellite reliability', () => {
+      expect(MAP.MAX_ZOOM).toBe(18);
+    });
+  });
+
+  describe('COLOR_PALETTE', () => {
+    it('has exactly 20 entries', () => {
+      expect(COLOR_PALETTE).toHaveLength(20);
+    });
+
+    it('contains only valid hex color strings', () => {
+      const hexRegex = /^#[0-9a-fA-F]{6}$/;
+      for (const color of COLOR_PALETTE) {
+        expect(color).toMatch(hexRegex);
+      }
+    });
+
+    it('has no duplicate colors', () => {
+      const unique = new Set(COLOR_PALETTE);
+      expect(unique.size).toBe(COLOR_PALETTE.length);
     });
   });
 });
