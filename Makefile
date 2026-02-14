@@ -8,7 +8,7 @@ APP_NAME        := SpeleoDB
 SCHEME          := App
 XCODEPROJ       := ios/App/App.xcodeproj
 WORKSPACE       := ios/App/App.xcworkspace
-BUNDLE_ID       := io.ionic.starter
+BUNDLE_ID       := org.speleodb.app
 
 # Default simulator (override with: make ios-sim SIMULATOR="iPhone 17 Pro Max")
 SIMULATOR       ?= iPhone 17 Pro

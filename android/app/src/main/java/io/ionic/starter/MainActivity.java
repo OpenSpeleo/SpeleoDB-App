@@ -1,4 +1,4 @@
-package io.ionic.starter;
+package org.speleodb.app;
 
 import com.getcapacitor.BridgeActivity;
 
