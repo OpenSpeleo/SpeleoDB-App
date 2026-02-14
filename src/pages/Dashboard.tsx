@@ -16,6 +16,11 @@ import type { LngLatBoundsLike } from 'maplibre-gl';
 import { useSpeleoDB } from '../context/SpeleoDBProvider';
 import { COLOR_PALETTE, MAP } from '../constants';
 import { registerTileCacheProtocol, getCachedStyle } from '../services/TileCacheService';
+import {
+  getProjectVisibilityPreferences,
+  setProjectVisibilityPreference,
+  setProjectVisibilityPreferences,
+} from '../services/PreferencesService';
 import ProjectPanel from '../components/ProjectPanel';
 import type { Project } from '../types/project';
 
@@ -306,9 +311,15 @@ const Dashboard: React.FC = () => {
 
       setGeoJsonData(newData);
 
-      // On first meaningful load, activate all projects that have data
+      // On first meaningful load, restore persisted visibility per project.
       setActiveProjectIds((prev) => {
-        if (prev.size === 0) return new Set(Object.keys(newData));
+        if (prev.size === 0) {
+          const visibilityPrefs = getProjectVisibilityPreferences();
+          const visibleIds = Object.keys(newData).filter(
+            (projectId) => visibilityPrefs[projectId] !== false,
+          );
+          return new Set(visibleIds);
+        }
         return prev;
       });
     })();
@@ -351,20 +362,31 @@ const Dashboard: React.FC = () => {
       } else {
         next.add(projectId);
       }
+      setProjectVisibilityPreference(projectId, next.has(projectId));
       return next;
     });
   }, []);
 
   const handleShowAll = useCallback(() => {
     // Activate only projects that currently have loaded GeoJSON.
-    setActiveProjectIds(new Set(panelProjects.map((p) => p.id)));
+    const nextIds = panelProjects.map((p) => p.id);
+    setProjectVisibilityPreferences(
+      Object.fromEntries(nextIds.map((projectId) => [projectId, true] as const)),
+    );
+    setActiveProjectIds(new Set(nextIds));
   }, [panelProjects]);
 
   const handleHideAll = useCallback(() => {
+    const nextIds = panelProjects.map((p) => p.id);
+    setProjectVisibilityPreferences(
+      Object.fromEntries(nextIds.map((projectId) => [projectId, false] as const)),
+    );
     setActiveProjectIds(new Set());
-  }, []);
+  }, [panelProjects]);
 
   const handleZoomToProject = useCallback((projectId: string) => {
+    setProjectVisibilityPreference(projectId, true);
+
     // Activate the project
     setActiveProjectIds((prev) => {
       if (prev.has(projectId)) return prev;

@@ -62,6 +62,22 @@ vi.mock('../services/TileCacheService', () => ({
   }),
 }));
 
+const {
+  mockGetProjectVisibilityPreferences,
+  mockSetProjectVisibilityPreference,
+  mockSetProjectVisibilityPreferences,
+} = vi.hoisted(() => ({
+  mockGetProjectVisibilityPreferences: vi.fn(() => ({})),
+  mockSetProjectVisibilityPreference: vi.fn(),
+  mockSetProjectVisibilityPreferences: vi.fn(),
+}));
+
+vi.mock('../services/PreferencesService', () => ({
+  getProjectVisibilityPreferences: mockGetProjectVisibilityPreferences,
+  setProjectVisibilityPreference: mockSetProjectVisibilityPreference,
+  setProjectVisibilityPreferences: mockSetProjectVisibilityPreferences,
+}));
+
 // Mock SpeleoDBProvider
 const mockSyncProjects = vi.fn().mockResolvedValue(undefined);
 const mockGetProjectGeoJSON = vi.fn().mockResolvedValue(null);
@@ -129,6 +145,22 @@ function makeProject(overrides: Partial<Project> = {}): Project {
   };
 }
 
+function pointFeatureCollection(lng = 2.3, lat = 46.6): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Point',
+          coordinates: [lng, lat],
+        },
+      },
+    ],
+  };
+}
+
 // ==================== Tests ====================
 
 describe('Dashboard', () => {
@@ -136,6 +168,7 @@ describe('Dashboard', () => {
     vi.clearAllMocks();
     mockIsAuthenticated.mockReturnValue(true);
     mockProjects = [];
+    mockGetProjectVisibilityPreferences.mockReturnValue({});
   });
 
   it('renders the map when authenticated', async () => {
@@ -216,5 +249,89 @@ describe('Dashboard', () => {
       expect(mockGetProjectGeoJSON).toHaveBeenCalledWith('p-json');
       expect(screen.getByTestId('map-source')).toBeInTheDocument();
     });
+  });
+
+  it('restores visibility from saved preferences on first load', async () => {
+    mockProjects = [
+      makeProject({ id: 'p1', name: 'Alpha' }),
+      makeProject({ id: 'p2', name: 'Beta' }),
+    ];
+    mockGetProjectGeoJSON.mockImplementation(async (projectId: string) =>
+      pointFeatureCollection(projectId === 'p1' ? 2.3 : 2.4, 46.6),
+    );
+    mockGetProjectVisibilityPreferences.mockReturnValue({
+      p1: false,
+      p2: true,
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('map-source')).toHaveLength(1);
+    });
+  });
+
+  it('persists project visibility when toggled', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Toggle Me' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Toggle Toggle Me')).toBeInTheDocument();
+      expect(screen.getByTestId('map-source')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByLabelText('Toggle Toggle Me'));
+    expect(mockSetProjectVisibilityPreference).toHaveBeenCalledWith('p1', false);
+  });
+
+  it('persists show-all and hide-all visibility in bulk', async () => {
+    mockProjects = [
+      makeProject({ id: 'p1', name: 'Alpha' }),
+      makeProject({ id: 'p2', name: 'Beta' }),
+    ];
+    mockGetProjectGeoJSON.mockImplementation(async (projectId: string) =>
+      pointFeatureCollection(projectId === 'p1' ? 2.3 : 2.4, 46.6),
+    );
+    mockGetProjectVisibilityPreferences.mockReturnValue({
+      p1: false,
+      p2: false,
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Show all')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText('Show all'));
+    expect(mockSetProjectVisibilityPreferences).toHaveBeenCalledWith({
+      p1: true,
+      p2: true,
+    });
+
+    await userEvent.click(screen.getByText('Hide all'));
+    expect(mockSetProjectVisibilityPreferences).toHaveBeenCalledWith({
+      p1: false,
+      p2: false,
+    });
+  });
+
+  it('persists visible=true when zooming to a project', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Zoom Me' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetProjectVisibilityPreferences.mockReturnValue({
+      p1: false,
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('Zoom Me')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText('Zoom Me'));
+    expect(mockSetProjectVisibilityPreference).toHaveBeenCalledWith('p1', true);
   });
 });

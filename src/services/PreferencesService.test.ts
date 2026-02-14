@@ -3,6 +3,9 @@ import {
   getPreferences,
   setPreferences,
   clearPreferences,
+  getProjectVisibilityPreferences,
+  setProjectVisibilityPreference,
+  setProjectVisibilityPreferences,
   type UserPreferences,
 } from './PreferencesService';
 import { PREFERENCES } from '../constants';
@@ -59,6 +62,67 @@ describe('PreferencesService', () => {
       expect(prefs.email).toBe('first@x.com');
       expect(prefs.instance).toBe('https://first.org');
       expect(prefs.token).toBe('new-token');
+    });
+
+    it('keeps projectVisibility across unrelated partial updates', () => {
+      setProjectVisibilityPreference('p1', false);
+      setPreferences({ token: 'tok' });
+      const prefs = getPreferences();
+      expect(prefs.token).toBe('tok');
+      expect(prefs.projectVisibility).toEqual({ p1: false });
+    });
+  });
+
+  describe('project visibility preferences', () => {
+    it('returns empty map when missing', () => {
+      expect(getProjectVisibilityPreferences()).toEqual({});
+    });
+
+    it('stores and reads single project visibility', () => {
+      setProjectVisibilityPreference('11111111-1111-1111-1111-111111111111', false);
+      expect(getProjectVisibilityPreferences()).toEqual({
+        '11111111-1111-1111-1111-111111111111': false,
+      });
+    });
+
+    it('bulk updates merge and preserve other preferences', () => {
+      setPreferences({
+        email: 'user@example.com',
+        instance: 'https://example.org',
+      });
+      setProjectVisibilityPreferences({
+        p1: true,
+        p2: false,
+      });
+      setProjectVisibilityPreference('p3', true);
+
+      const prefs = getPreferences();
+      expect(prefs.email).toBe('user@example.com');
+      expect(prefs.instance).toBe('https://example.org');
+      expect(prefs.projectVisibility).toEqual({
+        p1: true,
+        p2: false,
+        p3: true,
+      });
+    });
+
+    it('handles rapid sequential updates without dropping entries', async () => {
+      const ids = ['p1', 'p2', 'p3', 'p4', 'p5'];
+      await Promise.all(
+        ids.map((id, index) =>
+          Promise.resolve().then(() => {
+            setProjectVisibilityPreference(id, index % 2 === 0);
+          }),
+        ),
+      );
+
+      expect(getProjectVisibilityPreferences()).toEqual({
+        p1: true,
+        p2: false,
+        p3: true,
+        p4: false,
+        p5: true,
+      });
     });
   });
 
