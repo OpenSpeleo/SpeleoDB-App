@@ -9,6 +9,7 @@
 import React, { createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { IonModal, IonContent, IonButton } from '@ionic/react';
+import logoPng from '../assets/media/logo.png';
 
 import { HttpClient } from '../services/HttpClient';
 import { SpeleoDBService } from '../services/SpeleoDBService';
@@ -103,6 +104,10 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   // ---- Offline modal local state -------------------------------------------
   const [showOfflineModal, setShowOfflineModal] = React.useState(false);
   const [allowOfflineModalDismiss, setAllowOfflineModalDismiss] = React.useState(false);
+  const [showCompanionInfoModal, setShowCompanionInfoModal] = React.useState(false);
+  const [allowCompanionInfoModalDismiss, setAllowCompanionInfoModalDismiss] = React.useState(false);
+  const previousAuthStateRef = useRef(authState.isAuthenticated);
+  const shouldOpenCompanionInfoRef = useRef(false);
 
   // ---- Startup: redirect + validate stored token ---------------------------
 
@@ -139,6 +144,35 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     });
   }, [history, location.pathname, controller]);
 
+  // ---- Companion info modal (show once right after login) ------------------
+
+  useEffect(() => {
+    const wasAuthenticated = previousAuthStateRef.current;
+    const isAuthenticated = authState.isAuthenticated;
+
+    if (!wasAuthenticated && isAuthenticated) {
+      shouldOpenCompanionInfoRef.current = true;
+    } else if (wasAuthenticated && !isAuthenticated) {
+      shouldOpenCompanionInfoRef.current = false;
+      setShowCompanionInfoModal(false);
+      setAllowCompanionInfoModalDismiss(false);
+    }
+
+    previousAuthStateRef.current = isAuthenticated;
+  }, [authState.isAuthenticated]);
+
+  useEffect(() => {
+    if (
+      shouldOpenCompanionInfoRef.current &&
+      authState.isAuthenticated &&
+      location.pathname === '/dashboard'
+    ) {
+      setAllowCompanionInfoModalDismiss(false);
+      setShowCompanionInfoModal(true);
+      shouldOpenCompanionInfoRef.current = false;
+    }
+  }, [authState.isAuthenticated, location.pathname]);
+
   // ---- Render ---------------------------------------------------------------
 
   const value: SpeleoDBContextValue = {
@@ -153,6 +187,74 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   return (
     <SpeleoDBContext.Provider value={value}>
       {children}
+
+      {/* Companion onboarding modal */}
+      <IonModal
+        isOpen={showCompanionInfoModal}
+        onDidDismiss={() => {
+          setShowCompanionInfoModal(false);
+          setAllowCompanionInfoModalDismiss(false);
+        }}
+        canDismiss={allowCompanionInfoModalDismiss}
+        backdropDismiss={false}
+      >
+        <IonContent className="ion-padding">
+          <div className="relative flex items-center justify-center min-h-full py-6">
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-72 h-72 rounded-full bg-purple-500/20 blur-3xl" />
+              <div className="absolute -bottom-16 right-0 w-60 h-60 rounded-full bg-indigo-500/20 blur-3xl" />
+            </div>
+
+            <div className="relative w-full max-w-md rounded-3xl border border-slate-700/80 bg-slate-900/95 p-6 sm:p-8 shadow-2xl shadow-purple-900/30 backdrop-blur text-center">
+              <img src={logoPng} alt="SpeleoDB" className="w-full max-w-xs mx-auto mb-6" />
+
+              <h2 className="text-2xl font-bold text-slate-100 mb-6">
+                Your surveys, always with you
+              </h2>
+              <p className="text-slate-300 text-sm mb-2 font-bold">
+                The SpeleoDB app is built for fieldwork.
+              </p>
+              <p className="text-slate-300 text-sm mb-6 font-bold">
+                Online or Offline.
+              </p>
+
+              <div className="space-y-3 text-left mb-5">
+                <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-3 py-2">
+                  <p className="text-sm font-medium text-slate-100">Sync all your SpeleoDB data to your phone</p>
+                </div>
+                <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-3 py-2">
+                  <p className="text-sm font-medium text-slate-100">Pull down anytime to refresh</p>
+                </div>
+                <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-3 py-2">
+                  <p className="text-sm font-medium text-slate-100">Everything stays on your phoner: full offline access</p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 p-4 text-left mb-5">
+                <p className="text-sm text-slate-200 font-medium mb-2">
+                  Survey in the field, publish to SpeleoDB, then sync to your phone in seconds.
+                </p>
+                <p className="text-sm text-slate-300 mt-4">
+                  You can now visualize your survey in the jungle or even underwater.
+                </p>
+              </div>
+
+              <p className="text-slate-300 text-sm mb-6">Have fun exploring.</p>
+
+              <IonButton
+                expand="block"
+                className="font-semibold"
+                onClick={() => {
+                  setAllowCompanionInfoModalDismiss(true);
+                  setShowCompanionInfoModal(false);
+                }}
+              >
+                Start exploring
+              </IonButton>
+            </div>
+          </div>
+        </IonContent>
+      </IonModal>
 
       {/* Offline warning modal */}
       <IonModal

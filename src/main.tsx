@@ -1,7 +1,13 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
+import { addIcons } from 'ionicons';
+import { arrowDownOutline } from 'ionicons/icons';
 import App from './App';
+
+addIcons({
+  'arrow-down-outline': arrowDownOutline,
+});
 
 function registerServiceWorker(): void {
   if (import.meta.env.DEV) return;
