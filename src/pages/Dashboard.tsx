@@ -417,7 +417,7 @@ const Dashboard: React.FC = () => {
           />
         </IonRefresher>
 
-        <div className="relative w-full h-full" style={{ height: '100dvh' }}>
+        <div className="relative w-full h-full dashboard-map-container" style={{ height: '100dvh' }}>
           {/* ---- Map ---- */}
           {mapStyle && (
             <Map

@@ -12,6 +12,7 @@
  */
 
 import maplibregl from 'maplibre-gl';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker.js?url';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
 
 // ==================== Constants ====================
@@ -21,6 +22,10 @@ const TILE_DB_VERSION = 2;
 const TILE_STORE = 'tiles';
 const PREFETCH_JOB_STORE = 'prefetch_jobs';
 const STYLE_CACHE_KEY = '__style_json__';
+
+// Use explicit worker URL instead of inline/blob worker bootstrap.
+// This avoids worker bootstrap runtime issues on some iOS devices.
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 // ==================== IndexedDB helpers ====================
 

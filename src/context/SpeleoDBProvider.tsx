@@ -102,6 +102,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
 
   // ---- Offline modal local state -------------------------------------------
   const [showOfflineModal, setShowOfflineModal] = React.useState(false);
+  const [allowOfflineModalDismiss, setAllowOfflineModalDismiss] = React.useState(false);
 
   // ---- Startup: redirect + validate stored token ---------------------------
 
@@ -133,6 +134,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
         return;
       }
       // network_error
+      setAllowOfflineModalDismiss(false);
       setShowOfflineModal(true);
     });
   }, [history, location.pathname, controller]);
@@ -155,9 +157,12 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
       {/* Offline warning modal */}
       <IonModal
         isOpen={showOfflineModal}
-        onDidDismiss={() => setShowOfflineModal(false)}
-        initialBreakpoint={0.5}
-        breakpoints={[0, 0.5]}
+        onDidDismiss={() => {
+          setShowOfflineModal(false);
+          setAllowOfflineModalDismiss(false);
+        }}
+        canDismiss={allowOfflineModalDismiss}
+        backdropDismiss={false}
       >
         <IonContent className="ion-padding">
           <div className="flex flex-col h-full justify-center max-w-sm mx-auto text-center">
@@ -177,7 +182,13 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
                 The app could not reach the server. You are operating in offline mode. Some features may be limited.
               </p>
             </div>
-            <IonButton expand="block" onClick={() => setShowOfflineModal(false)}>
+            <IonButton
+              expand="block"
+              onClick={() => {
+                setAllowOfflineModalDismiss(true);
+                setShowOfflineModal(false);
+              }}
+            >
               OK
             </IonButton>
           </div>
