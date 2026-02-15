@@ -34,11 +34,11 @@ function prefetchStatusLabel(job: TilePrefetchJobState | undefined): string | nu
   const processed = job.completedTiles + job.failedTiles;
   const pct = job.totalTiles > 0 ? Math.floor((processed / job.totalTiles) * 100) : 0;
 
-  if (job.status === 'done') return `Tiles ready (${pct}%)`;
-  if (job.status === 'error') return `Tile prefetch failed (${pct}%)`;
-  if (job.status === 'paused') return `Tile prefetch paused (${pct}%)`;
+  if (job.status === 'done') return `Map ready (${pct}%)`;
+  if (job.status === 'error') return `Map prefetch failed (${pct}%)`;
+  if (job.status === 'paused') return `Map prefetch paused (${pct}%)`;
   if (job.status === 'downloading' || job.status === 'queued') {
-    return `Caching tiles (${pct}%)`;
+    return `Caching map (${pct}%)`;
   }
   return null;
 }

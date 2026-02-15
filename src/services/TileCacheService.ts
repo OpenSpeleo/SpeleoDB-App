@@ -196,7 +196,7 @@ async function fetchWithCache(url: string, signal?: AbortSignal): Promise<ArrayB
     // Network failed -- try cache
     const cached = await idbGetTile(url);
     if (cached) return cached;
-    throw new Error(`Offline and no cached tile for ${url}`);
+    throw new Error(`Offline and no cached map for ${url}`);
   }
 }
 

@@ -486,7 +486,7 @@ export class SpeleoDBController {
           geojson: normalized,
         });
       } catch (error) {
-        console.warn(`Failed preparing tile prefetch for project ${project.id}:`, error);
+        console.warn(`Failed preparing map prefetch for project ${project.id}:`, error);
       }
     }
 
@@ -500,7 +500,7 @@ export class SpeleoDBController {
         padMeters: 50,
       });
     } catch (error) {
-      console.warn('Tile prefetch scheduling failed:', error);
+      console.warn('Map prefetch scheduling failed:', error);
     }
   }
 

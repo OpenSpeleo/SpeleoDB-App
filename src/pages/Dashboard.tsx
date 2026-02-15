@@ -277,7 +277,7 @@ const Dashboard: React.FC = () => {
       0,
     );
     const pct = totalTiles > 0 ? Math.floor((doneTiles / totalTiles) * 100) : 0;
-    return `${pct}% offline tiles`;
+    return `${pct}% offline maps`;
   }, [tilePrefetchJobs]);
 
   useEffect(() => {

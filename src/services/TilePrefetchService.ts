@@ -314,7 +314,7 @@ export function buildTileUrlsForFeatureCollection(
 
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
-  return 'Tile prefetch failed';
+  return 'Map prefetch failed';
 }
 
 // ==================== Service ====================
