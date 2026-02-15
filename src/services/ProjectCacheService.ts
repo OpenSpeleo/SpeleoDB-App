@@ -87,11 +87,7 @@ export class ProjectCacheService {
 
   /** Wipe all cached projects and geojson data (e.g. on logout). */
   async clearAll(): Promise<void> {
-    try {
-      await this.store.clear('projects');
-      await this.store.clear('geojson');
-    } catch (error) {
-      console.error('ProjectCacheService.clearAll failed:', error);
-    }
+    await this.store.clear('projects');
+    await this.store.clear('geojson');
   }
 }

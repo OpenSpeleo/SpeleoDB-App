@@ -338,10 +338,17 @@ export class TilePrefetchService {
   }
 
   dispose(): void {
+    if (this.destroyed) return;
     this.destroyed = true;
     if (typeof window !== 'undefined') {
       window.removeEventListener('online', this.onlineListener);
     }
+    this.queue = [];
+    this.queueByUrl.clear();
+    this.cachePresence.clear();
+    this.jobsByProject.clear();
+    this.notify();
+    this.listeners.clear();
   }
 
   subscribe(listener: JobsListener): () => void {
@@ -364,6 +371,7 @@ export class TilePrefetchService {
     if (this.destroyed || projects.length === 0) return;
 
     for (const project of projects) {
+      if (this.destroyed) return;
       await this.enqueueProject(project, request);
     }
 
@@ -379,8 +387,10 @@ export class TilePrefetchService {
   }
 
   private async bootstrap(): Promise<void> {
+    if (this.destroyed) return;
     try {
       const jobs = await this.deps.getAllPrefetchJobs();
+      if (this.destroyed) return;
       for (const job of jobs) {
         this.jobsByProject.set(job.projectId, job);
       }
@@ -486,7 +496,7 @@ export class TilePrefetchService {
   }
 
   private async processQueue(): Promise<void> {
-    while (this.queue.length > 0) {
+    while (!this.destroyed && this.queue.length > 0) {
       if (!this.deps.isOnline()) {
         await this.pausePendingJobs();
         return;
@@ -495,11 +505,13 @@ export class TilePrefetchService {
       const entry = this.queue.shift();
       if (!entry) continue;
       this.queueByUrl.delete(entry.url);
+      if (this.destroyed) return;
       const downloadingProjects = this.resolveActiveProjectIds(entry.projectCommits);
       if (downloadingProjects.size === 0) continue;
       await this.markProjectsStatus(downloadingProjects, 'downloading');
 
       const result = await this.downloadWithRetry(entry.url);
+      if (this.destroyed) return;
       const completionProjects = this.resolveActiveProjectIds(entry.projectCommits);
       if (completionProjects.size === 0) {
         this.notify();
@@ -529,11 +541,17 @@ export class TilePrefetchService {
   private async downloadWithRetry(
     url: string,
   ): Promise<{ success: true; bytes: number } | { success: false; message: string }> {
+    if (this.destroyed) {
+      return { success: false, message: 'Tile prefetch cancelled' };
+    }
     if (await this.checkTileCache(url)) {
       return { success: true, bytes: 0 };
     }
 
     for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+      if (this.destroyed) {
+        return { success: false, message: 'Tile prefetch cancelled' };
+      }
       try {
         const bytes = await this.deps.fetchAndCacheTile(url);
         return { success: true, bytes };
@@ -552,6 +570,7 @@ export class TilePrefetchService {
   }
 
   private async applySuccess(projectIds: Set<string>, bytes: number): Promise<void> {
+    if (this.destroyed) return;
     const bytesPerProject = projectIds.size > 0 ? Math.floor(bytes / projectIds.size) : bytes;
     const writes: Promise<void>[] = [];
     for (const projectId of projectIds) {
@@ -569,6 +588,7 @@ export class TilePrefetchService {
   }
 
   private async applyFailure(projectIds: Set<string>, message: string): Promise<void> {
+    if (this.destroyed) return;
     const writes: Promise<void>[] = [];
     for (const projectId of projectIds) {
       const current = this.jobsByProject.get(projectId);
@@ -599,6 +619,7 @@ export class TilePrefetchService {
   }
 
   private async pausePendingJobs(): Promise<void> {
+    if (this.destroyed) return;
     const writes: Promise<void>[] = [];
     for (const job of this.jobsByProject.values()) {
       if (job.status === 'queued' || job.status === 'downloading') {
@@ -628,6 +649,7 @@ export class TilePrefetchService {
   }
 
   private async markProjectsStatus(projectIds: Set<string>, status: TilePrefetchStatus): Promise<void> {
+    if (this.destroyed) return;
     const writes: Promise<void>[] = [];
     for (const projectId of projectIds) {
       const current = this.jobsByProject.get(projectId);
@@ -641,20 +663,24 @@ export class TilePrefetchService {
   }
 
   private async checkTileCache(url: string): Promise<boolean> {
+    if (this.destroyed) return false;
     const known = this.cachePresence.get(url);
     if (known !== undefined) return known;
     const cached = await this.deps.hasCachedTile(url);
+    if (this.destroyed) return false;
     this.cachePresence.set(url, cached);
     return cached;
   }
 
   private async upsertJob(job: TilePrefetchJobState): Promise<void> {
+    if (this.destroyed) return;
     job.updatedAt = this.deps.now();
     this.jobsByProject.set(job.projectId, job);
     await this.persistJob(job);
   }
 
   private async persistJob(job: TilePrefetchJobState): Promise<void> {
+    if (this.destroyed) return;
     try {
       await this.deps.setPrefetchJob(job);
     } catch {

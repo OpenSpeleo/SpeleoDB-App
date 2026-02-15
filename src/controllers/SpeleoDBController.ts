@@ -119,7 +119,9 @@ export class SpeleoDBController {
   private _syncStatus: SyncStatus = 'idle';
   private _tilePrefetchJobs: TilePrefetchJobState[] = [];
   private _listeners = new Set<() => void>();
-  private tilePrefetch: TilePrefetchService;
+  private tilePrefetch!: TilePrefetchService;
+  private tilePrefetchUnsubscribe: (() => void) | null = null;
+  private _isPurgingLocalData = false;
 
   // Snapshot references for useSyncExternalStore (identity-stable between notifies)
   private _authStateSnapshot: AuthState = this._authState;
@@ -136,11 +138,7 @@ export class SpeleoDBController {
     private cache: ProjectCacheService,
     tilePrefetch?: TilePrefetchService,
   ) {
-    this.tilePrefetch = tilePrefetch ?? new TilePrefetchService();
-    this.tilePrefetch.subscribe((jobs) => {
-      this._tilePrefetchJobs = jobs;
-      this.notify();
-    });
+    this.attachTilePrefetch(tilePrefetch ?? new TilePrefetchService());
     this.restoreSession();
   }
 
@@ -199,6 +197,14 @@ export class SpeleoDBController {
     this._syncStatusSnapshot = this._syncStatus;
     this._tilePrefetchJobsSnapshot = [...this._tilePrefetchJobs];
     this._listeners.forEach((fn) => fn());
+  }
+
+  private attachTilePrefetch(service: TilePrefetchService): void {
+    this.tilePrefetch = service;
+    this.tilePrefetchUnsubscribe = this.tilePrefetch.subscribe((jobs) => {
+      this._tilePrefetchJobs = jobs;
+      this.notify();
+    });
   }
 
   // ---- Actions --------------------------------------------------------------
@@ -345,38 +351,80 @@ export class SpeleoDBController {
         this._isOfflineLocked = false;
         return 'unauthorized';
       }
-      this._isOnline = false;
-      this._isOfflineLocked = true;
-      this.notify();
+      await this.logout();
       return 'network_error';
     } catch {
-      this._isOnline = false;
-      this._isOfflineLocked = true;
-      this.notify();
+      await this.logout();
       return 'network_error';
     }
   }
 
   /**
-   * Logout: clear in-memory state, remove auth preferences, and flush caches.
-   * Resolves once cache cleanup tasks complete.
+   * Logout and wipe all local user data immediately.
+   * Confirmation (if any) is handled by the UI layer before calling this.
    */
   async logout(): Promise<void> {
-    this._authState = { isAuthenticated: false, user: null, token: null };
-    this._isOnline = false;
-    this._isOfflineLocked = false;
-    this._isRetryingConnection = false;
-    this._projects = [];
-    this._syncStatus = 'idle';
-    this._tilePrefetchJobs = [];
-    this.prefs.setPreferences({ email: undefined, token: undefined });
-    this.notify();
+    await this.purgeAllLocalUserData();
+  }
 
-    await Promise.allSettled([
-      this.cache.clearAll(),
-      clearCachedTiles(),
-      clearPrefetchJobs(),
-    ]);
+  private async purgeAllLocalUserData(): Promise<void> {
+    if (this._isPurgingLocalData) return;
+    this._isPurgingLocalData = true;
+    try {
+      const prefetchAtPurgeStart = this.tilePrefetch;
+
+      // Stop prefetch updates first to avoid stale progress being re-published.
+      this.tilePrefetchUnsubscribe?.();
+      this.tilePrefetchUnsubscribe = null;
+      prefetchAtPurgeStart.dispose();
+      try {
+        await prefetchAtPurgeStart.waitForIdle?.();
+      } catch {
+        // Continue cleanup even if prefetch teardown fails.
+      }
+
+      // Reset in-memory state first so UI reflects the wipe immediately.
+      this._authState = { isAuthenticated: false, user: null, token: null };
+      this._isOnline = false;
+      this._isOfflineLocked = false;
+      this._isRetryingConnection = false;
+      this._projects = [];
+      this._syncStatus = 'idle';
+      this._tilePrefetchJobs = [];
+      this.prefs.clearPreferences();
+
+      try {
+        localStorage.clear();
+      } catch (error) {
+        console.error('Failed to clear local storage user data:', error);
+      }
+
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.clear();
+        }
+      } catch {
+        // no-op in environments where sessionStorage is unavailable.
+      }
+
+      this.notify();
+
+      const cleanupResults = await Promise.allSettled([
+        this.cache.clearAll(),
+        clearCachedTiles(),
+        clearPrefetchJobs(),
+      ]);
+      for (const result of cleanupResults) {
+        if (result.status === 'rejected') {
+          console.error('Failed to wipe local cache data:', result.reason);
+        }
+      }
+
+      // Recreate a fresh prefetch service so runtime state restarts from zero.
+      this.attachTilePrefetch(new TilePrefetchService());
+    } finally {
+      this._isPurgingLocalData = false;
+    }
   }
 
   /**

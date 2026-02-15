@@ -147,7 +147,6 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
 
     controller.validateSession().then(async (result) => {
       if (result === 'unauthorized') {
-        clearPreferences();
         await controller.logout();
         history.replace('/');
         return;
@@ -157,10 +156,33 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
         return;
       }
       // network_error
+      if (!controller.isAuthenticated()) {
+        history.replace('/');
+        return;
+      }
       setAllowOfflineModalDismiss(false);
       setShowOfflineModal(true);
     });
   }, [history, location.pathname, controller]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleOffline = () => {
+      if (!controller.isAuthenticated()) return;
+      void controller.logout().then(() => {
+        setShowOfflineModal(false);
+        setAllowOfflineModalDismiss(false);
+        setOfflineRetryError('');
+        history.replace('/');
+      });
+    };
+
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [controller, history]);
 
   useEffect(() => {
     if (isOfflineLocked) {
@@ -181,6 +203,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     if (!wasAuthenticated && isAuthenticated) {
       shouldOpenCompanionInfoRef.current = true;
     } else if (wasAuthenticated && !isAuthenticated) {
+      didValidateRef.current = false;
       shouldOpenCompanionInfoRef.current = false;
       setShowCompanionInfoModal(false);
       setAllowCompanionInfoModalDismiss(false);
@@ -329,7 +352,6 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
                   return;
                 }
                 if (result === 'unauthorized') {
-                  clearPreferences();
                   await controller.logout();
                   history.replace('/');
                   return;

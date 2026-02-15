@@ -8,7 +8,13 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
-import { IonPage, IonContent, IonRefresher, IonRefresherContent } from '@ionic/react';
+import {
+  IonPage,
+  IonContent,
+  IonRefresher,
+  IonRefresherContent,
+  IonModal,
+} from '@ionic/react';
 import Map, { Layer, Source } from 'react-map-gl/maplibre';
 import type { MapRef } from 'react-map-gl/maplibre';
 import type { LngLatBoundsLike } from 'maplibre-gl';
@@ -210,6 +216,8 @@ const Dashboard: React.FC = () => {
 
   // Panel state
   const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Active projects (which layers are visible)
   const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
@@ -371,9 +379,20 @@ const Dashboard: React.FC = () => {
   }, [controller, isOfflineLocked]);
 
   const handleLogout = useCallback(async () => {
-    await controller.logout();
-    history.push('/');
-  }, [controller, history]);
+    setShowLogoutConfirmModal(true);
+  }, []);
+
+  const handleConfirmLogout = useCallback(async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await controller.logout();
+      setShowLogoutConfirmModal(false);
+      history.push('/');
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }, [controller, history, isLoggingOut]);
 
   const handleToggleProject = useCallback((projectId: string) => {
     setActiveProjectIds((prev) => {
@@ -617,6 +636,55 @@ const Dashboard: React.FC = () => {
             onClose={() => setIsPanelOpen(false)}
             isOpen={isPanelOpen}
           />
+
+          <IonModal
+            isOpen={showLogoutConfirmModal}
+            onDidDismiss={() => setShowLogoutConfirmModal(false)}
+            canDismiss={!isLoggingOut}
+            backdropDismiss={!isLoggingOut}
+          >
+            <IonContent className="ion-padding">
+              <div className="flex flex-col h-full justify-center max-w-sm mx-auto text-center">
+                <div className="mb-6">
+                  <span className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-red-500/20 text-red-300 mb-4">
+                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 9v2m0 4h.01m-7.938 4h15.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L2.33 16c-.77 1.333.192 3 1.732 3z"
+                      />
+                    </svg>
+                  </span>
+                  <h2 className="text-xl font-semibold text-slate-100 mb-2">Clear local data and sign out?</h2>
+                  <p className="text-slate-300 text-sm mb-2">
+                    All local data will be cleared immediately from this device.
+                  </p>
+                  <p className="text-slate-400 text-sm">
+                    This includes cached maps, GeoJSON, projects, and offline credentials. You will not be able to reconnect without network access.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-3">
+                  <button
+                    type="button"
+                    disabled={isLoggingOut}
+                    onClick={() => setShowLogoutConfirmModal(false)}
+                    className="px-4 py-3 rounded-xl bg-slate-800/70 text-slate-200 hover:bg-slate-700/70 disabled:opacity-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isLoggingOut}
+                    onClick={handleConfirmLogout}
+                    className="px-4 py-3 rounded-xl bg-red-600 text-white hover:bg-red-500 disabled:opacity-50 transition-colors"
+                  >
+                    {isLoggingOut ? 'Clearing data…' : 'Wipe local data & Sign Out'}
+                  </button>
+                </div>
+              </div>
+            </IonContent>
+          </IonModal>
 
           {/* ---- Loading state when style not yet loaded ---- */}
           {!mapStyle && (

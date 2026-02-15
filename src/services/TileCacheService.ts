@@ -115,19 +115,11 @@ export async function setPrefetchJob(job: TilePrefetchJobState): Promise<void> {
 }
 
 export async function clearPrefetchJobs(): Promise<void> {
-  try {
-    await clearPrefetchJobsFromStore();
-  } catch {
-    // Best effort during logout/cleanup.
-  }
+  await clearPrefetchJobsFromStore();
 }
 
 export async function clearCachedTiles(): Promise<void> {
-  try {
-    await clearCachedTilesFromStore();
-  } catch {
-    // Best effort during logout/cleanup.
-  }
+  await clearCachedTilesFromStore();
 }
 
 export async function runTileCacheStartupMaintenance(): Promise<void> {

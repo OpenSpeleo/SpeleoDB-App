@@ -7,6 +7,7 @@ import type { AuthTokenResponse } from '../types';
 import { PREFERENCES } from '../constants';
 import { TilePrefetchService } from '../services/TilePrefetchService';
 import type { Project } from '../types/project';
+import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import { getTile, upsertTile } from '../services/tileCache/TileCacheRepository';
 
 // ==================== Mocks ====================
@@ -173,7 +174,7 @@ describe('SpeleoDBController', () => {
   // ---- logout ---------------------------------------------------------------
 
   describe('logout', () => {
-    it('clears auth state and removes email/token from preferences', async () => {
+    it('clears auth state and removes persisted preferences', async () => {
       await controller.login(validCreds);
       expect(controller.isAuthenticated()).toBe(true);
 
@@ -181,28 +182,19 @@ describe('SpeleoDBController', () => {
 
       expect(controller.isAuthenticated()).toBe(false);
       expect(controller.currentUser).toBeNull();
-      expect(prefs.setPreferences).toHaveBeenCalledWith({
-        email: undefined,
-        token: undefined,
-      });
+      expect(prefs.clearPreferences).toHaveBeenCalledOnce();
     });
 
-    it('resets offline lock state on logout', async () => {
-      const validateToken = vi.fn(async () => {
-        throw new Error('timeout');
-      });
-      service = createMockService({ validateToken });
-      const withToken = createMockPrefs({
-        token: 'tok',
-        instance: 'https://www.speleodb.org',
-      });
-      controller = new SpeleoDBController(service, withToken, cache);
-
-      await controller.validateSession();
-      expect(controller.isOfflineLocked).toBe(true);
-
+    it('clears local pending sync queue and offline users on logout', async () => {
+      localStorage.setItem('speleo_pending_sync', JSON.stringify([{ type: 'signup' }]));
+      localStorage.setItem(
+        'speleo_users_db',
+        JSON.stringify({ 'user@example.com': { password: 'pass', user: { id: '1' } } }),
+      );
       await controller.logout();
-      expect(controller.isOfflineLocked).toBe(false);
+
+      expect(localStorage.getItem('speleo_pending_sync')).toBeNull();
+      expect(localStorage.getItem('speleo_users_db')).toBeNull();
     });
 
     it('clears cached map tiles on logout', async () => {
@@ -218,6 +210,14 @@ describe('SpeleoDBController', () => {
     });
 
     it('waits for project cache cleanup before resolving logout', async () => {
+      const mockTilePrefetch = {
+        subscribe: vi.fn(() => () => {}),
+        enqueueProjects: vi.fn(async () => {}),
+        waitForIdle: vi.fn(async () => {}),
+        dispose: vi.fn(),
+      } as unknown as TilePrefetchService;
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+
       const clearAllResolver: { fn?: () => void } = {};
       cache.clearAll = vi.fn(
         () => new Promise<void>((resolve) => {
@@ -238,6 +238,42 @@ describe('SpeleoDBController', () => {
       clearAllResolver.fn();
       await logoutPromise;
       expect(logoutResolved).toBe(true);
+    });
+
+    it('tears down in-memory tile prefetch runtime state on logout', async () => {
+      const unsubscribe = vi.fn();
+      let listener: (jobs: TilePrefetchJobState[]) => void = () => {};
+      const mockTilePrefetch = {
+        subscribe: vi.fn((cb: (jobs: TilePrefetchJobState[]) => void) => {
+          listener = cb;
+          return unsubscribe;
+        }),
+        enqueueProjects: vi.fn(async () => {}),
+        dispose: vi.fn(),
+      } as unknown as TilePrefetchService;
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+
+      listener([{
+        projectId: 'p1',
+        commitId: 'c1',
+        status: 'queued',
+        zoomMin: 0,
+        zoomMax: 0,
+        padMeters: 50,
+        totalTiles: 1,
+        completedTiles: 0,
+        failedTiles: 0,
+        bytesDownloaded: 0,
+        estimatedBytes: 0,
+        updatedAt: Date.now(),
+      }]);
+      expect(controller.tilePrefetchJobs.length).toBe(1);
+
+      await controller.logout();
+
+      expect(unsubscribe).toHaveBeenCalledOnce();
+      expect(mockTilePrefetch.dispose).toHaveBeenCalledOnce();
+      expect(controller.tilePrefetchJobs.length).toBe(0);
     });
   });
 
@@ -308,7 +344,9 @@ describe('SpeleoDBController', () => {
 
       const result = await ctrl.validateSession();
       expect(result).toBe('network_error');
-      expect(ctrl.isOfflineLocked).toBe(true);
+      expect(ctrl.isOfflineLocked).toBe(false);
+      expect(ctrl.isAuthenticated()).toBe(false);
+      expect(withToken.clearPreferences).toHaveBeenCalledOnce();
     });
 
     it('returns "unauthorized" when no token in preferences', async () => {
@@ -316,7 +354,7 @@ describe('SpeleoDBController', () => {
       expect(result).toBe('unauthorized');
     });
 
-    it('uses startup auth timeout and unlocks on successful retry', async () => {
+    it('wipes session on disconnect and retry becomes unauthorized', async () => {
       const validateToken = vi.fn()
         .mockRejectedValueOnce(new Error('timeout'))
         .mockResolvedValueOnce({ status: 200, data: {} });
@@ -331,7 +369,7 @@ describe('SpeleoDBController', () => {
 
       const first = await ctrl.validateSession();
       expect(first).toBe('network_error');
-      expect(ctrl.isOfflineLocked).toBe(true);
+      expect(ctrl.isAuthenticated()).toBe(false);
       expect(validateToken).toHaveBeenNthCalledWith(
         1,
         'https://www.speleodb.org',
@@ -340,14 +378,9 @@ describe('SpeleoDBController', () => {
       );
 
       const retried = await ctrl.retryConnection();
-      expect(retried).toBe('ok');
+      expect(retried).toBe('unauthorized');
       expect(ctrl.isOfflineLocked).toBe(false);
-      expect(validateToken).toHaveBeenNthCalledWith(
-        2,
-        'https://www.speleodb.org',
-        't',
-        3000,
-      );
+      expect(validateToken).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -423,7 +456,7 @@ describe('SpeleoDBController', () => {
       onlineSpy.mockRestore();
     });
 
-    it('does not call network project sync while offline lock is active', async () => {
+    it('does not call network project sync after disconnect wipes token', async () => {
       const validateToken = vi.fn(async () => {
         throw new Error('timeout');
       });
@@ -437,7 +470,7 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, withToken, cache);
 
       await controller.validateSession();
-      expect(controller.isOfflineLocked).toBe(true);
+      expect(controller.isAuthenticated()).toBe(false);
 
       await controller.syncProjects();
 
@@ -445,8 +478,8 @@ describe('SpeleoDBController', () => {
     });
   });
 
-  describe('offline lock network gating', () => {
-    it('skips online login call while offline lock is active', async () => {
+  describe('disconnect wipe login behavior', () => {
+    it('fails offline login after disconnect wipe removed local users', async () => {
       const validateToken = vi.fn(async () => {
         throw new Error('timeout');
       });
@@ -458,9 +491,13 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, withToken, cache);
 
       await controller.validateSession();
-      expect(controller.isOfflineLocked).toBe(true);
+      expect(controller.isAuthenticated()).toBe(false);
 
-      await controller.login(validCreds);
+      const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+      const result = await controller.login(validCreds);
+      onlineSpy.mockRestore();
+
+      expect(result.success).toBe(false);
       expect(service.authenticate).not.toHaveBeenCalled();
     });
   });

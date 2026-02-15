@@ -45,6 +45,13 @@ vi.mock('@ionic/react', () => ({
   IonContent: ({ children }: { children?: React.ReactNode }) => (
     <div data-testid="ion-content">{children}</div>
   ),
+  IonModal: ({
+    children,
+    isOpen,
+  }: {
+    children?: React.ReactNode;
+    isOpen?: boolean;
+  }) => (isOpen ? <div data-testid="ion-modal">{children}</div> : null),
   IonRefresher: ({ children }: { children?: React.ReactNode }) => (
     <div data-testid="ion-refresher">{children}</div>
   ),
@@ -247,15 +254,23 @@ describe('Dashboard', () => {
     });
   });
 
-  it('calls logout and navigates home on Sign Out click', async () => {
+  it('asks for confirmation before wiping data on Sign Out', async () => {
     const history = renderDashboard();
     await waitFor(() => {
       expect(screen.getByText('Sign Out')).toBeInTheDocument();
     });
 
     await userEvent.click(screen.getByText('Sign Out'));
-    expect(mockLogout).toHaveBeenCalledOnce();
-    expect(history.location.pathname).toBe('/');
+    expect(mockLogout).not.toHaveBeenCalled();
+    expect(
+      screen.getByText('Clear local data and sign out?'),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('Wipe local data & Sign Out'));
+    await waitFor(() => {
+      expect(mockLogout).toHaveBeenCalledOnce();
+      expect(history.location.pathname).toBe('/');
+    });
   });
 
   it('redirects to /login when not authenticated', () => {

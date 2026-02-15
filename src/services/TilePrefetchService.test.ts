@@ -186,6 +186,26 @@ describe('TilePrefetchService queue behavior', () => {
     service.dispose();
   });
 
+  it('clears in-memory jobs on dispose', async () => {
+    const { deps } = createDeps();
+    const service = new TilePrefetchService(deps);
+
+    await service.enqueueProjects(
+      [{ projectId: 'p1', commitId: 'c1', geojson: pointFeatureCollection(2.3, 46.6) }],
+      {
+        tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
+        minZoom: 0,
+        maxZoom: 0,
+        padMeters: 50,
+      },
+    );
+    await service.waitForIdle();
+    expect(service.getSnapshot().length).toBe(1);
+
+    service.dispose();
+    expect(service.getSnapshot().length).toBe(0);
+  });
+
   it('ignores stale queued tiles when a project is re-enqueued with a new commit', async () => {
     const firstDownload = createDeferred<number>();
     let fetchCalls = 0;
