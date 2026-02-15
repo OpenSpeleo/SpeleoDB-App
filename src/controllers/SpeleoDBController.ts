@@ -12,7 +12,7 @@
 import { HTTP_STATUS, MAP, NETWORK, PREFERENCES } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
-import { clearPrefetchJobs } from '../services/TileCacheService';
+import { clearCachedTiles, clearPrefetchJobs } from '../services/TileCacheService';
 import { TilePrefetchService } from '../services/TilePrefetchService';
 import type {
   AuthResponse,
@@ -374,6 +374,7 @@ export class SpeleoDBController {
 
     await Promise.allSettled([
       this.cache.clearAll(),
+      clearCachedTiles(),
       clearPrefetchJobs(),
     ]);
   }

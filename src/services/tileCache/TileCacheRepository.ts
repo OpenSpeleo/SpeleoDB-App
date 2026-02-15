@@ -56,16 +56,23 @@ export async function __closeTileCacheRepositoryForTests(): Promise<void> {
   }
 }
 
-export async function __clearTileCacheRepositoryForTests(): Promise<void> {
+export async function clearCachedTiles(now = Date.now()): Promise<void> {
   const db = await openTileDB();
   const tx = db.transaction(
-    [TILE_STORE, TILE_METADATA_STORE, TILE_STATS_STORE, PREFETCH_JOB_STORE],
+    [TILE_STORE, TILE_METADATA_STORE, TILE_STATS_STORE],
     'readwrite',
   );
   tx.objectStore(TILE_STORE).clear();
   tx.objectStore(TILE_METADATA_STORE).clear();
+  tx.objectStore(TILE_STATS_STORE).put(buildEmptyStats(now), TILE_STATS_KEY);
+  await transactionDone(tx);
+}
+
+export async function __clearTileCacheRepositoryForTests(): Promise<void> {
+  await clearCachedTiles(Date.now());
+  const db = await openTileDB();
+  const tx = db.transaction(PREFETCH_JOB_STORE, 'readwrite');
   tx.objectStore(PREFETCH_JOB_STORE).clear();
-  tx.objectStore(TILE_STATS_STORE).put(buildEmptyStats(Date.now()), TILE_STATS_KEY);
   await transactionDone(tx);
 }
 

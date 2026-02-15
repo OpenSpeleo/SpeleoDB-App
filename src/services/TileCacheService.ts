@@ -16,6 +16,7 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker.js?url';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import { TileCacheMaintenanceService } from './tileCache/TileCacheMaintenanceService';
 import {
+  clearCachedTiles as clearCachedTilesFromStore,
   clearPrefetchJobs as clearPrefetchJobsFromStore,
   getAllPrefetchJobs as getAllPrefetchJobsFromStore,
   getPrefetchJob as getPrefetchJobFromStore,
@@ -116,6 +117,14 @@ export async function setPrefetchJob(job: TilePrefetchJobState): Promise<void> {
 export async function clearPrefetchJobs(): Promise<void> {
   try {
     await clearPrefetchJobsFromStore();
+  } catch {
+    // Best effort during logout/cleanup.
+  }
+}
+
+export async function clearCachedTiles(): Promise<void> {
+  try {
+    await clearCachedTilesFromStore();
   } catch {
     // Best effort during logout/cleanup.
   }

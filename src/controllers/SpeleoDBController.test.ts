@@ -7,6 +7,7 @@ import type { AuthTokenResponse } from '../types';
 import { PREFERENCES } from '../constants';
 import { TilePrefetchService } from '../services/TilePrefetchService';
 import type { Project } from '../types/project';
+import { getTile, upsertTile } from '../services/tileCache/TileCacheRepository';
 
 // ==================== Mocks ====================
 
@@ -202,6 +203,18 @@ describe('SpeleoDBController', () => {
 
       await controller.logout();
       expect(controller.isOfflineLocked).toBe(false);
+    });
+
+    it('clears cached map tiles on logout', async () => {
+      const tileUrl = 'https://tiles.example.com/logout-clear.png';
+      await upsertTile(tileUrl, new Uint8Array([1, 2, 3]).buffer, {
+        pinnedByAutoPrefetch: false,
+      });
+      expect(await getTile(tileUrl)).not.toBeNull();
+
+      await controller.logout();
+
+      expect(await getTile(tileUrl)).toBeNull();
     });
 
     it('waits for project cache cleanup before resolving logout', async () => {

@@ -10,6 +10,7 @@ vi.mock('maplibre-gl', () => ({
 
 import maplibregl from 'maplibre-gl';
 import {
+  clearCachedTiles,
   registerTileCacheProtocol,
   getCachedStyle,
   fetchAndCachePinnedTile,
@@ -17,6 +18,7 @@ import {
 } from './TileCacheService';
 import {
   __clearTileCacheRepositoryForTests,
+  getTile,
   getTileMetadata,
   upsertTile,
 } from './tileCache/TileCacheRepository';
@@ -141,6 +143,23 @@ describe('TileCacheService', () => {
 
       const metadata = await getTileMetadata('https://tiles.example.com/pinned.png');
       expect((metadata?.lastAccessedAt ?? 0) >= 10).toBe(true);
+    });
+  });
+
+  describe('cache cleanup', () => {
+    it('clears cached tiles and tile metadata', async () => {
+      const tileUrl = 'https://tiles.example.com/clear-me.png';
+      await upsertTile(tileUrl, new Uint8Array([1, 2, 3]).buffer, {
+        pinnedByAutoPrefetch: false,
+      });
+
+      expect(await getTile(tileUrl)).not.toBeNull();
+      expect(await getTileMetadata(tileUrl)).not.toBeNull();
+
+      await clearCachedTiles();
+
+      expect(await getTile(tileUrl)).toBeNull();
+      expect(await getTileMetadata(tileUrl)).toBeNull();
     });
   });
 });
