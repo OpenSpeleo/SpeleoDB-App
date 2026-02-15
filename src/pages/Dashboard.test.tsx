@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
@@ -52,8 +52,22 @@ vi.mock('@ionic/react', () => ({
     children?: React.ReactNode;
     isOpen?: boolean;
   }) => (isOpen ? <div data-testid="ion-modal">{children}</div> : null),
-  IonRefresher: ({ children }: { children?: React.ReactNode }) => (
-    <div data-testid="ion-refresher">{children}</div>
+  IonRefresher: ({
+    children,
+    className,
+    disabled,
+  }: {
+    children?: React.ReactNode;
+    className?: string;
+    disabled?: boolean;
+  }) => (
+    <div
+      data-testid="ion-refresher"
+      className={className}
+      data-disabled={disabled ? 'true' : 'false'}
+    >
+      {children}
+    </div>
   ),
   IonRefresherContent: () => <div data-testid="ion-refresher-content" />,
 }));
@@ -254,6 +268,13 @@ describe('Dashboard', () => {
     });
   });
 
+  it('renders dashboard-specific refresher class', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByTestId('ion-refresher')).toHaveClass('dashboard-refresher');
+    });
+  });
+
   it('asks for confirmation before wiping data on Sign Out', async () => {
     const history = renderDashboard();
     await waitFor(() => {
@@ -330,6 +351,25 @@ describe('Dashboard', () => {
       expect(mockSetBearing).toHaveBeenCalledWith(0);
       expect(mockSetPitch).toHaveBeenCalledWith(0);
     });
+  });
+
+  it('disables refresher while map pointer gesture is active', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByTestId('map')).toBeInTheDocument();
+    });
+
+    const refresher = screen.getByTestId('ion-refresher');
+    const mapTouchSurface = document.querySelector('.dashboard-map-touch-surface');
+    expect(mapTouchSurface).toBeTruthy();
+
+    expect(refresher).toHaveAttribute('data-disabled', 'false');
+
+    fireEvent.pointerDown(mapTouchSurface as Element);
+    expect(refresher).toHaveAttribute('data-disabled', 'true');
+
+    fireEvent.pointerUp(mapTouchSurface as Element);
+    expect(refresher).toHaveAttribute('data-disabled', 'false');
   });
 
   it('renders GeoJSON layer when payload is a JSON string', async () => {

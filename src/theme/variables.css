@@ -131,13 +131,13 @@ ion-content::part(scroll) {
   scrollbar-color: #475569 transparent;
 }
 
-/* Pull-to-refresh: grow the refresher so text/spinner sit below the notch */
-ion-refresher {
-  height: calc(60px + env(safe-area-inset-top));
-  padding-top: env(safe-area-inset-top);
+/* Dashboard pull-to-refresh: keep indicator below notch + floating header */
+ion-refresher.dashboard-refresher {
+  height: calc(64px + env(safe-area-inset-top));
+  padding-top: calc(env(safe-area-inset-top) + 16px);
 }
 
-ion-refresher-content {
+ion-refresher.dashboard-refresher ion-refresher-content {
   --color: #94a3b8; /* slate-400 */
 }
 

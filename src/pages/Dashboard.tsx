@@ -218,6 +218,7 @@ const Dashboard: React.FC = () => {
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isMapGestureActive, setIsMapGestureActive] = useState(false);
 
   // Active projects (which layers are visible)
   const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
@@ -378,6 +379,26 @@ const Dashboard: React.FC = () => {
     event.detail.complete();
   }, [controller, isOfflineLocked]);
 
+  const handleMapGestureStart = useCallback((
+    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+  ) => {
+    event.stopPropagation();
+    setIsMapGestureActive(true);
+  }, []);
+
+  const handleMapGestureMove = useCallback((
+    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+  ) => {
+    event.stopPropagation();
+  }, []);
+
+  const handleMapGestureEnd = useCallback((
+    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+  ) => {
+    event.stopPropagation();
+    setIsMapGestureActive(false);
+  }, []);
+
   const handleLogout = useCallback(async () => {
     setShowLogoutConfirmModal(true);
   }, []);
@@ -469,6 +490,8 @@ const Dashboard: React.FC = () => {
     <IonPage>
       <IonContent fullscreen className="ion-no-padding" scrollY={false}>
         <IonRefresher
+          className="dashboard-refresher"
+          disabled={isMapGestureActive}
           slot="fixed"
           onIonRefresh={handleRefresh}
           pullFactor={0.5}
@@ -484,95 +507,107 @@ const Dashboard: React.FC = () => {
         </IonRefresher>
 
         <div className="relative w-full h-full dashboard-map-container" style={{ height: '100dvh' }}>
-          {/* ---- Map ---- */}
-          {mapStyle && (
-            <Map
-              ref={mapRef}
-              initialViewState={{
-                longitude: MAP.DEFAULT_CENTER[0],
-                latitude: MAP.DEFAULT_CENTER[1],
-                zoom: MAP.DEFAULT_ZOOM,
-                ...MAP.NORTH_UP_ORIENTATION,
-              }}
-              maxZoom={MAP.MAX_ZOOM}
-              {...MAP.ROTATION_LOCK_INTERACTIONS}
-              style={{ width: '100%', height: '100%' }}
-              mapStyle={mapStyle as maplibregl.StyleSpecification}
-              attributionControl={{ compact: true }}
-              onLoad={handleMapLoad}
-            >
-              {/* GeoJSON layers for each active project */}
-              {sortedProjects.map((project) => {
-                if (!activeProjectIds.has(project.id) || !geoJsonData[project.id]) {
-                  return null;
-                }
-                const color = getProjectColor(project.id, projectColorsById);
-                const sourceId = `project-${project.id}`;
+          <div
+            className="w-full h-full dashboard-map-touch-surface"
+            onTouchStart={handleMapGestureStart}
+            onTouchMove={handleMapGestureMove}
+            onTouchEnd={handleMapGestureEnd}
+            onTouchCancel={handleMapGestureEnd}
+            onPointerDown={handleMapGestureStart}
+            onPointerMove={handleMapGestureMove}
+            onPointerUp={handleMapGestureEnd}
+            onPointerCancel={handleMapGestureEnd}
+          >
+            {/* ---- Map ---- */}
+            {mapStyle && (
+              <Map
+                ref={mapRef}
+                initialViewState={{
+                  longitude: MAP.DEFAULT_CENTER[0],
+                  latitude: MAP.DEFAULT_CENTER[1],
+                  zoom: MAP.DEFAULT_ZOOM,
+                  ...MAP.NORTH_UP_ORIENTATION,
+                }}
+                maxZoom={MAP.MAX_ZOOM}
+                {...MAP.ROTATION_LOCK_INTERACTIONS}
+                style={{ width: '100%', height: '100%' }}
+                mapStyle={mapStyle as maplibregl.StyleSpecification}
+                attributionControl={{ compact: true }}
+                onLoad={handleMapLoad}
+              >
+                {/* GeoJSON layers for each active project */}
+                {sortedProjects.map((project) => {
+                  if (!activeProjectIds.has(project.id) || !geoJsonData[project.id]) {
+                    return null;
+                  }
+                  const color = getProjectColor(project.id, projectColorsById);
+                  const sourceId = `project-${project.id}`;
 
-                return (
-                  <Source
-                    key={project.id}
-                    id={sourceId}
-                    type="geojson"
-                    data={geoJsonData[project.id]}
-                  >
-                    {/* Polygon fills */}
-                    <Layer
-                      id={`${sourceId}-fill`}
-                      type="fill"
-                      filter={[
-                        'match',
-                        ['geometry-type'],
-                        ['Polygon', 'MultiPolygon'],
-                        true,
-                        false,
-                      ]}
-                      paint={{
-                        'fill-color': color,
-                        'fill-opacity': 0.25,
-                      }}
-                    />
+                  return (
+                    <Source
+                      key={project.id}
+                      id={sourceId}
+                      type="geojson"
+                      data={geoJsonData[project.id]}
+                    >
+                      {/* Polygon fills */}
+                      <Layer
+                        id={`${sourceId}-fill`}
+                        type="fill"
+                        filter={[
+                          'match',
+                          ['geometry-type'],
+                          ['Polygon', 'MultiPolygon'],
+                          true,
+                          false,
+                        ]}
+                        paint={{
+                          'fill-color': color,
+                          'fill-opacity': 0.25,
+                        }}
+                      />
 
-                    {/* Lines + polygon outlines */}
-                    <Layer
-                      id={`${sourceId}-line`}
-                      type="line"
-                      filter={[
-                        'match',
-                        ['geometry-type'],
-                        ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'],
-                        true,
-                        false,
-                      ]}
-                      paint={{
-                        'line-color': color,
-                        'line-width': 2.5,
-                      }}
-                    />
+                      {/* Lines + polygon outlines */}
+                      <Layer
+                        id={`${sourceId}-line`}
+                        type="line"
+                        filter={[
+                          'match',
+                          ['geometry-type'],
+                          ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'],
+                          true,
+                          false,
+                        ]}
+                        paint={{
+                          'line-color': color,
+                          'line-width': 2.5,
+                        }}
+                      />
 
-                    {/* Point circles */}
-                    <Layer
-                      id={`${sourceId}-circle`}
-                      type="circle"
-                      filter={[
-                        'match',
-                        ['geometry-type'],
-                        ['Point', 'MultiPoint'],
-                        true,
-                        false,
-                      ]}
-                      paint={{
-                        'circle-color': color,
-                        'circle-radius': 6,
-                        'circle-stroke-width': 1.5,
-                        'circle-stroke-color': '#ffffff',
-                      }}
-                    />
-                  </Source>
-                );
-              })}
-            </Map>
-          )}
+                      {/* Point circles */}
+                      <Layer
+                        id={`${sourceId}-circle`}
+                        type="circle"
+                        filter={[
+                          'match',
+                          ['geometry-type'],
+                          ['Point', 'MultiPoint'],
+                          true,
+                          false,
+                        ]}
+                        paint={{
+                          'circle-color': color,
+                          'circle-radius': 6,
+                          'circle-stroke-width': 1.5,
+                          'circle-stroke-color': '#ffffff',
+                        }}
+                      />
+                    </Source>
+                  );
+                })}
+              </Map>
+            )}
+          </div>
 
           {/* ---- Floating header ---- */}
           <div
