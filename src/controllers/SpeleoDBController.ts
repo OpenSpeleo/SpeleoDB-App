@@ -12,7 +12,11 @@
 import { HTTP_STATUS, MAP, NETWORK, PREFERENCES } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
-import { clearCachedTiles, clearPrefetchJobs } from '../services/TileCacheService';
+import {
+  clearCachedTiles,
+  clearPrefetchJobs,
+  setTileCacheOfflineMode,
+} from '../services/TileCacheService';
 import { TilePrefetchService } from '../services/TilePrefetchService';
 import type {
   AuthResponse,
@@ -138,8 +142,9 @@ export class SpeleoDBController {
     private cache: ProjectCacheService,
     tilePrefetch?: TilePrefetchService,
   ) {
-    this.attachTilePrefetch(tilePrefetch ?? new TilePrefetchService());
+    this.attachTilePrefetch(tilePrefetch ?? this.createTilePrefetchService());
     this.restoreSession();
+    this.setOfflineLocked(false);
   }
 
   // ---- State accessors (snapshot-based for useSyncExternalStore) -------------
@@ -205,6 +210,17 @@ export class SpeleoDBController {
       this._tilePrefetchJobs = jobs;
       this.notify();
     });
+  }
+
+  private createTilePrefetchService(): TilePrefetchService {
+    return new TilePrefetchService({
+      isOnline: () => this.hasNetworkAccess(),
+    });
+  }
+
+  private setOfflineLocked(locked: boolean): void {
+    this._isOfflineLocked = locked;
+    setTileCacheOfflineMode(locked);
   }
 
   // ---- Actions --------------------------------------------------------------
@@ -334,6 +350,14 @@ export class SpeleoDBController {
     const instance = prefs.instance?.trim();
     if (!token || !instance) return 'unauthorized';
 
+    const browserOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+    if (!browserOnline) {
+      this._isOnline = false;
+      this.setOfflineLocked(true);
+      this.notify();
+      return 'network_error';
+    }
+
     try {
       const response = await this.service.validateToken(
         instance,
@@ -343,7 +367,7 @@ export class SpeleoDBController {
 
       if (response.status >= 200 && response.status < 300) {
         this._isOnline = true;
-        this._isOfflineLocked = false;
+        this.setOfflineLocked(false);
         this.notify();
         return 'ok';
       }
@@ -354,13 +378,13 @@ export class SpeleoDBController {
       // Any non-4xx status at startup is treated as a transient network/server issue.
       // Keep the session and move to offline mode instead of wiping local data.
       this._isOnline = false;
-      this._isOfflineLocked = true;
+      this.setOfflineLocked(true);
       this.notify();
       return 'network_error';
     } catch {
       // Timeout or transport errors must never trigger logout.
       this._isOnline = false;
-      this._isOfflineLocked = true;
+      this.setOfflineLocked(true);
       this.notify();
       return 'network_error';
     }
@@ -393,7 +417,7 @@ export class SpeleoDBController {
       // Reset in-memory state first so UI reflects the wipe immediately.
       this._authState = { isAuthenticated: false, user: null, token: null };
       this._isOnline = false;
-      this._isOfflineLocked = false;
+      this.setOfflineLocked(false);
       this._isRetryingConnection = false;
       this._projects = [];
       this._syncStatus = 'idle';
@@ -428,7 +452,7 @@ export class SpeleoDBController {
       }
 
       // Recreate a fresh prefetch service so runtime state restarts from zero.
-      this.attachTilePrefetch(new TilePrefetchService());
+      this.attachTilePrefetch(this.createTilePrefetchService());
     } finally {
       this._isPurgingLocalData = false;
     }
@@ -507,6 +531,7 @@ export class SpeleoDBController {
         const freshProjects = response.data.data;
         this._projects = freshProjects;
         this._isOnline = true;
+        this.setOfflineLocked(false);
         await this.cache.setProjects(freshProjects);
         this.notify();
 
@@ -540,6 +565,8 @@ export class SpeleoDBController {
    * Uses a simple worker-pool to limit concurrency to 3 parallel downloads.
    */
   private async downloadGeoJSONFiles(projects: Project[]): Promise<void> {
+    if (!this.hasNetworkAccess()) return;
+
     const eligible = projects.filter(
       (p) => p.geojson_file && !p.exclude_geojson,
     );
@@ -550,11 +577,13 @@ export class SpeleoDBController {
 
     const worker = async (): Promise<void> => {
       while (queue.length > 0) {
+        if (!this.hasNetworkAccess()) return;
         const project = queue.shift()!;
         try {
           const cachedCommit = await this.cache.getCachedCommitId(project.id);
           if (cachedCommit === project.latest_commit.id) continue; // already up to date
 
+          if (!this.hasNetworkAccess()) return;
           const res = await this.service.downloadJSON(project.geojson_file!);
           await this.cache.setGeoJSON(project.id, res.data, project.latest_commit.id);
         } catch (error) {

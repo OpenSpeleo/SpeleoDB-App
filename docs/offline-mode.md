@@ -1,18 +1,42 @@
 # Offline Mode
 
-This document describes the offline cache feature and the expected auth behavior when the app starts.
+This document defines the offline cache feature, user-facing offline modal behavior, and online recovery guarantees.
 
 ## Goal
 
 - Allow users with a previously valid local session to continue working when network connectivity is poor or unavailable.
 - Log out users and clear local data only when auth is definitively invalid (HTTP 4xx from token validation).
+- Keep offline UX non-blocking: user can acknowledge offline mode and keep using cached data.
 
 ## Startup auth timeout
 
 - Timeout constant: `NETWORK.STARTUP_AUTH_TIMEOUT_MS = 3000` in `src/constants.ts`.
 - During startup, the app validates the stored token against the backend.
 - If the request times out or fails due to transport/network/server conditions, the app must enter offline mode and keep the local session.
-- Timeout must never trigger logout.
+- Timeout must never trigger logout or cache clearing.
+
+## Offline mode user experience
+
+- Offline modal includes a `Go Offline` action.
+- `Go Offline` means:
+  - close the modal,
+  - keep app in offline mode,
+  - continue using cached data,
+  - do not reprompt again during the same offline period.
+- After user acknowledged offline mode, prompt may appear again only after offline lock is cleared by an explicit reconnect path and later re-entered.
+
+## Online recovery behavior (strict)
+
+When app is in offline mode, only two actions are allowed to attempt returning online:
+
+1. Close and reopen the app (startup validation attempt).
+2. Pull-to-refresh on dashboard (manual reconnect attempt).
+
+Both actions must run a tentative reconnect flow and resolve to exactly one outcome:
+
+- reconnect success: clear offline lock and resume online behavior.
+- still offline: remain offline without forced logout and without repeated blocking prompts.
+- unauthorized (4xx): follow logout/cache purge behavior.
 
 ## Startup auth outcome matrix
 
@@ -20,30 +44,21 @@ This document describes the offline cache feature and the expected auth behavior
 | --- | --- | --- | --- | --- |
 | HTTP 2xx | `ok` | No | No | Continue online |
 | HTTP 4xx | `unauthorized` | Yes | Yes | Redirect to home/login |
-| HTTP 5xx or non-4xx error status | `network_error` | No | No | Offline mode |
-| Timeout / transport exception | `network_error` | No | No | Offline mode |
-| Browser offline event | N/A | No | No | Offline modal shown |
+| HTTP 5xx or non-4xx error status | `network_error` | No | No | Offline modal shown (acknowledge once with `Go Offline`) |
+| Timeout / transport exception | `network_error` | No | No | Offline modal shown (acknowledge once with `Go Offline`) |
 
-## Retry behavior
+## Network behavior while offline
 
-- Offline modal "Retry connection" calls `retryConnection()`.
-- Retry outcomes:
-  - `ok`: close offline modal and resume normal behavior.
-  - `unauthorized`: redirect to home/login (logout and purge already handled in controller for 4xx).
-  - `network_error`: stay in offline modal.
+- Offline mode uses cached app data and cached map resources.
+- Outbound network requests should be skipped for normal offline operation paths.
+- Explicit reconnect attempts are limited to the two recovery paths above.
+- Pull-to-refresh is the only in-session manual reconnect trigger while offline.
+- The app does not use passive `online`/`offline` browser listeners. Connectivity changes alone do not trigger reconnect or modal state changes.
 
-## What gets cleared, and when
+## Logout and data purge
 
-Local data purge is tied to `logout()` and includes:
-
-- preferences and auth state
-- local and session storage
-- project cache
-- tile cache and prefetch jobs
-
-Expected trigger for purge in startup auth flow:
-
-- only HTTP 4xx token validation responses.
+Logout and wipe policy is documented in `docs/logout-behavior.md`.
+In offline mode flows, local data must only be purged on authentication-invalid (`4xx`) outcomes.
 
 ## Source code map
 
@@ -51,10 +66,16 @@ Expected trigger for purge in startup auth flow:
 - Auth decision logic: `src/controllers/SpeleoDBController.ts`
 - Timeout/transport behavior: `src/services/HttpClient.ts`
 - Auth API call: `src/services/SpeleoDBService.ts`
+- Logout policy detail: `docs/logout-behavior.md`
+- Networking state model: `docs/networking.md`
+- Map/tile offline fetch behavior: `src/services/TileCacheService.ts`
+- Tile prefetch runtime behavior: `src/services/TilePrefetchService.ts`
 - Key tests:
   - `src/controllers/SpeleoDBController.test.ts`
   - `src/context/SpeleoDBProvider.test.tsx`
   - `src/pages/Dashboard.test.tsx`
+  - `src/services/TileCacheService.test.ts`
+  - `src/services/TilePrefetchService.test.ts`
 
 ## Change checklist (offline/auth)
 
@@ -62,5 +83,7 @@ When modifying auth/offline logic:
 
 1. Verify timeout and network failures do not call `logout()`.
 2. Verify only 4xx auth failures trigger cache purge.
-3. Run targeted tests for controller, provider, and dashboard retry paths.
-4. Update this document if any behavior changes.
+3. Verify modal can be acknowledged with `Go Offline` and is not repeatedly re-shown in same offline period.
+4. Verify only two reconnect paths are active while offline: app relaunch and dashboard pull-to-refresh.
+5. Run targeted tests for controller, provider, dashboard, tile cache, and tile prefetch paths.
+6. Update this document if any behavior changes.

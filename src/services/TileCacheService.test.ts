@@ -15,6 +15,7 @@ import {
   getCachedStyle,
   fetchAndCachePinnedTile,
   runTileCacheStartupMaintenance,
+  setTileCacheOfflineMode,
 } from './TileCacheService';
 import {
   __clearTileCacheRepositoryForTests,
@@ -32,6 +33,7 @@ async function resetTileDatabase(): Promise<void> {
 describe('TileCacheService', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    setTileCacheOfflineMode(false);
     await resetTileDatabase();
   });
 
@@ -117,6 +119,28 @@ describe('TileCacheService', () => {
         getCachedStyle('https://example.com/style.json'),
       ).rejects.toThrow();
     });
+
+    it('uses cached style without network calls when offline mode is forced', async () => {
+      const cachedStyle = {
+        version: 8,
+        sprite: 'https://example.com/sprites/basic',
+        glyphs: 'https://example.com/fonts/{fontstack}/{range}.pbf',
+        sources: {},
+        layers: [],
+      };
+      await upsertTile(
+        '__style_json__',
+        new TextEncoder().encode(JSON.stringify(cachedStyle)).buffer,
+        { pinnedByAutoPrefetch: false },
+      );
+      setTileCacheOfflineMode(true);
+      globalThis.fetch = vi.fn();
+
+      const result = await getCachedStyle('https://example.com/style.json');
+
+      expect(result.sprite).toBe('cached-https://example.com/sprites/basic');
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
   });
 
   describe('prefetch pinning', () => {
@@ -131,6 +155,16 @@ describe('TileCacheService', () => {
 
       const metadata = await getTileMetadata('https://tiles.example.com/1/1/1.png');
       expect(metadata?.pinnedByAutoPrefetch).toBe(true);
+    });
+
+    it('does not attempt tile download when offline mode is forced', async () => {
+      setTileCacheOfflineMode(true);
+      globalThis.fetch = vi.fn();
+
+      await expect(
+        fetchAndCachePinnedTile('https://tiles.example.com/1/1/1.png'),
+      ).rejects.toThrow('Offline and no cached map');
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
     it('bumps pinned access time during startup maintenance', async () => {

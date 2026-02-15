@@ -323,26 +323,15 @@ export class TilePrefetchService {
   private readyPromise: Promise<void>;
   private runningPromise: Promise<void> | null = null;
   private destroyed = false;
-  private readonly onlineListener: () => void;
 
   constructor(customDeps: Partial<TilePrefetchDependencies> = {}) {
     this.deps = { ...defaultDeps, ...customDeps };
-    this.onlineListener = () => {
-      void this.resumePausedJobs();
-    };
     this.readyPromise = this.bootstrap();
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener('online', this.onlineListener);
-    }
   }
 
   dispose(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('online', this.onlineListener);
-    }
     this.queue = [];
     this.queueByUrl.clear();
     this.cachePresence.clear();
@@ -630,22 +619,6 @@ export class TilePrefetchService {
     }
     await Promise.all(writes);
     this.notify();
-  }
-
-  private async resumePausedJobs(): Promise<void> {
-    if (this.destroyed) return;
-    const writes: Promise<void>[] = [];
-    for (const job of this.jobsByProject.values()) {
-      if (job.status === 'paused') {
-        const processed = job.completedTiles + job.failedTiles;
-        job.status = processed >= job.totalTiles ? (job.failedTiles > 0 ? 'error' : 'done') : 'queued';
-        job.updatedAt = this.deps.now();
-        writes.push(this.persistJob(job));
-      }
-    }
-    await Promise.all(writes);
-    this.notify();
-    this.startProcessing();
   }
 
   private async markProjectsStatus(projectIds: Set<string>, status: TilePrefetchStatus): Promise<void> {

@@ -6,7 +6,7 @@ import type { HttpResponse } from '../services/HttpClient';
 import type { AuthTokenResponse } from '../types';
 import { PREFERENCES } from '../constants';
 import { TilePrefetchService } from '../services/TilePrefetchService';
-import type { Project } from '../types/project';
+import type { Project, ProjectsGeoJSONResponse } from '../types/project';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import { getTile, upsertTile } from '../services/tileCache/TileCacheRepository';
 
@@ -351,6 +351,22 @@ describe('SpeleoDBController', () => {
       expect(withToken.clearPreferences).not.toHaveBeenCalled();
     });
 
+    it('skips startup network call when browser is offline', async () => {
+      const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+      const withToken = createMockPrefs({
+        token: 't',
+        instance: 'https://www.speleodb.org',
+      });
+      const ctrl = new SpeleoDBController(service, withToken, cache);
+
+      const result = await ctrl.validateSession();
+
+      expect(result).toBe('network_error');
+      expect(ctrl.isOfflineLocked).toBe(true);
+      expect(service.validateToken).not.toHaveBeenCalled();
+      onlineSpy.mockRestore();
+    });
+
     it('returns "unauthorized" when no token in preferences', async () => {
       const result = await controller.validateSession();
       expect(result).toBe('unauthorized');
@@ -479,6 +495,64 @@ describe('SpeleoDBController', () => {
       await controller.syncProjects();
 
       expect(service.getProjectsGeoJSON).not.toHaveBeenCalled();
+    });
+
+    it('skips geojson download stage if network drops after project list fetch', async () => {
+      let online = true;
+      const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockImplementation(() => online);
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async (_instance: string, _token: string) => {
+          online = false;
+          return {
+            status: 200,
+            data: {
+              data: [{
+                id: 'p1',
+                name: 'Project 1',
+                description: '',
+                country: 'FR',
+                type: 'survey',
+                visibility: 'public',
+                is_active: true,
+                created_by: 'u',
+                creation_date: '2025-01-01',
+                modified_date: '2025-01-01',
+                commit_count: 1,
+                active_mutex: null,
+                fork_from: null,
+                exclude_geojson: false,
+                geojson_file: 'https://example.com/p1.geojson',
+                latest_commit: {
+                  id: 'c1',
+                  message: 'init',
+                  author_email: 'u@example.com',
+                  author_name: 'User',
+                  authored_date: '2025-01-01',
+                  dt_since: 'today',
+                  parent_ids: [],
+                  url: '',
+                  formats: [],
+                  tree: [],
+                },
+              }],
+              success: true,
+              timestamp: '2026-01-01T00:00:00.000Z',
+              url: 'https://www.speleodb.org/api/v1/projects/geojson/',
+            },
+          } as HttpResponse<ProjectsGeoJSONResponse>;
+        }),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
+      expect(service.downloadJSON).not.toHaveBeenCalled();
+      onlineSpy.mockRestore();
     });
   });
 

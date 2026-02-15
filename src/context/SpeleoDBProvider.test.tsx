@@ -1,6 +1,7 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import { SpeleoDBProvider } from './SpeleoDBProvider';
@@ -9,6 +10,9 @@ const {
   mockValidateSession,
   mockRetryConnection,
   mockLogout,
+  mockStoreSubscribers,
+  emitStoreUpdate,
+  mockIsOfflineLockedRef,
   mockIsAuthenticated,
   mockGetPreferences,
   mockSetPreferences,
@@ -17,23 +21,33 @@ const {
   authStateSnapshot,
   projectsSnapshot,
   tilePrefetchJobsSnapshot,
-} = vi.hoisted(() => ({
-  mockValidateSession: vi.fn(),
-  mockRetryConnection: vi.fn(),
-  mockLogout: vi.fn(),
-  mockIsAuthenticated: vi.fn(),
-  mockGetPreferences: vi.fn(),
-  mockSetPreferences: vi.fn(),
-  mockClearPreferences: vi.fn(),
-  mockRunTileCacheStartupMaintenance: vi.fn(),
-  authStateSnapshot: {
-    isAuthenticated: true,
-    user: { id: 'restored', email: 'user@example.com', name: 'user@example.com' },
-    token: 'tok',
-  },
-  projectsSnapshot: [] as unknown[],
-  tilePrefetchJobsSnapshot: [] as unknown[],
-}));
+} = vi.hoisted(() => {
+  const storeSubscribers = new Set<() => void>();
+  return {
+    mockValidateSession: vi.fn(),
+    mockRetryConnection: vi.fn(),
+    mockLogout: vi.fn(),
+    mockStoreSubscribers: storeSubscribers,
+    emitStoreUpdate: () => {
+      for (const listener of storeSubscribers) {
+        listener();
+      }
+    },
+    mockIsOfflineLockedRef: { current: false },
+    mockIsAuthenticated: vi.fn(),
+    mockGetPreferences: vi.fn(),
+    mockSetPreferences: vi.fn(),
+    mockClearPreferences: vi.fn(),
+    mockRunTileCacheStartupMaintenance: vi.fn(),
+    authStateSnapshot: {
+      isAuthenticated: true,
+      user: { id: 'restored', email: 'user@example.com', name: 'user@example.com' },
+      token: 'tok',
+    },
+    projectsSnapshot: [] as unknown[],
+    tilePrefetchJobsSnapshot: [] as unknown[],
+  };
+});
 
 vi.mock('@ionic/react', () => ({
   IonModal: ({
@@ -79,8 +93,11 @@ vi.mock('../controllers/SpeleoDBController', () => {
     retryConnection = mockRetryConnection;
     logout = mockLogout;
 
-    subscribe(): () => void {
-      return () => {};
+    subscribe(listener: () => void): () => void {
+      mockStoreSubscribers.add(listener);
+      return () => {
+        mockStoreSubscribers.delete(listener);
+      };
     }
 
     isAuthenticated(): boolean {
@@ -96,7 +113,7 @@ vi.mock('../controllers/SpeleoDBController', () => {
     }
 
     get isOfflineLocked() {
-      return false;
+      return mockIsOfflineLockedRef.current;
     }
 
     get isRetryingConnection() {
@@ -122,6 +139,7 @@ vi.mock('../controllers/SpeleoDBController', () => {
 describe('SpeleoDBProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockStoreSubscribers.clear();
 
     mockGetPreferences.mockReturnValue({
       email: 'user@example.com',
@@ -132,10 +150,13 @@ describe('SpeleoDBProvider', () => {
     mockRetryConnection.mockResolvedValue('ok');
     mockLogout.mockResolvedValue(undefined);
     mockIsAuthenticated.mockReturnValue(true);
+    mockIsOfflineLockedRef.current = false;
     mockRunTileCacheStartupMaintenance.mockResolvedValue(undefined);
   });
 
-  it('shows offline modal and does not logout when browser goes offline', async () => {
+  it('shows offline modal on startup network_error and does not logout', async () => {
+    mockValidateSession.mockResolvedValue('network_error');
+    mockIsOfflineLockedRef.current = true;
     const history = createMemoryHistory({ initialEntries: ['/dashboard'] });
     render(
       <Router history={history}>
@@ -149,14 +170,62 @@ describe('SpeleoDBProvider', () => {
       expect(mockValidateSession).toHaveBeenCalledOnce();
     });
 
-    act(() => {
-      window.dispatchEvent(new Event('offline'));
-    });
-
     await waitFor(() => {
       expect(screen.getByText('Offline mode')).toBeInTheDocument();
     });
     expect(mockLogout).not.toHaveBeenCalled();
     expect(history.location.pathname).toBe('/dashboard');
+  });
+
+  it('allows Go Offline dismissal and reprompts only after offline lock clears and returns', async () => {
+    mockValidateSession.mockResolvedValue('network_error');
+    mockIsOfflineLockedRef.current = true;
+    render(
+      <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+        <SpeleoDBProvider>
+          <div>child</div>
+        </SpeleoDBProvider>
+      </Router>,
+    );
+
+    await waitFor(() => {
+      expect(mockValidateSession).toHaveBeenCalledOnce();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Go Offline')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText('Go Offline'));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Offline mode')).not.toBeInTheDocument();
+    });
+
+    act(() => {
+      emitStoreUpdate();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Offline mode')).not.toBeInTheDocument();
+    });
+
+    act(() => {
+      mockIsOfflineLockedRef.current = false;
+      emitStoreUpdate();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Offline mode')).not.toBeInTheDocument();
+    });
+
+    act(() => {
+      mockIsOfflineLockedRef.current = true;
+      emitStoreUpdate();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Offline mode')).toBeInTheDocument();
+    });
   });
 });

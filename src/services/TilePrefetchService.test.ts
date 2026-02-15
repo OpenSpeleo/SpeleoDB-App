@@ -282,4 +282,25 @@ describe('TilePrefetchService queue behavior', () => {
     expect(fetchAndCacheTile).toHaveBeenCalled();
     service.dispose();
   });
+
+  it('does not start tile downloads while dependency reports offline', async () => {
+    const { deps, fetchAndCacheTile } = createDeps({
+      isOnline: vi.fn(() => false),
+    });
+    const service = new TilePrefetchService(deps);
+
+    await service.enqueueProjects(
+      [{ projectId: 'p1', commitId: 'c1', geojson: pointFeatureCollection(2.3, 46.6) }],
+      {
+        tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
+        minZoom: 0,
+        maxZoom: 0,
+        padMeters: 50,
+      },
+    );
+    await service.waitForIdle();
+
+    expect(fetchAndCacheTile).not.toHaveBeenCalled();
+    service.dispose();
+  });
 });

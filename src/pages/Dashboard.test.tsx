@@ -56,16 +56,27 @@ vi.mock('@ionic/react', () => ({
     children,
     className,
     disabled,
+    onIonRefresh,
   }: {
     children?: React.ReactNode;
     className?: string;
     disabled?: boolean;
+    onIonRefresh?: (event: CustomEvent) => void;
   }) => (
     <div
       data-testid="ion-refresher"
       className={className}
       data-disabled={disabled ? 'true' : 'false'}
     >
+      <button
+        type="button"
+        data-testid="trigger-refresh"
+        onClick={() => onIonRefresh?.({
+          detail: { complete: () => {} },
+        } as unknown as CustomEvent)}
+      >
+        Trigger refresh
+      </button>
       {children}
     </div>
   ),
@@ -161,6 +172,7 @@ const mockRetryConnection = vi.fn().mockResolvedValue('ok');
 const mockGetProjectGeoJSON = vi.fn().mockResolvedValue(null);
 const mockLogout = vi.fn();
 const mockIsAuthenticated = vi.fn().mockReturnValue(true);
+let mockIsOfflineLocked = false;
 let mockProjects: Project[] = [];
 const mockController = {
   syncProjects: mockSyncProjects,
@@ -176,7 +188,7 @@ vi.mock('../context/SpeleoDBProvider', () => ({
     projects: mockProjects,
     syncStatus: 'idle' as const,
     isOnline: true,
-    isOfflineLocked: false,
+    isOfflineLocked: mockIsOfflineLocked,
     isRetryingConnection: false,
     tilePrefetchJobs: [],
   }),
@@ -250,6 +262,7 @@ describe('Dashboard', () => {
     vi.clearAllMocks();
     mapPropsRef.current = null;
     mockIsAuthenticated.mockReturnValue(true);
+    mockIsOfflineLocked = false;
     mockProjects = [];
     mockGetProjectVisibilityPreferences.mockReturnValue({});
   });
@@ -372,6 +385,40 @@ describe('Dashboard', () => {
     expect(refresher).toHaveAttribute('data-disabled', 'false');
   });
 
+  it('uses pull-to-refresh as online recovery attempt while offline-locked', async () => {
+    mockIsOfflineLocked = true;
+    mockRetryConnection.mockResolvedValueOnce('network_error');
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(mockSyncProjects).toHaveBeenCalledTimes(1);
+    });
+
+    await userEvent.click(screen.getByTestId('trigger-refresh'));
+
+    await waitFor(() => {
+      expect(mockRetryConnection).toHaveBeenCalledOnce();
+    });
+    expect(mockSyncProjects).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries then syncs when pull-to-refresh reconnect succeeds', async () => {
+    mockIsOfflineLocked = true;
+    mockRetryConnection.mockResolvedValueOnce('ok');
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(mockSyncProjects).toHaveBeenCalledTimes(1);
+    });
+
+    await userEvent.click(screen.getByTestId('trigger-refresh'));
+
+    await waitFor(() => {
+      expect(mockRetryConnection).toHaveBeenCalledOnce();
+      expect(mockSyncProjects).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('renders GeoJSON layer when payload is a JSON string', async () => {
     mockProjects = [makeProject({ id: 'p-json', name: 'JSON String Project' })];
     mockGetProjectGeoJSON.mockResolvedValueOnce(JSON.stringify({
@@ -413,6 +460,17 @@ describe('Dashboard', () => {
 
     await waitFor(() => {
       expect(screen.getAllByTestId('map-source')).toHaveLength(1);
+    });
+  });
+
+  it('shows project count when cached panel projects are available (even with idle sync status)', async () => {
+    mockProjects = [makeProject({ id: 'p-count', name: 'Count Project' })];
+    mockGetProjectGeoJSON.mockResolvedValueOnce(pointFeatureCollection());
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByText('1 project')).toBeInTheDocument();
     });
   });
 

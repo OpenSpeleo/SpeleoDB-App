@@ -643,7 +643,7 @@ const Dashboard: React.FC = () => {
               {tilePrefetchSummary && (
                 <span className="text-xs text-emerald-300">{tilePrefetchSummary}</span>
               )}
-              {syncStatus === 'done' && panelProjects.length > 0 && (
+              {panelProjects.length > 0 && (
                 <span className="text-xs text-slate-400">
                   {panelProjects.length} project{panelProjects.length !== 1 ? 's' : ''}
                 </span>

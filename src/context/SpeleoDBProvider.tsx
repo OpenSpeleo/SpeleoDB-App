@@ -117,7 +117,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   // ---- Offline modal local state -------------------------------------------
   const [showOfflineModal, setShowOfflineModal] = React.useState(false);
   const [allowOfflineModalDismiss, setAllowOfflineModalDismiss] = React.useState(false);
-  const [offlineRetryError, setOfflineRetryError] = React.useState('');
+  const [offlineModeAcknowledged, setOfflineModeAcknowledged] = React.useState(false);
   const [showCompanionInfoModal, setShowCompanionInfoModal] = React.useState(false);
   const [allowCompanionInfoModalDismiss, setAllowCompanionInfoModalDismiss] = React.useState(false);
   const previousAuthStateRef = useRef(authState.isAuthenticated);
@@ -157,38 +157,23 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
       // network_error
       if (!controller.isAuthenticated()) {
         history.replace('/');
-        return;
       }
-      setAllowOfflineModalDismiss(false);
-      setShowOfflineModal(true);
     });
   }, [history, location.pathname, controller]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const handleOffline = () => {
-      if (!controller.isAuthenticated()) return;
-      setAllowOfflineModalDismiss(false);
-      setShowOfflineModal(true);
-      setOfflineRetryError('');
-    };
-
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [controller, history]);
-
-  useEffect(() => {
     if (isOfflineLocked) {
-      setAllowOfflineModalDismiss(false);
-      setShowOfflineModal(true);
+      if (!offlineModeAcknowledged) {
+        setAllowOfflineModalDismiss(false);
+        setShowOfflineModal(true);
+      }
       return;
     }
+
+    setAllowOfflineModalDismiss(false);
+    setOfflineModeAcknowledged(false);
     setShowOfflineModal(false);
-    setOfflineRetryError('');
-  }, [isOfflineLocked]);
+  }, [isOfflineLocked, offlineModeAcknowledged]);
 
   // ---- Companion info modal (show once right after login) ------------------
 
@@ -332,31 +317,19 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
               <p className="text-slate-400 text-sm">
                 The app could not reach the server in time. You are operating in offline mode.
               </p>
-              {offlineRetryError && (
-                <p className="text-amber-300 text-xs mt-3">{offlineRetryError}</p>
-              )}
+              <p className="text-slate-500 text-xs mt-3">
+                To attempt reconnect, close and reopen the app, or use pull-to-refresh on the dashboard.
+              </p>
             </div>
             <IonButton
               expand="block"
-              disabled={isRetryingConnection}
-              onClick={async () => {
-                setOfflineRetryError('');
-                const result = await controller.retryConnection();
-                if (result === 'ok') {
-                  setAllowOfflineModalDismiss(true);
-                  setShowOfflineModal(false);
-                  return;
-                }
-                if (result === 'unauthorized') {
-                  history.replace('/');
-                  return;
-                }
-                setAllowOfflineModalDismiss(false);
-                setShowOfflineModal(true);
-                setOfflineRetryError('Still offline. Check connectivity and try again.');
+              onClick={() => {
+                setOfflineModeAcknowledged(true);
+                setAllowOfflineModalDismiss(true);
+                setShowOfflineModal(false);
               }}
             >
-              {isRetryingConnection ? 'Retrying…' : 'Retry connection'}
+              Go Offline
             </IonButton>
           </div>
         </IonContent>

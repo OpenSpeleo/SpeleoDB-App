@@ -5,7 +5,9 @@ This folder contains product and engineering documentation for core app behavior
 ## Available docs
 
 - `offline-mode.md`: how offline mode works, startup auth timeout behavior, logout rules, and test expectations.
-- `pull-to-refresh.md`: dashboard pull-to-refresh feature behavior, gesture constraints, and acceptance criteria.
+- `pull-to-refresh.md`: dashboard pull-to-refresh behavior, gesture constraints, and reconnect semantics while offline.
+- `logout-behavior.md`: when logout/cache purge happens and what data is cleared.
+- `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 
 ## Maintainer note
 

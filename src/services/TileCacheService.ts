@@ -31,6 +31,7 @@ import {
 
 const STYLE_CACHE_KEY = '__style_json__';
 const tileCacheMaintenance = new TileCacheMaintenanceService();
+let tileCacheOfflineMode = false;
 
 // Use explicit worker URL instead of inline/blob worker bootstrap.
 // This avoids worker bootstrap runtime issues on some iOS devices.
@@ -43,6 +44,15 @@ function isAbortError(error: unknown): boolean {
     'name' in error &&
     (error as { name?: string }).name === 'AbortError',
   );
+}
+
+function hasUsableNetwork(): boolean {
+  const browserOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+  return browserOnline && !tileCacheOfflineMode;
+}
+
+export function setTileCacheOfflineMode(isOffline: boolean): void {
+  tileCacheOfflineMode = isOffline;
 }
 
 // ==================== Public prefetch helpers ====================
@@ -85,6 +95,9 @@ export async function fetchAndCacheTile(
   signal?: AbortSignal,
   pinnedByAutoPrefetch = false,
 ): Promise<number> {
+  if (!hasUsableNetwork()) {
+    throw new Error(`Offline and no cached map for ${url}`);
+  }
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.arrayBuffer();
@@ -133,6 +146,15 @@ export async function runTileCacheStartupMaintenance(): Promise<void> {
 // ==================== Network-first fetch with cache ====================
 
 async function fetchWithCache(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  if (!hasUsableNetwork()) {
+    const cached = await getTile(url);
+    if (cached) {
+      void touchTileAccess(url);
+      return cached;
+    }
+    throw new Error(`Offline and no cached map for ${url}`);
+  }
+
   // Try network first
   try {
     const response = await fetch(url, { signal });
@@ -190,6 +212,9 @@ export async function getCachedStyle(
   let styleJson: Record<string, unknown>;
 
   try {
+    if (!hasUsableNetwork()) {
+      throw new Error('Offline mode active');
+    }
     const response = await fetch(styleUrl);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     styleJson = await response.json();

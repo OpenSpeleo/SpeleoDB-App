@@ -37,9 +37,14 @@ This document defines the dashboard pull-to-refresh feature behavior.
 
 When refresh is triggered:
 
-1. If app is offline-locked, it first attempts connection retry.
-2. If retry succeeds (or app is not offline-locked), it runs project sync.
-3. Refresher interaction is completed after the async flow finishes.
+- If online, run project sync
+- If online:
+    1. First attempts connection retry (see offline-mode.md for more details)
+        a. If retry succeeds, run project sync.
+        b. If retry fails with network error, the app remains offline and uses cached data.
+        c. If retry fails with HTTP 400 code, logout the user
+
+Refresher interaction is completed after the async flow finishes.
 
 ## Configuration
 
