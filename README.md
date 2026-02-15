@@ -82,6 +82,55 @@ Run `make help` to see all targets. Here is the full reference:
 | `make sync`      | Build web app + sync to iOS native project |
 | `make cap-doctor` | Run Capacitor doctor diagnostics        |
 
+## Native Credential Association Files
+
+To enable native password-manager suggestions for the app login, host both files below on the canonical domain:
+
+- `https://www.speleodb.org/.well-known/apple-app-site-association`
+- `https://www.speleodb.org/.well-known/assetlinks.json`
+
+`apple-app-site-association` (no file extension):
+
+```json
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "UDUF7J66TN.org.speleodb.app",
+        "paths": ["*"]
+      }
+    ]
+  }
+}
+```
+
+`assetlinks.json`:
+
+```json
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "org.speleodb.app",
+      "sha256_cert_fingerprints": [
+        "<RELEASE_CERT_SHA256_FINGERPRINT>"
+      ]
+    }
+  }
+]
+```
+
+Get the Android signing fingerprint with:
+
+```bash
+cd android && ./gradlew signingReport
+```
+
 ### iOS -- Build & Run from the Terminal
 
 These targets let you build, install, and run the iOS app **entirely from Cursor/VSCode** without opening Xcode.

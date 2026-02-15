@@ -50,6 +50,16 @@ describe('Login page', () => {
     expect(screen.getByLabelText(/speleodb instance/i)).toBeInTheDocument();
   });
 
+  it('uses native credential autofill semantics for login fields', () => {
+    renderLogin();
+
+    expect(screen.getByLabelText(/email/i)).toHaveAttribute('autocomplete', 'username');
+    expect(screen.getByLabelText(/password/i)).toHaveAttribute('autocomplete', 'current-password');
+    expect(
+      screen.getByText(/native password autofill uses credentials saved for www\.speleodb\.org\./i),
+    ).toBeInTheDocument();
+  });
+
   it('pre-fills instance with DEFAULT_INSTANCE', () => {
     renderLogin();
     const instanceInput = screen.getByLabelText(/speleodb instance/i);

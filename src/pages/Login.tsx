@@ -107,7 +107,7 @@ const Login: React.FC = () => {
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required
-                          autoComplete="email"
+                          autoComplete="username"
                         />
                       </div>
                       <div>
@@ -149,6 +149,9 @@ const Login: React.FC = () => {
                           placeholder={PREFERENCES.DEFAULT_INSTANCE}
                           autoComplete="url"
                         />
+                        <p className="mt-2 text-xs text-slate-500">
+                          Native password autofill uses credentials saved for www.speleodb.org.
+                        </p>
                       </div>
                     </div>
                     <div className="mt-6">
