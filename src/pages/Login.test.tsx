@@ -6,6 +6,7 @@ import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import Login from './Login';
 import { PREFERENCES } from '../constants';
+import { clearPreferences, setPreferences } from '../services/PreferencesService';
 
 // Mock the SpeleoDBProvider hook -- return a fake controller.
 const mockLogin = vi.fn();
@@ -39,6 +40,7 @@ function renderLogin() {
 describe('Login page', () => {
   beforeEach(() => {
     mockLogin.mockReset();
+    clearPreferences();
   });
 
   it('renders email, password, and instance fields', () => {
@@ -52,6 +54,14 @@ describe('Login page', () => {
     renderLogin();
     const instanceInput = screen.getByLabelText(/speleodb instance/i);
     expect(instanceInput).toHaveValue(PREFERENCES.DEFAULT_INSTANCE);
+  });
+
+  it('pre-fills instance with persisted instance preference when available', () => {
+    setPreferences({ instance: 'https://custom.instance.example' });
+
+    renderLogin();
+    const instanceInput = screen.getByLabelText(/speleodb instance/i);
+    expect(instanceInput).toHaveValue('https://custom.instance.example');
   });
 
   it('on successful login redirects to /dashboard', async () => {

@@ -145,10 +145,10 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     if (didValidateRef.current) return;
     didValidateRef.current = true;
 
-    controller.validateSession().then((result) => {
+    controller.validateSession().then(async (result) => {
       if (result === 'unauthorized') {
         clearPreferences();
-        controller.logout();
+        await controller.logout();
         history.replace('/');
         return;
       }
@@ -330,7 +330,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
                 }
                 if (result === 'unauthorized') {
                   clearPreferences();
-                  controller.logout();
+                  await controller.logout();
                   history.replace('/');
                   return;
                 }

@@ -3,6 +3,7 @@ import { Link, useHistory } from 'react-router-dom';
 import { IonPage, IonContent } from '@ionic/react';
 import { useSpeleoDB } from '../context/SpeleoDBProvider';
 import { PREFERENCES } from '../constants';
+import { getPreferences } from '../services/PreferencesService';
 import { getInstanceBaseUrl, INSTANCE_PATHS } from '../utils/url';
 import logoSvg from '../assets/media/logo.png';
 import authIllustrationSvg from '../assets/media/auth-illustration.svg';
@@ -12,7 +13,9 @@ const Login: React.FC = () => {
   const { controller } = useSpeleoDB();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [instance, setInstance] = useState<string>(PREFERENCES.DEFAULT_INSTANCE);
+  const [instance, setInstance] = useState<string>(() =>
+    getPreferences().instance ?? PREFERENCES.DEFAULT_INSTANCE,
+  );
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);

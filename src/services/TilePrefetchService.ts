@@ -39,7 +39,7 @@ interface Bounds {
 
 interface QueueEntry {
   url: string;
-  projectIds: Set<string>;
+  projectCommits: Map<string, string>;
 }
 
 export interface TilePrefetchDependencies {
@@ -433,7 +433,7 @@ export class TilePrefetchService {
     await this.upsertJob(job);
 
     for (const url of uncachedUrls) {
-      this.queueUrl(url, project.projectId);
+      this.queueUrl(url, project.projectId, project.commitId);
     }
   }
 
@@ -458,14 +458,17 @@ export class TilePrefetchService {
     };
   }
 
-  private queueUrl(url: string, projectId: string): void {
+  private queueUrl(url: string, projectId: string, commitId: string): void {
     const entry = this.queueByUrl.get(url);
     if (entry) {
-      entry.projectIds.add(projectId);
+      entry.projectCommits.set(projectId, commitId);
       return;
     }
 
-    const nextEntry: QueueEntry = { url, projectIds: new Set([projectId]) };
+    const nextEntry: QueueEntry = {
+      url,
+      projectCommits: new Map([[projectId, commitId]]),
+    };
     this.queueByUrl.set(url, nextEntry);
     this.queue.push(nextEntry);
   }
@@ -492,17 +495,35 @@ export class TilePrefetchService {
       const entry = this.queue.shift();
       if (!entry) continue;
       this.queueByUrl.delete(entry.url);
-      await this.markProjectsStatus(entry.projectIds, 'downloading');
+      const downloadingProjects = this.resolveActiveProjectIds(entry.projectCommits);
+      if (downloadingProjects.size === 0) continue;
+      await this.markProjectsStatus(downloadingProjects, 'downloading');
 
       const result = await this.downloadWithRetry(entry.url);
+      const completionProjects = this.resolveActiveProjectIds(entry.projectCommits);
+      if (completionProjects.size === 0) {
+        this.notify();
+        continue;
+      }
       if (result.success) {
         this.cachePresence.set(entry.url, true);
-        await this.applySuccess(entry.projectIds, result.bytes);
+        await this.applySuccess(completionProjects, result.bytes);
       } else {
-        await this.applyFailure(entry.projectIds, result.message);
+        await this.applyFailure(completionProjects, result.message);
       }
       this.notify();
     }
+  }
+
+  private resolveActiveProjectIds(projectCommits: Map<string, string>): Set<string> {
+    const activeProjectIds = new Set<string>();
+    for (const [projectId, commitId] of projectCommits) {
+      const current = this.jobsByProject.get(projectId);
+      if (!current) continue;
+      if (current.commitId !== commitId) continue;
+      activeProjectIds.add(projectId);
+    }
+    return activeProjectIds;
   }
 
   private async downloadWithRetry(

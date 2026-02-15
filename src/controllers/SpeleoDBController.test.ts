@@ -176,7 +176,7 @@ describe('SpeleoDBController', () => {
       await controller.login(validCreds);
       expect(controller.isAuthenticated()).toBe(true);
 
-      controller.logout();
+      await controller.logout();
 
       expect(controller.isAuthenticated()).toBe(false);
       expect(controller.currentUser).toBeNull();
@@ -184,6 +184,47 @@ describe('SpeleoDBController', () => {
         email: undefined,
         token: undefined,
       });
+    });
+
+    it('resets offline lock state on logout', async () => {
+      const validateToken = vi.fn(async () => {
+        throw new Error('timeout');
+      });
+      service = createMockService({ validateToken });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.validateSession();
+      expect(controller.isOfflineLocked).toBe(true);
+
+      await controller.logout();
+      expect(controller.isOfflineLocked).toBe(false);
+    });
+
+    it('waits for project cache cleanup before resolving logout', async () => {
+      const clearAllResolver: { fn?: () => void } = {};
+      cache.clearAll = vi.fn(
+        () => new Promise<void>((resolve) => {
+          clearAllResolver.fn = () => resolve();
+        }),
+      );
+
+      let logoutResolved = false;
+      const logoutPromise = controller.logout().then(() => {
+        logoutResolved = true;
+      });
+
+      await Promise.resolve();
+      expect(cache.clearAll).toHaveBeenCalledOnce();
+      expect(logoutResolved).toBe(false);
+
+      if (!clearAllResolver.fn) throw new Error('clearAll resolver should be defined');
+      clearAllResolver.fn();
+      await logoutPromise;
+      expect(logoutResolved).toBe(true);
     });
   });
 
@@ -323,7 +364,7 @@ describe('SpeleoDBController', () => {
       const listener = vi.fn();
       controller.subscribe(listener);
 
-      controller.logout();
+      await controller.logout();
 
       expect(listener).toHaveBeenCalled();
     });

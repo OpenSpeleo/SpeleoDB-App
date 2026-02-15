@@ -358,18 +358,24 @@ export class SpeleoDBController {
   }
 
   /**
-   * Logout: clear in-memory state and remove email/token from preferences (keep instance).
+   * Logout: clear in-memory state, remove auth preferences, and flush caches.
+   * Resolves once cache cleanup tasks complete.
    */
-  logout(): void {
+  async logout(): Promise<void> {
     this._authState = { isAuthenticated: false, user: null, token: null };
     this._isOnline = false;
+    this._isOfflineLocked = false;
+    this._isRetryingConnection = false;
     this._projects = [];
     this._syncStatus = 'idle';
     this._tilePrefetchJobs = [];
     this.prefs.setPreferences({ email: undefined, token: undefined });
-    this.cache.clearAll();
-    clearPrefetchJobs();
     this.notify();
+
+    await Promise.allSettled([
+      this.cache.clearAll(),
+      clearPrefetchJobs(),
+    ]);
   }
 
   /**

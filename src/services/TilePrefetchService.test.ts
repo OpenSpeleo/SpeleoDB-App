@@ -23,6 +23,51 @@ function pointFeatureCollection(lng: number, lat: number): GeoJSON.FeatureCollec
   };
 }
 
+function twoPointFeatureCollection(lng: number, lat: number): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Point',
+          coordinates: [lng, lat],
+        },
+      },
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Point',
+          coordinates: [lng + 0.001, lat + 0.001],
+        },
+      },
+    ],
+  };
+}
+
+async function waitForCondition(
+  condition: () => boolean,
+  attempts = 50,
+): Promise<void> {
+  for (let i = 0; i < attempts; i += 1) {
+    if (condition()) return;
+    await Promise.resolve();
+  }
+  throw new Error('Condition not met in time');
+}
+
+function createDeferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  let reject: (reason?: unknown) => void = () => {};
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('TilePrefetchService geometry helpers', () => {
   it('computes a dateline-safe interval for features crossing +/-180', () => {
     const fc: GeoJSON.FeatureCollection = {
@@ -138,6 +183,57 @@ describe('TilePrefetchService queue behavior', () => {
     await service.enqueueProjects([{ projectId: 'p1', commitId: 'c1', geojson }], request);
     await service.waitForIdle();
     expect(fetchAndCacheTile).toHaveBeenCalledTimes(1);
+    service.dispose();
+  });
+
+  it('ignores stale queued tiles when a project is re-enqueued with a new commit', async () => {
+    const firstDownload = createDeferred<number>();
+    let fetchCalls = 0;
+    const { deps, fetchAndCacheTile } = createDeps({
+      fetchAndCacheTile: vi.fn(async () => {
+        fetchCalls += 1;
+        if (fetchCalls === 1) return firstDownload.promise;
+        return 2000;
+      }),
+    });
+    const service = new TilePrefetchService(deps);
+    const firstGeojson = twoPointFeatureCollection(2.3, 46.6);
+    const secondGeojson = twoPointFeatureCollection(-120, -35);
+    const request = {
+      tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
+      minZoom: 3,
+      maxZoom: 3,
+      padMeters: 0,
+    };
+    const firstUrls = buildTileUrlsForFeatureCollection(firstGeojson, request);
+    const secondUrls = buildTileUrlsForFeatureCollection(secondGeojson, request);
+    expect(firstUrls.length).toBeGreaterThan(0);
+    expect(secondUrls.length).toBeGreaterThan(0);
+    const secondUrlSet = new Set(secondUrls);
+    const overlapCount = firstUrls.filter((url) => secondUrlSet.has(url)).length;
+    expect(overlapCount).toBe(0);
+
+    await service.enqueueProjects(
+      [{ projectId: 'p1', commitId: 'c1', geojson: firstGeojson }],
+      request,
+    );
+    await waitForCondition(() => fetchAndCacheTile.mock.calls.length === 1);
+
+    await service.enqueueProjects(
+      [{ projectId: 'p1', commitId: 'c2', geojson: secondGeojson }],
+      request,
+    );
+
+    firstDownload.resolve(1000);
+    await service.waitForIdle();
+
+    const [job] = service.getSnapshot();
+    expect(fetchAndCacheTile.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(job.commitId).toBe('c2');
+    expect(job.totalTiles).toBe(secondUrls.length);
+    expect(job.completedTiles).toBe(secondUrls.length);
+    expect(job.bytesDownloaded).toBe(secondUrls.length * 2000);
+    expect(job.status).toBe('done');
     service.dispose();
   });
 

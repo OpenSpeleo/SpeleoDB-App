@@ -354,8 +354,8 @@ const Dashboard: React.FC = () => {
     event.detail.complete();
   }, [controller, isOfflineLocked]);
 
-  const handleLogout = useCallback(() => {
-    controller.logout();
+  const handleLogout = useCallback(async () => {
+    await controller.logout();
     history.push('/');
   }, [controller, history]);
 

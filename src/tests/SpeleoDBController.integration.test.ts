@@ -126,7 +126,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
       await controller.login({ email, password, instance });
       expect(controller.isAuthenticated()).toBe(true);
 
-      controller.logout();
+      await controller.logout();
 
       expect(controller.isAuthenticated()).toBe(false);
       expect(controller.currentUser).toBeNull();
