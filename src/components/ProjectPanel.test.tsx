@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import ProjectPanel from './ProjectPanel';
 import type { ProjectPanelProps } from './ProjectPanel';
 import type { Project } from '../types/project';
+import { COLOR_PALETTE } from '../constants';
 
 // ==================== Helpers ====================
 
@@ -49,6 +50,11 @@ const defaultProps: ProjectPanelProps = {
   ],
   activeProjectIds: new Set(['p1', 'p2', 'p3']),
   geoJsonData: { p1: {}, p2: {}, p3: {} },
+  projectColorsById: {
+    p1: COLOR_PALETTE[0],
+    p2: COLOR_PALETTE[1],
+    p3: COLOR_PALETTE[2],
+  },
   tilePrefetchByProject: {},
   onToggleProject: vi.fn(),
   onZoomToProject: vi.fn(),
@@ -80,6 +86,19 @@ describe('ProjectPanel', () => {
   it('shows empty state when no projects', () => {
     renderPanel({ projects: [] });
     expect(screen.getByText('No projects available')).toBeInTheDocument();
+  });
+
+  it('renders project dots from provided projectColorsById mapping', () => {
+    renderPanel({
+      projectColorsById: {
+        p1: '#111111',
+        p2: '#222222',
+        p3: '#333333',
+      },
+    });
+
+    const betaDot = screen.getByTestId('project-color-dot-p2');
+    expect(betaDot).toHaveStyle({ backgroundColor: '#222222' });
   });
 
   it('calls onZoomToProject when a project name is clicked', async () => {

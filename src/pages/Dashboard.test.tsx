@@ -48,7 +48,22 @@ vi.mock('react-map-gl/maplibre', () => {
     Source: ({ children }: { children?: React.ReactNode }) => (
       <div data-testid="map-source">{children}</div>
     ),
-    Layer: () => <div data-testid="map-layer" />,
+    Layer: ({
+      id,
+      paint,
+    }: {
+      id?: string;
+      paint?: Record<string, unknown>;
+    }) => {
+      const lineColor = paint?.['line-color'];
+      const fillColor = paint?.['fill-color'];
+      const circleColor = paint?.['circle-color'];
+      const layerColor = [lineColor, fillColor, circleColor].find(
+        (value): value is string => typeof value === 'string',
+      ) ?? '';
+
+      return <div data-testid="map-layer" data-layer-id={id} data-layer-color={layerColor} />;
+    },
     NavigationControl: () => <div data-testid="nav-control" />,
   };
 });
@@ -341,5 +356,44 @@ describe('Dashboard', () => {
 
     await userEvent.click(screen.getByText('Zoom Me'));
     expect(mockSetProjectVisibilityPreference).toHaveBeenCalledWith('p1', true);
+  });
+
+  it('uses the same project color in panel dot and map layer', async () => {
+    mockProjects = [
+      makeProject({
+        id: 'p-hidden',
+        name: 'Alpha Hidden',
+        exclude_geojson: true,
+        geojson_file: null,
+      }),
+      makeProject({
+        id: 'p-visible',
+        name: 'Beta Visible',
+      }),
+    ];
+    mockGetProjectGeoJSON.mockImplementation(async (projectId: string) => {
+      if (projectId === 'p-visible') {
+        return pointFeatureCollection(2.4, 46.7);
+      }
+      return null;
+    });
+
+    const history = renderDashboard();
+    await waitFor(() => {
+      expect(history.location.pathname).toBe('/dashboard');
+      expect(mockGetProjectGeoJSON).toHaveBeenCalledWith('p-visible');
+      expect(screen.getByTestId('project-color-dot-p-visible')).toBeInTheDocument();
+    });
+
+    const lineLayer = document.querySelector(
+      '[data-layer-id="project-p-visible-line"]',
+    ) as HTMLElement | null;
+    expect(lineLayer).not.toBeNull();
+
+    const layerColor = lineLayer?.dataset.layerColor;
+    expect(layerColor).toBeTruthy();
+
+    const panelDot = screen.getByTestId('project-color-dot-p-visible');
+    expect(panelDot.getAttribute('style')).toContain(`border-color: ${layerColor}`);
   });
 });

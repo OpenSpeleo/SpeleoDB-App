@@ -14,7 +14,7 @@ import type { MapRef } from 'react-map-gl/maplibre';
 import type { LngLatBoundsLike } from 'maplibre-gl';
 
 import { useSpeleoDB } from '../context/SpeleoDBProvider';
-import { COLOR_PALETTE, MAP } from '../constants';
+import { MAP } from '../constants';
 import { registerTileCacheProtocol, getCachedStyle } from '../services/TileCacheService';
 import {
   getProjectVisibilityPreferences,
@@ -22,18 +22,13 @@ import {
   setProjectVisibilityPreferences,
 } from '../services/PreferencesService';
 import ProjectPanel from '../components/ProjectPanel';
-import type { Project } from '../types/project';
+import { createProjectColorState, getProjectColor } from '../utils/projectColors';
 
 // ==================== GeoJSON type alias ====================
 
 type GeoJsonRecord = Record<string, GeoJSON.FeatureCollection>;
 
 // ==================== Helpers ====================
-
-/** Sort projects by name for stable color assignment. */
-function sortProjects(projects: Project[]): Project[] {
-  return [...projects].sort((a, b) => a.name.localeCompare(b.name));
-}
 
 /**
  * Normalize any valid GeoJSON into a FeatureCollection.
@@ -241,7 +236,10 @@ const Dashboard: React.FC = () => {
 
   // ---- Load GeoJSON from cache after sync completes -------------------------
 
-  const sortedProjects = useMemo(() => sortProjects(projects), [projects]);
+  const { sortedProjects, projectColorsById } = useMemo(
+    () => createProjectColorState(projects),
+    [projects],
+  );
   const geoJsonProjects = useMemo(
     () => sortedProjects.filter((p) => !p.exclude_geojson && Boolean(p.geojson_file)),
     [sortedProjects],
@@ -464,11 +462,11 @@ const Dashboard: React.FC = () => {
               <NavigationControl position="bottom-right" showCompass={true} />
 
               {/* GeoJSON layers for each active project */}
-              {sortedProjects.map((project, idx) => {
+              {sortedProjects.map((project) => {
                 if (!activeProjectIds.has(project.id) || !geoJsonData[project.id]) {
                   return null;
                 }
-                const color = COLOR_PALETTE[idx % COLOR_PALETTE.length];
+                const color = getProjectColor(project.id, projectColorsById);
                 const sourceId = `project-${project.id}`;
 
                 return (
@@ -589,6 +587,7 @@ const Dashboard: React.FC = () => {
             projects={panelProjects}
             activeProjectIds={panelActiveProjectIds}
             geoJsonData={geoJsonData}
+            projectColorsById={projectColorsById}
             tilePrefetchByProject={tilePrefetchByProject}
             onToggleProject={handleToggleProject}
             onZoomToProject={handleZoomToProject}

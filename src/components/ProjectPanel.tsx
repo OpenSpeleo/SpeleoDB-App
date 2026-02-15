@@ -2,7 +2,7 @@
  * ProjectPanel -- collapsible side panel for toggling project GeoJSON layers.
  *
  * Slides in from the left over the map. Each project gets a colored dot
- * (from COLOR_PALETTE) and a toggle switch. A backdrop click or the close
+ * (driven by Dashboard's project color mapping) and a toggle switch. A backdrop click or the close
  * button dismisses the panel.
  *
  * Clicking the project name/dot zooms the map to that project.
@@ -11,8 +11,8 @@
 
 import React from 'react';
 import type { Project } from '../types/project';
-import { COLOR_PALETTE } from '../constants';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
+import { getProjectColor } from '../utils/projectColors';
 
 // ==================== Props ====================
 
@@ -20,6 +20,7 @@ export interface ProjectPanelProps {
   projects: Project[];
   activeProjectIds: Set<string>;
   geoJsonData: Record<string, unknown>;
+  projectColorsById: Record<string, string>;
   tilePrefetchByProject: Record<string, TilePrefetchJobState | undefined>;
   onToggleProject: (projectId: string) => void;
   onZoomToProject: (projectId: string) => void;
@@ -49,6 +50,7 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
   projects,
   activeProjectIds,
   geoJsonData,
+  projectColorsById,
   tilePrefetchByProject,
   onToggleProject,
   onZoomToProject,
@@ -126,8 +128,8 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
             </div>
           ) : (
             <ul className="py-1">
-              {projects.map((project, idx) => {
-                const color = COLOR_PALETTE[idx % COLOR_PALETTE.length];
+              {projects.map((project) => {
+                const color = getProjectColor(project.id, projectColorsById);
                 const isActive = activeProjectIds.has(project.id);
                 const hasGeoJson = project.id in geoJsonData;
                 const prefetchLabel = prefetchStatusLabel(tilePrefetchByProject[project.id]);
@@ -146,6 +148,7 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
                       >
                         {/* Color dot */}
                         <span
+                          data-testid={`project-color-dot-${project.id}`}
                           className="w-3 h-3 rounded-full flex-shrink-0 ring-1 ring-white/20"
                           style={{
                             backgroundColor: isActive ? color : 'transparent',
