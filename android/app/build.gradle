@@ -43,11 +43,157 @@ dependencies {
 }
 
 def repoRootDir = rootProject.projectDir.parentFile.absolutePath
-def nodeBinary = System.getenv("NODE_BINARY") ?: "node"
+
+def isWindowsHost() {
+    return System.getProperty("os.name").toLowerCase().contains("win")
+}
+
+def resolveCommandFromCurrentPath(commandName) {
+    try {
+        def probeArgs = isWindowsHost() ? ["where", commandName] : ["which", commandName]
+        def probe = new ProcessBuilder(probeArgs)
+            .redirectErrorStream(true)
+            .start()
+        def outputLines = probe.inputStream
+            .getText("UTF-8")
+            .readLines()
+            .collect { it.trim() }
+            .findAll { it }
+
+        if (probe.waitFor() == 0) {
+            for (def line : outputLines) {
+                def candidate = new File(line)
+                if (candidate.exists() && candidate.canExecute()) {
+                    return candidate.absolutePath
+                }
+            }
+        }
+    } catch (Exception ignored) {
+        // Fall through and keep probing.
+    }
+
+    return null
+}
+
+def resolveCommandFromLoginShell(commandName) {
+    if (isWindowsHost()) {
+        return null
+    }
+
+    def candidateShells = [System.getenv("SHELL"), "/bin/zsh", "/bin/bash"]
+        .findAll { it }
+        .unique()
+
+    for (def shellPath : candidateShells) {
+        def shellFile = new File(shellPath)
+        if (!shellFile.exists() || !shellFile.canExecute()) {
+            continue
+        }
+
+        try {
+            def shellProbe = new ProcessBuilder(shellPath, "-lc", "command -v ${commandName}")
+                .redirectErrorStream(true)
+                .start()
+            def shellProbeOutput = shellProbe.inputStream.getText("UTF-8").trim()
+            if (shellProbe.waitFor() == 0 && shellProbeOutput) {
+                def directCandidate = new File(shellProbeOutput)
+                if (directCandidate.exists() && directCandidate.canExecute()) {
+                    return directCandidate.absolutePath
+                }
+
+                // Some shells can return a command name. Resolve again against current PATH.
+                def resolvedFromCurrentPath = resolveCommandFromCurrentPath(shellProbeOutput)
+                if (resolvedFromCurrentPath) {
+                    return resolvedFromCurrentPath
+                }
+            }
+        } catch (Exception ignored) {
+            // Try the next shell.
+        }
+    }
+
+    return null
+}
+
+def resolveNodeBinary() {
+    def explicitNodeBinary = System.getenv("NODE_BINARY")?.trim()
+    if (explicitNodeBinary) {
+        def explicitNodeFile = new File(explicitNodeBinary)
+        if (explicitNodeFile.exists() && explicitNodeFile.canExecute()) {
+            return explicitNodeFile.absolutePath
+        }
+
+        // If NODE_BINARY is a command name (e.g. "node"), resolve it to a concrete path.
+        if (!explicitNodeBinary.contains(File.separator) && !explicitNodeBinary.contains("\\")) {
+            def explicitFromCurrentPath = resolveCommandFromCurrentPath(explicitNodeBinary)
+            if (explicitFromCurrentPath) {
+                return explicitFromCurrentPath
+            }
+
+            def explicitFromLoginShell = resolveCommandFromLoginShell(explicitNodeBinary)
+            if (explicitFromLoginShell) {
+                return explicitFromLoginShell
+            }
+        }
+    }
+
+    def nodeFromCurrentPath = resolveCommandFromCurrentPath("node")
+    if (nodeFromCurrentPath) {
+        return nodeFromCurrentPath
+    }
+
+    // Android Studio often launches Gradle with a reduced PATH.
+    // Use a login shell so NVM/Homebrew-managed Node installs are discoverable.
+    def nodeFromLoginShell = resolveCommandFromLoginShell("node")
+    if (nodeFromLoginShell) {
+        return nodeFromLoginShell
+    }
+
+    def candidateNodePaths = [
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+    ]
+
+    def nvmBin = System.getenv("NVM_BIN")?.trim()
+    if (nvmBin) {
+        candidateNodePaths.add("${nvmBin}${File.separator}node")
+    }
+
+    def programFiles = System.getenv("ProgramFiles")
+    def programFilesX86 = System.getenv("ProgramFiles(x86)")
+    def localAppData = System.getenv("LOCALAPPDATA")
+    if (programFiles) {
+        candidateNodePaths.add("${programFiles}\\nodejs\\node.exe")
+    }
+    if (programFilesX86) {
+        candidateNodePaths.add("${programFilesX86}\\nodejs\\node.exe")
+    }
+    if (localAppData) {
+        candidateNodePaths.add("${localAppData}\\Programs\\nodejs\\node.exe")
+    }
+
+    for (def candidatePath : candidateNodePaths) {
+        def candidateFile = new File(candidatePath)
+        if (candidateFile.exists() && candidateFile.canExecute()) {
+            return candidatePath
+        }
+    }
+
+    throw new RuntimeException(
+        "[sentry] Node.js not found for Android build. " +
+        "Set NODE_BINARY to your Node executable path (for example /opt/homebrew/bin/node), " +
+        "or launch Android Studio from a shell where node is available."
+    )
+}
 
 tasks.register("buildWebAssetsWithAndroidSentry", Exec) {
     workingDir repoRootDir
-    commandLine nodeBinary, "scripts/build-native-assets.mjs", "android"
+    doFirst {
+        def nodeBinary = resolveNodeBinary()
+        logger.lifecycle("[sentry] Using Node binary: ${nodeBinary}")
+        commandLine nodeBinary, "scripts/build-native-assets.mjs", "android"
+    }
 }
 
 preBuild.dependsOn("buildWebAssetsWithAndroidSentry")
