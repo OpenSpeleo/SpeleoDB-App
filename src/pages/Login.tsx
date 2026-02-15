@@ -186,11 +186,10 @@ const Login: React.FC = () => {
                     </p>
                   </div>
 
-                  {/* Offline indicator */}
+                  {/* Offline auth note */}
                   <div className="mt-8 text-center">
-                    <p className="text-xs text-slate-500 flex items-center justify-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${navigator.onLine ? 'bg-green-500' : 'bg-yellow-500'}`} />
-                      {navigator.onLine ? 'Online' : 'Offline - Using local authentication'}
+                    <p className="text-xs text-slate-500">
+                      Offline sign-in is available with locally stored credentials.
                     </p>
                   </div>
                 </div>

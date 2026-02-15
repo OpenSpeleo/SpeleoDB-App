@@ -134,12 +134,14 @@ describe('TileCacheService', () => {
         { pinnedByAutoPrefetch: false },
       );
       setTileCacheOfflineMode(true);
+      const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
       globalThis.fetch = vi.fn();
 
       const result = await getCachedStyle('https://example.com/style.json');
 
       expect(result.sprite).toBe('cached-https://example.com/sprites/basic');
       expect(globalThis.fetch).not.toHaveBeenCalled();
+      onlineSpy.mockRestore();
     });
   });
 
@@ -159,12 +161,14 @@ describe('TileCacheService', () => {
 
     it('does not attempt tile download when offline mode is forced', async () => {
       setTileCacheOfflineMode(true);
+      const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
       globalThis.fetch = vi.fn();
 
       await expect(
         fetchAndCachePinnedTile('https://tiles.example.com/1/1/1.png'),
       ).rejects.toThrow('Offline and no cached map');
       expect(globalThis.fetch).not.toHaveBeenCalled();
+      onlineSpy.mockRestore();
     });
 
     it('bumps pinned access time during startup maintenance', async () => {

@@ -13,7 +13,7 @@ import {
 } from './TileCacheRepository';
 
 function defaultIsOnline(): boolean {
-  return typeof navigator === 'undefined' ? true : navigator.onLine;
+  return true;
 }
 
 function defaultNow(): number {

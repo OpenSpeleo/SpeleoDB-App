@@ -68,6 +68,7 @@ In offline mode flows, local data must only be purged on authentication-invalid 
 - Auth API call: `src/services/SpeleoDBService.ts`
 - Logout policy detail: `docs/logout-behavior.md`
 - Networking state model: `docs/networking.md`
+- Architecture and style expectations: `docs/implementation-guidelines.md`
 - Map/tile offline fetch behavior: `src/services/TileCacheService.ts`
 - Tile prefetch runtime behavior: `src/services/TilePrefetchService.ts`
 - Key tests:

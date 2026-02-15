@@ -9,7 +9,7 @@
  * re-render via useSyncExternalStore.
  */
 
-import { HTTP_STATUS, MAP, NETWORK, PREFERENCES } from '../constants';
+import { HTTP_STATUS, MAP, NETWORK } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import {
@@ -22,7 +22,6 @@ import type {
   AuthResponse,
   AuthState,
   LoginCredentials,
-  SignupCredentials,
   User,
 } from '../types';
 import type { Project } from '../types/project';
@@ -44,7 +43,6 @@ export interface PreferencesPort {
 // ==================== Storage keys (offline) ====================
 
 const STORAGE_KEYS = {
-  PENDING_SYNC: 'speleo_pending_sync',
   USERS_DB: 'speleo_users_db',
 } as const;
 
@@ -273,52 +271,6 @@ export class SpeleoDBController {
   }
 
   /**
-   * Signup: stores locally and calls the API when online.
-   */
-  async signup(credentials: SignupCredentials): Promise<AuthResponse> {
-    const { name, email, password, country } = credentials;
-
-    if (!name) return { success: false, message: 'Name is required' };
-    if (!this.validateEmail(email)) return { success: false, message: 'Invalid email address' };
-    if (!password || password.length < 8) return { success: false, message: 'Password must be at least 8 characters' };
-    if (!country) return { success: false, message: 'Country is required' };
-
-    const localUsers = this.getLocalUsers();
-    if (localUsers[email.toLowerCase()]) {
-      return { success: false, message: 'An account with this email already exists' };
-    }
-
-    const user: User = { id: this.generateUserId(), email, name, country };
-
-    if (this.hasNetworkAccess()) {
-      try {
-        const prefs = this.prefs.getPreferences();
-        const instanceUrl = prefs.instance ?? PREFERENCES.DEFAULT_INSTANCE;
-
-        const response = await this.service.signup(instanceUrl, credentials);
-
-        if (response.status === HTTP_STATUS.OK || response.status === HTTP_STATUS.CREATED) {
-          this.saveLocalUser(email, password, response.data.user ? { ...user, ...response.data.user } : user);
-          return {
-            success: true,
-            message: 'Account created! Please check your email to verify.',
-            user: response.data.user ? { ...user, ...response.data.user } : user,
-          };
-        }
-
-        return { success: false, message: response.data.message ?? 'Signup failed' };
-      } catch (error) {
-        console.warn('Online signup failed, creating locally...', error);
-      }
-    }
-
-    // Offline: save locally and queue for sync
-    this.saveLocalUser(email, password, user);
-    this.addPendingSync({ type: 'signup', data: { name, email, password, country } });
-    return { success: true, message: "Account created locally. It will sync when you're online.", user };
-  }
-
-  /**
    * Validates the stored token with the server.
    * - 2xx   -> 'ok'
    * - 4xx   -> 'unauthorized' (and local logout/cache purge)
@@ -349,14 +301,6 @@ export class SpeleoDBController {
     const token = prefs.token;
     const instance = prefs.instance?.trim();
     if (!token || !instance) return 'unauthorized';
-
-    const browserOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
-    if (!browserOnline) {
-      this._isOnline = false;
-      this.setOfflineLocked(true);
-      this.notify();
-      return 'network_error';
-    }
 
     try {
       const response = await this.service.validateToken(
@@ -456,33 +400,6 @@ export class SpeleoDBController {
     } finally {
       this._isPurgingLocalData = false;
     }
-  }
-
-  /**
-   * Flush queued operations to the server (e.g. signup that happened offline).
-   */
-  async syncPending(): Promise<void> {
-    if (!this.hasNetworkAccess()) return;
-
-    const prefs = this.prefs.getPreferences();
-    const instanceUrl = prefs.instance ?? PREFERENCES.DEFAULT_INSTANCE;
-    const pending = this.getPendingSync();
-    const remaining: typeof pending = [];
-
-    for (const item of pending) {
-      try {
-        if (item.type === 'signup') {
-          const response = await this.service.signup(instanceUrl, item.data as SignupCredentials);
-          if (response.status < 200 || response.status >= 300) {
-            remaining.push(item);
-          }
-        }
-      } catch {
-        remaining.push(item);
-      }
-    }
-
-    localStorage.setItem(STORAGE_KEYS.PENDING_SYNC, JSON.stringify(remaining));
   }
 
   // ---- Project sync ---------------------------------------------------------
@@ -700,49 +617,13 @@ export class SpeleoDBController {
     }
   }
 
-  private saveLocalUser(email: string, password: string, user: User): void {
-    try {
-      const users = this.getLocalUsers();
-      users[email.toLowerCase()] = { password, user };
-      localStorage.setItem(STORAGE_KEYS.USERS_DB, JSON.stringify(users));
-    } catch (error) {
-      console.error('Failed to save local user:', error);
-    }
-  }
-
-  // ---- Pending sync queue ---------------------------------------------------
-
-  private addPendingSync(item: { type: string; data: unknown }): void {
-    try {
-      const pending = this.getPendingSync();
-      pending.push({ ...item, timestamp: Date.now() });
-      localStorage.setItem(STORAGE_KEYS.PENDING_SYNC, JSON.stringify(pending));
-    } catch (error) {
-      console.error('Failed to add pending sync:', error);
-    }
-  }
-
-  private getPendingSync(): Array<{ type: string; data: unknown; timestamp: number }> {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEYS.PENDING_SYNC);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  }
-
   // ---- ID generators --------------------------------------------------------
 
   private generateOfflineToken(): string {
     return 'offline_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
   }
 
-  private generateUserId(): string {
-    return 'user_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
-  }
-
   private hasNetworkAccess(): boolean {
-    const online = typeof navigator === 'undefined' ? true : navigator.onLine;
-    return !this._isOfflineLocked && online;
+    return !this._isOfflineLocked;
   }
 }

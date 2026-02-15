@@ -9,6 +9,8 @@ Before implementing or reviewing changes related to authentication, offline mode
 
 1. Read `docs/README.md`.
 2. Read `docs/offline-mode.md`.
+3. Read `docs/networking.md`.
+4. Read `docs/implementation-guidelines.md`.
 
 ## Required behavior
 

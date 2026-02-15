@@ -30,8 +30,10 @@ import {
 // ==================== Constants ====================
 
 const STYLE_CACHE_KEY = '__style_json__';
-const tileCacheMaintenance = new TileCacheMaintenanceService();
 let tileCacheOfflineMode = false;
+const tileCacheMaintenance = new TileCacheMaintenanceService({
+  isOnline: () => !tileCacheOfflineMode,
+});
 
 // Use explicit worker URL instead of inline/blob worker bootstrap.
 // This avoids worker bootstrap runtime issues on some iOS devices.
@@ -47,8 +49,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 function hasUsableNetwork(): boolean {
-  const browserOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
-  return browserOnline && !tileCacheOfflineMode;
+  return !tileCacheOfflineMode;
 }
 
 export function setTileCacheOfflineMode(isOffline: boolean): void {

@@ -8,6 +8,7 @@ This folder contains product and engineering documentation for core app behavior
 - `pull-to-refresh.md`: dashboard pull-to-refresh behavior, gesture constraints, and reconnect semantics while offline.
 - `logout-behavior.md`: when logout/cache purge happens and what data is cleared.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
+- `implementation-guidelines.md`: high-level architecture boundaries, coding conventions, and testing expectations.
 
 ## Maintainer note
 

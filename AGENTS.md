@@ -6,6 +6,8 @@ Use the `docs/` folder as the primary guidance source for behavior and conventio
 
 - `docs/README.md`
 - `docs/offline-mode.md` (for auth/offline/cache/startup/retry changes)
+- `docs/networking.md`
+- `docs/implementation-guidelines.md` (for architecture/style/testing expectations)
 
 ## Working rules
 

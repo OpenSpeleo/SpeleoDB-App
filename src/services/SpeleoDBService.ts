@@ -9,7 +9,7 @@
 import { API, HEADERS } from '../constants';
 import { getInstanceBaseUrl } from '../utils/url';
 import type { HttpClient, HttpResponse } from './HttpClient';
-import type { AuthTokenResponse, SignupCredentials } from '../types';
+import type { AuthTokenResponse } from '../types';
 import type { ProjectsGeoJSONResponse } from '../types/project';
 
 export class SpeleoDBService {
@@ -89,25 +89,5 @@ export class SpeleoDBService {
    */
   async downloadJSON<T = unknown>(url: string): Promise<HttpResponse<T>> {
     return this.http.request<T>({ url, method: 'GET' });
-  }
-
-  // ==================== Signup ====================
-
-  /**
-   * POST /api/v1/auth/signup
-   */
-  async signup(
-    instance: string,
-    data: SignupCredentials,
-  ): Promise<HttpResponse<{ user?: { id: string; email: string; name: string }; message?: string }>> {
-    const baseUrl = getInstanceBaseUrl(instance);
-    const url = `${baseUrl}${API.BASE_PATH}/auth/signup`;
-
-    return this.http.request({
-      url,
-      method: 'POST',
-      headers: { [HEADERS.CONTENT_TYPE]: HEADERS.APPLICATION_JSON },
-      data,
-    });
   }
 }

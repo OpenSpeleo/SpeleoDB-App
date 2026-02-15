@@ -46,7 +46,6 @@ function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBServic
   return {
     authenticate: vi.fn(async () => ({ status: 200, data: { user: 'u@x.com', token: 'tok' } }) as HttpResponse<AuthTokenResponse>),
     validateToken: vi.fn(async () => ({ status: 200, data: {} }) as HttpResponse<unknown>),
-    signup: vi.fn(async () => ({ status: 201, data: { user: { id: '1', email: 'a@b.com', name: 'A' } } }) as HttpResponse),
     getProjectsGeoJSON: vi.fn(async () => ({ status: 200, data: { data: [project] } }) as HttpResponse<unknown>),
     downloadJSON: vi.fn(async () => ({
       status: 200,
@@ -56,7 +55,7 @@ function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBServic
       },
     }) as HttpResponse<unknown>),
     ...overrides,
-  } as SpeleoDBService;
+  } as unknown as SpeleoDBService;
 }
 
 function createMockPrefs(initial?: { email?: string; token?: string; instance?: string }): PreferencesPort {
@@ -351,7 +350,7 @@ describe('SpeleoDBController', () => {
       expect(withToken.clearPreferences).not.toHaveBeenCalled();
     });
 
-    it('skips startup network call when browser is offline', async () => {
+    it('does not rely on browser online hints for startup validation', async () => {
       const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
       const withToken = createMockPrefs({
         token: 't',
@@ -361,9 +360,9 @@ describe('SpeleoDBController', () => {
 
       const result = await ctrl.validateSession();
 
-      expect(result).toBe('network_error');
-      expect(ctrl.isOfflineLocked).toBe(true);
-      expect(service.validateToken).not.toHaveBeenCalled();
+      expect(result).toBe('ok');
+      expect(ctrl.isOfflineLocked).toBe(false);
+      expect(service.validateToken).toHaveBeenCalledOnce();
       onlineSpy.mockRestore();
     });
 
@@ -449,7 +448,6 @@ describe('SpeleoDBController', () => {
         features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } }],
       }));
 
-      const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
       prefs.setPreferences({
         token: 'tok',
         instance: 'https://www.speleodb.org',
@@ -471,8 +469,6 @@ describe('SpeleoDBController', () => {
       expect(request.minZoom).toBe(0);
       expect(request.maxZoom).toBe(18);
       expect(request.padMeters).toBe(50);
-
-      onlineSpy.mockRestore();
     });
 
     it('does not call network project sync while offline lock is active', async () => {
@@ -497,49 +493,47 @@ describe('SpeleoDBController', () => {
       expect(service.getProjectsGeoJSON).not.toHaveBeenCalled();
     });
 
-    it('skips geojson download stage if network drops after project list fetch', async () => {
-      let online = true;
-      const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockImplementation(() => online);
+    it('continues project sync when geojson downloads fail', async () => {
       service = createMockService({
-        getProjectsGeoJSON: vi.fn(async (_instance: string, _token: string) => {
-          online = false;
-          return {
-            status: 200,
-            data: {
-              data: [{
-                id: 'p1',
-                name: 'Project 1',
-                description: '',
-                country: 'FR',
-                type: 'survey',
-                visibility: 'public',
-                is_active: true,
-                created_by: 'u',
-                creation_date: '2025-01-01',
-                modified_date: '2025-01-01',
-                commit_count: 1,
-                active_mutex: null,
-                fork_from: null,
-                exclude_geojson: false,
-                geojson_file: 'https://example.com/p1.geojson',
-                latest_commit: {
-                  id: 'c1',
-                  message: 'init',
-                  author_email: 'u@example.com',
-                  author_name: 'User',
-                  authored_date: '2025-01-01',
-                  dt_since: 'today',
-                  parent_ids: [],
-                  url: '',
-                  formats: [],
-                  tree: [],
-                },
-              }],
-              success: true,
-              timestamp: '2026-01-01T00:00:00.000Z',
-              url: 'https://www.speleodb.org/api/v1/projects/geojson/',
-            },
-          } as HttpResponse<ProjectsGeoJSONResponse>;
+        getProjectsGeoJSON: vi.fn(async (_instance: string, _token: string) => ({
+          status: 200,
+          data: {
+            data: [{
+              id: 'p1',
+              name: 'Project 1',
+              description: '',
+              country: 'FR',
+              type: 'survey',
+              visibility: 'public',
+              is_active: true,
+              created_by: 'u',
+              creation_date: '2025-01-01',
+              modified_date: '2025-01-01',
+              commit_count: 1,
+              active_mutex: null,
+              fork_from: null,
+              exclude_geojson: false,
+              geojson_file: 'https://example.com/p1.geojson',
+              latest_commit: {
+                id: 'c1',
+                message: 'init',
+                author_email: 'u@example.com',
+                author_name: 'User',
+                authored_date: '2025-01-01',
+                dt_since: 'today',
+                parent_ids: [],
+                url: '',
+                formats: [],
+                tree: [],
+              },
+            }],
+            success: true,
+            timestamp: '2026-01-01T00:00:00.000Z',
+            url: 'https://www.speleodb.org/api/v1/projects/geojson/',
+          },
+        }) as HttpResponse<ProjectsGeoJSONResponse>),
+        downloadJSON: vi.fn(async () => {
+          throw new Error('Network dropped');
         }),
       });
       const withToken = createMockPrefs({
@@ -551,8 +545,8 @@ describe('SpeleoDBController', () => {
       await controller.syncProjects();
 
       expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
-      expect(service.downloadJSON).not.toHaveBeenCalled();
-      onlineSpy.mockRestore();
+      expect(service.downloadJSON).toHaveBeenCalledOnce();
+      expect(cache.setGeoJSON).not.toHaveBeenCalled();
     });
   });
 
@@ -581,9 +575,7 @@ describe('SpeleoDBController', () => {
       expect(controller.isAuthenticated()).toBe(true);
       expect(controller.isOfflineLocked).toBe(true);
 
-      const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
       const result = await controller.login(validCreds);
-      onlineSpy.mockRestore();
 
       expect(result.success).toBe(true);
       expect(service.authenticate).not.toHaveBeenCalled();

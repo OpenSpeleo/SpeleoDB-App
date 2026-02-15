@@ -59,7 +59,8 @@ const defaultDeps: TilePrefetchDependencies = {
   fetchAndCacheTile: (url: string) => defaultFetchAndCachePinnedTile(url),
   getAllPrefetchJobs: defaultGetAllPrefetchJobs,
   setPrefetchJob: defaultSetPrefetchJob,
-  isOnline: () => (typeof navigator === 'undefined' ? true : navigator.onLine),
+  // Runtime should inject the app-level network gate.
+  isOnline: () => true,
   now: () => Date.now(),
   sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
 };

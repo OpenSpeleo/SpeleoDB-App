@@ -64,22 +64,4 @@ describe('SpeleoDBService', () => {
     });
   });
 
-  // ---- signup ---------------------------------------------------------------
-
-  describe('signup', () => {
-    it('POSTs JSON to the signup endpoint', async () => {
-      http = createMockHttpClient({ status: 201, data: { user: { id: '1' } } });
-      service = new SpeleoDBService(http);
-
-      const data = { name: 'Joe', email: 'joe@test.com', password: 'secret123', country: 'US' };
-      const res = await service.signup('https://www.speleodb.org', data);
-
-      expect(res.status).toBe(201);
-      const req = http.calls[0];
-      expect(req.url).toBe(`https://www.speleodb.org${API.BASE_PATH}/auth/signup`);
-      expect(req.method).toBe('POST');
-      expect(req.headers?.[HEADERS.CONTENT_TYPE]).toBe(HEADERS.APPLICATION_JSON);
-      expect(req.data).toEqual(data);
-    });
-  });
 });

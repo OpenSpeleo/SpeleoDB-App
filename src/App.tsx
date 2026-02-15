@@ -7,7 +7,6 @@ import { SpeleoDBProvider } from './context/SpeleoDBProvider';
 /* Pages */
 import Home from './pages/Home';
 import Login from './pages/Login';
-import Signup from './pages/Signup';
 import Dashboard from './pages/Dashboard';
 
 /* Core CSS required for Ionic components to work properly */
@@ -52,7 +51,6 @@ const App: React.FC = () => (
           <Switch>
             <Route exact path="/" component={Home} />
             <Route exact path="/login" component={Login} />
-            <Route exact path="/signup" component={Signup} />
             <Route exact path="/dashboard" component={Dashboard} />
             {/* Fallback route */}
             <Route>

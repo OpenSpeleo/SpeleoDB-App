@@ -40,8 +40,15 @@ If neither action occurs, app remains in offline behavior even if device connect
 - `4xx` from auth validation means token/session is invalid and must trigger logout + local purge.
 - Network errors, timeouts, and non-`4xx` failures must preserve session and local cache.
 
+## Implementation expectations
+
+- Treat controller offline lock as the authoritative network gate for app behavior.
+- Keep reconnect logic explicit and initiated only from documented triggers.
+- Follow code architecture and testing conventions in `docs/implementation-guidelines.md`.
+
 See also:
 
 - `docs/offline-mode.md`
 - `docs/pull-to-refresh.md`
 - `docs/logout-behavior.md`
+- `docs/implementation-guidelines.md`

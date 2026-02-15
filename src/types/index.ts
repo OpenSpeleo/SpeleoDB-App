@@ -26,13 +26,6 @@ export interface LoginCredentials {
   instance: string;
 }
 
-export interface SignupCredentials {
-  name: string;
-  email: string;
-  password: string;
-  country: string;
-}
-
 export interface AuthResponse {
   success: boolean;
   message: string;
