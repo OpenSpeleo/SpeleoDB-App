@@ -369,6 +369,11 @@ const Dashboard: React.FC = () => {
     didFitRef.current = false;
     if (isOfflineLocked) {
       const result = await controller.retryConnection();
+      if (result === 'unauthorized') {
+        history.replace('/');
+        event.detail.complete();
+        return;
+      }
       if (result !== 'ok') {
         event.detail.complete();
         return;
@@ -377,7 +382,7 @@ const Dashboard: React.FC = () => {
     await controller.syncProjects();
     setLoadTrigger((n) => n + 1);
     event.detail.complete();
-  }, [controller, isOfflineLocked]);
+  }, [controller, history, isOfflineLocked]);
 
   const handleMapGestureStart = useCallback((
     event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,

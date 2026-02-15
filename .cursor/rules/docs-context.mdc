@@ -1,0 +1,22 @@
+---
+description: Require agents to consult project docs before offline/auth changes
+alwaysApply: true
+---
+
+# Docs-First Context
+
+Before implementing or reviewing changes related to authentication, offline mode, cache behavior, startup validation, or retry logic:
+
+1. Read `docs/README.md`.
+2. Read `docs/offline-mode.md`.
+
+## Required behavior
+
+- Treat docs in `docs/` as the project guidance source for expected behavior.
+- Keep implementation aligned with documented offline/auth rules.
+- If you change behavior, update the relevant file in `docs/` in the same change.
+- If code and docs conflict, call out the conflict and propose or apply the doc/code alignment.
+
+## Minimum verification
+
+- Run targeted tests for controller/provider/dashboard paths when touching offline/auth logic.

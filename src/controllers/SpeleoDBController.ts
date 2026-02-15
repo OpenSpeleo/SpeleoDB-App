@@ -305,8 +305,8 @@ export class SpeleoDBController {
   /**
    * Validates the stored token with the server.
    * - 2xx   -> 'ok'
-   * - 4xx   -> 'unauthorized'
-   * - error -> 'network_error'
+   * - 4xx   -> 'unauthorized' (and local logout/cache purge)
+   * - other -> 'network_error' (keeps current session, enters offline mode)
    */
   async validateSession(): Promise<'ok' | 'unauthorized' | 'network_error'> {
     if (this._isOfflineLocked) {
@@ -348,13 +348,20 @@ export class SpeleoDBController {
         return 'ok';
       }
       if (response.status >= 400 && response.status < 500) {
-        this._isOfflineLocked = false;
+        await this.logout();
         return 'unauthorized';
       }
-      await this.logout();
+      // Any non-4xx status at startup is treated as a transient network/server issue.
+      // Keep the session and move to offline mode instead of wiping local data.
+      this._isOnline = false;
+      this._isOfflineLocked = true;
+      this.notify();
       return 'network_error';
     } catch {
-      await this.logout();
+      // Timeout or transport errors must never trigger logout.
+      this._isOnline = false;
+      this._isOfflineLocked = true;
+      this.notify();
       return 'network_error';
     }
   }

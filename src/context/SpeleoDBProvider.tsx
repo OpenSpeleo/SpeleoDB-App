@@ -145,9 +145,8 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     if (didValidateRef.current) return;
     didValidateRef.current = true;
 
-    controller.validateSession().then(async (result) => {
+    controller.validateSession().then((result) => {
       if (result === 'unauthorized') {
-        await controller.logout();
         history.replace('/');
         return;
       }
@@ -170,12 +169,9 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
 
     const handleOffline = () => {
       if (!controller.isAuthenticated()) return;
-      void controller.logout().then(() => {
-        setShowOfflineModal(false);
-        setAllowOfflineModalDismiss(false);
-        setOfflineRetryError('');
-        history.replace('/');
-      });
+      setAllowOfflineModalDismiss(false);
+      setShowOfflineModal(true);
+      setOfflineRetryError('');
     };
 
     window.addEventListener('offline', handleOffline);
@@ -352,7 +348,6 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
                   return;
                 }
                 if (result === 'unauthorized') {
-                  await controller.logout();
                   history.replace('/');
                   return;
                 }

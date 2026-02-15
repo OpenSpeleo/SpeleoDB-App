@@ -330,6 +330,8 @@ describe('SpeleoDBController', () => {
 
       const result = await ctrl.validateSession();
       expect(result).toBe('unauthorized');
+      expect(ctrl.isAuthenticated()).toBe(false);
+      expect(withToken.clearPreferences).toHaveBeenCalledOnce();
     });
 
     it('returns "network_error" when request throws', async () => {
@@ -344,9 +346,9 @@ describe('SpeleoDBController', () => {
 
       const result = await ctrl.validateSession();
       expect(result).toBe('network_error');
-      expect(ctrl.isOfflineLocked).toBe(false);
-      expect(ctrl.isAuthenticated()).toBe(false);
-      expect(withToken.clearPreferences).toHaveBeenCalledOnce();
+      expect(ctrl.isOfflineLocked).toBe(true);
+      expect(ctrl.isAuthenticated()).toBe(true);
+      expect(withToken.clearPreferences).not.toHaveBeenCalled();
     });
 
     it('returns "unauthorized" when no token in preferences', async () => {
@@ -354,7 +356,7 @@ describe('SpeleoDBController', () => {
       expect(result).toBe('unauthorized');
     });
 
-    it('wipes session on disconnect and retry becomes unauthorized', async () => {
+    it('keeps session on disconnect and allows retry recovery', async () => {
       const validateToken = vi.fn()
         .mockRejectedValueOnce(new Error('timeout'))
         .mockResolvedValueOnce({ status: 200, data: {} });
@@ -369,7 +371,8 @@ describe('SpeleoDBController', () => {
 
       const first = await ctrl.validateSession();
       expect(first).toBe('network_error');
-      expect(ctrl.isAuthenticated()).toBe(false);
+      expect(ctrl.isAuthenticated()).toBe(true);
+      expect(ctrl.isOfflineLocked).toBe(true);
       expect(validateToken).toHaveBeenNthCalledWith(
         1,
         'https://www.speleodb.org',
@@ -378,9 +381,9 @@ describe('SpeleoDBController', () => {
       );
 
       const retried = await ctrl.retryConnection();
-      expect(retried).toBe('unauthorized');
+      expect(retried).toBe('ok');
       expect(ctrl.isOfflineLocked).toBe(false);
-      expect(validateToken).toHaveBeenCalledTimes(1);
+      expect(validateToken).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -456,7 +459,7 @@ describe('SpeleoDBController', () => {
       onlineSpy.mockRestore();
     });
 
-    it('does not call network project sync after disconnect wipes token', async () => {
+    it('does not call network project sync while offline lock is active', async () => {
       const validateToken = vi.fn(async () => {
         throw new Error('timeout');
       });
@@ -470,7 +473,8 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, withToken, cache);
 
       await controller.validateSession();
-      expect(controller.isAuthenticated()).toBe(false);
+      expect(controller.isAuthenticated()).toBe(true);
+      expect(controller.isOfflineLocked).toBe(true);
 
       await controller.syncProjects();
 
@@ -478,8 +482,8 @@ describe('SpeleoDBController', () => {
     });
   });
 
-  describe('disconnect wipe login behavior', () => {
-    it('fails offline login after disconnect wipe removed local users', async () => {
+  describe('disconnect login behavior', () => {
+    it('preserves offline users after disconnect timeout', async () => {
       const validateToken = vi.fn(async () => {
         throw new Error('timeout');
       });
@@ -489,15 +493,25 @@ describe('SpeleoDBController', () => {
         instance: 'https://www.speleodb.org',
       });
       controller = new SpeleoDBController(service, withToken, cache);
+      localStorage.setItem(
+        'speleo_users_db',
+        JSON.stringify({
+          'user@example.com': {
+            password: 'pass',
+            user: { id: '1', email: 'user@example.com', name: 'User' },
+          },
+        }),
+      );
 
       await controller.validateSession();
-      expect(controller.isAuthenticated()).toBe(false);
+      expect(controller.isAuthenticated()).toBe(true);
+      expect(controller.isOfflineLocked).toBe(true);
 
       const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
       const result = await controller.login(validCreds);
       onlineSpy.mockRestore();
 
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
       expect(service.authenticate).not.toHaveBeenCalled();
     });
   });
