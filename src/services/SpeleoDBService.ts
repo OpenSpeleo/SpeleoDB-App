@@ -47,6 +47,7 @@ export class SpeleoDBService {
   async validateToken(
     instance: string,
     token: string,
+    timeoutMs?: number,
   ): Promise<HttpResponse<unknown>> {
     const baseUrl = getInstanceBaseUrl(instance);
     const url = baseUrl + API.AUTH_TOKEN_ENDPOINT;
@@ -55,6 +56,7 @@ export class SpeleoDBService {
       url,
       method: 'GET',
       headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
+      timeoutMs,
     });
   }
 

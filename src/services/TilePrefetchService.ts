@@ -1,5 +1,5 @@
 import {
-  fetchAndCacheTile as defaultFetchAndCacheTile,
+  fetchAndCachePinnedTile as defaultFetchAndCachePinnedTile,
   getAllPrefetchJobs as defaultGetAllPrefetchJobs,
   hasCachedTile as defaultHasCachedTile,
   setPrefetchJob as defaultSetPrefetchJob,
@@ -16,7 +16,6 @@ import type {
 const MAX_MERCATOR_LAT = 85.05112878;
 const MIN_MERCATOR_LAT = -85.05112878;
 const METERS_PER_DEGREE_LAT = 111_320;
-const STORAGE_BUDGET_RATIO = 0.9;
 const DEFAULT_ESTIMATED_TILE_BYTES = 45_000;
 const RETRY_DELAYS_MS = [500, 1_500, 3_500];
 
@@ -48,7 +47,6 @@ export interface TilePrefetchDependencies {
   fetchAndCacheTile: (url: string) => Promise<number>;
   getAllPrefetchJobs: () => Promise<TilePrefetchJobState[]>;
   setPrefetchJob: (job: TilePrefetchJobState) => Promise<void>;
-  estimateStorage: () => Promise<StorageEstimate | null>;
   isOnline: () => boolean;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
@@ -58,13 +56,9 @@ type JobsListener = (jobs: TilePrefetchJobState[]) => void;
 
 const defaultDeps: TilePrefetchDependencies = {
   hasCachedTile: defaultHasCachedTile,
-  fetchAndCacheTile: (url: string) => defaultFetchAndCacheTile(url),
+  fetchAndCacheTile: (url: string) => defaultFetchAndCachePinnedTile(url),
   getAllPrefetchJobs: defaultGetAllPrefetchJobs,
   setPrefetchJob: defaultSetPrefetchJob,
-  estimateStorage: async () => {
-    if (typeof navigator === 'undefined' || !navigator.storage?.estimate) return null;
-    return navigator.storage.estimate();
-  },
   isOnline: () => (typeof navigator === 'undefined' ? true : navigator.onLine),
   now: () => Date.now(),
   sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -369,10 +363,8 @@ export class TilePrefetchService {
     await this.readyPromise;
     if (this.destroyed || projects.length === 0) return;
 
-    let budget = await this.getAvailableBudget();
     for (const project of projects) {
-      const consumed = await this.enqueueProject(project, request, budget);
-      if (budget !== null) budget = Math.max(0, budget - consumed);
+      await this.enqueueProject(project, request);
     }
 
     this.notify();
@@ -401,15 +393,14 @@ export class TilePrefetchService {
   private async enqueueProject(
     project: TilePrefetchProjectInput,
     request: TilePrefetchRequest,
-    budgetBytes: number | null,
-  ): Promise<number> {
+  ): Promise<void> {
     const existing = this.jobsByProject.get(project.projectId);
     if (
       existing &&
       existing.commitId === project.commitId &&
       existing.status === 'done'
     ) {
-      return 0;
+      return;
     }
 
     const allUrls = buildTileUrlsForFeatureCollection(project.geojson, request);
@@ -419,7 +410,7 @@ export class TilePrefetchService {
       const doneJob = this.buildBaseJob(project, request, 0);
       doneJob.status = 'done';
       await this.upsertJob(doneJob);
-      return 0;
+      return;
     }
 
     const uncachedUrls: string[] = [];
@@ -435,16 +426,6 @@ export class TilePrefetchService {
     }
 
     const estimatedBytes = uncachedUrls.length * DEFAULT_ESTIMATED_TILE_BYTES;
-    if (budgetBytes !== null && estimatedBytes > budgetBytes) {
-      const rejectedJob = this.buildBaseJob(project, request, uniqueUrls.length);
-      rejectedJob.completedTiles = completedTiles;
-      rejectedJob.estimatedBytes = estimatedBytes;
-      rejectedJob.status = 'error';
-      rejectedJob.message = 'Insufficient storage budget for offline tile prefetch';
-      await this.upsertJob(rejectedJob);
-      return 0;
-    }
-
     const job = this.buildBaseJob(project, request, uniqueUrls.length);
     job.completedTiles = completedTiles;
     job.estimatedBytes = estimatedBytes;
@@ -454,8 +435,6 @@ export class TilePrefetchService {
     for (const url of uncachedUrls) {
       this.queueUrl(url, project.projectId);
     }
-
-    return estimatedBytes;
   }
 
   private buildBaseJob(
@@ -646,18 +625,6 @@ export class TilePrefetchService {
     const cached = await this.deps.hasCachedTile(url);
     this.cachePresence.set(url, cached);
     return cached;
-  }
-
-  private async getAvailableBudget(): Promise<number | null> {
-    try {
-      const estimate = await this.deps.estimateStorage();
-      if (!estimate || typeof estimate.quota !== 'number' || typeof estimate.usage !== 'number') {
-        return null;
-      }
-      return Math.max(0, (estimate.quota - estimate.usage) * STORAGE_BUDGET_RATIO);
-    } catch {
-      return null;
-    }
   }
 
   private async upsertJob(job: TilePrefetchJobState): Promise<void> {

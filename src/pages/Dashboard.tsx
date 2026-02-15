@@ -192,7 +192,7 @@ registerTileCacheProtocol();
 
 const Dashboard: React.FC = () => {
   const history = useHistory();
-  const { controller, projects, syncStatus, tilePrefetchJobs } = useSpeleoDB();
+  const { controller, projects, syncStatus, tilePrefetchJobs, isOfflineLocked } = useSpeleoDB();
   const didSyncRef = useRef(false);
   const didFitRef = useRef(false);
   const mapRef = useRef<MapRef>(null);
@@ -344,10 +344,17 @@ const Dashboard: React.FC = () => {
 
   const handleRefresh = useCallback(async (event: CustomEvent) => {
     didFitRef.current = false;
+    if (isOfflineLocked) {
+      const result = await controller.retryConnection();
+      if (result !== 'ok') {
+        event.detail.complete();
+        return;
+      }
+    }
     await controller.syncProjects();
     setLoadTrigger((n) => n + 1);
     event.detail.complete();
-  }, [controller]);
+  }, [controller, isOfflineLocked]);
 
   const handleLogout = useCallback(() => {
     controller.logout();

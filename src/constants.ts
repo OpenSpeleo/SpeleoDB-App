@@ -41,6 +41,7 @@ export const PREFERENCES = {
 // ==================== NETWORK ====================
 export const NETWORK = {
   REQUEST_TIMEOUT_MS: 10000,
+  STARTUP_AUTH_TIMEOUT_MS: 3000,
 } as const;
 
 // ==================== MAP ====================
@@ -56,6 +57,8 @@ export const MAP = {
   DEFAULT_ZOOM: 5,
   // Hard cap to avoid provider "map data not available" tiles.
   MAX_ZOOM: 18,
+  // Hard cap for all cached tile payloads (prefetch + runtime map browsing).
+  TILE_CACHE_MAX_BYTES: 500 * 1024 * 1024,
 } as const;
 
 // ==================== COLOR PALETTE ====================

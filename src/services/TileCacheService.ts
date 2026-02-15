@@ -14,113 +14,26 @@
 import maplibregl from 'maplibre-gl';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker.js?url';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
+import { TileCacheMaintenanceService } from './tileCache/TileCacheMaintenanceService';
+import {
+  clearPrefetchJobs as clearPrefetchJobsFromStore,
+  getAllPrefetchJobs as getAllPrefetchJobsFromStore,
+  getPrefetchJob as getPrefetchJobFromStore,
+  getTile,
+  hasTile,
+  setPrefetchJob as setPrefetchJobInStore,
+  touchTileAccess,
+  upsertTile,
+} from './tileCache/TileCacheRepository';
 
 // ==================== Constants ====================
 
-const TILE_DB_NAME = 'speleo_tiles';
-const TILE_DB_VERSION = 2;
-const TILE_STORE = 'tiles';
-const PREFETCH_JOB_STORE = 'prefetch_jobs';
 const STYLE_CACHE_KEY = '__style_json__';
+const tileCacheMaintenance = new TileCacheMaintenanceService();
 
 // Use explicit worker URL instead of inline/blob worker bootstrap.
 // This avoids worker bootstrap runtime issues on some iOS devices.
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
-
-// ==================== IndexedDB helpers ====================
-
-let dbPromise: Promise<IDBDatabase> | null = null;
-
-function openTileDB(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-
-  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(TILE_DB_NAME, TILE_DB_VERSION);
-
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(TILE_STORE)) {
-        db.createObjectStore(TILE_STORE);
-      }
-      if (!db.objectStoreNames.contains(PREFETCH_JOB_STORE)) {
-        db.createObjectStore(PREFETCH_JOB_STORE);
-      }
-    };
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-
-  return dbPromise;
-}
-
-async function idbGetFromStore<T>(store: string, key: string): Promise<T | null> {
-  try {
-    const db = await openTileDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(store, 'readonly');
-      const req = tx.objectStore(store).get(key);
-      req.onsuccess = () => resolve((req.result as T) ?? null);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function idbSetInStore<T>(
-  store: string,
-  key: string,
-  value: T,
-): Promise<void> {
-  const db = await openTileDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readwrite');
-    tx.objectStore(store).put(value, key);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-async function idbGetAllFromStore<T>(store: string): Promise<T[]> {
-  try {
-    const db = await openTileDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(store, 'readonly');
-      const req = tx.objectStore(store).getAll();
-      req.onsuccess = () => resolve((req.result as T[]) ?? []);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return [];
-  }
-}
-
-async function idbClearStore(store: string): Promise<void> {
-  const db = await openTileDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readwrite');
-    tx.objectStore(store).clear();
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-async function idbGetTile(key: string): Promise<ArrayBuffer | null> {
-  return idbGetFromStore<ArrayBuffer>(TILE_STORE, key);
-}
-
-async function idbSetTileBestEffort(key: string, value: ArrayBuffer): Promise<void> {
-  try {
-    await idbSetInStore(TILE_STORE, key, value);
-  } catch {
-    // Silently fail -- runtime caching is best-effort.
-  }
-}
-
-async function idbSetTileStrict(key: string, value: ArrayBuffer): Promise<void> {
-  await idbSetInStore(TILE_STORE, key, value);
-}
 
 function isAbortError(error: unknown): boolean {
   return Boolean(
@@ -137,7 +50,29 @@ function isAbortError(error: unknown): boolean {
  * Returns true when the tile already exists in IndexedDB.
  */
 export async function hasCachedTile(url: string): Promise<boolean> {
-  return (await idbGetTile(url)) !== null;
+  return hasTile(url);
+}
+
+async function upsertTileStrict(
+  url: string,
+  data: ArrayBuffer,
+  pinnedByAutoPrefetch: boolean,
+): Promise<void> {
+  await tileCacheMaintenance.ensureCapacityBeforeWrite(url, data.byteLength);
+  await upsertTile(url, data, { pinnedByAutoPrefetch });
+}
+
+async function upsertTileBestEffort(
+  url: string,
+  data: ArrayBuffer,
+  pinnedByAutoPrefetch: boolean,
+): Promise<void> {
+  try {
+    await tileCacheMaintenance.ensureCapacityBeforeWrite(url, data.byteLength);
+    await upsertTile(url, data, { pinnedByAutoPrefetch });
+  } catch {
+    // Runtime map caching is best-effort.
+  }
 }
 
 /**
@@ -147,33 +82,50 @@ export async function hasCachedTile(url: string): Promise<boolean> {
 export async function fetchAndCacheTile(
   url: string,
   signal?: AbortSignal,
+  pinnedByAutoPrefetch = false,
 ): Promise<number> {
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.arrayBuffer();
-  await idbSetTileStrict(url, data);
+  await upsertTileStrict(url, data, pinnedByAutoPrefetch);
   return data.byteLength;
+}
+
+export async function fetchAndCachePinnedTile(
+  url: string,
+  signal?: AbortSignal,
+): Promise<number> {
+  const bytes = await fetchAndCacheTile(url, signal, true);
+  return bytes;
 }
 
 export async function getPrefetchJob(
   projectId: string,
 ): Promise<TilePrefetchJobState | null> {
-  return idbGetFromStore<TilePrefetchJobState>(PREFETCH_JOB_STORE, projectId);
+  return getPrefetchJobFromStore(projectId);
 }
 
 export async function getAllPrefetchJobs(): Promise<TilePrefetchJobState[]> {
-  return idbGetAllFromStore<TilePrefetchJobState>(PREFETCH_JOB_STORE);
+  return getAllPrefetchJobsFromStore();
 }
 
 export async function setPrefetchJob(job: TilePrefetchJobState): Promise<void> {
-  await idbSetInStore(PREFETCH_JOB_STORE, job.projectId, job);
+  await setPrefetchJobInStore(job);
 }
 
 export async function clearPrefetchJobs(): Promise<void> {
   try {
-    await idbClearStore(PREFETCH_JOB_STORE);
+    await clearPrefetchJobsFromStore();
   } catch {
     // Best effort during logout/cleanup.
+  }
+}
+
+export async function runTileCacheStartupMaintenance(): Promise<void> {
+  try {
+    await tileCacheMaintenance.runStartupMaintenance();
+  } catch {
+    // Startup maintenance should not block app initialization.
   }
 }
 
@@ -187,15 +139,18 @@ async function fetchWithCache(url: string, signal?: AbortSignal): Promise<ArrayB
     const data = await response.arrayBuffer();
 
     // Cache in background (don't await -- non-blocking)
-    void idbSetTileBestEffort(url, data);
+    void upsertTileBestEffort(url, data, false);
 
     return data;
   } catch (error) {
     if (isAbortError(error)) throw error;
 
     // Network failed -- try cache
-    const cached = await idbGetTile(url);
-    if (cached) return cached;
+    const cached = await getTile(url);
+    if (cached) {
+      void touchTileAccess(url);
+      return cached;
+    }
     throw new Error(`Offline and no cached map for ${url}`);
   }
 }
@@ -240,15 +195,17 @@ export async function getCachedStyle(
 
     // Cache the raw style JSON for offline use
     const encoder = new TextEncoder();
-    void idbSetTileBestEffort(
+    void upsertTileBestEffort(
       STYLE_CACHE_KEY,
       encoder.encode(JSON.stringify(styleJson)).buffer,
+      false,
     );
   } catch {
     // Try to load from cache
-    const cached = await idbGetTile(STYLE_CACHE_KEY);
+    const cached = await getTile(STYLE_CACHE_KEY);
     if (!cached) throw new Error('Cannot load map style (offline, not cached)');
     const decoder = new TextDecoder();
+    void touchTileAccess(STYLE_CACHE_KEY);
     styleJson = JSON.parse(decoder.decode(cached));
   }
 

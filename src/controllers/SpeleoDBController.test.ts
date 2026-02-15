@@ -254,11 +254,46 @@ describe('SpeleoDBController', () => {
 
       const result = await ctrl.validateSession();
       expect(result).toBe('network_error');
+      expect(ctrl.isOfflineLocked).toBe(true);
     });
 
     it('returns "unauthorized" when no token in preferences', async () => {
       const result = await controller.validateSession();
       expect(result).toBe('unauthorized');
+    });
+
+    it('uses startup auth timeout and unlocks on successful retry', async () => {
+      const validateToken = vi.fn()
+        .mockRejectedValueOnce(new Error('timeout'))
+        .mockResolvedValueOnce({ status: 200, data: {} });
+      service = createMockService({
+        validateToken,
+      });
+      const withToken = createMockPrefs({
+        token: 't',
+        instance: 'https://www.speleodb.org',
+      });
+      const ctrl = new SpeleoDBController(service, withToken, cache);
+
+      const first = await ctrl.validateSession();
+      expect(first).toBe('network_error');
+      expect(ctrl.isOfflineLocked).toBe(true);
+      expect(validateToken).toHaveBeenNthCalledWith(
+        1,
+        'https://www.speleodb.org',
+        't',
+        3000,
+      );
+
+      const retried = await ctrl.retryConnection();
+      expect(retried).toBe('ok');
+      expect(ctrl.isOfflineLocked).toBe(false);
+      expect(validateToken).toHaveBeenNthCalledWith(
+        2,
+        'https://www.speleodb.org',
+        't',
+        3000,
+      );
     });
   });
 
@@ -297,7 +332,7 @@ describe('SpeleoDBController', () => {
   describe('syncProjects tile prefetch', () => {
     it('enqueues prefetch jobs after geojson sync', async () => {
       const enqueueProjects = vi.fn(async () => {});
-      const subscribe = vi.fn((_listener: (jobs: unknown[]) => void) => () => {});
+      const subscribe = vi.fn(() => () => {});
       const mockTilePrefetch = {
         enqueueProjects,
         subscribe,
@@ -332,6 +367,47 @@ describe('SpeleoDBController', () => {
       expect(request.padMeters).toBe(50);
 
       onlineSpy.mockRestore();
+    });
+
+    it('does not call network project sync while offline lock is active', async () => {
+      const validateToken = vi.fn(async () => {
+        throw new Error('timeout');
+      });
+      service = createMockService({
+        validateToken,
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.validateSession();
+      expect(controller.isOfflineLocked).toBe(true);
+
+      await controller.syncProjects();
+
+      expect(service.getProjectsGeoJSON).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('offline lock network gating', () => {
+    it('skips online login call while offline lock is active', async () => {
+      const validateToken = vi.fn(async () => {
+        throw new Error('timeout');
+      });
+      service = createMockService({ validateToken });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.validateSession();
+      expect(controller.isOfflineLocked).toBe(true);
+
+      await controller.login(validCreds);
+      expect(service.authenticate).not.toHaveBeenCalled();
     });
   });
 });

@@ -14,6 +14,7 @@ import logoPng from '../assets/media/logo.png';
 import { HttpClient } from '../services/HttpClient';
 import { SpeleoDBService } from '../services/SpeleoDBService';
 import { ProjectCacheService } from '../services/ProjectCacheService';
+import { runTileCacheStartupMaintenance } from '../services/TileCacheService';
 import {
   getPreferences,
   setPreferences,
@@ -31,6 +32,8 @@ export interface SpeleoDBContextValue {
   controller: SpeleoDBController;
   authState: AuthState;
   isOnline: boolean;
+  isOfflineLocked: boolean;
+  isRetryingConnection: boolean;
   projects: Project[];
   syncStatus: SyncStatus;
   tilePrefetchJobs: TilePrefetchJobState[];
@@ -91,6 +94,16 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     () => controller.projects,
   );
 
+  const isOfflineLocked = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.isOfflineLocked,
+  );
+
+  const isRetryingConnection = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.isRetryingConnection,
+  );
+
   const syncStatus = useSyncExternalStore(
     (cb) => controller.subscribe(cb),
     () => controller.syncStatus,
@@ -104,10 +117,15 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   // ---- Offline modal local state -------------------------------------------
   const [showOfflineModal, setShowOfflineModal] = React.useState(false);
   const [allowOfflineModalDismiss, setAllowOfflineModalDismiss] = React.useState(false);
+  const [offlineRetryError, setOfflineRetryError] = React.useState('');
   const [showCompanionInfoModal, setShowCompanionInfoModal] = React.useState(false);
   const [allowCompanionInfoModalDismiss, setAllowCompanionInfoModalDismiss] = React.useState(false);
   const previousAuthStateRef = useRef(authState.isAuthenticated);
   const shouldOpenCompanionInfoRef = useRef(false);
+
+  useEffect(() => {
+    void runTileCacheStartupMaintenance();
+  }, []);
 
   // ---- Startup: redirect + validate stored token ---------------------------
 
@@ -144,6 +162,16 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     });
   }, [history, location.pathname, controller]);
 
+  useEffect(() => {
+    if (isOfflineLocked) {
+      setAllowOfflineModalDismiss(false);
+      setShowOfflineModal(true);
+      return;
+    }
+    setShowOfflineModal(false);
+    setOfflineRetryError('');
+  }, [isOfflineLocked]);
+
   // ---- Companion info modal (show once right after login) ------------------
 
   useEffect(() => {
@@ -179,6 +207,8 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     controller,
     authState,
     isOnline,
+    isOfflineLocked,
+    isRetryingConnection,
     projects,
     syncStatus,
     tilePrefetchJobs,
@@ -281,17 +311,35 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
               </span>
               <h2 className="text-xl font-semibold text-slate-100 mb-2">Offline mode</h2>
               <p className="text-slate-400 text-sm">
-                The app could not reach the server. You are operating in offline mode. Some features may be limited.
+                The app could not reach the server in time. You are operating in offline mode.
               </p>
+              {offlineRetryError && (
+                <p className="text-amber-300 text-xs mt-3">{offlineRetryError}</p>
+              )}
             </div>
             <IonButton
               expand="block"
-              onClick={() => {
-                setAllowOfflineModalDismiss(true);
-                setShowOfflineModal(false);
+              disabled={isRetryingConnection}
+              onClick={async () => {
+                setOfflineRetryError('');
+                const result = await controller.retryConnection();
+                if (result === 'ok') {
+                  setAllowOfflineModalDismiss(true);
+                  setShowOfflineModal(false);
+                  return;
+                }
+                if (result === 'unauthorized') {
+                  clearPreferences();
+                  controller.logout();
+                  history.replace('/');
+                  return;
+                }
+                setAllowOfflineModalDismiss(false);
+                setShowOfflineModal(true);
+                setOfflineRetryError('Still offline. Check connectivity and try again.');
               }}
             >
-              OK
+              {isRetryingConnection ? 'Retrying…' : 'Retry connection'}
             </IonButton>
           </div>
         </IonContent>

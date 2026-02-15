@@ -26,6 +26,7 @@ vi.mock('@ionic/react', () => ({
 vi.mock('maplibre-gl', () => ({
   default: {
     addProtocol: vi.fn(),
+    setWorkerUrl: vi.fn(),
   },
 }));
 
@@ -80,22 +81,27 @@ vi.mock('../services/PreferencesService', () => ({
 
 // Mock SpeleoDBProvider
 const mockSyncProjects = vi.fn().mockResolvedValue(undefined);
+const mockRetryConnection = vi.fn().mockResolvedValue('ok');
 const mockGetProjectGeoJSON = vi.fn().mockResolvedValue(null);
 const mockLogout = vi.fn();
 const mockIsAuthenticated = vi.fn().mockReturnValue(true);
 let mockProjects: Project[] = [];
+const mockController = {
+  syncProjects: mockSyncProjects,
+  retryConnection: mockRetryConnection,
+  getProjectGeoJSON: mockGetProjectGeoJSON,
+  logout: mockLogout,
+  isAuthenticated: mockIsAuthenticated,
+};
 
 vi.mock('../context/SpeleoDBProvider', () => ({
   useSpeleoDB: () => ({
-    controller: {
-      syncProjects: mockSyncProjects,
-      getProjectGeoJSON: mockGetProjectGeoJSON,
-      logout: mockLogout,
-      isAuthenticated: mockIsAuthenticated,
-    },
+    controller: mockController,
     projects: mockProjects,
     syncStatus: 'idle' as const,
     isOnline: true,
+    isOfflineLocked: false,
+    isRetryingConnection: false,
     tilePrefetchJobs: [],
   }),
 }));
@@ -199,7 +205,9 @@ describe('Dashboard', () => {
   it('redirects to /login when not authenticated', () => {
     mockIsAuthenticated.mockReturnValue(false);
     const history = renderDashboard();
-    expect(history.location.pathname).toBe('/login');
+    return waitFor(() => {
+      expect(history.location.pathname).toBe('/login');
+    });
   });
 
   it('calls syncProjects on mount', async () => {

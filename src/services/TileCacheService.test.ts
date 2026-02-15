@@ -4,17 +4,33 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('maplibre-gl', () => ({
   default: {
     addProtocol: vi.fn(),
+    setWorkerUrl: vi.fn(),
   },
 }));
 
 import maplibregl from 'maplibre-gl';
-import { registerTileCacheProtocol, getCachedStyle } from './TileCacheService';
+import {
+  registerTileCacheProtocol,
+  getCachedStyle,
+  fetchAndCachePinnedTile,
+  runTileCacheStartupMaintenance,
+} from './TileCacheService';
+import {
+  __clearTileCacheRepositoryForTests,
+  getTileMetadata,
+  upsertTile,
+} from './tileCache/TileCacheRepository';
+
+async function resetTileDatabase(): Promise<void> {
+  await __clearTileCacheRepositoryForTests();
+}
 
 // ==================== Tests ====================
 
 describe('TileCacheService', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    await resetTileDatabase();
   });
 
   describe('registerTileCacheProtocol', () => {
@@ -91,11 +107,40 @@ describe('TileCacheService', () => {
     });
 
     it('throws when offline and no cache available', async () => {
+      await Promise.resolve();
+      await resetTileDatabase();
       globalThis.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
 
       await expect(
         getCachedStyle('https://example.com/style.json'),
       ).rejects.toThrow();
+    });
+  });
+
+  describe('prefetch pinning', () => {
+    it('marks strict prefetch writes as pinned metadata', async () => {
+      const payload = new Uint8Array([1, 2, 3]).buffer;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(payload),
+      });
+
+      await fetchAndCachePinnedTile('https://tiles.example.com/1/1/1.png');
+
+      const metadata = await getTileMetadata('https://tiles.example.com/1/1/1.png');
+      expect(metadata?.pinnedByAutoPrefetch).toBe(true);
+    });
+
+    it('bumps pinned access time during startup maintenance', async () => {
+      await upsertTile('https://tiles.example.com/pinned.png', new Uint8Array([1]).buffer, {
+        pinnedByAutoPrefetch: true,
+        now: 10,
+      });
+
+      await runTileCacheStartupMaintenance();
+
+      const metadata = await getTileMetadata('https://tiles.example.com/pinned.png');
+      expect((metadata?.lastAccessedAt ?? 0) >= 10).toBe(true);
     });
   });
 });

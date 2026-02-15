@@ -73,7 +73,6 @@ describe('TilePrefetchService queue behavior', () => {
       setPrefetchJob: vi.fn(async (job: TilePrefetchJobState) => {
         jobs.set(job.projectId, { ...job });
       }),
-      estimateStorage: vi.fn(async () => ({ quota: 500_000_000, usage: 10_000 })),
       isOnline: vi.fn(() => true),
       now: vi.fn(() => Date.now()),
       sleep: vi.fn(async () => {}),
@@ -142,9 +141,11 @@ describe('TilePrefetchService queue behavior', () => {
     service.dispose();
   });
 
-  it('fails preflight when storage budget is insufficient', async () => {
+  it('marks failures when strict cache writes fail', async () => {
     const { deps, fetchAndCacheTile } = createDeps({
-      estimateStorage: vi.fn(async () => ({ quota: 1000, usage: 980 })),
+      fetchAndCacheTile: vi.fn(async () => {
+        throw new Error('Tile cache is full');
+      }),
     });
     const service = new TilePrefetchService(deps);
 
@@ -161,8 +162,8 @@ describe('TilePrefetchService queue behavior', () => {
 
     const [job] = service.getSnapshot();
     expect(job.status).toBe('error');
-    expect(job.message).toContain('Insufficient storage budget');
-    expect(fetchAndCacheTile).not.toHaveBeenCalled();
+    expect(job.message).toContain('Tile cache is full');
+    expect(fetchAndCacheTile).toHaveBeenCalled();
     service.dispose();
   });
 });

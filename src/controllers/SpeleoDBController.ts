@@ -9,7 +9,7 @@
  * re-render via useSyncExternalStore.
  */
 
-import { HTTP_STATUS, MAP, PREFERENCES } from '../constants';
+import { HTTP_STATUS, MAP, NETWORK, PREFERENCES } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import { clearPrefetchJobs } from '../services/TileCacheService';
@@ -113,6 +113,8 @@ export class SpeleoDBController {
   // ---- Observable state -----------------------------------------------------
   private _authState: AuthState = { isAuthenticated: false, user: null, token: null };
   private _isOnline = false;
+  private _isOfflineLocked = false;
+  private _isRetryingConnection = false;
   private _projects: Project[] = [];
   private _syncStatus: SyncStatus = 'idle';
   private _tilePrefetchJobs: TilePrefetchJobState[] = [];
@@ -122,6 +124,8 @@ export class SpeleoDBController {
   // Snapshot references for useSyncExternalStore (identity-stable between notifies)
   private _authStateSnapshot: AuthState = this._authState;
   private _isOnlineSnapshot: boolean = this._isOnline;
+  private _isOfflineLockedSnapshot: boolean = this._isOfflineLocked;
+  private _isRetryingConnectionSnapshot: boolean = this._isRetryingConnection;
   private _projectsSnapshot: Project[] = this._projects;
   private _syncStatusSnapshot: SyncStatus = this._syncStatus;
   private _tilePrefetchJobsSnapshot: TilePrefetchJobState[] = this._tilePrefetchJobs;
@@ -148,6 +152,14 @@ export class SpeleoDBController {
 
   get isOnline(): boolean {
     return this._isOnlineSnapshot;
+  }
+
+  get isOfflineLocked(): boolean {
+    return this._isOfflineLockedSnapshot;
+  }
+
+  get isRetryingConnection(): boolean {
+    return this._isRetryingConnectionSnapshot;
   }
 
   get currentUser(): User | null {
@@ -181,6 +193,8 @@ export class SpeleoDBController {
     // Produce new snapshot references so useSyncExternalStore detects changes.
     this._authStateSnapshot = { ...this._authState };
     this._isOnlineSnapshot = this._isOnline;
+    this._isOfflineLockedSnapshot = this._isOfflineLocked;
+    this._isRetryingConnectionSnapshot = this._isRetryingConnection;
     this._projectsSnapshot = [...this._projects];
     this._syncStatusSnapshot = this._syncStatus;
     this._tilePrefetchJobsSnapshot = [...this._tilePrefetchJobs];
@@ -206,7 +220,7 @@ export class SpeleoDBController {
     }
 
     // Online path
-    if (navigator.onLine) {
+    if (this.hasNetworkAccess()) {
       try {
         const response = await this.service.authenticate(instance, email, password);
 
@@ -254,7 +268,7 @@ export class SpeleoDBController {
 
     const user: User = { id: this.generateUserId(), email, name, country };
 
-    if (navigator.onLine) {
+    if (this.hasNetworkAccess()) {
       try {
         const prefs = this.prefs.getPreferences();
         const instanceUrl = prefs.instance ?? PREFERENCES.DEFAULT_INSTANCE;
@@ -289,24 +303,56 @@ export class SpeleoDBController {
    * - error -> 'network_error'
    */
   async validateSession(): Promise<'ok' | 'unauthorized' | 'network_error'> {
+    if (this._isOfflineLocked) {
+      return 'network_error';
+    }
+    return this.validateSessionAgainstServer();
+  }
+
+  async retryConnection(): Promise<'ok' | 'unauthorized' | 'network_error'> {
+    if (this._isRetryingConnection) return 'network_error';
+
+    this._isRetryingConnection = true;
+    this.notify();
+    try {
+      return await this.validateSessionAgainstServer();
+    } finally {
+      this._isRetryingConnection = false;
+      this.notify();
+    }
+  }
+
+  private async validateSessionAgainstServer(): Promise<'ok' | 'unauthorized' | 'network_error'> {
     const prefs = this.prefs.getPreferences();
     const token = prefs.token;
     const instance = prefs.instance?.trim();
     if (!token || !instance) return 'unauthorized';
 
     try {
-      const response = await this.service.validateToken(instance, token);
+      const response = await this.service.validateToken(
+        instance,
+        token,
+        NETWORK.STARTUP_AUTH_TIMEOUT_MS,
+      );
 
       if (response.status >= 200 && response.status < 300) {
         this._isOnline = true;
+        this._isOfflineLocked = false;
         this.notify();
         return 'ok';
       }
       if (response.status >= 400 && response.status < 500) {
+        this._isOfflineLocked = false;
         return 'unauthorized';
       }
-      return 'unauthorized';
+      this._isOnline = false;
+      this._isOfflineLocked = true;
+      this.notify();
+      return 'network_error';
     } catch {
+      this._isOnline = false;
+      this._isOfflineLocked = true;
+      this.notify();
       return 'network_error';
     }
   }
@@ -330,7 +376,7 @@ export class SpeleoDBController {
    * Flush queued operations to the server (e.g. signup that happened offline).
    */
   async syncPending(): Promise<void> {
-    if (!navigator.onLine) return;
+    if (!this.hasNetworkAccess()) return;
 
     const prefs = this.prefs.getPreferences();
     const instanceUrl = prefs.instance ?? PREFERENCES.DEFAULT_INSTANCE;
@@ -375,7 +421,7 @@ export class SpeleoDBController {
     }
 
     // Step 2 -- fetch fresh data if online
-    if (!navigator.onLine) {
+    if (!this.hasNetworkAccess()) {
       // Already showing cached data (if any); nothing more to do offline.
       if (this._projects.length === 0) {
         this._syncStatus = 'error';
@@ -464,7 +510,7 @@ export class SpeleoDBController {
    * Uses bbox+50m and zoom levels 0..18 so map imagery is available offline.
    */
   private async scheduleTilePrefetch(projects: Project[]): Promise<void> {
-    if (!navigator.onLine) return;
+    if (!this.hasNetworkAccess()) return;
 
     const eligible = projects.filter((p) => p.geojson_file && !p.exclude_geojson);
     if (eligible.length === 0) return;
@@ -602,5 +648,10 @@ export class SpeleoDBController {
 
   private generateUserId(): string {
     return 'user_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+  }
+
+  private hasNetworkAccess(): boolean {
+    const online = typeof navigator === 'undefined' ? true : navigator.onLine;
+    return !this._isOfflineLocked && online;
   }
 }
