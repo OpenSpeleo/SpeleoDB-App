@@ -10,11 +10,6 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Move map controls away from screen edge on dashboard. */
-.dashboard-map-container .maplibregl-ctrl-bottom-right {
-  transform: translate(-15px, -15px);
-}
-
 /* Custom scrollbar for webkit browsers */
 @layer components {
   ::-webkit-scrollbar {

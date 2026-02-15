@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { IonPage, IonContent, IonRefresher, IonRefresherContent } from '@ionic/react';
-import Map, { Layer, Source, NavigationControl } from 'react-map-gl/maplibre';
+import Map, { Layer, Source } from 'react-map-gl/maplibre';
 import type { MapRef } from 'react-map-gl/maplibre';
 import type { LngLatBoundsLike } from 'maplibre-gl';
 
@@ -177,6 +177,22 @@ function visitCoords(
       for (const g of geometry.geometries) visitCoords(g, fn);
       break;
   }
+}
+
+type OrientationLockMap = {
+  touchZoomRotate?: { disableRotation?: () => void };
+  setBearing?: (bearing: number) => void;
+  setPitch?: (pitch: number) => void;
+};
+
+/** Keep the map north-up and disable touch rotation. */
+function lockMapOrientation(mapRef: MapRef | null): void {
+  if (!mapRef) return;
+
+  const map = mapRef.getMap() as unknown as OrientationLockMap;
+  map.touchZoomRotate?.disableRotation?.();
+  map.setBearing?.(MAP.NORTH_UP_ORIENTATION.bearing);
+  map.setPitch?.(MAP.NORTH_UP_ORIENTATION.pitch);
 }
 
 // ==================== Register tile caching protocol once ====================
@@ -422,6 +438,10 @@ const Dashboard: React.FC = () => {
     }, 0);
   }, []);
 
+  const handleMapLoad = useCallback(() => {
+    lockMapOrientation(mapRef.current);
+  }, []);
+
   // ---- Render ---------------------------------------------------------------
 
   if (!controller.isAuthenticated()) return null;
@@ -453,14 +473,15 @@ const Dashboard: React.FC = () => {
                 longitude: MAP.DEFAULT_CENTER[0],
                 latitude: MAP.DEFAULT_CENTER[1],
                 zoom: MAP.DEFAULT_ZOOM,
+                ...MAP.NORTH_UP_ORIENTATION,
               }}
               maxZoom={MAP.MAX_ZOOM}
+              {...MAP.ROTATION_LOCK_INTERACTIONS}
               style={{ width: '100%', height: '100%' }}
               mapStyle={mapStyle as maplibregl.StyleSpecification}
               attributionControl={{ compact: true }}
+              onLoad={handleMapLoad}
             >
-              <NavigationControl position="bottom-right" showCompass={true} />
-
               {/* GeoJSON layers for each active project */}
               {sortedProjects.map((project) => {
                 if (!activeProjectIds.has(project.id) || !geoJsonData[project.id]) {

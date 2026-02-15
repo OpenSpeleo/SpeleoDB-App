@@ -9,6 +9,35 @@ import type { Project } from '../types/project';
 
 // ==================== Mocks ====================
 
+const {
+  mapPropsRef,
+  mockMapFitBounds,
+  mockGetMap,
+  mockDisableTouchRotation,
+  mockSetBearing,
+  mockSetPitch,
+} = vi.hoisted(() => {
+  const mapPropsRef = { current: null as Record<string, unknown> | null };
+  const mockMapFitBounds = vi.fn();
+  const mockDisableTouchRotation = vi.fn();
+  const mockSetBearing = vi.fn();
+  const mockSetPitch = vi.fn();
+  const mockGetMap = vi.fn(() => ({
+    touchZoomRotate: { disableRotation: mockDisableTouchRotation },
+    setBearing: mockSetBearing,
+    setPitch: mockSetPitch,
+  }));
+
+  return {
+    mapPropsRef,
+    mockMapFitBounds,
+    mockGetMap,
+    mockDisableTouchRotation,
+    mockSetBearing,
+    mockSetPitch,
+  };
+});
+
 vi.mock('@ionic/react', () => ({
   IonPage: ({ children }: { children?: React.ReactNode }) => (
     <div data-testid="ion-page">{children}</div>
@@ -33,11 +62,22 @@ vi.mock('maplibre-gl', () => ({
 // Mock react-map-gl/maplibre
 vi.mock('react-map-gl/maplibre', () => {
   const MapMock = React.forwardRef(
-    ({ children }: { children?: React.ReactNode }, ref: React.Ref<unknown>) => {
+    (
+      { children, ...mapProps }: { children?: React.ReactNode } & Record<string, unknown>,
+      ref: React.Ref<unknown>,
+    ) => {
+      mapPropsRef.current = mapProps;
+
       React.useImperativeHandle(ref, () => ({
-        fitBounds: vi.fn(),
-        getMap: vi.fn(),
+        fitBounds: mockMapFitBounds,
+        getMap: mockGetMap,
       }));
+
+      React.useEffect(() => {
+        const onLoad = mapProps.onLoad;
+        if (typeof onLoad === 'function') onLoad();
+      }, [mapProps.onLoad]);
+
       return <div data-testid="map">{children}</div>;
     },
   );
@@ -187,6 +227,7 @@ function pointFeatureCollection(lng = 2.3, lat = 46.6): GeoJSON.FeatureCollectio
 describe('Dashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mapPropsRef.current = null;
     mockIsAuthenticated.mockReturnValue(true);
     mockProjects = [];
     mockGetProjectVisibilityPreferences.mockReturnValue({});
@@ -243,10 +284,36 @@ describe('Dashboard', () => {
     expect(screen.getByText('Projects')).toBeInTheDocument();
   });
 
-  it('renders navigation control', async () => {
+  it('does not render navigation control', async () => {
     renderDashboard();
     await waitFor(() => {
-      expect(screen.getByTestId('nav-control')).toBeInTheDocument();
+      expect(screen.queryByTestId('nav-control')).not.toBeInTheDocument();
+    });
+  });
+
+  it('locks map orientation and disables rotation interactions', async () => {
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('map')).toBeInTheDocument();
+      expect(mapPropsRef.current).not.toBeNull();
+    });
+
+    const mapProps = mapPropsRef.current as Record<string, unknown>;
+    expect(mapProps.dragRotate).toBe(false);
+    expect(mapProps.touchPitch).toBe(false);
+    expect(mapProps.pitchWithRotate).toBe(false);
+    expect(mapProps.keyboard).toBe(false);
+    expect(mapProps.maxPitch).toBe(0);
+
+    const initialViewState = mapProps.initialViewState as Record<string, unknown>;
+    expect(initialViewState.bearing).toBe(0);
+    expect(initialViewState.pitch).toBe(0);
+
+    await waitFor(() => {
+      expect(mockDisableTouchRotation).toHaveBeenCalledOnce();
+      expect(mockSetBearing).toHaveBeenCalledWith(0);
+      expect(mockSetPitch).toHaveBeenCalledWith(0);
     });
   });
 

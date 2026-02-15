@@ -78,6 +78,19 @@ describe('constants', () => {
     it('caps MAX_ZOOM at 18 for satellite reliability', () => {
       expect(MAP.MAX_ZOOM).toBe(18);
     });
+
+    it('locks map orientation to north-up defaults', () => {
+      expect(MAP.NORTH_UP_ORIENTATION.bearing).toBe(0);
+      expect(MAP.NORTH_UP_ORIENTATION.pitch).toBe(0);
+    });
+
+    it('disables rotation and pitch interactions for locked maps', () => {
+      expect(MAP.ROTATION_LOCK_INTERACTIONS.dragRotate).toBe(false);
+      expect(MAP.ROTATION_LOCK_INTERACTIONS.touchPitch).toBe(false);
+      expect(MAP.ROTATION_LOCK_INTERACTIONS.pitchWithRotate).toBe(false);
+      expect(MAP.ROTATION_LOCK_INTERACTIONS.keyboard).toBe(false);
+      expect(MAP.ROTATION_LOCK_INTERACTIONS.maxPitch).toBe(0);
+    });
   });
 
   describe('COLOR_PALETTE', () => {

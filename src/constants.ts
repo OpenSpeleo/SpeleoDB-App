@@ -55,6 +55,17 @@ export const MAP = {
     'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   DEFAULT_CENTER: [2.3, 46.6] as [number, number], // France center
   DEFAULT_ZOOM: 5,
+  NORTH_UP_ORIENTATION: {
+    bearing: 0,
+    pitch: 0,
+  } as const,
+  ROTATION_LOCK_INTERACTIONS: {
+    dragRotate: false,
+    touchPitch: false,
+    pitchWithRotate: false,
+    keyboard: false,
+    maxPitch: 0,
+  } as const,
   // Hard cap to avoid provider "map data not available" tiles.
   MAX_ZOOM: 18,
   // Hard cap for all cached tile payloads (prefetch + runtime map browsing).
