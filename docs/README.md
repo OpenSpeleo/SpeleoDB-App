@@ -9,6 +9,7 @@ This folder contains product and engineering documentation for core app behavior
 - `logout-behavior.md`: when logout/cache purge happens and what data is cleared.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding conventions, and testing expectations.
+- `onboarding-modal.md`: companion onboarding modal design intent, responsive layout behavior, and UX requirements.
 
 ## Maintainer note
 

@@ -231,10 +231,12 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
         }}
         canDismiss={allowCompanionInfoModalDismiss}
         backdropDismiss={false}
+        className="onboarding-modal"
       >
-        <IonContent className="ion-padding">
-          <div className="relative flex items-center justify-center min-h-full py-6">
-            <div className="absolute inset-0 pointer-events-none">
+        <IonContent>
+          {/* Phone layout (< md): vertically centered card */}
+          <div className="md:hidden relative flex items-center justify-center min-h-full px-4 py-6">
+            <div className="absolute inset-0 pointer-events-none overflow-hidden">
               <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-72 h-72 rounded-full bg-purple-500/20 blur-3xl" />
               <div className="absolute -bottom-16 right-0 w-60 h-60 rounded-full bg-indigo-500/20 blur-3xl" />
             </div>
@@ -254,22 +256,22 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
 
               <div className="space-y-3 text-left mb-5">
                 <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-3 py-2">
-                  <p className="text-sm font-medium text-slate-100">Sync all your SpeleoDB data to your phone</p>
+                  <p className="text-sm font-medium text-slate-100">Sync all your SpeleoDB surveys to your phone</p>
                 </div>
                 <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-3 py-2">
                   <p className="text-sm font-medium text-slate-100">Pull down anytime to refresh</p>
                 </div>
                 <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-3 py-2">
-                  <p className="text-sm font-medium text-slate-100">Everything stays on your phoner: full offline access</p>
+                  <p className="text-sm font-medium text-slate-100">Full offline access: no internet required.</p>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 p-4 text-left mb-5">
                 <p className="text-sm text-slate-200 font-medium mb-2">
-                  Survey in the field, publish to SpeleoDB, then sync to your phone in seconds.
+                  Survey, publish to SpeleoDB, and sync to your phone in seconds.
                 </p>
                 <p className="text-sm text-slate-300 mt-4">
-                  You can now visualize your survey in the jungle or even underwater.
+                  Visualize your surveys in the field, underground or even underwater.
                 </p>
               </div>
 
@@ -285,6 +287,70 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
               >
                 Start exploring
               </IonButton>
+            </div>
+          </div>
+
+          {/* Tablet layout (md+): side-by-side hero + features */}
+          <div className="hidden md:flex min-h-full">
+            {/* Left pane: branded hero */}
+            <div className="relative w-2/5 flex flex-col items-center justify-center p-8 lg:p-12 overflow-hidden border-r border-slate-700/30">
+              <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute inset-0 bg-gradient-to-br from-purple-950/40 via-slate-900 to-indigo-950/30" />
+                <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[28rem] h-[28rem] rounded-full bg-purple-500/15 blur-3xl" />
+                <div className="absolute bottom-1/4 -right-20 w-80 h-80 rounded-full bg-indigo-500/15 blur-3xl" />
+              </div>
+
+              <div className="relative text-center max-w-sm">
+                <img src={logoPng} alt="SpeleoDB" className="w-full max-w-sm mx-auto mb-8" />
+                <h2 className="text-3xl lg:text-4xl font-bold text-slate-100 mb-4 leading-tight">
+                  Your surveys, always with you
+                </h2>
+                <p className="text-slate-300 text-base font-bold mb-1">
+                  The SpeleoDB app is built for fieldwork.
+                </p>
+                <p className="text-slate-300 text-base font-bold">
+                  Online or Offline.
+                </p>
+              </div>
+            </div>
+
+            {/* Right pane: features + call to action */}
+            <div className="w-3/5 flex flex-col items-center justify-center p-8 lg:p-12">
+              <div className="w-full max-w-lg">
+                <div className="space-y-3 mb-6">
+                  <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-4 py-3">
+                    <p className="text-base font-medium text-slate-100">Sync all your SpeleoDB surveys to your device</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-4 py-3">
+                    <p className="text-base font-medium text-slate-100">Pull down anytime to refresh</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-4 py-3">
+                    <p className="text-base font-medium text-slate-100">Full offline access: no internet required</p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 p-5 mb-6">
+                  <p className="text-base text-slate-200 font-medium mb-3">
+                    Survey, publish to SpeleoDB, and sync to your device in seconds.
+                  </p>
+                  <p className="text-sm text-slate-300">
+                    Visualize your surveys in the field, underground or even underwater.
+                  </p>
+                </div>
+
+                <p className="text-slate-300 text-sm mb-6 text-center">Have fun exploring.</p>
+
+                <IonButton
+                  expand="block"
+                  className="font-semibold"
+                  onClick={() => {
+                    setAllowCompanionInfoModalDismiss(true);
+                    setShowCompanionInfoModal(false);
+                  }}
+                >
+                  Start exploring
+                </IonButton>
+              </div>
             </div>
           </div>
         </IonContent>

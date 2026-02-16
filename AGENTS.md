@@ -8,6 +8,7 @@ Use the `docs/` folder as the primary guidance source for behavior and conventio
 - `docs/offline-mode.md` (for auth/offline/cache/startup/retry changes)
 - `docs/networking.md`
 - `docs/implementation-guidelines.md` (for architecture/style/testing expectations)
+- `docs/onboarding-modal.md` (for onboarding modal layout/UX/dismissal changes)
 
 ## Working rules
 
