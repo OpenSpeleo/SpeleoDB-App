@@ -10,6 +10,7 @@ This folder contains product and engineering documentation for core app behavior
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding conventions, and testing expectations.
 - `onboarding-modal.md`: companion onboarding modal design intent, responsive layout behavior, and UX requirements.
+- `project-panel.md`: project panel layout, open/close behavior, zoom-to-project, auto-close UX, and persistence.
 
 ## Maintainer note
 

@@ -538,6 +538,34 @@ describe('Dashboard', () => {
     expect(mockSetProjectVisibilityPreference).toHaveBeenCalledWith('p1', true);
   });
 
+  it('closes the project panel after zooming to a project', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Click Me' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetProjectVisibilityPreferences.mockReturnValue({ p1: true });
+
+    renderDashboard();
+
+    // Open the panel first
+    await waitFor(() => {
+      expect(screen.getByLabelText('Open project panel')).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByLabelText('Open project panel'));
+    expect(screen.getByText('Projects')).toBeInTheDocument();
+
+    // Panel should be visible (translate-x-0)
+    const panelBefore = document.querySelector('.translate-x-0.z-30');
+    expect(panelBefore).not.toBeNull();
+
+    // Click the project name to zoom
+    await userEvent.click(screen.getByText('Click Me'));
+
+    // Panel should now be closed (-translate-x-full)
+    await waitFor(() => {
+      const panelAfter = document.querySelector('.-translate-x-full.z-30');
+      expect(panelAfter).not.toBeNull();
+    });
+  });
+
   it('uses the same project color in panel dot and map layer', async () => {
     mockProjects = [
       makeProject({

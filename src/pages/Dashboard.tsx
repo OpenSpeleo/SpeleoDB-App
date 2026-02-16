@@ -452,6 +452,7 @@ const Dashboard: React.FC = () => {
 
   const handleZoomToProject = useCallback((projectId: string) => {
     setProjectVisibilityPreference(projectId, true);
+    setIsPanelOpen(false);
 
     // Activate the project
     setActiveProjectIds((prev) => {
