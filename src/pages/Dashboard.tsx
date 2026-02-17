@@ -900,20 +900,21 @@ const Dashboard: React.FC = () => {
       );
     };
 
-    setProjectVisibilityPreference(projectId, true);
-    setIsPanelOpen(false);
-
-    // Activate the project
+    // Step 0: Ensure the project layer is visible on the map
     setActiveProjectIds((prev) => {
       if (prev.has(projectId)) return prev;
       const next = new Set(prev);
       next.add(projectId);
       return next;
     });
+    setProjectVisibilityPreference(projectId, true);
 
-    // Zoom to this project's bounds — read geoJsonData from the latest state
-    // via a functional update trick: we schedule the zoom after React processes
-    // the activation above.
+    // Step 1: Close the panel so the map is unobstructed before animating
+    setIsPanelOpen(false);
+
+    // Step 2: Zoom to this project's bounds — read geoJsonData from the
+    // latest state via a functional update trick: we schedule the zoom after
+    // React processes the activation above.
     setTimeout(() => {
       // Access the ref-stable map and read geoJsonData at call time
       const map = mapRef.current;

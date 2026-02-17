@@ -58,11 +58,10 @@ Each row contains:
 
 Tapping the name or the color dot triggers `onZoomToProject(projectId)`, which:
 
-1. Sets the project's visibility preference to `true` (persisted).
-2. Closes the panel immediately (auto-close).
-3. Activates the project layer if not already active.
-4. Computes the bounding box from the project's GeoJSON data (with 10% padding).
-5. Calls `map.fitBounds()` with `padding: 60`, `maxZoom: 16`, `duration: 800` (800ms fly animation).
+1. Ensures the project layer is visible: activates the project if not already active and persists the visibility preference as `true`.
+2. Closes the panel immediately (auto-close) so the map is unobstructed.
+3. Computes the bounding box from the project's GeoJSON data (with 10% padding).
+4. Calls `map.fitBounds()` with `padding: 60`, `maxZoom: 16`, `duration: 800` (800ms fly animation).
 
 ### Toggle switch
 
