@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:www.speleodb.org</string>
+		<string>webcredentials:www.speleodb.org</string>
 	</array>
 </dict>
 </plist>

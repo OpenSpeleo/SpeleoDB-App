@@ -84,22 +84,19 @@ Run `make help` to see all targets. Here is the full reference:
 
 ## Native Credential Association Files
 
-To enable native password-manager suggestions for the app login, host both files below on the canonical domain:
+To enable native password-manager suggestions for the app login (without opening all site links in the app), host these URLs on the canonical domain:
 
 - `https://www.speleodb.org/.well-known/apple-app-site-association`
 - `https://www.speleodb.org/.well-known/assetlinks.json`
+- `https://www.speleodb.org/.well-known/change-password` (recommended)
 
 `apple-app-site-association` (no file extension):
 
 ```json
 {
-  "applinks": {
-    "apps": [],
-    "details": [
-      {
-        "appID": "UDUF7J66TN.org.speleodb.app",
-        "paths": ["*"]
-      }
+  "webcredentials": {
+    "apps": [
+      "UDUF7J66TN.org.speleodb.app"
     ]
   }
 }
@@ -111,7 +108,6 @@ To enable native password-manager suggestions for the app login, host both files
 [
   {
     "relation": [
-      "delegate_permission/common.handle_all_urls",
       "delegate_permission/common.get_login_creds"
     ],
     "target": {
@@ -124,6 +120,8 @@ To enable native password-manager suggestions for the app login, host both files
   }
 ]
 ```
+
+`/.well-known/change-password` should return an HTTP redirect (`301` or `302`) to your account password-change page (for example, `/private/password/`).
 
 Get the Android signing fingerprint with:
 
