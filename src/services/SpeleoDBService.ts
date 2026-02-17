@@ -71,14 +71,81 @@ export class SpeleoDBService {
     instance: string,
     token: string,
   ): Promise<HttpResponse<ProjectsGeoJSONResponse>> {
-    const baseUrl = getInstanceBaseUrl(instance);
-    const url = baseUrl + API.PROJECTS_GEOJSON_ENDPOINT;
+    return this.getAuthorized<ProjectsGeoJSONResponse>(
+      instance,
+      token,
+      API.PROJECTS_GEOJSON_ENDPOINT,
+    );
+  }
 
-    return this.http.request<ProjectsGeoJSONResponse>({
-      url,
-      method: 'GET',
-      headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
-    });
+  /**
+   * GET /api/v1/landmarks/geojson/  (with Token header)
+   */
+  async getLandmarksGeoJSON(
+    instance: string,
+    token: string,
+  ): Promise<HttpResponse<GeoJSON.FeatureCollection>> {
+    return this.getAuthorized<GeoJSON.FeatureCollection>(
+      instance,
+      token,
+      API.LANDMARKS_GEOJSON_ENDPOINT,
+    );
+  }
+
+  /**
+   * GET /api/v1/stations/subsurface/geojson/  (with Token header)
+   */
+  async getSubsurfaceStationsGeoJSON(
+    instance: string,
+    token: string,
+  ): Promise<HttpResponse<GeoJSON.FeatureCollection>> {
+    return this.getAuthorized<GeoJSON.FeatureCollection>(
+      instance,
+      token,
+      API.SUBSURFACE_STATIONS_GEOJSON_ENDPOINT,
+    );
+  }
+
+  /**
+   * GET /api/v1/stations/surface/geojson/  (with Token header)
+   */
+  async getSurfaceStationsGeoJSON(
+    instance: string,
+    token: string,
+  ): Promise<HttpResponse<GeoJSON.FeatureCollection>> {
+    return this.getAuthorized<GeoJSON.FeatureCollection>(
+      instance,
+      token,
+      API.SURFACE_STATIONS_GEOJSON_ENDPOINT,
+    );
+  }
+
+  /**
+   * GET /api/v1/exploration-leads/geojson/  (with Token header)
+   */
+  async getExplorationLeadsGeoJSON(
+    instance: string,
+    token: string,
+  ): Promise<HttpResponse<GeoJSON.FeatureCollection>> {
+    return this.getAuthorized<GeoJSON.FeatureCollection>(
+      instance,
+      token,
+      API.EXPLORATION_LEADS_GEOJSON_ENDPOINT,
+    );
+  }
+
+  /**
+   * GET /api/v1/cylinder-installs/geojson/  (with Token header)
+   */
+  async getCylinderInstallsGeoJSON(
+    instance: string,
+    token: string,
+  ): Promise<HttpResponse<GeoJSON.FeatureCollection>> {
+    return this.getAuthorized<GeoJSON.FeatureCollection>(
+      instance,
+      token,
+      API.CYLINDER_INSTALLS_GEOJSON_ENDPOINT,
+    );
   }
 
   /**
@@ -89,5 +156,20 @@ export class SpeleoDBService {
    */
   async downloadJSON<T = unknown>(url: string): Promise<HttpResponse<T>> {
     return this.http.request<T>({ url, method: 'GET' });
+  }
+
+  private async getAuthorized<T>(
+    instance: string,
+    token: string,
+    endpoint: string,
+  ): Promise<HttpResponse<T>> {
+    const baseUrl = getInstanceBaseUrl(instance);
+    const url = baseUrl + endpoint;
+
+    return this.http.request<T>({
+      url,
+      method: 'GET',
+      headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
+    });
   }
 }

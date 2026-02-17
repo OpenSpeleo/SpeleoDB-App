@@ -26,6 +26,7 @@ This document defines the dashboard pull-to-refresh feature behavior.
 
 - Pull/drag gestures that start on the map surface must not trigger pull-to-refresh.
 - Map pan/zoom interaction remains map-only.
+- Pull/scroll gestures inside the project side panel list must not trigger pull-to-refresh.
 
 ## Visual behavior
 
@@ -37,12 +38,16 @@ This document defines the dashboard pull-to-refresh feature behavior.
 
 When refresh is triggered:
 
-- If online, run project sync
-- If online:
-    1. First attempts connection retry (see offline-mode.md for more details)
-        a. If retry succeeds, run project sync.
-        b. If retry fails with network error, the app remains offline and uses cached data.
-        c. If retry fails with HTTP 400 code, logout the user
+- If currently online:
+  - run dashboard sync (`syncProjects()`), which refreshes:
+    - project list and per-project GeoJSON,
+    - read-only overlay GeoJSON (landmarks, stations, exploration leads, cylinder installs).
+  - map marker labels are regenerated from refreshed overlay payloads on dashboard reload.
+- If offline lock is active:
+  1. attempt explicit reconnect (`retryConnection()`),
+  2. if reconnect succeeds, run dashboard sync,
+  3. if reconnect fails with network/transport error, remain offline and keep cached data,
+  4. if reconnect returns unauthorized (`4xx`), logout and purge local data.
 
 Refresher interaction is completed after the async flow finishes.
 
@@ -61,11 +66,13 @@ These values define pull sensitivity and trigger thresholds for the dashboard re
 - Feature container: `src/pages/Dashboard.tsx`
 - Refresher visual spacing/styles: `src/theme/variables.css`
 - Feature tests: `src/pages/Dashboard.test.tsx`
+- Overlay rendering/source tests: `src/pages/Dashboard.test.tsx`
 
 ## Acceptance checklist
 
 - Header pull-down shows indicator clearly below safe area and can refresh.
 - Map drag/pull does not show pull-to-refresh UI and does not trigger refresh.
+- Project panel list scrolling does not trigger pull-to-refresh.
 - Header controls remain usable while pull-to-refresh is available.
 - Map pan and pinch-zoom remain functional.
 

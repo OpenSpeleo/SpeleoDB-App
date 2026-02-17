@@ -32,6 +32,7 @@ If neither action occurs, app remains in offline behavior even if device connect
 ## Request gating while offline
 
 - During offline lock, normal data/map fetch paths should skip outbound network and use cache.
+- This includes dashboard project GeoJSON and read-only overlay GeoJSON (landmarks, stations, exploration leads, cylinder installs).
 - Reconnect attempts are explicit and limited to the two triggers above.
 - Transport errors/timeouts remain non-destructive (no logout, no cache purge).
 
@@ -52,3 +53,4 @@ See also:
 - `docs/pull-to-refresh.md`
 - `docs/logout-behavior.md`
 - `docs/implementation-guidelines.md`
+- `docs/dashboard-map-overlays.md`

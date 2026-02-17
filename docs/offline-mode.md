@@ -50,6 +50,7 @@ Both actions must run a tentative reconnect flow and resolve to exactly one outc
 ## Network behavior while offline
 
 - Offline mode uses cached app data and cached map resources.
+- Dashboard map overlays (landmarks, stations, exploration leads, cylinder installs) are read from cached GeoJSON when offline.
 - Outbound network requests should be skipped for normal offline operation paths.
 - Explicit reconnect attempts are limited to the two recovery paths above.
 - Pull-to-refresh is the only in-session manual reconnect trigger while offline.
@@ -71,10 +72,12 @@ In offline mode flows, local data must only be purged on authentication-invalid 
 - Architecture and style expectations: `docs/implementation-guidelines.md`
 - Map/tile offline fetch behavior: `src/services/TileCacheService.ts`
 - Tile prefetch runtime behavior: `src/services/TilePrefetchService.ts`
+- Overlay contract and icon mapping: `docs/dashboard-map-overlays.md`
 - Key tests:
   - `src/controllers/SpeleoDBController.test.ts`
   - `src/context/SpeleoDBProvider.test.tsx`
   - `src/pages/Dashboard.test.tsx`
+  - `src/services/ProjectCacheService.test.ts`
   - `src/services/TileCacheService.test.ts`
   - `src/services/TilePrefetchService.test.ts`
 

@@ -20,7 +20,8 @@ import type { MapRef } from 'react-map-gl/maplibre';
 import type { LngLatBoundsLike } from 'maplibre-gl';
 
 import { useSpeleoDB } from '../context/SpeleoDBProvider';
-import { MAP } from '../constants';
+import { MAP, MAP_OVERLAYS } from '../constants';
+import type { MapOverlayGeoJsonRecord, MapOverlayId } from '../types/mapOverlay';
 import { registerTileCacheProtocol, getCachedStyle } from '../services/TileCacheService';
 import {
   getProjectVisibilityPreferences,
@@ -28,20 +29,50 @@ import {
   setProjectVisibilityPreferences,
 } from '../services/PreferencesService';
 import ProjectPanel from '../components/ProjectPanel';
+import OverlayMarkerDetailsModal from '../components/OverlayMarkerDetailsModal';
+import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { createProjectColorState, getProjectColor } from '../utils/projectColors';
 import { restartGuidedTourFromHelp } from '../onboarding/guidedTour/engine';
 import { TOUR_EVENTS } from '../onboarding/guidedTour/selectors';
+import {
+  INTERACTIVE_OVERLAY_LAYER_IDS,
+  parseOverlayMarkerDetails,
+} from '../utils/overlayMarkerDetails';
+import type {
+  InteractiveOverlayFeature,
+  OverlayMarkerDetails,
+} from '../utils/overlayMarkerDetails';
+import artifactIcon from '../assets/media/map-icons/artifact-icon.png';
+import boneIcon from '../assets/media/map-icons/bones-icon.png';
+import biologyIcon from '../assets/media/map-icons/fish-icon.png';
+import geologyIcon from '../assets/media/map-icons/rock-icon.png';
+import explorationLeadIcon from '../assets/media/map-icons/exploration-lead-icon.png';
+import cylinderIcon from '../assets/media/map-icons/cylinder-orange-icon.png';
 
 // ==================== GeoJSON type alias ====================
 
 type GeoJsonRecord = Record<string, GeoJSON.FeatureCollection>;
 type IonRefreshEvent = CustomEvent<{ complete: () => void }>;
+type OverlayIconId =
+  | 'biology-station-icon'
+  | 'bone-station-icon'
+  | 'artifact-station-icon'
+  | 'geology-station-icon'
+  | 'exploration-lead-icon'
+  | 'cylinder-icon';
+
+type OverlayIconAvailability = Record<OverlayIconId, boolean>;
+
+type ProjectLinkedOverlayId = 'subsurfaceStations' | 'explorationLeads' | 'cylinderInstalls';
 
 const REFRESH_SETTLE_MIN_DELAY_MS = 700;
 const REFRESH_SETTLE_MAX_DELAY_MS = 2400;
 const REFRESH_SETTLE_POLL_INTERVAL_MS = 80;
 const REFRESH_SETTLE_REQUIRED_STABLE_SAMPLES = 4;
 const REFRESH_SETTLE_POSITION_EPSILON_PX = 0.75;
+const MAP_MARKER_HIT_RADIUS_PX_TOUCH = 26;
+const MAP_TOUCH_TAP_MAX_MOVEMENT_PX = 12;
+const MAP_TOUCH_TAP_MAX_DURATION_MS = 550;
 const REFRESH_ACTIVE_CLASS_HINTS = [
   'refresher-active',
   'refresher-refreshing',
@@ -49,88 +80,227 @@ const REFRESH_ACTIVE_CLASS_HINTS = [
   'refresher-ready',
 ];
 
+const OVERLAY_ICON_SOURCES: Record<OverlayIconId, string> = {
+  'biology-station-icon': biologyIcon,
+  'bone-station-icon': boneIcon,
+  'artifact-station-icon': artifactIcon,
+  'geology-station-icon': geologyIcon,
+  'exploration-lead-icon': explorationLeadIcon,
+  'cylinder-icon': cylinderIcon,
+};
+
+const DEFAULT_OVERLAY_ICON_AVAILABILITY: OverlayIconAvailability = {
+  'biology-station-icon': false,
+  'bone-station-icon': false,
+  'artifact-station-icon': false,
+  'geology-station-icon': false,
+  'exploration-lead-icon': false,
+  'cylinder-icon': false,
+};
+
+const PROJECT_LINKED_OVERLAY_IDS = new Set<ProjectLinkedOverlayId>([
+  'subsurfaceStations',
+  'explorationLeads',
+  'cylinderInstalls',
+]);
+
+const PROJECT_LAYER_ORDER_ANCHOR_SOURCE_ID = 'project-layer-order-anchor-source';
+const PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID = 'project-layer-order-anchor';
+const OVERLAY_ICON_WARNED = new Set<OverlayIconId>();
+const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
+  type: 'FeatureCollection',
+  features: [],
+};
+
 // ==================== Helpers ====================
 
-/**
- * Normalize any valid GeoJSON into a FeatureCollection.
- * Handles: FeatureCollection, Feature, bare Geometry, wrapped payloads,
- * and JSON strings returned by some native transports.
- */
-function normalizeGeoJSON(data: unknown): GeoJSON.FeatureCollection | null {
-  let current: unknown = data;
+function getOverlayMarkerMinZoom(overlayId: MapOverlayId): number {
+  return MAP_OVERLAYS.find((overlay) => overlay.id === overlayId)?.markerMinZoom ?? 12;
+}
 
-  // Unwrap a few common envelope shapes:
-  // - raw JSON string
-  // - { data: <geojson> }
-  // - { geojson: <geojson> }
-  // iOS native HTTP responses can surface JSON as strings.
-  for (let i = 0; i < 4; i += 1) {
-    if (typeof current === 'string') {
-      const trimmed = current.trim();
-      if (!trimmed) return null;
-      try {
-        current = JSON.parse(trimmed);
-      } catch {
-        return null;
-      }
+function getOverlayLabelMinZoom(overlayId: MapOverlayId): number | null {
+  const zoom = MAP_OVERLAYS.find((overlay) => overlay.id === overlayId)?.labelMinZoom;
+  return typeof zoom === 'number' ? zoom : null;
+}
+
+function resolveFeatureColor(properties: Record<string, unknown>): string {
+  if (typeof properties.color === 'string' && properties.color) {
+    return properties.color;
+  }
+  const tag = properties.tag;
+  if (tag && typeof tag === 'object') {
+    const tagColor = (tag as { color?: unknown }).color;
+    if (typeof tagColor === 'string' && tagColor) {
+      return tagColor;
+    }
+  }
+  return '#fb923c';
+}
+
+function normalizeOverlayGeoJSON(
+  overlayId: MapOverlayId,
+  featureCollection: GeoJSON.FeatureCollection,
+): GeoJSON.FeatureCollection {
+  if (overlayId !== 'subsurfaceStations' && overlayId !== 'surfaceStations') {
+    return featureCollection;
+  }
+
+  return {
+    ...featureCollection,
+    features: featureCollection.features.map((feature) => {
+      const properties = (feature.properties ?? {}) as Record<string, unknown>;
+      return {
+        ...feature,
+        properties: {
+          ...properties,
+          color: resolveFeatureColor(properties),
+        },
+      };
+    }),
+  };
+}
+
+type OverlayImageMap = {
+  hasImage: (id: string) => boolean;
+  addImage: (id: string, image: unknown) => void;
+  loadImage: (
+    url: string,
+    callback: (error?: Error | null, image?: unknown) => void,
+  ) => void;
+};
+
+type OverlayFeatureQueryMap = {
+  queryRenderedFeatures: (
+    pointOrBox: { x: number; y: number } | [[number, number], [number, number]],
+    options?: { layers?: string[] },
+  ) => InteractiveOverlayFeature[];
+  getCanvas: () => { getBoundingClientRect: () => DOMRect };
+  getLayer: (id: string) => unknown;
+};
+
+type MapPointerTapCandidate = {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startedAtMs: number;
+  moved: boolean;
+  pointerType: string;
+};
+
+function getClickedOverlayMarkerDetails(
+  features: InteractiveOverlayFeature[],
+): OverlayMarkerDetails | null {
+  for (const layerId of INTERACTIVE_OVERLAY_LAYER_IDS) {
+    const feature = features.find((candidate) => candidate.layer?.id === layerId);
+    if (!feature) {
       continue;
     }
-
-    if (!current || typeof current !== 'object') break;
-    const envelope = current as Record<string, unknown>;
-
-    if (typeof envelope.type === 'string' || Array.isArray(envelope.features)) {
-      break;
+    const details = parseOverlayMarkerDetails(feature);
+    if (details) {
+      return details;
     }
-
-    if ('data' in envelope) {
-      current = envelope.data;
-      continue;
-    }
-
-    if ('geojson' in envelope) {
-      current = envelope.geojson;
-      continue;
-    }
-
-    break;
   }
-
-  if (!current || typeof current !== 'object') return null;
-  const obj = current as Record<string, unknown>;
-
-  // Already a FeatureCollection
-  if (obj.type === 'FeatureCollection' && Array.isArray(obj.features)) {
-    return obj as unknown as GeoJSON.FeatureCollection;
-  }
-
-  // Some payloads omit "type" but still expose a features array.
-  if (Array.isArray(obj.features)) {
-    return {
-      type: 'FeatureCollection',
-      features: obj.features as GeoJSON.Feature[],
-    };
-  }
-
-  // Single Feature → wrap in a FeatureCollection
-  if (obj.type === 'Feature') {
-    return {
-      type: 'FeatureCollection',
-      features: [obj as unknown as GeoJSON.Feature],
-    };
-  }
-
-  // Bare Geometry → wrap in Feature → FeatureCollection
-  if (typeof obj.type === 'string' && ('coordinates' in obj || 'geometries' in obj)) {
-    return {
-      type: 'FeatureCollection',
-      features: [
-        { type: 'Feature', properties: {}, geometry: obj as unknown as GeoJSON.Geometry },
-      ],
-    };
-  }
-
   return null;
+}
+
+function getMarkerHitQueryBounds(
+  point: { x: number; y: number },
+  radiusPx: number,
+): [[number, number], [number, number]] {
+  return [
+    [point.x - radiusPx, point.y - radiusPx],
+    [point.x + radiusPx, point.y + radiusPx],
+  ];
+}
+
+function getProjectLinkFromFeature(
+  overlayId: ProjectLinkedOverlayId,
+  feature: GeoJSON.Feature,
+): string | null {
+  const properties = (feature.properties ?? {}) as Record<string, unknown>;
+  const candidate = overlayId === 'cylinderInstalls'
+    ? properties.project_id
+    : properties.project;
+  if (typeof candidate === 'string' && candidate) {
+    return candidate;
+  }
+  if (typeof candidate === 'number') {
+    return String(candidate);
+  }
+  return null;
+}
+
+function filterOverlayByProjectVisibility(
+  overlayId: MapOverlayId,
+  featureCollection: GeoJSON.FeatureCollection,
+  activeProjectIds: Set<string>,
+): GeoJSON.FeatureCollection {
+  if (!PROJECT_LINKED_OVERLAY_IDS.has(overlayId as ProjectLinkedOverlayId)) {
+    return featureCollection;
+  }
+
+  const projectLinkedOverlayId = overlayId as ProjectLinkedOverlayId;
+  return {
+    ...featureCollection,
+    features: featureCollection.features.filter((feature) => {
+      const projectId = getProjectLinkFromFeature(projectLinkedOverlayId, feature);
+      return Boolean(projectId && activeProjectIds.has(projectId));
+    }),
+  };
+}
+
+async function loadImageViaFetch(url: string): Promise<unknown> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  if (typeof createImageBitmap === 'function') {
+    return createImageBitmap(blob);
+  }
+
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    return await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Image element failed to load'));
+      image.src = objectUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function loadMapImage(
+  map: OverlayImageMap,
+  id: OverlayIconId,
+  url: string,
+): Promise<boolean> {
+  if (map.hasImage(id)) {
+    return true;
+  }
+
+  try {
+    const image = await loadImageViaFetch(url);
+    map.addImage(id, image);
+    return true;
+  } catch (fetchError) {
+    return new Promise((resolve) => {
+      map.loadImage(url, (error, image) => {
+        if (error || !image) {
+          if (!OVERLAY_ICON_WARNED.has(id)) {
+            OVERLAY_ICON_WARNED.add(id);
+            console.warn(`Failed to load map icon ${id} (${url})`, error ?? fetchError);
+          }
+          resolve(false);
+          return;
+        }
+        map.addImage(id, image);
+        resolve(true);
+      });
+    });
+  }
 }
 
 /** Compute combined bounding box for the given project IDs. */
@@ -249,18 +419,27 @@ const Dashboard: React.FC = () => {
   const didSyncRef = useRef(false);
   const didFitRef = useRef(false);
   const mapRef = useRef<MapRef>(null);
+  const mapPointerTapCandidateRef = useRef<MapPointerTapCandidate | null>(null);
 
   // Panel state
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isMapGestureActive, setIsMapGestureActive] = useState(false);
+  const [isPanelGestureActive, setIsPanelGestureActive] = useState(false);
+  const [selectedOverlayMarkerDetail, setSelectedOverlayMarkerDetail] =
+    useState<OverlayMarkerDetails | null>(null);
 
   // Active projects (which layers are visible)
   const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
 
   // Loaded GeoJSON keyed by project ID
   const [geoJsonData, setGeoJsonData] = useState<GeoJsonRecord>({});
+  const [overlayGeoJsonData, setOverlayGeoJsonData] = useState<MapOverlayGeoJsonRecord>({});
+  const [overlayIconAvailability, setOverlayIconAvailability] = useState<OverlayIconAvailability>(
+    DEFAULT_OVERLAY_ICON_AVAILABILITY,
+  );
+  const [overlayIconsLoaded, setOverlayIconsLoaded] = useState(false);
 
   // Map style (loaded from cache/network)
   const [mapStyle, setMapStyle] = useState<Record<string, unknown> | null>(null);
@@ -339,6 +518,20 @@ const Dashboard: React.FC = () => {
     return `${pct}% offline maps`;
   }, [tilePrefetchJobs]);
 
+  const loadOverlayIcons = useCallback(async () => {
+    const map = mapRef.current?.getMap() as unknown as OverlayImageMap | undefined;
+    if (!map) return;
+
+    setOverlayIconsLoaded(false);
+    const availability: OverlayIconAvailability = { ...DEFAULT_OVERLAY_ICON_AVAILABILITY };
+    const iconEntries = Object.entries(OVERLAY_ICON_SOURCES) as Array<[OverlayIconId, string]>;
+    for (const [iconId, iconSrc] of iconEntries) {
+      availability[iconId] = await loadMapImage(map, iconId, iconSrc);
+    }
+    setOverlayIconAvailability(availability);
+    setOverlayIconsLoaded(true);
+  }, []);
+
   useEffect(() => {
     // Only load when triggered (after sync completes)
     if (loadTrigger === 0) return;
@@ -385,6 +578,54 @@ const Dashboard: React.FC = () => {
 
     return () => { stale = true; };
   }, [loadTrigger, controller, geoJsonProjects]);
+
+  useEffect(() => {
+    if (loadTrigger === 0) return;
+
+    let stale = false;
+    (async () => {
+      const nextData: MapOverlayGeoJsonRecord = {};
+      for (const overlay of MAP_OVERLAYS) {
+        try {
+          const raw = await controller.getOverlayGeoJSON(overlay.id);
+          if (stale) return;
+
+          const featureCollection = normalizeGeoJSON(raw);
+          if (featureCollection && featureCollection.features.length > 0) {
+            nextData[overlay.id] = normalizeOverlayGeoJSON(overlay.id, featureCollection);
+          }
+        } catch (error) {
+          console.warn(`Failed to load cached overlay ${overlay.id}:`, error);
+        }
+      }
+
+      if (stale) return;
+      setOverlayGeoJsonData(nextData);
+    })();
+
+    return () => {
+      stale = true;
+    };
+  }, [controller, loadTrigger]);
+
+  const visibleOverlayGeoJsonData = useMemo(() => {
+    const nextData: MapOverlayGeoJsonRecord = {};
+    for (const overlay of MAP_OVERLAYS) {
+      const featureCollection = overlayGeoJsonData[overlay.id];
+      if (!featureCollection || featureCollection.features.length === 0) {
+        continue;
+      }
+      const filtered = filterOverlayByProjectVisibility(
+        overlay.id,
+        featureCollection,
+        activeProjectIds,
+      );
+      if (filtered.features.length > 0) {
+        nextData[overlay.id] = filtered;
+      }
+    }
+    return nextData;
+  }, [activeProjectIds, overlayGeoJsonData]);
 
   // ---- Auto-fit bounds on first data load -----------------------------------
 
@@ -460,24 +701,148 @@ const Dashboard: React.FC = () => {
     completeRefreshForTour();
   }, [controller, history, isOfflineLocked]);
 
-  const handleMapGestureStart = useCallback((
-    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+  const openOverlayMarkerDetailsAtMapPoint = useCallback((
+    point: { x: number; y: number },
+    hitRadiusPx: number,
   ) => {
-    event.stopPropagation();
+    const map = mapRef.current?.getMap() as unknown as OverlayFeatureQueryMap | undefined;
+    if (!map?.queryRenderedFeatures || !map.getLayer) {
+      return;
+    }
+
+    // Filter to only layers that currently exist on the map to avoid
+    // maplibre-gl throwing on non-existent layer IDs (icon-layer and
+    // fallback-layer are conditionally rendered, never both present).
+    const existingLayers = INTERACTIVE_OVERLAY_LAYER_IDS.filter(
+      (id) => map.getLayer(id) != null,
+    );
+
+    if (existingLayers.length === 0) {
+      return;
+    }
+
+    let features: InteractiveOverlayFeature[];
+    try {
+      features = map.queryRenderedFeatures(
+        getMarkerHitQueryBounds(point, hitRadiusPx),
+        { layers: existingLayers as string[] },
+      );
+    } catch (err) {
+      console.warn('[overlay-tap] queryRenderedFeatures error', err);
+      return;
+    }
+
+    if (!features || features.length === 0) {
+      return;
+    }
+
+    const details = getClickedOverlayMarkerDetails(features);
+    if (!details) {
+      return;
+    }
+
+    setSelectedOverlayMarkerDetail(details);
+  }, []);
+
+  const openOverlayMarkerDetailsAtClientPoint = useCallback((
+    clientX: number,
+    clientY: number,
+    hitRadiusPx: number,
+  ) => {
+    const map = mapRef.current?.getMap() as unknown as OverlayFeatureQueryMap | undefined;
+    const canvasRect = map?.getCanvas()?.getBoundingClientRect();
+    if (!canvasRect) {
+      return;
+    }
+
+    openOverlayMarkerDetailsAtMapPoint({
+      x: clientX - canvasRect.left,
+      y: clientY - canvasRect.top,
+    }, hitRadiusPx);
+  }, [openOverlayMarkerDetailsAtMapPoint]);
+
+  const handleMapGestureStart = useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+  ) => {
     setIsMapGestureActive(true);
+
+    if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+      mapPointerTapCandidateRef.current = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startedAtMs: Date.now(),
+        moved: false,
+        pointerType: event.pointerType,
+      };
+    } else {
+      mapPointerTapCandidateRef.current = null;
+    }
   }, []);
 
   const handleMapGestureMove = useCallback((
-    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+    event: React.PointerEvent<HTMLDivElement>,
   ) => {
-    event.stopPropagation();
+    const candidate = mapPointerTapCandidateRef.current;
+    if (!candidate || candidate.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const distance = Math.hypot(
+      event.clientX - candidate.startClientX,
+      event.clientY - candidate.startClientY,
+    );
+    if (distance > MAP_TOUCH_TAP_MAX_MOVEMENT_PX) {
+      candidate.moved = true;
+    }
   }, []);
 
   const handleMapGestureEnd = useCallback((
-    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+    event: React.PointerEvent<HTMLDivElement>,
   ) => {
-    event.stopPropagation();
     setIsMapGestureActive(false);
+
+    const candidate = mapPointerTapCandidateRef.current;
+    if (!candidate || candidate.pointerId !== event.pointerId) {
+      return;
+    }
+
+    mapPointerTapCandidateRef.current = null;
+
+    if (event.type !== 'pointerup') {
+      return;
+    }
+
+    const durationMs = Date.now() - candidate.startedAtMs;
+    const distance = Math.hypot(
+      event.clientX - candidate.startClientX,
+      event.clientY - candidate.startClientY,
+    );
+    const isTap = !candidate.moved
+      && distance <= MAP_TOUCH_TAP_MAX_MOVEMENT_PX
+      && durationMs <= MAP_TOUCH_TAP_MAX_DURATION_MS;
+
+    if (!isTap || (candidate.pointerType !== 'touch' && candidate.pointerType !== 'pen')) {
+      return;
+    }
+
+    openOverlayMarkerDetailsAtClientPoint(
+      event.clientX,
+      event.clientY,
+      MAP_MARKER_HIT_RADIUS_PX_TOUCH,
+    );
+  }, [openOverlayMarkerDetailsAtClientPoint]);
+
+  const handlePanelGestureStart = useCallback(() => {
+    setIsPanelGestureActive(true);
+  }, []);
+
+  const handlePanelGestureMove = useCallback(() => {
+    setIsPanelGestureActive(true);
+  }, []);
+
+  const handlePanelGestureEnd = useCallback(() => {
+    setIsPanelGestureActive(false);
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -586,11 +951,22 @@ const Dashboard: React.FC = () => {
 
   const handleMapLoad = useCallback(() => {
     lockMapOrientation(mapRef.current);
-  }, []);
+    void loadOverlayIcons();
+  }, [loadOverlayIcons]);
 
   const handleRestartGuidedTour = useCallback(() => {
     void restartGuidedTourFromHelp();
   }, []);
+
+  const handleDismissOverlayMarkerDetailsModal = useCallback(() => {
+    setSelectedOverlayMarkerDetail(null);
+  }, []);
+
+  useEffect(() => {
+    if (!isPanelOpen) {
+      setIsPanelGestureActive(false);
+    }
+  }, [isPanelOpen]);
 
   // ---- Render ---------------------------------------------------------------
 
@@ -601,7 +977,7 @@ const Dashboard: React.FC = () => {
       <IonContent fullscreen className="ion-no-padding" scrollY={false}>
         <IonRefresher
           className="dashboard-refresher"
-          disabled={isMapGestureActive}
+          disabled={isMapGestureActive || isPanelGestureActive}
           slot="fixed"
           onIonRefresh={handleRefresh}
           pullFactor={0.5}
@@ -619,14 +995,10 @@ const Dashboard: React.FC = () => {
         <div className="relative w-full h-full dashboard-map-container" style={{ height: '100dvh' }}>
           <div
             className="w-full h-full dashboard-map-touch-surface"
-            onTouchStart={handleMapGestureStart}
-            onTouchMove={handleMapGestureMove}
-            onTouchEnd={handleMapGestureEnd}
-            onTouchCancel={handleMapGestureEnd}
-            onPointerDown={handleMapGestureStart}
-            onPointerMove={handleMapGestureMove}
-            onPointerUp={handleMapGestureEnd}
-            onPointerCancel={handleMapGestureEnd}
+            onPointerDownCapture={handleMapGestureStart}
+            onPointerMoveCapture={handleMapGestureMove}
+            onPointerUpCapture={handleMapGestureEnd}
+            onPointerCancelCapture={handleMapGestureEnd}
           >
             {/* ---- Map ---- */}
             {mapStyle && (
@@ -645,6 +1017,21 @@ const Dashboard: React.FC = () => {
                 attributionControl={{ compact: true }}
                 onLoad={handleMapLoad}
               >
+                <Source
+                  id={PROJECT_LAYER_ORDER_ANCHOR_SOURCE_ID}
+                  type="geojson"
+                  data={EMPTY_FEATURE_COLLECTION}
+                >
+                  <Layer
+                    id={PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID}
+                    type="circle"
+                    paint={{
+                      'circle-opacity': 0,
+                      'circle-radius': 0,
+                    }}
+                  />
+                </Source>
+
                 {/* GeoJSON layers for each active project */}
                 {sortedProjects.map((project) => {
                   if (!activeProjectIds.has(project.id) || !geoJsonData[project.id]) {
@@ -664,6 +1051,7 @@ const Dashboard: React.FC = () => {
                       <Layer
                         id={`${sourceId}-fill`}
                         type="fill"
+                        beforeId={PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID}
                         filter={[
                           'match',
                           ['geometry-type'],
@@ -681,6 +1069,8 @@ const Dashboard: React.FC = () => {
                       <Layer
                         id={`${sourceId}-line`}
                         type="line"
+                        beforeId={PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID}
+                        minzoom={MAP.PROJECT_LAYER_ZOOMS.LINE_MIN}
                         filter={[
                           'match',
                           ['geometry-type'],
@@ -694,10 +1084,11 @@ const Dashboard: React.FC = () => {
                         }}
                       />
 
-                      {/* Point circles */}
+                      {/* Point entries: Django parity star symbol */}
                       <Layer
-                        id={`${sourceId}-circle`}
-                        type="circle"
+                        id={`${sourceId}-point`}
+                        type="symbol"
+                        beforeId={PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID}
                         filter={[
                           'match',
                           ['geometry-type'],
@@ -705,16 +1096,337 @@ const Dashboard: React.FC = () => {
                           true,
                           false,
                         ]}
+                        minzoom={MAP.PROJECT_LAYER_ZOOMS.ENTRY_SYMBOL_MIN}
+                        layout={{
+                          'text-field': '★',
+                          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+                          'text-size': ['interpolate', ['linear'], ['zoom'], 8, 18, 14, 24],
+                          'text-allow-overlap': true,
+                          'text-ignore-placement': true,
+                        }}
                         paint={{
-                          'circle-color': color,
-                          'circle-radius': 6,
-                          'circle-stroke-width': 1.5,
-                          'circle-stroke-color': '#ffffff',
+                          'text-color': '#F5E027',
+                          'text-halo-color': '#000000',
+                          'text-halo-width': 1.5,
                         }}
                       />
                     </Source>
                   );
                 })}
+
+                {visibleOverlayGeoJsonData.landmarks && (
+                  <Source
+                    id="landmarks-source"
+                    type="geojson"
+                    data={visibleOverlayGeoJsonData.landmarks}
+                  >
+                    <Layer
+                      id="landmarks-layer"
+                      type="symbol"
+                      minzoom={getOverlayMarkerMinZoom('landmarks')}
+                      layout={{
+                        'text-field': '▼',
+                        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+                        'text-size': ['interpolate', ['linear'], ['zoom'], 6, 10, 10, 14, 14, 20, 18, 28],
+                        'text-allow-overlap': true,
+                        'text-ignore-placement': true,
+                      }}
+                      paint={{
+                        'text-color': '#3b82f6',
+                        'text-halo-color': '#ffffff',
+                        'text-halo-width': 2,
+                        'text-halo-blur': 0.5,
+                      }}
+                    />
+                    <Layer
+                      id="landmarks-labels"
+                      type="symbol"
+                      minzoom={getOverlayLabelMinZoom('landmarks') ?? 16}
+                      layout={{
+                        'text-field': ['get', 'name'],
+                        'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+                        'text-offset': [0, 1.5],
+                        'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 12, 18, 14],
+                        'text-anchor': 'top',
+                        'text-allow-overlap': false,
+                        'text-ignore-placement': false,
+                      }}
+                      paint={{
+                        'text-color': '#3b82f6',
+                        'text-halo-color': '#ffffff',
+                        'text-halo-width': 1.5,
+                      }}
+                    />
+                  </Source>
+                )}
+
+                {visibleOverlayGeoJsonData.surfaceStations && (
+                  <Source
+                    id="surface-stations-source"
+                    type="geojson"
+                    data={visibleOverlayGeoJsonData.surfaceStations}
+                  >
+                    <Layer
+                      id="surface-stations-layer"
+                      type="symbol"
+                      minzoom={getOverlayMarkerMinZoom('surfaceStations')}
+                      layout={{
+                        'text-field': '◆',
+                        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+                        'text-size': ['interpolate', ['linear'], ['zoom'], 14, 16, 18, 24],
+                        'text-allow-overlap': true,
+                        'text-ignore-placement': true,
+                      }}
+                      paint={{
+                        'text-color': ['coalesce', ['get', 'color'], '#fb923c'],
+                        'text-halo-color': '#ffffff',
+                        'text-halo-width': 2,
+                        'text-halo-blur': 0.5,
+                      }}
+                    />
+                    <Layer
+                      id="surface-stations-labels"
+                      type="symbol"
+                      minzoom={getOverlayLabelMinZoom('surfaceStations') ?? 16}
+                      layout={{
+                        'text-field': ['get', 'name'],
+                        'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+                        'text-offset': [0, 1.2],
+                        'text-size': 12,
+                        'text-anchor': 'top',
+                        'text-allow-overlap': false,
+                        'text-ignore-placement': false,
+                      }}
+                      paint={{
+                        'text-color': '#222',
+                        'text-halo-color': '#ffffff',
+                        'text-halo-width': 2,
+                      }}
+                    />
+                  </Source>
+                )}
+
+                {visibleOverlayGeoJsonData.subsurfaceStations && (
+                  <Source
+                    id="subsurface-stations-source"
+                    type="geojson"
+                    data={visibleOverlayGeoJsonData.subsurfaceStations}
+                  >
+                    <Layer
+                      id="subsurface-stations-circles"
+                      type="circle"
+                      filter={[
+                        'any',
+                        ['!', ['has', 'type']],
+                        ['==', ['get', 'type'], null],
+                        ['==', ['get', 'type'], 'sensor'],
+                      ]}
+                      minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
+                      paint={{
+                        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 5, 18, 8],
+                        'circle-color': ['coalesce', ['get', 'color'], '#fb923c'],
+                        'circle-stroke-width': 2,
+                        'circle-stroke-color': '#ffffff',
+                        'circle-opacity': 1,
+                      }}
+                    />
+
+                    {overlayIconsLoaded && overlayIconAvailability['biology-station-icon'] && (
+                      <Layer
+                        id="subsurface-stations-biology-icons"
+                        type="symbol"
+                        filter={['==', ['get', 'type'], 'biology']}
+                        minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
+                        layout={{
+                          'icon-image': 'biology-station-icon',
+                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1.0],
+                          'icon-allow-overlap': true,
+                          'icon-ignore-placement': true,
+                        }}
+                        paint={{ 'icon-opacity': 1 }}
+                      />
+                    )}
+
+                    {overlayIconsLoaded && overlayIconAvailability['bone-station-icon'] && (
+                      <Layer
+                        id="subsurface-stations-bone-icons"
+                        type="symbol"
+                        filter={['==', ['get', 'type'], 'bone']}
+                        minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
+                        layout={{
+                          'icon-image': 'bone-station-icon',
+                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1.0],
+                          'icon-allow-overlap': true,
+                          'icon-ignore-placement': true,
+                        }}
+                        paint={{ 'icon-opacity': 1 }}
+                      />
+                    )}
+
+                    {overlayIconsLoaded && overlayIconAvailability['artifact-station-icon'] && (
+                      <Layer
+                        id="subsurface-stations-artifact-icons"
+                        type="symbol"
+                        filter={['==', ['get', 'type'], 'artifact']}
+                        minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
+                        layout={{
+                          'icon-image': 'artifact-station-icon',
+                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1.0],
+                          'icon-allow-overlap': true,
+                          'icon-ignore-placement': true,
+                        }}
+                        paint={{ 'icon-opacity': 1 }}
+                      />
+                    )}
+
+                    {overlayIconsLoaded && overlayIconAvailability['geology-station-icon'] && (
+                      <Layer
+                        id="subsurface-stations-geology-icons"
+                        type="symbol"
+                        filter={['==', ['get', 'type'], 'geology']}
+                        minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
+                        layout={{
+                          'icon-image': 'geology-station-icon',
+                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1.0],
+                          'icon-allow-overlap': true,
+                          'icon-ignore-placement': true,
+                        }}
+                        paint={{ 'icon-opacity': 1 }}
+                      />
+                    )}
+
+                    <Layer
+                      id="subsurface-stations-labels"
+                      type="symbol"
+                      minzoom={getOverlayLabelMinZoom('subsurfaceStations') ?? 16}
+                      layout={{
+                        'text-field': ['get', 'name'],
+                        'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+                        'text-offset': [0, 1.2],
+                        'text-size': 12,
+                        'text-anchor': 'top',
+                        'text-allow-overlap': false,
+                        'text-ignore-placement': false,
+                      }}
+                      paint={{
+                        'text-color': '#222',
+                        'text-halo-color': '#ffffff',
+                        'text-halo-width': 2,
+                      }}
+                    />
+                  </Source>
+                )}
+
+                {visibleOverlayGeoJsonData.explorationLeads && (
+                  <Source
+                    id="exploration-leads-source"
+                    type="geojson"
+                    data={visibleOverlayGeoJsonData.explorationLeads}
+                  >
+                    {overlayIconsLoaded && overlayIconAvailability['exploration-lead-icon'] && (
+                      <Layer
+                        id="exploration-leads-icon-layer"
+                        type="symbol"
+                        minzoom={getOverlayMarkerMinZoom('explorationLeads')}
+                        layout={{
+                          'icon-image': 'exploration-lead-icon',
+                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.4, 18, 0.6],
+                          'icon-allow-overlap': true,
+                          'icon-ignore-placement': true,
+                        }}
+                        paint={{ 'icon-opacity': 1 }}
+                      />
+                    )}
+                    {overlayIconsLoaded && !overlayIconAvailability['exploration-lead-icon'] && (
+                      <Layer
+                        id="exploration-leads-fallback-layer"
+                        type="circle"
+                        minzoom={getOverlayMarkerMinZoom('explorationLeads')}
+                        paint={{
+                          'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 8, 18, 12],
+                          'circle-color': '#EF4444',
+                          'circle-stroke-width': 2,
+                          'circle-stroke-color': '#ffffff',
+                          'circle-opacity': 1,
+                        }}
+                      />
+                    )}
+                  </Source>
+                )}
+
+                {visibleOverlayGeoJsonData.cylinderInstalls && (
+                  <Source
+                    id="cylinder-installs-source"
+                    type="geojson"
+                    data={visibleOverlayGeoJsonData.cylinderInstalls}
+                  >
+                    {overlayIconsLoaded && overlayIconAvailability['cylinder-icon'] && (
+                      <Layer
+                        id="cylinder-installs-icon-layer"
+                        type="symbol"
+                        minzoom={getOverlayMarkerMinZoom('cylinderInstalls')}
+                        layout={{
+                          'icon-image': 'cylinder-icon',
+                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.8, 18, 1.2],
+                          'icon-allow-overlap': true,
+                          'icon-ignore-placement': true,
+                        }}
+                        paint={{ 'icon-opacity': 1 }}
+                      />
+                    )}
+                    {overlayIconsLoaded && !overlayIconAvailability['cylinder-icon'] && (
+                      <Layer
+                        id="cylinder-installs-fallback-layer"
+                        type="symbol"
+                        minzoom={getOverlayMarkerMinZoom('cylinderInstalls')}
+                        layout={{
+                          'text-field': '●',
+                          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+                          'text-size': ['interpolate', ['linear'], ['zoom'], 14, 18, 18, 26],
+                          'text-allow-overlap': true,
+                          'text-ignore-placement': true,
+                        }}
+                        paint={{
+                          'text-color': '#FF6B00',
+                          'text-halo-color': '#ffffff',
+                          'text-halo-width': 2,
+                        }}
+                      />
+                    )}
+
+                    <Layer
+                      id="cylinder-installs-labels"
+                      type="symbol"
+                      minzoom={getOverlayLabelMinZoom('cylinderInstalls') ?? 16}
+                      layout={{
+                        'text-field': [
+                          'concat',
+                          ['coalesce', ['to-string', ['get', 'install_date']], ''],
+                          ' @ ',
+                          ['coalesce', ['to-string', ['get', 'pressure']], ''],
+                          ' ',
+                          [
+                            'case',
+                            ['==', ['get', 'pressure_unit_system'], 'imperial'],
+                            'PSI',
+                            'BAR',
+                          ],
+                        ],
+                        'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+                        'text-size': 11,
+                        'text-offset': [0, 1.5],
+                        'text-anchor': 'top',
+                        'text-allow-overlap': false,
+                        'text-ignore-placement': false,
+                      }}
+                      paint={{
+                        'text-color': '#000000',
+                        'text-halo-color': '#ffffff',
+                        'text-halo-width': 1.5,
+                      }}
+                    />
+                  </Source>
+                )}
               </Map>
             )}
           </div>
@@ -791,7 +1503,15 @@ const Dashboard: React.FC = () => {
             onShowAll={handleShowAll}
             onHideAll={handleHideAll}
             onClose={() => setIsPanelOpen(false)}
+            onGestureStart={handlePanelGestureStart}
+            onGestureMove={handlePanelGestureMove}
+            onGestureEnd={handlePanelGestureEnd}
             isOpen={isPanelOpen}
+          />
+
+          <OverlayMarkerDetailsModal
+            detail={selectedOverlayMarkerDetail}
+            onClose={handleDismissOverlayMarkerDetailsModal}
           />
 
           <IonModal

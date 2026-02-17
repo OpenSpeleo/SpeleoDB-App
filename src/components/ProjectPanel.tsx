@@ -27,6 +27,9 @@ export interface ProjectPanelProps {
   onShowAll: () => void;
   onHideAll: () => void;
   onClose: () => void;
+  onGestureStart?: () => void;
+  onGestureMove?: () => void;
+  onGestureEnd?: () => void;
   isOpen: boolean;
 }
 
@@ -57,10 +60,34 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
   onShowAll,
   onHideAll,
   onClose,
+  onGestureStart,
+  onGestureMove,
+  onGestureEnd,
   isOpen,
 }) => {
   const activeCount = activeProjectIds.size;
   const totalCount = projects.length;
+
+  const handleGestureStart = (
+    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+  ) => {
+    event.stopPropagation();
+    onGestureStart?.();
+  };
+
+  const handleGestureMove = (
+    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+  ) => {
+    event.stopPropagation();
+    onGestureMove?.();
+  };
+
+  const handleGestureEnd = (
+    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+  ) => {
+    event.stopPropagation();
+    onGestureEnd?.();
+  };
 
   return (
     <>
@@ -81,6 +108,15 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
         data-tour="project-panel"
         data-tour-open={isOpen ? 'true' : 'false'}
+        data-testid="project-panel"
+        onTouchStart={handleGestureStart}
+        onTouchMove={handleGestureMove}
+        onTouchEnd={handleGestureEnd}
+        onTouchCancel={handleGestureEnd}
+        onPointerDown={handleGestureStart}
+        onPointerMove={handleGestureMove}
+        onPointerUp={handleGestureEnd}
+        onPointerCancel={handleGestureEnd}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
@@ -128,7 +164,10 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
         </div>
 
         {/* Project list */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">
+        <div
+          className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain"
+          data-testid="project-panel-list"
+        >
           {projects.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-slate-500">
               No projects available

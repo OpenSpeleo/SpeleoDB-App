@@ -40,3 +40,12 @@ export interface AuthTokenResponse {
   user: string;
   token: string;
 }
+
+export type {
+  MapOverlayDefinition,
+  MapOverlayGeoJsonRecord,
+  MapOverlayId,
+  MapOverlayLegendItem,
+} from './mapOverlay';
+
+export { MAP_OVERLAY_IDS } from './mapOverlay';

@@ -7,11 +7,13 @@
 
 import { CacheStore } from './CacheStore';
 import type { Project } from '../types/project';
+import type { MapOverlayId } from '../types/mapOverlay';
 
 // ==================== Internal keys ====================
 
 /** The projects list is stored under a single well-known key. */
 const PROJECTS_LIST_KEY = 'list';
+const OVERLAY_KEY_PREFIX = 'overlay:';
 
 // ==================== Service ====================
 
@@ -83,11 +85,40 @@ export class ProjectCacheService {
     }
   }
 
+  // ---- Shared read-only map overlays -----------------------------------------
+
+  /** Read a cached overlay payload, or null if not cached. */
+  async getOverlayGeoJSON(overlayId: MapOverlayId): Promise<unknown | null> {
+    try {
+      const entry = await this.store.get('geojson', this.getOverlayCacheKey(overlayId));
+      return entry?.data ?? null;
+    } catch (error) {
+      console.error(`ProjectCacheService.getOverlayGeoJSON(${overlayId}) failed:`, error);
+      return null;
+    }
+  }
+
+  /** Write an overlay GeoJSON payload. */
+  async setOverlayGeoJSON(overlayId: MapOverlayId, data: unknown): Promise<void> {
+    try {
+      await this.store.set('geojson', this.getOverlayCacheKey(overlayId), {
+        data,
+        cachedAt: Date.now(),
+      });
+    } catch (error) {
+      console.error(`ProjectCacheService.setOverlayGeoJSON(${overlayId}) failed:`, error);
+    }
+  }
+
   // ---- Housekeeping -----------------------------------------------------------
 
   /** Wipe all cached projects and geojson data (e.g. on logout). */
   async clearAll(): Promise<void> {
     await this.store.clear('projects');
     await this.store.clear('geojson');
+  }
+
+  private getOverlayCacheKey(overlayId: MapOverlayId): string {
+    return `${OVERLAY_KEY_PREFIX}${overlayId}`;
   }
 }

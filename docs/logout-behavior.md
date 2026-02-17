@@ -28,7 +28,7 @@ Logout must not be triggered by transient network conditions:
 
 - auth state and preferences,
 - `localStorage` and `sessionStorage`,
-- cached projects and GeoJSON,
+- cached projects and GeoJSON (including dashboard overlay GeoJSON),
 - cached map tiles,
 - persisted tile prefetch jobs.
 
@@ -43,4 +43,5 @@ Logout must not be triggered by transient network conditions:
 - Controller logout implementation: `src/controllers/SpeleoDBController.ts`
 - Startup/session validation decisions: `src/controllers/SpeleoDBController.ts`
 - Offline modal behavior: `src/context/SpeleoDBProvider.tsx`
+- Overlay details: `docs/dashboard-map-overlays.md`
 - Regression tests: `src/controllers/SpeleoDBController.test.ts`, `src/context/SpeleoDBProvider.test.tsx`

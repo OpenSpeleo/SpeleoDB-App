@@ -9,7 +9,7 @@
  * re-render via useSyncExternalStore.
  */
 
-import { HTTP_STATUS, MAP, NETWORK } from '../constants';
+import { HTTP_STATUS, MAP, MAP_OVERLAYS, NETWORK } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import {
@@ -25,7 +25,9 @@ import type {
   User,
 } from '../types';
 import type { Project } from '../types/project';
+import type { MapOverlayId } from '../types/mapOverlay';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
+import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 
 // ==================== Sync status ====================
 
@@ -45,69 +47,6 @@ export interface PreferencesPort {
 const STORAGE_KEYS = {
   USERS_DB: 'speleo_users_db',
 } as const;
-
-function normalizeGeoJSON(data: unknown): GeoJSON.FeatureCollection | null {
-  let current: unknown = data;
-
-  for (let i = 0; i < 4; i += 1) {
-    if (typeof current === 'string') {
-      const trimmed = current.trim();
-      if (!trimmed) return null;
-      try {
-        current = JSON.parse(trimmed);
-      } catch {
-        return null;
-      }
-      continue;
-    }
-
-    if (!current || typeof current !== 'object') break;
-    const envelope = current as Record<string, unknown>;
-    if (typeof envelope.type === 'string' || Array.isArray(envelope.features)) break;
-    if ('data' in envelope) {
-      current = envelope.data;
-      continue;
-    }
-    if ('geojson' in envelope) {
-      current = envelope.geojson;
-      continue;
-    }
-    break;
-  }
-
-  if (!current || typeof current !== 'object') return null;
-  const obj = current as Record<string, unknown>;
-
-  if (obj.type === 'FeatureCollection' && Array.isArray(obj.features)) {
-    return obj as unknown as GeoJSON.FeatureCollection;
-  }
-  if (Array.isArray(obj.features)) {
-    return {
-      type: 'FeatureCollection',
-      features: obj.features as GeoJSON.Feature[],
-    };
-  }
-  if (obj.type === 'Feature') {
-    return {
-      type: 'FeatureCollection',
-      features: [obj as unknown as GeoJSON.Feature],
-    };
-  }
-  if (typeof obj.type === 'string' && ('coordinates' in obj || 'geometries' in obj)) {
-    return {
-      type: 'FeatureCollection',
-      features: [
-        {
-          type: 'Feature',
-          properties: {},
-          geometry: obj as unknown as GeoJSON.Geometry,
-        },
-      ],
-    };
-  }
-
-  return null;
-}
 
 // ==================== Controller ====================
 
@@ -455,7 +394,10 @@ export class SpeleoDBController {
         // Step 3 -- download geojson files in background (non-blocking)
         await this.downloadGeoJSONFiles(freshProjects);
 
-        // Step 4 -- start aggressive tile prefetch in background for offline mode.
+        // Step 4 -- sync read-only map overlays for offline icon rendering.
+        await this.syncMapOverlays(instance, token);
+
+        // Step 5 -- start aggressive tile prefetch in background for offline mode.
         void this.scheduleTilePrefetch(freshProjects);
       }
 
@@ -473,6 +415,13 @@ export class SpeleoDBController {
    */
   async getProjectGeoJSON(projectId: string): Promise<unknown | null> {
     return this.cache.getGeoJSON(projectId);
+  }
+
+  /**
+   * Read an overlay GeoJSON payload from cache.
+   */
+  async getOverlayGeoJSON(overlayId: MapOverlayId): Promise<unknown | null> {
+    return this.cache.getOverlayGeoJSON(overlayId);
   }
 
   /**
@@ -511,6 +460,54 @@ export class SpeleoDBController {
 
     const concurrency = Math.min(3, eligible.length);
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  }
+
+  /**
+   * Sync shared map overlays so read-only icons remain available offline.
+   */
+  private async syncMapOverlays(instance: string, token: string): Promise<void> {
+    if (!this.hasNetworkAccess()) return;
+
+    await Promise.all(MAP_OVERLAYS.map(async (overlay) => {
+      if (!this.hasNetworkAccess()) return;
+
+      try {
+        const response = await this.fetchOverlayGeoJSON(overlay.id, instance, token);
+        if (response.status >= 200 && response.status < 300) {
+          await this.cache.setOverlayGeoJSON(overlay.id, response.data);
+          return;
+        }
+
+        console.warn(
+          `Overlay sync skipped for ${overlay.id}: status ${response.status}`,
+        );
+      } catch (error) {
+        console.warn(`Failed to sync overlay ${overlay.id}:`, error);
+      }
+    }));
+  }
+
+  private fetchOverlayGeoJSON(
+    overlayId: MapOverlayId,
+    instance: string,
+    token: string,
+  ): ReturnType<SpeleoDBService['getLandmarksGeoJSON']> {
+    switch (overlayId) {
+      case 'landmarks':
+        return this.service.getLandmarksGeoJSON(instance, token);
+      case 'subsurfaceStations':
+        return this.service.getSubsurfaceStationsGeoJSON(instance, token);
+      case 'surfaceStations':
+        return this.service.getSurfaceStationsGeoJSON(instance, token);
+      case 'explorationLeads':
+        return this.service.getExplorationLeadsGeoJSON(instance, token);
+      case 'cylinderInstalls':
+        return this.service.getCylinderInstallsGeoJSON(instance, token);
+      default: {
+        const exhaustiveCheck: never = overlayId;
+        throw new Error(`Unsupported overlay id: ${exhaustiveCheck}`);
+      }
+    }
   }
 
   /**

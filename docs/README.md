@@ -12,6 +12,7 @@ This folder contains product and engineering documentation for core app behavior
 - `onboarding-modal.md`: companion onboarding modal design intent, responsive layout behavior, and UX requirements.
 - `project-panel.md`: project panel layout, open/close behavior, zoom-to-project, auto-close UX, and persistence.
 - `guided-tour.md`: interactive guided tour flow, driver.js integration, step definitions, and architecture.
+- `dashboard-map-overlays.md`: read-only dashboard overlay endpoints, icon/label mapping, marker detail modal contract, and offline cache lifecycle.
 
 ## Maintainer note
 

@@ -47,6 +47,26 @@ function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBServic
     authenticate: vi.fn(async () => ({ status: 200, data: { user: 'u@x.com', token: 'tok' } }) as HttpResponse<AuthTokenResponse>),
     validateToken: vi.fn(async () => ({ status: 200, data: {} }) as HttpResponse<unknown>),
     getProjectsGeoJSON: vi.fn(async () => ({ status: 200, data: { data: [project] } }) as HttpResponse<unknown>),
+    getLandmarksGeoJSON: vi.fn(async () => ({
+      status: 200,
+      data: { type: 'FeatureCollection', features: [] },
+    }) as HttpResponse<GeoJSON.FeatureCollection>),
+    getSubsurfaceStationsGeoJSON: vi.fn(async () => ({
+      status: 200,
+      data: { type: 'FeatureCollection', features: [] },
+    }) as HttpResponse<GeoJSON.FeatureCollection>),
+    getSurfaceStationsGeoJSON: vi.fn(async () => ({
+      status: 200,
+      data: { type: 'FeatureCollection', features: [] },
+    }) as HttpResponse<GeoJSON.FeatureCollection>),
+    getExplorationLeadsGeoJSON: vi.fn(async () => ({
+      status: 200,
+      data: { type: 'FeatureCollection', features: [] },
+    }) as HttpResponse<GeoJSON.FeatureCollection>),
+    getCylinderInstallsGeoJSON: vi.fn(async () => ({
+      status: 200,
+      data: { type: 'FeatureCollection', features: [] },
+    }) as HttpResponse<GeoJSON.FeatureCollection>),
     downloadJSON: vi.fn(async () => ({
       status: 200,
       data: {
@@ -78,6 +98,8 @@ function createMockCache(): ProjectCacheService {
     setProjects: vi.fn(async () => {}),
     getGeoJSON: vi.fn(async () => null),
     setGeoJSON: vi.fn(async () => {}),
+    getOverlayGeoJSON: vi.fn(async () => null),
+    setOverlayGeoJSON: vi.fn(async () => {}),
     getCachedCommitId: vi.fn(async () => null),
     clearAll: vi.fn(async () => {}),
   } as unknown as ProjectCacheService;
@@ -491,6 +513,11 @@ describe('SpeleoDBController', () => {
       await controller.syncProjects();
 
       expect(service.getProjectsGeoJSON).not.toHaveBeenCalled();
+      expect(service.getLandmarksGeoJSON).not.toHaveBeenCalled();
+      expect(service.getSubsurfaceStationsGeoJSON).not.toHaveBeenCalled();
+      expect(service.getSurfaceStationsGeoJSON).not.toHaveBeenCalled();
+      expect(service.getExplorationLeadsGeoJSON).not.toHaveBeenCalled();
+      expect(service.getCylinderInstallsGeoJSON).not.toHaveBeenCalled();
     });
 
     it('continues project sync when geojson downloads fail', async () => {
@@ -547,6 +574,77 @@ describe('SpeleoDBController', () => {
       expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
       expect(service.downloadJSON).toHaveBeenCalledOnce();
       expect(cache.setGeoJSON).not.toHaveBeenCalled();
+    });
+
+    it('syncs read-only overlay geojson payloads during project sync', async () => {
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(service.getLandmarksGeoJSON).toHaveBeenCalledOnce();
+      expect(service.getSubsurfaceStationsGeoJSON).toHaveBeenCalledOnce();
+      expect(service.getSurfaceStationsGeoJSON).toHaveBeenCalledOnce();
+      expect(service.getExplorationLeadsGeoJSON).toHaveBeenCalledOnce();
+      expect(service.getCylinderInstallsGeoJSON).toHaveBeenCalledOnce();
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('landmarks', {
+        type: 'FeatureCollection',
+        features: [],
+      });
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('subsurfaceStations', {
+        type: 'FeatureCollection',
+        features: [],
+      });
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('surfaceStations', {
+        type: 'FeatureCollection',
+        features: [],
+      });
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('explorationLeads', {
+        type: 'FeatureCollection',
+        features: [],
+      });
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('cylinderInstalls', {
+        type: 'FeatureCollection',
+        features: [],
+      });
+    });
+
+    it('continues sync when one overlay endpoint fails', async () => {
+      const getLandmarksGeoJSON = vi.fn(async () => {
+        throw new Error('overlay endpoint failed');
+      });
+      service = createMockService({
+        getLandmarksGeoJSON,
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
+      expect(cache.setProjects).toHaveBeenCalledOnce();
+      expect(service.getSubsurfaceStationsGeoJSON).toHaveBeenCalledOnce();
+      expect(service.getSurfaceStationsGeoJSON).toHaveBeenCalledOnce();
+      expect(service.getExplorationLeadsGeoJSON).toHaveBeenCalledOnce();
+      expect(service.getCylinderInstallsGeoJSON).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('overlay cache reads', () => {
+    it('returns overlay geojson from cache service', async () => {
+      const payload = { type: 'FeatureCollection', features: [] };
+      cache.getOverlayGeoJSON = vi.fn(async () => payload);
+
+      const result = await controller.getOverlayGeoJSON('landmarks');
+
+      expect(cache.getOverlayGeoJSON).toHaveBeenCalledWith('landmarks');
+      expect(result).toEqual(payload);
     });
   });
 

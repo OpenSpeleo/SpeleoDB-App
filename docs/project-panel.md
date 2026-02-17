@@ -44,6 +44,8 @@ Both operate on all projects in the list regardless of which were individually t
 
 A scrollable list of all projects that have GeoJSON data (projects with `exclude_geojson: true` or no `geojson_file` are filtered out before reaching the panel).
 
+List scrolling is self-contained and must not leak gesture handling to dashboard pull-to-refresh.
+
 Each row contains:
 
 ### Color dot
@@ -65,6 +67,19 @@ Tapping the name or the color dot triggers `onZoomToProject(projectId)`, which:
 ### Toggle switch
 
 A purple/slate toggle to show or hide the project's map layer without zooming. Persists the visibility preference per project. Does **not** close the panel -- the user stays in the panel to continue managing layers.
+
+### Overlay effect of project toggles
+
+Project toggle state also filters project-linked dashboard overlays:
+
+- Subsurface stations (`properties.project`)
+- Exploration leads (`properties.project`)
+- Cylinder installs (`properties.project_id`)
+
+Global overlays that are not project-linked remain unaffected:
+
+- Landmarks
+- Surface stations
 
 ### Tile prefetch status
 

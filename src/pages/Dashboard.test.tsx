@@ -8,7 +8,43 @@ import Dashboard from './Dashboard';
 import type { Project } from '../types/project';
 import { TOUR_EVENTS } from '../onboarding/guidedTour/selectors';
 
+// jsdom lacks PointerEvent -- polyfill so fireEvent.pointerDown/Up creates
+// events with pointerId/pointerType that the pointer-capture handlers rely on.
+if (typeof globalThis.PointerEvent === 'undefined') {
+  class PointerEventPolyfill extends MouseEvent {
+    readonly pointerId: number;
+    readonly pointerType: string;
+    readonly width: number;
+    readonly height: number;
+    readonly pressure: number;
+    readonly tiltX: number;
+    readonly tiltY: number;
+    readonly twist: number;
+    readonly isPrimary: boolean;
+
+    constructor(type: string, init: PointerEventInit & MouseEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 0;
+      this.pointerType = init.pointerType ?? '';
+      this.width = init.width ?? 1;
+      this.height = init.height ?? 1;
+      this.pressure = init.pressure ?? 0;
+      this.tiltX = init.tiltX ?? 0;
+      this.tiltY = init.tiltY ?? 0;
+      this.twist = init.twist ?? 0;
+      this.isPrimary = init.isPrimary ?? false;
+    }
+  }
+  (globalThis as Record<string, unknown>).PointerEvent = PointerEventPolyfill;
+}
+
 // ==================== Mocks ====================
+
+type MockRenderedFeature = {
+  id?: string | number;
+  layer?: { id?: string };
+  properties?: Record<string, unknown>;
+};
 
 const {
   mapPropsRef,
@@ -18,6 +54,12 @@ const {
   mockDisableTouchRotation,
   mockSetBearing,
   mockSetPitch,
+  mockMapHasImage,
+  mockMapAddImage,
+  mockMapLoadImage,
+  mockMapGetCanvas,
+  mockMapGetLayer,
+  mockQueryRenderedFeatures,
 } = vi.hoisted(() => {
   const mapPropsRef = { current: null as Record<string, unknown> | null };
   const mockMapFitBounds = vi.fn();
@@ -25,11 +67,37 @@ const {
   const mockDisableTouchRotation = vi.fn();
   const mockSetBearing = vi.fn();
   const mockSetPitch = vi.fn();
+  const mockMapHasImage = vi.fn(() => false);
+  const mockMapAddImage = vi.fn();
+  const mockMapGetCanvas = vi.fn(() => ({
+    getBoundingClientRect: () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 390,
+      bottom: 844,
+      width: 390,
+      height: 844,
+      toJSON: () => ({}),
+    }),
+  }));
+  const mockQueryRenderedFeatures = vi.fn((): MockRenderedFeature[] => []);
+  const mockMapGetLayer = vi.fn((id: string) => ({ id }));
+  const mockMapLoadImage = vi.fn((_url: string, callback: (error: Error | null, image?: unknown) => void) => {
+    callback(null, { width: 16, height: 16 });
+  });
   const mockGetMap = vi.fn(() => ({
     once: mockMapOnce,
     touchZoomRotate: { disableRotation: mockDisableTouchRotation },
     setBearing: mockSetBearing,
     setPitch: mockSetPitch,
+    hasImage: mockMapHasImage,
+    addImage: mockMapAddImage,
+    loadImage: mockMapLoadImage,
+    getCanvas: mockMapGetCanvas,
+    getLayer: mockMapGetLayer,
+    queryRenderedFeatures: mockQueryRenderedFeatures,
   }));
 
   return {
@@ -40,6 +108,12 @@ const {
     mockDisableTouchRotation,
     mockSetBearing,
     mockSetPitch,
+    mockMapHasImage,
+    mockMapAddImage,
+    mockMapLoadImage,
+    mockMapGetCanvas,
+    mockMapGetLayer,
+    mockQueryRenderedFeatures,
   };
 });
 
@@ -115,7 +189,21 @@ vi.mock('react-map-gl/maplibre', () => {
         if (typeof onLoad === 'function') onLoad();
       }, [mapProps.onLoad]);
 
-      return <div data-testid="map">{children}</div>;
+      return (
+        <div
+          data-testid="map"
+          onClick={() => {
+            const onClick = mapProps.onClick;
+            if (typeof onClick === 'function') {
+              onClick({
+                point: { x: 120, y: 80 },
+              });
+            }
+          }}
+        >
+          {children}
+        </div>
+      );
     },
   );
   MapMock.displayName = 'MapMock';
@@ -128,9 +216,17 @@ vi.mock('react-map-gl/maplibre', () => {
     Layer: ({
       id,
       paint,
+      filter,
+      layout,
+      minzoom,
+      beforeId,
     }: {
       id?: string;
       paint?: Record<string, unknown>;
+      filter?: unknown;
+      layout?: Record<string, unknown>;
+      minzoom?: number;
+      beforeId?: string;
     }) => {
       const lineColor = paint?.['line-color'];
       const fillColor = paint?.['fill-color'];
@@ -138,8 +234,28 @@ vi.mock('react-map-gl/maplibre', () => {
       const layerColor = [lineColor, fillColor, circleColor].find(
         (value): value is string => typeof value === 'string',
       ) ?? '';
+      const iconImage = typeof layout?.['icon-image'] === 'string'
+        ? layout['icon-image']
+        : '';
+      const layerFilter = filter ? JSON.stringify(filter) : '';
+      const layerText = layout && 'text-field' in layout
+        ? JSON.stringify(layout['text-field'])
+        : '';
+      const layerMinzoom = typeof minzoom === 'number' ? String(minzoom) : '';
+      const layerBeforeId = typeof beforeId === 'string' ? beforeId : '';
 
-      return <div data-testid="map-layer" data-layer-id={id} data-layer-color={layerColor} />;
+      return (
+        <div
+          data-testid="map-layer"
+          data-layer-id={id}
+          data-layer-color={layerColor}
+          data-layer-filter={layerFilter}
+          data-layer-icon={iconImage}
+          data-layer-text={layerText}
+          data-layer-minzoom={layerMinzoom}
+          data-layer-before-id={layerBeforeId}
+        />
+      );
     },
     NavigationControl: () => <div data-testid="nav-control" />,
   };
@@ -183,6 +299,7 @@ vi.mock('../onboarding/guidedTour/engine', () => ({
 const mockSyncProjects = vi.fn().mockResolvedValue(undefined);
 const mockRetryConnection = vi.fn().mockResolvedValue('ok');
 const mockGetProjectGeoJSON = vi.fn().mockResolvedValue(null);
+const mockGetOverlayGeoJSON = vi.fn().mockResolvedValue(null);
 const mockLogout = vi.fn();
 const mockIsAuthenticated = vi.fn().mockReturnValue(true);
 let mockIsOfflineLocked = false;
@@ -191,6 +308,7 @@ const mockController = {
   syncProjects: mockSyncProjects,
   retryConnection: mockRetryConnection,
   getProjectGeoJSON: mockGetProjectGeoJSON,
+  getOverlayGeoJSON: mockGetOverlayGeoJSON,
   logout: mockLogout,
   isAuthenticated: mockIsAuthenticated,
 };
@@ -217,6 +335,31 @@ function renderDashboard() {
     </Router>,
   );
   return history;
+}
+
+function simulatePointerTap(
+  element: Element,
+  clientX = 120,
+  clientY = 80,
+): void {
+  fireEvent.pointerDown(element, {
+    pointerId: 1,
+    pointerType: 'touch',
+    clientX,
+    clientY,
+  });
+  fireEvent.pointerUp(element, {
+    pointerId: 1,
+    pointerType: 'touch',
+    clientX,
+    clientY,
+  });
+}
+
+function getMapTouchSurface(): Element {
+  const el = document.querySelector('.dashboard-map-touch-surface');
+  if (!el) throw new Error('.dashboard-map-touch-surface not found');
+  return el;
 }
 
 function makeProject(overrides: Partial<Project> = {}): Project {
@@ -268,6 +411,72 @@ function pointFeatureCollection(lng = 2.3, lat = 46.6): GeoJSON.FeatureCollectio
   };
 }
 
+function overlayPointFeatureCollection(
+  properties: Record<string, unknown> = {},
+  lng = 2.3,
+  lat = 46.6,
+): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties,
+        geometry: {
+          type: 'Point',
+          coordinates: [lng, lat],
+        },
+      },
+    ],
+  };
+}
+
+function lineFeatureCollection(): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { section_name: 'Main line' },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [2.3, 46.6],
+            [2.31, 46.61],
+          ],
+        },
+      },
+    ],
+  };
+}
+
+function mixedProjectFeatureCollection(): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { section_name: 'Main line' },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [2.3, 46.6],
+            [2.31, 46.61],
+          ],
+        },
+      },
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Point',
+          coordinates: [2.32, 46.62],
+        },
+      },
+    ],
+  };
+}
+
 // ==================== Tests ====================
 
 describe('Dashboard', () => {
@@ -278,6 +487,26 @@ describe('Dashboard', () => {
     mockIsOfflineLocked = false;
     mockProjects = [];
     mockGetProjectVisibilityPreferences.mockReturnValue({});
+    mockGetOverlayGeoJSON.mockResolvedValue(null);
+    mockMapHasImage.mockReturnValue(false);
+    mockMapGetCanvas.mockReturnValue({
+      getBoundingClientRect: () => ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 390,
+        bottom: 844,
+        width: 390,
+        height: 844,
+        toJSON: () => ({}),
+      }),
+    });
+    mockQueryRenderedFeatures.mockReturnValue([]);
+    mockMapGetLayer.mockImplementation((id: string) => ({ id }));
+    mockMapLoadImage.mockImplementation((_url: string, callback: (error: Error | null, image?: unknown) => void) => {
+      callback(null, { width: 16, height: 16 });
+    });
   });
 
   it('renders the map when authenticated', async () => {
@@ -418,6 +647,31 @@ describe('Dashboard', () => {
     expect(refresher).toHaveAttribute('data-disabled', 'false');
   });
 
+  it('disables refresher while interacting with the project panel list', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Panel Scroll Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Open project panel')).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByLabelText('Open project panel'));
+
+    const refresher = screen.getByTestId('ion-refresher');
+    const panelList = await screen.findByTestId('project-panel-list');
+
+    expect(refresher).toHaveAttribute('data-disabled', 'false');
+
+    fireEvent.pointerDown(panelList);
+    expect(refresher).toHaveAttribute('data-disabled', 'true');
+
+    fireEvent.pointerMove(panelList);
+    expect(refresher).toHaveAttribute('data-disabled', 'true');
+
+    fireEvent.pointerUp(panelList);
+    expect(refresher).toHaveAttribute('data-disabled', 'false');
+  });
+
   it('uses pull-to-refresh as online recovery attempt while offline-locked', async () => {
     mockIsOfflineLocked = true;
     mockRetryConnection.mockResolvedValueOnce('network_error');
@@ -493,7 +747,473 @@ describe('Dashboard', () => {
 
     await waitFor(() => {
       expect(mockGetProjectGeoJSON).toHaveBeenCalledWith('p-json');
-      expect(screen.getByTestId('map-source')).toBeInTheDocument();
+      expect(document.querySelector('[data-layer-id="project-p-json-point"]')).not.toBeNull();
+    });
+  });
+
+  it('renders project Point features as star symbols (Django parity)', async () => {
+    mockProjects = [makeProject({ id: 'p-star', name: 'Star Project' })];
+    mockGetProjectGeoJSON.mockResolvedValueOnce({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Point',
+            coordinates: [2.3, 46.6],
+          },
+        },
+      ],
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      const pointLayer = document.querySelector(
+        '[data-layer-id="project-p-star-point"]',
+      ) as HTMLElement | null;
+      expect(pointLayer).not.toBeNull();
+      expect(pointLayer?.dataset.layerText).toContain('★');
+      expect(pointLayer?.dataset.layerMinzoom).toBe('0');
+    });
+  });
+
+  it('keeps project line layer visible from zoom level 0', async () => {
+    mockProjects = [makeProject({ id: 'p-line', name: 'Line Project' })];
+    mockGetProjectGeoJSON.mockResolvedValueOnce(lineFeatureCollection());
+
+    renderDashboard();
+
+    await waitFor(() => {
+      const lineLayer = document.querySelector(
+        '[data-layer-id="project-p-line-line"]',
+      ) as HTMLElement | null;
+      expect(lineLayer).not.toBeNull();
+      expect(lineLayer?.dataset.layerMinzoom).toBe('0');
+    });
+  });
+
+  it('keeps project GeoJSON layers anchored below marker layers', async () => {
+    mockProjects = [makeProject({ id: 'p-order', name: 'Order Project' })];
+    mockGetProjectGeoJSON.mockResolvedValueOnce(mixedProjectFeatureCollection());
+
+    renderDashboard();
+
+    await waitFor(() => {
+      const fillLayer = document.querySelector(
+        '[data-layer-id="project-p-order-fill"]',
+      ) as HTMLElement | null;
+      const lineLayer = document.querySelector(
+        '[data-layer-id="project-p-order-line"]',
+      ) as HTMLElement | null;
+      const pointLayer = document.querySelector(
+        '[data-layer-id="project-p-order-point"]',
+      ) as HTMLElement | null;
+
+      expect(fillLayer?.dataset.layerBeforeId).toBe('project-layer-order-anchor');
+      expect(lineLayer?.dataset.layerBeforeId).toBe('project-layer-order-anchor');
+      expect(pointLayer?.dataset.layerBeforeId).toBe('project-layer-order-anchor');
+    });
+  });
+
+  it('renders cached overlay sources/layers with Django-style icon contracts', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Overlay Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'landmarks') return overlayPointFeatureCollection();
+      if (overlayId === 'surfaceStations') {
+        return overlayPointFeatureCollection({ tag: { color: '#f97316' } });
+      }
+      if (overlayId === 'subsurfaceStations') {
+        return overlayPointFeatureCollection({ type: 'biology', color: '#f97316', project: 'p1' });
+      }
+      if (overlayId === 'explorationLeads') return overlayPointFeatureCollection({ project: 'p1' });
+      if (overlayId === 'cylinderInstalls') {
+        return overlayPointFeatureCollection({
+          project_id: 'p1',
+          install_date: '2026-02-17',
+          pressure: 230,
+          pressure_unit_system: 'metric',
+        });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(mockGetOverlayGeoJSON).toHaveBeenCalledWith('landmarks');
+      expect(mockGetOverlayGeoJSON).toHaveBeenCalledWith('subsurfaceStations');
+      expect(mockGetOverlayGeoJSON).toHaveBeenCalledWith('surfaceStations');
+      expect(mockGetOverlayGeoJSON).toHaveBeenCalledWith('explorationLeads');
+      expect(mockGetOverlayGeoJSON).toHaveBeenCalledWith('cylinderInstalls');
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="landmarks-labels"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="surface-stations-layer"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="surface-stations-labels"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="subsurface-stations-circles"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="subsurface-stations-biology-icons"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="subsurface-stations-labels"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="cylinder-installs-icon-layer"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="cylinder-installs-labels"]')).not.toBeNull();
+    });
+
+    const subsurfaceCircleLayer = document.querySelector(
+      '[data-layer-id="subsurface-stations-circles"]',
+    ) as HTMLElement | null;
+    expect(subsurfaceCircleLayer?.dataset.layerFilter).toContain('"sensor"');
+
+    const biologyLayer = document.querySelector(
+      '[data-layer-id="subsurface-stations-biology-icons"]',
+    ) as HTMLElement | null;
+    expect(biologyLayer?.dataset.layerIcon).toBe('biology-station-icon');
+
+    const cylinderLabelLayer = document.querySelector(
+      '[data-layer-id="cylinder-installs-labels"]',
+    ) as HTMLElement | null;
+    expect(cylinderLabelLayer?.dataset.layerText).toContain('install_date');
+  });
+
+  it('uses fallback non-icon layers for exploration leads and cylinders when icons fail to load', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Fallback Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockMapLoadImage.mockImplementation((url: string, callback: (error: Error | null, image?: unknown) => void) => {
+      if (url.includes('exploration-lead-icon') || url.includes('cylinder-orange-icon')) {
+        callback(new Error('image load failed'));
+        return;
+      }
+      callback(null, { width: 16, height: 16 });
+    });
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'explorationLeads') {
+        return overlayPointFeatureCollection({ project: 'p1' });
+      }
+      if (overlayId === 'cylinderInstalls') {
+        return overlayPointFeatureCollection({ project_id: 'p1' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      const explorationLayer = document.querySelector(
+        '[data-layer-id="exploration-leads-fallback-layer"]',
+      ) as HTMLElement | null;
+      const cylinderLayer = document.querySelector(
+        '[data-layer-id="cylinder-installs-fallback-layer"]',
+      ) as HTMLElement | null;
+      expect(explorationLayer).not.toBeNull();
+      expect(cylinderLayer).not.toBeNull();
+      expect(explorationLayer?.dataset.layerIcon).toBe('');
+      expect(cylinderLayer?.dataset.layerIcon).toBe('');
+    });
+  });
+
+  it('opens marker details modal when tapping an exploration lead icon marker', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Lead Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'explorationLeads') {
+        return overlayPointFeatureCollection({ project: 'p1' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'exploration-leads-icon-layer' },
+        properties: { id: 'lead-1', description: 'lead ne, but might just go to the line' },
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(mockQueryRenderedFeatures).toHaveBeenCalled();
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent(
+      'lead ne, but might just go to the line',
+    );
+  });
+
+  it('does not open marker details modal when pointer interaction is a drag', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Drag Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'explorationLeads') {
+        return overlayPointFeatureCollection({ project: 'p1' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).not.toBeNull();
+    });
+
+    const surface = getMapTouchSurface();
+
+    fireEvent.pointerDown(surface, {
+      pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+    });
+    fireEvent.pointerMove(surface, {
+      pointerId: 1, pointerType: 'touch', clientX: 170, clientY: 80,
+    });
+    fireEvent.pointerUp(surface, {
+      pointerId: 1, pointerType: 'touch', clientX: 170, clientY: 80,
+    });
+
+    expect(mockQueryRenderedFeatures).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+  });
+
+  it('opens marker details modal when tapping an exploration lead fallback marker', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Lead Fallback Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockMapLoadImage.mockImplementation((url: string, callback: (error: Error | null, image?: unknown) => void) => {
+      if (url.includes('exploration-lead-icon')) {
+        callback(new Error('image load failed'));
+        return;
+      }
+      callback(null, { width: 16, height: 16 });
+    });
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'explorationLeads') {
+        return overlayPointFeatureCollection({ project: 'p1' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="exploration-leads-fallback-layer"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'exploration-leads-fallback-layer' },
+        properties: { description: 'fallback lead description' },
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent(
+      'fallback lead description',
+    );
+  });
+
+  it('opens marker details modal with formatted cylinder fields for icon markers', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Cylinder Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'cylinderInstalls') {
+        return overlayPointFeatureCollection({ project_id: 'p1' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="cylinder-installs-icon-layer"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'cylinder-installs-icon-layer' },
+        properties: {
+          id: 'cyl-1',
+          pressure: 3000,
+          pressure_unit_system: 'imperial',
+          o2_percentage: 32,
+          he_percentage: 0,
+          install_date: '2026-02-17',
+        },
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('overlay-marker-pressure')).toHaveTextContent('3000 PSI');
+    expect(screen.getByTestId('overlay-marker-gas-mix')).toHaveTextContent('NX32');
+    expect(screen.getByTestId('overlay-marker-install-date')).toHaveTextContent('2026-02-17');
+  });
+
+  it('opens marker details modal for cylinder fallback markers and handles malformed properties', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Cylinder Fallback Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockMapLoadImage.mockImplementation((url: string, callback: (error: Error | null, image?: unknown) => void) => {
+      if (url.includes('cylinder-orange-icon')) {
+        callback(new Error('image load failed'));
+        return;
+      }
+      callback(null, { width: 16, height: 16 });
+    });
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'cylinderInstalls') {
+        return overlayPointFeatureCollection({ project_id: 'p1' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="cylinder-installs-fallback-layer"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        id: 'feature-cylinder-fallback',
+        layer: { id: 'cylinder-installs-fallback-layer' },
+        properties: {},
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('overlay-marker-pressure')).toHaveTextContent('N/A');
+    expect(screen.getByTestId('overlay-marker-gas-mix')).toHaveTextContent('N/A');
+    expect(screen.getByTestId('overlay-marker-install-date')).toHaveTextContent('N/A');
+  });
+
+  it('does not open marker details modal for non-interactive map layers', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Non Interactive Layer Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'landmarks') {
+        return overlayPointFeatureCollection({ name: 'Landmark A' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'landmarks-layer' },
+        properties: { name: 'Landmark A' },
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+  });
+
+  it('dismisses marker details modal and updates content when selecting a different marker type', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Switch Marker Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'explorationLeads') {
+        return overlayPointFeatureCollection({ project: 'p1' });
+      }
+      if (overlayId === 'cylinderInstalls') {
+        return overlayPointFeatureCollection({ project_id: 'p1' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="cylinder-installs-icon-layer"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures
+      .mockReturnValueOnce([
+        {
+          layer: { id: 'exploration-leads-icon-layer' },
+          properties: { description: 'first marker detail' },
+        },
+      ])
+      .mockReturnValueOnce([
+        {
+          layer: { id: 'cylinder-installs-icon-layer' },
+          properties: {
+            pressure: 220,
+            pressure_unit_system: 'metric',
+            o2_percentage: 21,
+            he_percentage: 0,
+            install_date: '2026-02-18',
+          },
+        },
+      ]);
+
+    simulatePointerTap(getMapTouchSurface());
+    expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent('first marker detail');
+
+    simulatePointerTap(getMapTouchSurface());
+    expect(screen.queryByTestId('overlay-marker-description')).not.toBeInTheDocument();
+    expect(screen.getByTestId('overlay-marker-pressure')).toHaveTextContent('220 BAR');
+    expect(screen.getByTestId('overlay-marker-gas-mix')).toHaveTextContent('Air');
+
+    await userEvent.click(screen.getByText('Close'));
+    expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+  });
+
+  it('hides project-linked overlays when a project is hidden and keeps global overlays visible', async () => {
+    mockProjects = [
+      makeProject({ id: 'p1', name: 'Alpha' }),
+      makeProject({ id: 'p2', name: 'Beta' }),
+    ];
+    mockGetProjectGeoJSON.mockImplementation(async (projectId: string) =>
+      pointFeatureCollection(projectId === 'p1' ? 2.3 : 2.4, 46.6),
+    );
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'landmarks') return overlayPointFeatureCollection({ name: 'Landmark A' });
+      if (overlayId === 'surfaceStations') return overlayPointFeatureCollection({ name: 'Surface A' });
+      if (overlayId === 'subsurfaceStations') {
+        return overlayPointFeatureCollection({ type: 'sensor', project: 'p1' });
+      }
+      if (overlayId === 'explorationLeads') {
+        return overlayPointFeatureCollection({ project: 'p1' });
+      }
+      if (overlayId === 'cylinderInstalls') {
+        return overlayPointFeatureCollection({ project_id: 'p1' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="surface-stations-layer"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="subsurface-stations-circles"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="cylinder-installs-icon-layer"]')).not.toBeNull();
+    });
+
+    await userEvent.click(screen.getByLabelText('Toggle Alpha'));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="subsurface-stations-circles"]')).toBeNull();
+      expect(document.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).toBeNull();
+      expect(document.querySelector('[data-layer-id="exploration-leads-fallback-layer"]')).toBeNull();
+      expect(document.querySelector('[data-layer-id="cylinder-installs-icon-layer"]')).toBeNull();
+      expect(document.querySelector('[data-layer-id="cylinder-installs-fallback-layer"]')).toBeNull();
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="surface-stations-layer"]')).not.toBeNull();
     });
   });
 
@@ -513,7 +1233,7 @@ describe('Dashboard', () => {
     renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('map-source')).toHaveLength(1);
+      expect(document.querySelectorAll('[data-layer-id$="-line"]')).toHaveLength(1);
     });
   });
 
@@ -536,7 +1256,7 @@ describe('Dashboard', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Toggle Toggle Me')).toBeInTheDocument();
-      expect(screen.getByTestId('map-source')).toBeInTheDocument();
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
     });
 
     await userEvent.click(screen.getByLabelText('Toggle Toggle Me'));

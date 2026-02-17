@@ -64,4 +64,61 @@ describe('SpeleoDBService', () => {
     });
   });
 
+  // ---- overlay geojson endpoints --------------------------------------------
+
+  describe('overlay geojson endpoints', () => {
+    function expectOverlayRequest(endpoint: string): void {
+      expect(http.calls).toHaveLength(1);
+      const req = http.calls[0];
+      expect(req.method).toBe('GET');
+      expect(req.url).toBe('https://www.speleodb.org' + endpoint);
+      expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(`${HEADERS.TOKEN_PREFIX}tok`);
+    }
+
+    it('requests landmarks geojson with auth header', async () => {
+      http = createMockHttpClient({ status: 200, data: {} });
+      service = new SpeleoDBService(http);
+
+      await service.getLandmarksGeoJSON('https://www.speleodb.org', 'tok');
+
+      expectOverlayRequest(API.LANDMARKS_GEOJSON_ENDPOINT);
+    });
+
+    it('requests subsurface stations geojson with auth header', async () => {
+      http = createMockHttpClient({ status: 200, data: {} });
+      service = new SpeleoDBService(http);
+
+      await service.getSubsurfaceStationsGeoJSON('https://www.speleodb.org', 'tok');
+
+      expectOverlayRequest(API.SUBSURFACE_STATIONS_GEOJSON_ENDPOINT);
+    });
+
+    it('requests surface stations geojson with auth header', async () => {
+      http = createMockHttpClient({ status: 200, data: {} });
+      service = new SpeleoDBService(http);
+
+      await service.getSurfaceStationsGeoJSON('https://www.speleodb.org', 'tok');
+
+      expectOverlayRequest(API.SURFACE_STATIONS_GEOJSON_ENDPOINT);
+    });
+
+    it('requests exploration leads geojson with auth header', async () => {
+      http = createMockHttpClient({ status: 200, data: {} });
+      service = new SpeleoDBService(http);
+
+      await service.getExplorationLeadsGeoJSON('https://www.speleodb.org', 'tok');
+
+      expectOverlayRequest(API.EXPLORATION_LEADS_GEOJSON_ENDPOINT);
+    });
+
+    it('requests cylinder installs geojson with auth header', async () => {
+      http = createMockHttpClient({ status: 200, data: {} });
+      service = new SpeleoDBService(http);
+
+      await service.getCylinderInstallsGeoJSON('https://www.speleodb.org', 'tok');
+
+      expectOverlayRequest(API.CYLINDER_INSTALLS_GEOJSON_ENDPOINT);
+    });
+  });
+
 });

@@ -3,12 +3,19 @@
  * Add only what the app uses to keep the file maintainable.
  */
 
+import type { MapOverlayDefinition } from './types/mapOverlay';
+
 // ==================== API ENDPOINTS ====================
 const BASE_PATH = '/api/v1';
 export const API = {
   BASE_PATH,
   AUTH_TOKEN_ENDPOINT: BASE_PATH + '/user/auth-token/',
   PROJECTS_GEOJSON_ENDPOINT: BASE_PATH + '/projects/geojson/',
+  LANDMARKS_GEOJSON_ENDPOINT: BASE_PATH + '/landmarks/geojson/',
+  SUBSURFACE_STATIONS_GEOJSON_ENDPOINT: BASE_PATH + '/stations/subsurface/geojson/',
+  SURFACE_STATIONS_GEOJSON_ENDPOINT: BASE_PATH + '/stations/surface/geojson/',
+  EXPLORATION_LEADS_GEOJSON_ENDPOINT: BASE_PATH + '/exploration-leads/geojson/',
+  CYLINDER_INSTALLS_GEOJSON_ENDPOINT: BASE_PATH + '/cylinder-installs/geojson/',
 } as const;
 
 // ==================== HTTP STATUS CODES ====================
@@ -67,7 +74,11 @@ export const MAP = {
     maxPitch: 0,
   } as const,
   // Hard cap to avoid provider "map data not available" tiles.
-  MAX_ZOOM: 18,
+  MAX_ZOOM: 19.9,
+  PROJECT_LAYER_ZOOMS: {
+    LINE_MIN: 0,
+    ENTRY_SYMBOL_MIN: 0,
+  } as const,
   // Hard cap for all cached tile payloads (prefetch + runtime map browsing).
   TILE_CACHE_MAX_BYTES: 500 * 1024 * 1024,
 } as const;
@@ -96,4 +107,110 @@ export const COLOR_PALETTE = [
   '#1b9e77', // Dark Teal
   '#d95f02', // Dark Orange
   '#7570b3', // Slate Blue
+] as const;
+
+// ==================== MAP OVERLAYS ====================
+
+export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
+  {
+    id: 'landmarks',
+    label: 'Landmarks',
+    endpoint: API.LANDMARKS_GEOJSON_ENDPOINT,
+    markerMinZoom: 10,
+    labelMinZoom: 12,
+    legendItems: [
+      {
+        id: 'landmark',
+        label: 'Landmark',
+        kind: 'text-symbol',
+        symbol: '▼',
+        color: '#3b82f6',
+      },
+    ],
+  },
+  {
+    id: 'subsurfaceStations',
+    label: 'Subsurface Stations',
+    endpoint: API.SUBSURFACE_STATIONS_GEOJSON_ENDPOINT,
+    markerMinZoom: 12,
+    labelMinZoom: 14,
+    legendItems: [
+      {
+        id: 'subsurface-sensor',
+        label: 'Sensor station',
+        kind: 'circle',
+        color: '#fb923c',
+      },
+      {
+        id: 'subsurface-biology',
+        label: 'Biology station',
+        kind: 'image',
+        imageId: 'biology-station-icon',
+      },
+      {
+        id: 'subsurface-bone',
+        label: 'Bone station',
+        kind: 'image',
+        imageId: 'bone-station-icon',
+      },
+      {
+        id: 'subsurface-artifact',
+        label: 'Artifact station',
+        kind: 'image',
+        imageId: 'artifact-station-icon',
+      },
+      {
+        id: 'subsurface-geology',
+        label: 'Geology station',
+        kind: 'image',
+        imageId: 'geology-station-icon',
+      },
+    ],
+  },
+  {
+    id: 'surfaceStations',
+    label: 'Surface Stations',
+    endpoint: API.SURFACE_STATIONS_GEOJSON_ENDPOINT,
+    markerMinZoom: 12,
+    labelMinZoom: 14,
+    legendItems: [
+      {
+        id: 'surface-station',
+        label: 'Surface station',
+        kind: 'text-symbol',
+        symbol: '◆',
+        color: '#fb923c',
+      },
+    ],
+  },
+  {
+    id: 'explorationLeads',
+    label: 'Exploration Leads',
+    endpoint: API.EXPLORATION_LEADS_GEOJSON_ENDPOINT,
+    markerMinZoom: 12,
+    labelMinZoom: null,
+    legendItems: [
+      {
+        id: 'exploration-lead',
+        label: 'Exploration lead',
+        kind: 'image',
+        imageId: 'exploration-lead-icon',
+      },
+    ],
+  },
+  {
+    id: 'cylinderInstalls',
+    label: 'Cylinder Installs',
+    endpoint: API.CYLINDER_INSTALLS_GEOJSON_ENDPOINT,
+    markerMinZoom: 12,
+    labelMinZoom: 14,
+    legendItems: [
+      {
+        id: 'cylinder-install',
+        label: 'Cylinder install',
+        kind: 'image',
+        imageId: 'cylinder-icon',
+      },
+    ],
+  },
 ] as const;
