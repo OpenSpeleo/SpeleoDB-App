@@ -133,6 +133,27 @@ describe('ProjectPanel', () => {
     expect(onHideAll).toHaveBeenCalledOnce();
   });
 
+  it('renders guided tour selector for bulk actions', () => {
+    const { container } = renderPanel();
+    const bulkActions = container.querySelector('[data-tour="bulk-actions"]');
+    expect(bulkActions).not.toBeNull();
+  });
+
+  it('applies project tour selectors only to the first project row', () => {
+    const { container } = renderPanel();
+    const tourNames = container.querySelectorAll('[data-tour="project-name"]');
+    const tourToggles = container.querySelectorAll('[data-tour="project-toggle"]');
+
+    expect(tourNames).toHaveLength(1);
+    expect(tourToggles).toHaveLength(1);
+  });
+
+  it('exposes row zoom trigger markers on every project row', () => {
+    const { container } = renderPanel();
+    const rowZoomTriggers = container.querySelectorAll('[data-tour-action="project-row-zoom"]');
+    expect(rowZoomTriggers).toHaveLength(defaultProps.projects.length);
+  });
+
   it('calls onClose when close button is clicked', async () => {
     const onClose = vi.fn();
     renderPanel({ onClose });
@@ -151,5 +172,15 @@ describe('ProjectPanel', () => {
     const { container } = renderPanel({ isOpen: true });
     const panel = container.querySelector('.translate-x-0');
     expect(panel).not.toBeNull();
+  });
+
+  it('exposes guided tour panel-open marker for runtime readiness checks', () => {
+    const { container, rerender } = renderPanel({ isOpen: false });
+    const closedPanel = container.querySelector('[data-tour="project-panel"]');
+    expect(closedPanel?.getAttribute('data-tour-open')).toBe('false');
+
+    rerender(<ProjectPanel {...defaultProps} isOpen />);
+    const openPanel = container.querySelector('[data-tour="project-panel"]');
+    expect(openPanel?.getAttribute('data-tour-open')).toBe('true');
   });
 });

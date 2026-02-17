@@ -6,6 +6,8 @@ import {
   getProjectVisibilityPreferences,
   setProjectVisibilityPreference,
   setProjectVisibilityPreferences,
+  getHasCompletedGuidedTour,
+  setHasCompletedGuidedTour,
   type UserPreferences,
 } from './PreferencesService';
 import { PREFERENCES } from '../constants';
@@ -21,6 +23,7 @@ describe('PreferencesService', () => {
       expect(prefs.instance).toBe(PREFERENCES.DEFAULT_INSTANCE);
       expect(prefs.email).toBeUndefined();
       expect(prefs.token).toBeUndefined();
+      expect(prefs.hasCompletedGuidedTour).toBeUndefined();
     });
 
     it('applies default instance when stored object has no instance', () => {
@@ -70,6 +73,14 @@ describe('PreferencesService', () => {
       const prefs = getPreferences();
       expect(prefs.token).toBe('tok');
       expect(prefs.projectVisibility).toEqual({ p1: false });
+    });
+
+    it('keeps guided tour completion across unrelated partial updates', () => {
+      setHasCompletedGuidedTour(true);
+      setPreferences({ token: 'tok' });
+      const prefs = getPreferences();
+      expect(prefs.token).toBe('tok');
+      expect(prefs.hasCompletedGuidedTour).toBe(true);
     });
   });
 
@@ -134,6 +145,45 @@ describe('PreferencesService', () => {
       expect(prefs.email).toBeUndefined();
       expect(prefs.token).toBeUndefined();
       expect(prefs.instance).toBe(PREFERENCES.DEFAULT_INSTANCE);
+      expect(getHasCompletedGuidedTour()).toBe(false);
+    });
+  });
+
+  describe('guided tour completion preferences', () => {
+    it('defaults to false when missing', () => {
+      expect(getHasCompletedGuidedTour()).toBe(false);
+    });
+
+    it('stores and reads true', () => {
+      setHasCompletedGuidedTour(true);
+      expect(getHasCompletedGuidedTour()).toBe(true);
+    });
+
+    it('stores and reads false', () => {
+      setHasCompletedGuidedTour(true);
+      setHasCompletedGuidedTour(false);
+      expect(getHasCompletedGuidedTour()).toBe(false);
+    });
+
+    it('ignores non-boolean values from storage', () => {
+      localStorage.setItem(
+        PREFERENCES.STORAGE_KEY,
+        JSON.stringify({ hasCompletedGuidedTour: 'yes' }),
+      );
+      expect(getHasCompletedGuidedTour()).toBe(false);
+    });
+
+    it('survives rapid sequential updates', async () => {
+      await Promise.all([
+        Promise.resolve().then(() => setHasCompletedGuidedTour(true)),
+        Promise.resolve().then(() => setProjectVisibilityPreference('p1', true)),
+        Promise.resolve().then(() => setPreferences({ email: 'user@example.com' })),
+      ]);
+
+      const prefs = getPreferences();
+      expect(prefs.email).toBe('user@example.com');
+      expect(prefs.projectVisibility).toEqual({ p1: true });
+      expect(getHasCompletedGuidedTour()).toBe(true);
     });
   });
 });

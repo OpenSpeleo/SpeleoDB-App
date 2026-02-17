@@ -10,6 +10,7 @@ Use the `docs/` folder as the primary guidance source for behavior and conventio
 - `docs/implementation-guidelines.md` (for architecture/style/testing expectations)
 - `docs/onboarding-modal.md` (for onboarding modal layout/UX/dismissal changes)
 - `docs/project-panel.md` (for project panel layout/behavior/auto-close/persistence changes)
+- `docs/guided-tour.md` (for guided tour steps/architecture/driver.js changes)
 
 ## Working rules
 

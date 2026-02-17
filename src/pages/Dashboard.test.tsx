@@ -6,6 +6,7 @@ import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import Dashboard from './Dashboard';
 import type { Project } from '../types/project';
+import { TOUR_EVENTS } from '../onboarding/guidedTour/selectors';
 
 // ==================== Mocks ====================
 
@@ -13,16 +14,19 @@ const {
   mapPropsRef,
   mockMapFitBounds,
   mockGetMap,
+  mockMapOnce,
   mockDisableTouchRotation,
   mockSetBearing,
   mockSetPitch,
 } = vi.hoisted(() => {
   const mapPropsRef = { current: null as Record<string, unknown> | null };
   const mockMapFitBounds = vi.fn();
+  const mockMapOnce = vi.fn();
   const mockDisableTouchRotation = vi.fn();
   const mockSetBearing = vi.fn();
   const mockSetPitch = vi.fn();
   const mockGetMap = vi.fn(() => ({
+    once: mockMapOnce,
     touchZoomRotate: { disableRotation: mockDisableTouchRotation },
     setBearing: mockSetBearing,
     setPitch: mockSetPitch,
@@ -32,6 +36,7 @@ const {
     mapPropsRef,
     mockMapFitBounds,
     mockGetMap,
+    mockMapOnce,
     mockDisableTouchRotation,
     mockSetBearing,
     mockSetPitch,
@@ -160,10 +165,18 @@ const {
   mockSetProjectVisibilityPreferences: vi.fn(),
 }));
 
+const { mockRestartGuidedTourFromHelp } = vi.hoisted(() => ({
+  mockRestartGuidedTourFromHelp: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../services/PreferencesService', () => ({
   getProjectVisibilityPreferences: mockGetProjectVisibilityPreferences,
   setProjectVisibilityPreference: mockSetProjectVisibilityPreference,
   setProjectVisibilityPreferences: mockSetProjectVisibilityPreferences,
+}));
+
+vi.mock('../onboarding/guidedTour/engine', () => ({
+  restartGuidedTourFromHelp: mockRestartGuidedTourFromHelp,
 }));
 
 // Mock SpeleoDBProvider
@@ -288,6 +301,15 @@ describe('Dashboard', () => {
     });
   });
 
+  it('renders guided tour selectors for header and menu toggle', async () => {
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-tour="header"]')).not.toBeNull();
+      expect(document.querySelector('[data-tour="menu-toggle"]')).not.toBeNull();
+    });
+  });
+
   it('asks for confirmation before wiping data on Sign Out', async () => {
     const history = renderDashboard();
     await waitFor(() => {
@@ -305,6 +327,17 @@ describe('Dashboard', () => {
       expect(mockLogout).toHaveBeenCalledOnce();
       expect(history.location.pathname).toBe('/');
     });
+  });
+
+  it('restarts guided tour from help button', async () => {
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Start guided tour')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByLabelText('Start guided tour'));
+    expect(mockRestartGuidedTourFromHelp).toHaveBeenCalledWith();
   });
 
   it('redirects to /login when not authenticated', () => {
@@ -417,6 +450,27 @@ describe('Dashboard', () => {
       expect(mockRetryConnection).toHaveBeenCalledOnce();
       expect(mockSyncProjects).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('dispatches guided-tour refresh completion after pull refresh settles', async () => {
+    renderDashboard();
+
+    const onRefreshComplete = vi.fn();
+    document.addEventListener(TOUR_EVENTS.refreshComplete, onRefreshComplete as EventListener);
+
+    await userEvent.click(screen.getByTestId('trigger-refresh'));
+
+    await waitFor(
+      () => {
+        expect(onRefreshComplete).toHaveBeenCalled();
+      },
+      { timeout: 3000 },
+    );
+
+    document.removeEventListener(
+      TOUR_EVENTS.refreshComplete,
+      onRefreshComplete as EventListener,
+    );
   });
 
   it('renders GeoJSON layer when payload is a JSON string', async () => {
@@ -536,6 +590,34 @@ describe('Dashboard', () => {
 
     await userEvent.click(screen.getByText('Zoom Me'));
     expect(mockSetProjectVisibilityPreference).toHaveBeenCalledWith('p1', true);
+  });
+
+  it('dispatches guided-tour zoom completion after map movement ends', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Zoom Event' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockMapOnce.mockImplementation((eventName: string, listener: () => void) => {
+      if (eventName === 'moveend') listener();
+    });
+
+    renderDashboard();
+
+    const onZoomComplete = vi.fn();
+    document.addEventListener(TOUR_EVENTS.projectZoomComplete, onZoomComplete as EventListener);
+
+    await waitFor(() => {
+      expect(screen.getByText('Zoom Event')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText('Zoom Event'));
+
+    await waitFor(() => {
+      expect(onZoomComplete).toHaveBeenCalledOnce();
+    });
+
+    document.removeEventListener(
+      TOUR_EVENTS.projectZoomComplete,
+      onZoomComplete as EventListener,
+    );
   });
 
   it('closes the project panel after zooming to a project', async () => {

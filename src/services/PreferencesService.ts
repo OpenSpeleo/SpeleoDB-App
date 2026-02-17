@@ -10,6 +10,7 @@ export interface UserPreferences {
   token?: string;
   instance?: string;
   projectVisibility?: Record<string, boolean>;
+  hasCompletedGuidedTour?: boolean;
 }
 
 function getStorageKey(): string {
@@ -35,11 +36,20 @@ function normalizeProjectVisibility(
   return normalized;
 }
 
+function normalizeGuidedTourCompletion(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  return undefined;
+}
+
 function readRawPreferences(): UserPreferences {
   try {
     const raw = localStorage.getItem(getStorageKey());
     if (!raw) {
-      return { instance: defaultInstance(), projectVisibility: {} };
+      return {
+        instance: defaultInstance(),
+        projectVisibility: {},
+        hasCompletedGuidedTour: undefined,
+      };
     }
 
     const parsed = JSON.parse(raw) as UserPreferences;
@@ -48,9 +58,14 @@ function readRawPreferences(): UserPreferences {
       token: parsed.token,
       instance: parsed.instance ?? defaultInstance(),
       projectVisibility: normalizeProjectVisibility(parsed.projectVisibility),
+      hasCompletedGuidedTour: normalizeGuidedTourCompletion(parsed.hasCompletedGuidedTour),
     };
   } catch {
-    return { instance: defaultInstance(), projectVisibility: {} };
+    return {
+      instance: defaultInstance(),
+      projectVisibility: {},
+      hasCompletedGuidedTour: undefined,
+    };
   }
 }
 
@@ -82,6 +97,7 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
         token: mutated.token,
         instance: mutated.instance ?? defaultInstance(),
         projectVisibility: normalizeProjectVisibility(mutated.projectVisibility),
+        hasCompletedGuidedTour: normalizeGuidedTourCompletion(mutated.hasCompletedGuidedTour),
       };
       writePreferences(next);
     }
@@ -110,6 +126,10 @@ export function setPreferences(prefs: Partial<UserPreferences>): void {
       prefs.projectVisibility === undefined
         ? current.projectVisibility
         : normalizeProjectVisibility(prefs.projectVisibility),
+    hasCompletedGuidedTour:
+      prefs.hasCompletedGuidedTour === undefined
+        ? current.hasCompletedGuidedTour
+        : normalizeGuidedTourCompletion(prefs.hasCompletedGuidedTour),
   }));
 }
 
@@ -147,6 +167,20 @@ export function setProjectVisibilityPreferences(
       ...safeUpdates,
     },
   }));
+}
+
+/**
+ * Read guided tour completion flag.
+ */
+export function getHasCompletedGuidedTour(): boolean {
+  return getPreferences().hasCompletedGuidedTour === true;
+}
+
+/**
+ * Persist guided tour completion flag.
+ */
+export function setHasCompletedGuidedTour(completed: boolean): void {
+  setPreferences({ hasCompletedGuidedTour: completed });
 }
 
 /**

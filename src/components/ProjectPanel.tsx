@@ -79,6 +79,8 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
           flex flex-col transition-transform duration-300 ease-in-out
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
+        data-tour="project-panel"
+        data-tour-open={isOpen ? 'true' : 'false'}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
@@ -101,9 +103,13 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
         </div>
 
         {/* Bulk actions */}
-        <div className="flex gap-2 px-4 py-2.5 border-b border-slate-700/50">
+        <div
+          className="flex gap-2 px-4 py-2.5 border-b border-slate-700/50"
+          data-tour="bulk-actions"
+        >
           <button
             onClick={onShowAll}
+            data-tour-action="show-all"
             className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg
                        bg-slate-700/50 text-slate-300 hover:bg-slate-600/50
                        hover:text-slate-100 transition-colors"
@@ -112,6 +118,7 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
           </button>
           <button
             onClick={onHideAll}
+            data-tour-action="hide-all"
             className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg
                        bg-slate-700/50 text-slate-300 hover:bg-slate-600/50
                        hover:text-slate-100 transition-colors"
@@ -128,11 +135,12 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
             </div>
           ) : (
             <ul className="py-1">
-              {projects.map((project) => {
+              {projects.map((project, index) => {
                 const color = getProjectColor(project.id, projectColorsById);
                 const isActive = activeProjectIds.has(project.id);
                 const hasGeoJson = project.id in geoJsonData;
                 const prefetchLabel = prefetchStatusLabel(tilePrefetchByProject[project.id]);
+                const isFirstProject = index === 0;
 
                 return (
                   <li
@@ -141,43 +149,48 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
                   >
                     <div className="flex items-center gap-2 pl-4 pr-3 py-2.5">
                       {/* Name area -- click to zoom */}
-                      <button
-                        onClick={() => onZoomToProject(project.id)}
-                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                        title={hasGeoJson ? `Zoom to ${project.name}` : project.name}
-                      >
-                        {/* Color dot */}
-                        <span
-                          data-testid={`project-color-dot-${project.id}`}
-                          className="w-3 h-3 rounded-full flex-shrink-0 ring-1 ring-white/20"
-                          style={{
-                            backgroundColor: isActive ? color : 'transparent',
-                            borderWidth: isActive ? 0 : 2,
-                            borderColor: color,
-                            borderStyle: 'solid',
-                          }}
-                        />
-
-                        {/* Project name */}
-                        <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1">
+                        <button
+                          onClick={() => onZoomToProject(project.id)}
+                          data-tour={isFirstProject ? 'project-name' : undefined}
+                          data-tour-action="project-row-zoom"
+                          className="flex min-w-0 w-full items-center gap-3 text-left"
+                          title={hasGeoJson ? `Zoom to ${project.name}` : project.name}
+                        >
+                          {/* Color dot */}
                           <span
-                            className={`block text-sm truncate ${
-                              isActive ? 'text-slate-100' : 'text-slate-500'
-                            }`}
-                          >
-                            {project.name}
-                          </span>
-                          {prefetchLabel && (
-                            <span className="block text-[10px] text-emerald-300/90 truncate">
-                              {prefetchLabel}
+                            data-testid={`project-color-dot-${project.id}`}
+                            className="w-3 h-3 rounded-full flex-shrink-0 ring-1 ring-white/20"
+                            style={{
+                              backgroundColor: isActive ? color : 'transparent',
+                              borderWidth: isActive ? 0 : 2,
+                              borderColor: color,
+                              borderStyle: 'solid',
+                            }}
+                          />
+
+                          {/* Project name */}
+                          <div className="min-w-0 flex-1">
+                            <span
+                              className={`block text-sm truncate ${
+                                isActive ? 'text-slate-100' : 'text-slate-500'
+                              }`}
+                            >
+                              {project.name}
                             </span>
-                          )}
-                        </div>
-                      </button>
+                            {prefetchLabel && (
+                              <span className="block text-[10px] text-emerald-300/90 truncate">
+                                {prefetchLabel}
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      </div>
 
                       {/* Toggle switch -- kept in normal flow to prevent overflow */}
                       <button
                         onClick={() => onToggleProject(project.id)}
+                        data-tour={isFirstProject ? 'project-toggle' : undefined}
                         className="flex h-8 w-12 shrink-0 items-center justify-center"
                         aria-label={`Toggle ${project.name}`}
                       >

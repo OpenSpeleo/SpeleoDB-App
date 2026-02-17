@@ -1,0 +1,137 @@
+.driver-popover.guided-tour-popover {
+  background: #1e293b;
+  border: 2px solid rgba(248, 250, 252, 0.78);
+  border-radius: 14px;
+  color: #cbd5e1;
+  box-shadow:
+    0 20px 44px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.driver-popover.guided-tour-popover .driver-popover-title {
+  color: #f1f5f9;
+}
+
+.driver-popover.guided-tour-popover .driver-popover-description {
+  color: #cbd5e1;
+}
+
+.driver-popover.guided-tour-popover .driver-popover-progress-text {
+  color: #94a3b8;
+}
+
+.driver-popover.guided-tour-popover .driver-popover-arrow {
+  border-width: 10px;
+  filter: drop-shadow(0 0 1px rgba(248, 250, 252, 0.95));
+}
+
+.driver-popover.guided-tour-popover .driver-popover-arrow-side-left {
+  border-left-color: #1e293b;
+}
+
+.driver-popover.guided-tour-popover .driver-popover-arrow-side-right {
+  border-right-color: #1e293b;
+}
+
+.driver-popover.guided-tour-popover .driver-popover-arrow-side-top {
+  border-top-color: #1e293b;
+}
+
+.driver-popover.guided-tour-popover .driver-popover-arrow-side-bottom {
+  border-bottom-color: #1e293b;
+}
+
+.driver-popover.guided-tour-popover .driver-popover-arrow-side-left.driver-popover-arrow-align-center,
+.driver-popover.guided-tour-popover .driver-popover-arrow-side-right.driver-popover-arrow-align-center {
+  margin-top: -10px;
+}
+
+.driver-popover.guided-tour-popover .driver-popover-arrow-side-top.driver-popover-arrow-align-center,
+.driver-popover.guided-tour-popover .driver-popover-arrow-side-bottom.driver-popover-arrow-align-center {
+  margin-left: -10px;
+}
+
+.driver-popover.guided-tour-popover .driver-popover-next-btn,
+.driver-popover.guided-tour-popover .driver-popover-prev-btn {
+  background: #a855f7;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
+  text-shadow: none;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.driver-popover.guided-tour-popover .driver-popover-next-btn:hover,
+.driver-popover.guided-tour-popover .driver-popover-next-btn:focus,
+.driver-popover.guided-tour-popover .driver-popover-prev-btn:hover,
+.driver-popover.guided-tour-popover .driver-popover-prev-btn:focus {
+  background: #9333ea;
+}
+
+.guided-tour-pull-arrow {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  color: #e2e8f0;
+  margin-bottom: 8px;
+  animation: guided-tour-bounce 0.8s ease-in-out infinite alternate;
+}
+
+.guided-tour-step-feedback {
+  margin-top: 8px;
+  color: #a78bfa;
+  font-weight: 600;
+  min-height: 18px;
+}
+
+@keyframes guided-tour-bounce {
+  from {
+    transform: translateY(-2px);
+  }
+  to {
+    transform: translateY(3px);
+  }
+}
+
+/* Step 3 keeps the real hamburger button clickable even if cutout alignment drifts. */
+.tour-step-menu-clickthrough.driver-active .driver-overlay,
+.tour-step-menu-clickthrough.driver-active .driver-overlay path {
+  pointer-events: none !important;
+}
+
+.tour-step-menu-clickthrough.driver-active
+  [data-tour='menu-toggle'].driver-active-element {
+  position: relative;
+  z-index: 10001 !important;
+}
+
+.tour-step-menu-clickthrough.driver-active
+  [data-tour='menu-toggle'].driver-active-element,
+.tour-step-menu-clickthrough.driver-active
+  [data-tour='menu-toggle'].driver-active-element * {
+  pointer-events: auto !important;
+}
+
+/* Steps 4-5 sequentially expose only the intended bulk-action button. */
+.tour-step-bulk-hide-only.driver-active [data-tour-action='show-all'] {
+  display: none !important;
+}
+
+.tour-step-bulk-show-only.driver-active [data-tour-action='hide-all'] {
+  display: none !important;
+}
+
+/* Steps 3 and 7 briefly hide tour chrome before replaying native clicks. */
+.tour-step-transition-handoff.driver-active .driver-overlay,
+.tour-step-transition-handoff.driver-active .driver-overlay path,
+.tour-step-transition-handoff.driver-active .driver-popover {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Step 2 allows refresh/map gestures while the tour remains active. */
+.tour-step-pull-refresh.driver-active .dashboard-map-touch-surface,
+.tour-step-pull-refresh.driver-active ion-refresher.dashboard-refresher,
+.tour-step-pull-refresh.driver-active ion-refresher.dashboard-refresher * {
+  pointer-events: auto !important;
+}

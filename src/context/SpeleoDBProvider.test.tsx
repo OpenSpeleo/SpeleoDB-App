@@ -18,7 +18,9 @@ const {
   mockSetPreferences,
   mockClearPreferences,
   mockRunTileCacheStartupMaintenance,
-  authStateSnapshot,
+  mockStartGuidedTour,
+  mockDestroyGuidedTour,
+  authStateSnapshotRef,
   projectsSnapshot,
   tilePrefetchJobsSnapshot,
 } = vi.hoisted(() => {
@@ -39,10 +41,18 @@ const {
     mockSetPreferences: vi.fn(),
     mockClearPreferences: vi.fn(),
     mockRunTileCacheStartupMaintenance: vi.fn(),
-    authStateSnapshot: {
-      isAuthenticated: true,
-      user: { id: 'restored', email: 'user@example.com', name: 'user@example.com' },
-      token: 'tok',
+    mockStartGuidedTour: vi.fn().mockResolvedValue(undefined),
+    mockDestroyGuidedTour: vi.fn(),
+    authStateSnapshotRef: {
+      current: {
+        isAuthenticated: true,
+        user: { id: 'restored', email: 'user@example.com', name: 'user@example.com' },
+        token: 'tok',
+      } as {
+        isAuthenticated: boolean;
+        user: { id: string; email: string; name: string } | null;
+        token: string | null;
+      },
     },
     projectsSnapshot: [] as unknown[],
     tilePrefetchJobsSnapshot: [] as unknown[],
@@ -53,10 +63,23 @@ vi.mock('@ionic/react', () => ({
   IonModal: ({
     children,
     isOpen,
+    onDidDismiss,
   }: {
     children?: React.ReactNode;
     isOpen?: boolean;
-  }) => (isOpen ? <div data-testid="ion-modal">{children}</div> : null),
+    onDidDismiss?: () => void;
+  }) => {
+    const wasOpen = React.useRef(Boolean(isOpen));
+
+    React.useEffect(() => {
+      if (wasOpen.current && !isOpen) {
+        onDidDismiss?.();
+      }
+      wasOpen.current = Boolean(isOpen);
+    }, [isOpen, onDidDismiss]);
+
+    return isOpen ? <div data-testid="ion-modal">{children}</div> : null;
+  },
   IonContent: ({
     children,
   }: {
@@ -79,6 +102,11 @@ vi.mock('@ionic/react', () => ({
 
 vi.mock('../services/TileCacheService', () => ({
   runTileCacheStartupMaintenance: mockRunTileCacheStartupMaintenance,
+}));
+
+vi.mock('../onboarding/guidedTour/engine', () => ({
+  startGuidedTour: mockStartGuidedTour,
+  destroyGuidedTour: mockDestroyGuidedTour,
 }));
 
 vi.mock('../services/PreferencesService', () => ({
@@ -105,7 +133,7 @@ vi.mock('../controllers/SpeleoDBController', () => {
     }
 
     get authState() {
-      return authStateSnapshot;
+      return authStateSnapshotRef.current;
     }
 
     get isOnline() {
@@ -152,6 +180,11 @@ describe('SpeleoDBProvider', () => {
     mockIsAuthenticated.mockReturnValue(true);
     mockIsOfflineLockedRef.current = false;
     mockRunTileCacheStartupMaintenance.mockResolvedValue(undefined);
+    authStateSnapshotRef.current = {
+      isAuthenticated: true,
+      user: { id: 'restored', email: 'user@example.com', name: 'user@example.com' },
+      token: 'tok',
+    };
   });
 
   it('shows offline modal on startup network_error and does not logout', async () => {
@@ -226,6 +259,63 @@ describe('SpeleoDBProvider', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Offline mode')).toBeInTheDocument();
+    });
+  });
+
+  it('starts guided tour after onboarding modal dismissal on first dashboard login', async () => {
+    authStateSnapshotRef.current = {
+      isAuthenticated: false,
+      user: null,
+      token: null,
+    };
+    render(
+      <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+        <SpeleoDBProvider>
+          <div>child</div>
+        </SpeleoDBProvider>
+      </Router>,
+    );
+
+    act(() => {
+      authStateSnapshotRef.current = {
+        isAuthenticated: true,
+        user: { id: 'restored', email: 'user@example.com', name: 'user@example.com' },
+        token: 'tok',
+      };
+      emitStoreUpdate();
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Start exploring')).toHaveLength(2);
+    });
+
+    await userEvent.click(screen.getAllByText('Start exploring')[0]);
+
+    await waitFor(() => {
+      expect(mockStartGuidedTour).toHaveBeenCalledWith();
+    });
+  });
+
+  it('destroys active guided tour on auth transition to logged out', async () => {
+    render(
+      <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+        <SpeleoDBProvider>
+          <div>child</div>
+        </SpeleoDBProvider>
+      </Router>,
+    );
+
+    act(() => {
+      authStateSnapshotRef.current = {
+        isAuthenticated: false,
+        user: null,
+        token: null,
+      };
+      emitStoreUpdate();
+    });
+
+    await waitFor(() => {
+      expect(mockDestroyGuidedTour).toHaveBeenCalled();
     });
   });
 });

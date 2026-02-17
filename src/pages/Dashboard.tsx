@@ -29,10 +29,25 @@ import {
 } from '../services/PreferencesService';
 import ProjectPanel from '../components/ProjectPanel';
 import { createProjectColorState, getProjectColor } from '../utils/projectColors';
+import { restartGuidedTourFromHelp } from '../onboarding/guidedTour/engine';
+import { TOUR_EVENTS } from '../onboarding/guidedTour/selectors';
 
 // ==================== GeoJSON type alias ====================
 
 type GeoJsonRecord = Record<string, GeoJSON.FeatureCollection>;
+type IonRefreshEvent = CustomEvent<{ complete: () => void }>;
+
+const REFRESH_SETTLE_MIN_DELAY_MS = 700;
+const REFRESH_SETTLE_MAX_DELAY_MS = 2400;
+const REFRESH_SETTLE_POLL_INTERVAL_MS = 80;
+const REFRESH_SETTLE_REQUIRED_STABLE_SAMPLES = 4;
+const REFRESH_SETTLE_POSITION_EPSILON_PX = 0.75;
+const REFRESH_ACTIVE_CLASS_HINTS = [
+  'refresher-active',
+  'refresher-refreshing',
+  'refresher-pulling',
+  'refresher-ready',
+];
 
 // ==================== Helpers ====================
 
@@ -201,6 +216,27 @@ function lockMapOrientation(mapRef: MapRef | null): void {
   map.setPitch?.(MAP.NORTH_UP_ORIENTATION.pitch);
 }
 
+function isRefresherStillAnimating(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const className = target.className;
+  if (typeof className !== 'string') return false;
+  return REFRESH_ACTIVE_CLASS_HINTS.some((hint) => className.includes(hint));
+}
+
+function getDashboardVerticalPosition(): number {
+  const mapContainer = document.querySelector('.dashboard-map-container');
+  if (mapContainer instanceof HTMLElement) {
+    return mapContainer.getBoundingClientRect().top;
+  }
+
+  const content = document.querySelector('ion-content');
+  if (content instanceof HTMLElement) {
+    return content.getBoundingClientRect().top;
+  }
+
+  return window.scrollY;
+}
+
 // ==================== Register tile caching protocol once ====================
 
 registerTileCacheProtocol();
@@ -365,23 +401,63 @@ const Dashboard: React.FC = () => {
 
   // ---- Handlers -------------------------------------------------------------
 
-  const handleRefresh = useCallback(async (event: CustomEvent) => {
+  const handleRefresh = useCallback(async (event: IonRefreshEvent) => {
+    const completeRefreshForTour = () => {
+      event.detail.complete();
+      const startedAt = Date.now();
+      let stableSampleCount = 0;
+      let previousVerticalPosition = getDashboardVerticalPosition();
+
+      const tryDispatchWhenStable = () => {
+        const elapsed = Date.now() - startedAt;
+        const minDelayReached = elapsed >= REFRESH_SETTLE_MIN_DELAY_MS;
+        const maxDelayReached = elapsed >= REFRESH_SETTLE_MAX_DELAY_MS;
+        const isAnimating = isRefresherStillAnimating(event.target);
+        const currentVerticalPosition = getDashboardVerticalPosition();
+        const verticalDelta = Math.abs(currentVerticalPosition - previousVerticalPosition);
+        const isPositionStable = verticalDelta <= REFRESH_SETTLE_POSITION_EPSILON_PX;
+        previousVerticalPosition = currentVerticalPosition;
+
+        if (minDelayReached && !isAnimating && isPositionStable) {
+          stableSampleCount += 1;
+        } else {
+          stableSampleCount = 0;
+        }
+
+        if (
+          maxDelayReached ||
+          stableSampleCount >= REFRESH_SETTLE_REQUIRED_STABLE_SAMPLES
+        ) {
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+              document.dispatchEvent(new CustomEvent(TOUR_EVENTS.refreshComplete));
+            });
+          });
+          return;
+        }
+
+        window.setTimeout(tryDispatchWhenStable, REFRESH_SETTLE_POLL_INTERVAL_MS);
+      };
+
+      tryDispatchWhenStable();
+    };
+
     didFitRef.current = false;
     if (isOfflineLocked) {
       const result = await controller.retryConnection();
       if (result === 'unauthorized') {
         history.replace('/');
-        event.detail.complete();
+        completeRefreshForTour();
         return;
       }
       if (result !== 'ok') {
-        event.detail.complete();
+        completeRefreshForTour();
         return;
       }
     }
     await controller.syncProjects();
     setLoadTrigger((n) => n + 1);
-    event.detail.complete();
+    completeRefreshForTour();
   }, [controller, history, isOfflineLocked]);
 
   const handleMapGestureStart = useCallback((
@@ -451,6 +527,14 @@ const Dashboard: React.FC = () => {
   }, [panelProjects]);
 
   const handleZoomToProject = useCallback((projectId: string) => {
+    const emitZoomComplete = () => {
+      document.dispatchEvent(
+        new CustomEvent(TOUR_EVENTS.projectZoomComplete, {
+          detail: { projectId },
+        }),
+      );
+    };
+
     setProjectVisibilityPreference(projectId, true);
     setIsPanelOpen(false);
 
@@ -468,7 +552,10 @@ const Dashboard: React.FC = () => {
     setTimeout(() => {
       // Access the ref-stable map and read geoJsonData at call time
       const map = mapRef.current;
-      if (!map) return;
+      if (!map) {
+        emitZoomComplete();
+        return;
+      }
 
       // Get the source data directly from the map if available
       setGeoJsonData((current) => {
@@ -476,9 +563,22 @@ const Dashboard: React.FC = () => {
         if (fc) {
           const bounds = computeBounds(current, new Set([projectId]));
           if (bounds) {
+            let didEmitZoomComplete = false;
+            const emitZoomCompleteOnce = () => {
+              if (didEmitZoomComplete) return;
+              didEmitZoomComplete = true;
+              emitZoomComplete();
+            };
+            const mapInstance = map.getMap() as
+              | { once?: (eventName: 'moveend', listener: () => void) => void }
+              | undefined;
+            mapInstance?.once?.('moveend', emitZoomCompleteOnce);
             map.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 800 });
+            window.setTimeout(emitZoomCompleteOnce, 1200);
+            return current; // no change
           }
         }
+        emitZoomComplete();
         return current; // no change
       });
     }, 0);
@@ -486,6 +586,10 @@ const Dashboard: React.FC = () => {
 
   const handleMapLoad = useCallback(() => {
     lockMapOrientation(mapRef.current);
+  }, []);
+
+  const handleRestartGuidedTour = useCallback(() => {
+    void restartGuidedTourFromHelp();
   }, []);
 
   // ---- Render ---------------------------------------------------------------
@@ -617,6 +721,7 @@ const Dashboard: React.FC = () => {
 
           {/* ---- Floating header ---- */}
           <div
+            data-tour="header"
             className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between
                         px-3 py-2 bg-slate-900/70 backdrop-blur-sm border-b border-slate-700/30"
             style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}
@@ -624,6 +729,7 @@ const Dashboard: React.FC = () => {
             {/* Menu toggle */}
             <button
               onClick={() => setIsPanelOpen(true)}
+              data-tour="menu-toggle"
               className="w-10 h-10 flex items-center justify-center rounded-xl
                          bg-slate-800/60 text-slate-200 hover:bg-slate-700/60 transition-colors"
               aria-label="Open project panel"
@@ -653,6 +759,16 @@ const Dashboard: React.FC = () => {
 
             {/* Logout */}
             <div className="flex items-center gap-2">
+              <button
+                onClick={handleRestartGuidedTour}
+                className="w-9 h-9 text-sm font-bold text-slate-100 hover:text-white
+                           rounded-xl border border-slate-100/70 bg-slate-700/70
+                           hover:bg-slate-600/80 transition-colors shadow-sm shadow-black/30"
+                aria-label="Start guided tour"
+                title="Start guided tour"
+              >
+                ?
+              </button>
               <button
                 onClick={handleLogout}
                 className="px-3 py-2 text-xs font-medium text-slate-300 hover:text-white

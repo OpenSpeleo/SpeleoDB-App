@@ -25,6 +25,7 @@ import type { SyncStatus } from '../controllers/SpeleoDBController';
 import type { AuthState } from '../types';
 import type { Project } from '../types/project';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
+import { destroyGuidedTour, startGuidedTour } from '../onboarding/guidedTour/engine';
 
 // ==================== Context value shape ====================
 
@@ -122,6 +123,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   const [allowCompanionInfoModalDismiss, setAllowCompanionInfoModalDismiss] = React.useState(false);
   const previousAuthStateRef = useRef(authState.isAuthenticated);
   const shouldOpenCompanionInfoRef = useRef(false);
+  const shouldAutostartGuidedTourRef = useRef(false);
 
   useEffect(() => {
     void runTileCacheStartupMaintenance();
@@ -188,6 +190,8 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
       shouldOpenCompanionInfoRef.current = false;
       setShowCompanionInfoModal(false);
       setAllowCompanionInfoModalDismiss(false);
+      shouldAutostartGuidedTourRef.current = false;
+      destroyGuidedTour();
     }
 
     previousAuthStateRef.current = isAuthenticated;
@@ -204,6 +208,12 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
       shouldOpenCompanionInfoRef.current = false;
     }
   }, [authState.isAuthenticated, location.pathname]);
+
+  useEffect(() => {
+    return () => {
+      destroyGuidedTour();
+    };
+  }, []);
 
   // ---- Render ---------------------------------------------------------------
 
@@ -228,6 +238,17 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
         onDidDismiss={() => {
           setShowCompanionInfoModal(false);
           setAllowCompanionInfoModalDismiss(false);
+
+          const shouldStartTour =
+            shouldAutostartGuidedTourRef.current &&
+            authState.isAuthenticated &&
+            location.pathname === '/dashboard';
+          shouldAutostartGuidedTourRef.current = false;
+          if (shouldStartTour) {
+            // Provider does not own project-panel DOM state.
+            // The tour engine resolves project-target availability at runtime.
+            void startGuidedTour();
+          }
         }}
         canDismiss={allowCompanionInfoModalDismiss}
         backdropDismiss={false}
@@ -281,6 +302,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
                 expand="block"
                 className="font-semibold"
                 onClick={() => {
+                  shouldAutostartGuidedTourRef.current = true;
                   setAllowCompanionInfoModalDismiss(true);
                   setShowCompanionInfoModal(false);
                 }}
@@ -344,6 +366,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
                   expand="block"
                   className="font-semibold"
                   onClick={() => {
+                    shouldAutostartGuidedTourRef.current = true;
                     setAllowCompanionInfoModalDismiss(true);
                     setShowCompanionInfoModal(false);
                   }}
