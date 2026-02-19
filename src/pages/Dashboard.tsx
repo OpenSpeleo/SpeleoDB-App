@@ -1600,6 +1600,16 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
 
+          {/* ---- Esri attribution ---- */}
+          <div
+            className="absolute bottom-[0px] right-[0px] py-1.5 pl-4 pr-6 z-10 px-1.5 py-0.5
+                       text-[10px] text-white/80 hover:text-white
+                       bg-slate-700/70 rounded backdrop-blur-sm
+                       no-underline transition-colors"
+          >
+            Powered by Esri
+          </div>
+
           {/* ---- Project panel ---- */}
           <ProjectPanel
             projects={panelProjects}
