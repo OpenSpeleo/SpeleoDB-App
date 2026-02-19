@@ -427,6 +427,7 @@ const Dashboard: React.FC = () => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isMapGestureActive, setIsMapGestureActive] = useState(false);
   const [isPanelGestureActive, setIsPanelGestureActive] = useState(false);
+  const [isInitialSyncSettled, setIsInitialSyncSettled] = useState(false);
   const [selectedOverlayMarkerDetail, setSelectedOverlayMarkerDetail] =
     useState<OverlayMarkerDetails | null>(null);
 
@@ -468,9 +469,21 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     if (!didSyncRef.current) {
       didSyncRef.current = true;
-      controller.syncProjects().then(() => {
-        setLoadTrigger((n) => n + 1);
-      });
+      let cancelled = false;
+      controller.syncProjects()
+        .then(() => {
+          if (cancelled) return;
+          setLoadTrigger((n) => n + 1);
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setIsInitialSyncSettled(true);
+          }
+        });
+
+      return () => {
+        cancelled = true;
+      };
     }
   }, [controller]);
 
@@ -1435,6 +1448,7 @@ const Dashboard: React.FC = () => {
           {/* ---- Floating header ---- */}
           <div
             data-tour="header"
+            data-tour-sync-ready={isInitialSyncSettled ? 'true' : 'false'}
             className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between
                         px-3 py-2 bg-slate-900/70 backdrop-blur-sm border-b border-slate-700/30"
             style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}
@@ -1455,7 +1469,10 @@ const Dashboard: React.FC = () => {
             {/* Sync status */}
             <div className="flex items-center gap-2">
               {syncStatus === 'syncing' && (
-                <span className="flex items-center gap-1.5 text-xs text-slate-300">
+                <span
+                  data-tour="header-sync-status"
+                  className="flex items-center gap-1.5 text-xs text-slate-300"
+                >
                   <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
                   Syncing…
                 </span>
@@ -1464,7 +1481,7 @@ const Dashboard: React.FC = () => {
                 <span className="text-xs text-emerald-300">{tilePrefetchSummary}</span>
               )}
               {panelProjects.length > 0 && (
-                <span className="text-xs text-slate-400">
+                <span data-tour="header-project-count" className="text-xs text-slate-400">
                   {panelProjects.length} project{panelProjects.length !== 1 ? 's' : ''}
                 </span>
               )}

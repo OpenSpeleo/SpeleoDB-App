@@ -114,15 +114,17 @@ interface RenderTourTargetsOptions {
   includeBulkTargets?: boolean;
   includeProjectTargets?: boolean;
   panelOpen?: boolean;
+  syncReady?: boolean;
 }
 
 function renderTourTargets(options: RenderTourTargetsOptions = {}): void {
   const includeBulkTargets = options.includeBulkTargets ?? true;
   const includeProjectTargets = options.includeProjectTargets ?? true;
   const panelOpen = options.panelOpen ?? true;
+  const syncReady = options.syncReady ?? true;
 
   document.body.innerHTML = `
-    <div data-tour="header"></div>
+    <div data-tour="header" data-tour-sync-ready="${syncReady ? 'true' : 'false'}"></div>
     <button data-tour="menu-toggle"></button>
     <ion-refresher class="dashboard-refresher"></ion-refresher>
     <div data-tour="project-panel" data-tour-open="${panelOpen ? 'true' : 'false'}">
@@ -177,6 +179,83 @@ describe('guided tour engine', () => {
     await startGuidedTour();
     expect(mockDriverFactory).toHaveBeenCalledOnce();
     expect(document.body.classList.contains('guided-tour-active')).toBe(true);
+    expect(driverOptionsRef.current.allowClose).toBe(true);
+    expect(typeof driverOptionsRef.current.overlayClickBehavior).toBe('function');
+  });
+
+  it('renders a clearly labeled close control on non-completion steps', async () => {
+    renderTourTargets({ includeProjectTargets: false });
+    await startGuidedTour();
+
+    const closeButton = document.createElement('button');
+    const footerButtons = document.createElement('span');
+    const nextButton = document.createElement('button');
+    footerButtons.appendChild(nextButton);
+    nextButton.style.display = 'block';
+    driverState.activeIndex = 0;
+    driverOptionsRef.current.onPopoverRender?.(
+      { closeButton, footerButtons, nextButton } as never,
+      {
+        config: driverState.config,
+        state: { activeIndex: 0 },
+        driver: {} as never,
+      } as never,
+    );
+    // Re-render should keep a single close button in the same slot.
+    driverOptionsRef.current.onPopoverRender?.(
+      { closeButton, footerButtons, nextButton } as never,
+      {
+        config: driverState.config,
+        state: { activeIndex: 0 },
+        driver: {} as never,
+      } as never,
+    );
+
+    expect(closeButton.textContent).toBe('Close');
+    expect(closeButton.getAttribute('aria-label')).toBe('Close tutorial');
+    expect(closeButton.classList.contains('guided-tour-footer-close-btn')).toBe(true);
+    expect(closeButton.style.display).toBe('block');
+    expect(footerButtons.children[0]).toBe(closeButton);
+    expect(footerButtons.children[1]).toBe(nextButton);
+    expect(footerButtons.children).toHaveLength(2);
+  });
+
+  it('waits for dashboard initial sync readiness before starting', async () => {
+    renderTourTargets({
+      includeProjectTargets: false,
+      syncReady: false,
+    });
+
+    const startPromise = startGuidedTour();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(mockDriverFactory).not.toHaveBeenCalled();
+
+    const header = document.querySelector('[data-tour="header"]');
+    header?.setAttribute('data-tour-sync-ready', 'true');
+    await vi.advanceTimersByTimeAsync(150);
+    await startPromise;
+
+    expect(mockDriverFactory).toHaveBeenCalledOnce();
+  });
+
+  it('cancels pending sync-ready start when destroyed before readiness', async () => {
+    renderTourTargets({
+      includeProjectTargets: false,
+      syncReady: false,
+    });
+
+    const startPromise = startGuidedTour();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(mockDriverFactory).not.toHaveBeenCalled();
+
+    destroyGuidedTour();
+
+    const header = document.querySelector('[data-tour="header"]');
+    header?.setAttribute('data-tour-sync-ready', 'true');
+    await vi.advanceTimersByTimeAsync(150);
+    await startPromise;
+
+    expect(mockDriverFactory).not.toHaveBeenCalled();
   });
 
   it('restarts from help by resetting completion and forcing start', async () => {
@@ -185,6 +264,44 @@ describe('guided tour engine', () => {
     await restartGuidedTourFromHelp();
     expect(mockSetHasCompletedGuidedTour).toHaveBeenCalledWith(false);
     expect(mockDriverFactory).toHaveBeenCalledOnce();
+  });
+
+  it('persists completion when user uses explicit close control', async () => {
+    renderTourTargets({ includeProjectTargets: false });
+    await startGuidedTour();
+
+    const activeStep = driverOptionsRef.current.steps[0];
+    driverOptionsRef.current.onCloseClick?.(
+      undefined,
+      activeStep,
+      {
+        config: driverState.config,
+        state: { activeIndex: 0 },
+        driver: {} as never,
+      } as never,
+    );
+
+    expect(mockDriverDestroy).toHaveBeenCalledOnce();
+    expect(mockSetHasCompletedGuidedTour).toHaveBeenCalledWith(true);
+  });
+
+  it('does not close or persist when backdrop is clicked', async () => {
+    renderTourTargets({ includeProjectTargets: false });
+    await startGuidedTour();
+
+    driverOptionsRef.current.overlayClickBehavior?.();
+
+    expect(mockDriverDestroy).not.toHaveBeenCalled();
+    expect(mockSetHasCompletedGuidedTour).not.toHaveBeenCalled();
+  });
+
+  it('does not persist completion when tour is programmatically destroyed', async () => {
+    renderTourTargets({ includeProjectTargets: false });
+    await startGuidedTour();
+
+    destroyGuidedTour();
+
+    expect(mockSetHasCompletedGuidedTour).not.toHaveBeenCalled();
   });
 
   it('advances pull-to-refresh step only after refresh-complete event', async () => {
@@ -204,6 +321,62 @@ describe('guided tour engine', () => {
     vi.advanceTimersByTime(300);
 
     expect(mockDriverMoveNext).toHaveBeenCalledOnce();
+  });
+
+  it('shows and then hides the pull cue when refresh starts', async () => {
+    renderTourTargets({ includeProjectTargets: false });
+    await startGuidedTour();
+
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      `
+        <div data-tour-feedback="pull-refresh">Old text</div>
+      `,
+    );
+
+    const pullStep = driverOptionsRef.current.steps[1];
+    driverState.activeIndex = 1;
+    pullStep.onHighlightStarted?.(undefined, pullStep, {} as never);
+
+    const visualCue = document.querySelector('.guided-tour-pull-gesture-overlay');
+    const feedback = document.querySelector('[data-tour-feedback="pull-refresh"]');
+    expect(visualCue).toBeInstanceOf(HTMLElement);
+    expect(feedback).toBeInstanceOf(HTMLElement);
+    expect((visualCue as HTMLElement).dataset.hidden).toBe('false');
+    expect((feedback as HTMLElement).textContent).toBe('');
+
+    const refresher = document.querySelector('ion-refresher.dashboard-refresher');
+    refresher?.dispatchEvent(new Event('ionRefresh', { bubbles: true }));
+
+    expect((visualCue as HTMLElement).dataset.hidden).toBe('true');
+    expect((visualCue as HTMLElement).style.display).toBe('none');
+    expect((feedback as HTMLElement).textContent).toBe('Refreshing...');
+  });
+
+  it('removes the pull cue overlay when leaving the pull-to-refresh step', async () => {
+    renderTourTargets({ includeProjectTargets: false });
+    await startGuidedTour();
+
+    const pullStep = driverOptionsRef.current.steps[1];
+    driverState.activeIndex = 1;
+    pullStep.onHighlightStarted?.(undefined, pullStep, {} as never);
+    expect(document.querySelector('.guided-tour-pull-gesture-overlay')).not.toBeNull();
+
+    pullStep.onDeselected?.(undefined, pullStep, {} as never);
+    expect(document.querySelector('.guided-tour-pull-gesture-overlay')).toBeNull();
+  });
+
+  it('cleans up pull cue overlay when tour is destroyed mid-step', async () => {
+    renderTourTargets({ includeProjectTargets: false });
+    await startGuidedTour();
+
+    const pullStep = driverOptionsRef.current.steps[1];
+    driverState.activeIndex = 1;
+    pullStep.onHighlightStarted?.(undefined, pullStep, {} as never);
+    expect(document.querySelector('.guided-tour-pull-gesture-overlay')).not.toBeNull();
+
+    destroyGuidedTour();
+    expect(document.querySelector('.guided-tour-pull-gesture-overlay')).toBeNull();
   });
 
   it('uses zero-offset framing for header-focused steps', async () => {
@@ -270,7 +443,7 @@ describe('guided tour engine', () => {
     expect(driverState.activeIndex).toBe(3);
   });
 
-  it('keeps refreshing the menu highlight while layout settles', async () => {
+  it('applies menu-stage framing without repeated layout tracking refresh', async () => {
     renderTourTargets({ includeProjectTargets: false });
     await startGuidedTour();
 
@@ -279,11 +452,11 @@ describe('guided tour engine', () => {
     menuStep.onHighlightStarted?.(undefined, menuStep, {} as never);
     vi.advanceTimersByTime(900);
 
-    expect(mockDriverRefresh.mock.calls.length).toBeGreaterThanOrEqual(6);
+    expect(mockDriverRefresh.mock.calls.length).toBeLessThanOrEqual(3);
     expect(driverState.config.stagePadding).toBe(14);
   });
 
-  it('keeps menu highlight tracking active until the menu step exits', async () => {
+  it('does not accumulate additional menu refresh loops over time', async () => {
     renderTourTargets({ includeProjectTargets: false });
     await startGuidedTour();
 
@@ -293,7 +466,7 @@ describe('guided tour engine', () => {
 
     vi.advanceTimersByTime(1600);
     const refreshCallsWhileActive = mockDriverRefresh.mock.calls.length;
-    expect(refreshCallsWhileActive).toBeGreaterThanOrEqual(10);
+    expect(refreshCallsWhileActive).toBeLessThanOrEqual(3);
 
     menuStep.onDeselected?.(undefined, menuStep, {} as never);
     vi.advanceTimersByTime(300);

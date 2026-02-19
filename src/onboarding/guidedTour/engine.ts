@@ -1,6 +1,7 @@
-import { driver, type Driver } from 'driver.js';
+import { driver, type Driver, type PopoverDOM } from 'driver.js';
 import 'driver.js/dist/driver.css';
 import './tourStyles.css';
+import fingerSlideDownIcon from '../../assets/media/gesture-icons/finger_slide_down.svg';
 
 import {
   getHasCompletedGuidedTour,
@@ -29,23 +30,34 @@ let activeDriver: Driver | null = null;
 let activeStepIds: GuidedTourStepId[] = [];
 let unbindListeners: Array<() => void> = [];
 let pendingMoveTimeout: number | null = null;
-let refreshTimeoutIds: number[] = [];
-let menuTrackingIntervalId: number | null = null;
 let hasPersistedCompletionForRun = false;
+let shouldPersistCompletionOnDriverDestroyed = false;
 let didObserveRefreshStart = false;
 let didObserveCenterProjectTap = false;
 let allowSyntheticMenuClick = false;
 let allowSyntheticProjectClick = false;
+let pullRefreshCueOverlay: HTMLElement | null = null;
+let unbindPullRefreshCueViewportListeners: (() => void) | null = null;
+let pendingPullRefreshCueFrame: number | null = null;
+let pendingSyncReadyWait: Promise<boolean> | null = null;
+let syncReadyWaitVersion = 0;
 
 const GUIDED_TOUR_STAGE_PADDING_HEADER = 0;
 const GUIDED_TOUR_STAGE_RADIUS_DEFAULT = 8;
 const GUIDED_TOUR_STAGE_RADIUS_HEADER = 0;
 const MENU_STEP_ADVANCE_DELAY_MS = 600;
-const MENU_STEP_TRACKING_INTERVAL_MS = 120;
 const REFRESH_COMPLETE_SETTLE_DELAY_MS = 260;
 const BULK_ACTION_TARGET_GRACE_PERIOD_MS = 1200;
 const PROJECT_TARGET_GRACE_PERIOD_MS = 6000;
 const PROJECT_TARGET_POLL_INTERVAL_MS = 200;
+const GUIDED_TOUR_SYNC_READY_POLL_INTERVAL_MS = 120;
+const PULL_REFRESH_CUE_ANCHOR_OFFSET_X_PX = 0;
+const PULL_REFRESH_CUE_ANCHOR_OFFSET_Y_PX = 15;
+const PULL_REFRESH_CUE_LOOP_DURATION_MS = 1450;
+const PULL_REFRESH_CUE_DRAG_DISTANCE_PX = 54;
+const PULL_REFRESH_CUE_ICON_WIDTH_PX = 84;
+const PULL_REFRESH_CUE_ICON_HEIGHT_PX = 84;
+const PULL_REFRESH_CUE_BUBBLE_SIZE_PX = 58;
 
 function clearPendingMoveTimeout(): void {
   if (pendingMoveTimeout === null) return;
@@ -59,44 +71,6 @@ function addBodyClass(name: string): void {
 
 function removeBodyClass(name: string): void {
   document.body.classList.remove(name);
-}
-
-function clearRefreshTimeouts(): void {
-  for (const timeoutId of refreshTimeoutIds) {
-    window.clearTimeout(timeoutId);
-  }
-  refreshTimeoutIds = [];
-}
-
-function clearMenuTrackingInterval(): void {
-  if (menuTrackingIntervalId === null) return;
-  window.clearInterval(menuTrackingIntervalId);
-  menuTrackingIntervalId = null;
-}
-
-function queueDriverRefreshBurst(delaysMs: number[]): void {
-  clearRefreshTimeouts();
-  for (const delay of delaysMs) {
-    const timeoutId = window.setTimeout(() => {
-      if (!activeDriver || !activeDriver.isActive()) return;
-      activeDriver.refresh();
-    }, delay);
-    refreshTimeoutIds.push(timeoutId);
-  }
-}
-
-function startMenuHighlightTracking(): void {
-  clearMenuTrackingInterval();
-  const refreshWhileMenuStepIsActive = () => {
-    if (!activeDriver || !activeDriver.isActive()) return;
-    if (getActiveStepId() !== 'openProjectPanel') return;
-    activeDriver.refresh();
-  };
-
-  refreshWhileMenuStepIsActive();
-  menuTrackingIntervalId = window.setInterval(() => {
-    refreshWhileMenuStepIsActive();
-  }, MENU_STEP_TRACKING_INTERVAL_MS);
 }
 
 function setStageFraming(stagePadding: number, stageRadius: number): void {
@@ -138,12 +112,205 @@ function setMenuStagePadding(): void {
     GUIDED_TOUR_STAGE_PADDING_MENU,
     GUIDED_TOUR_STAGE_RADIUS_DEFAULT,
   );
-  // Refresher/map settle animations can shift layout briefly after step changes.
-  // Burst refresh keeps the cutout locked to the menu button during that window.
-  queueDriverRefreshBurst([0, 120, 280, 520, 820]);
-  // If the refresher is still animating/completing, keep syncing highlight geometry
-  // until the step exits so the menu cutout stays centered on the real button.
-  startMenuHighlightTracking();
+}
+
+function styleGuidedTourCloseButton(popover: PopoverDOM): void {
+  const stepId = getActiveStepId();
+  if (stepId === null || stepId === 'completion') return;
+
+  const closeButton = popover.closeButton;
+  const footerButtons = popover.footerButtons;
+  if (!(closeButton instanceof HTMLButtonElement)) return;
+  if (!(footerButtons instanceof HTMLElement)) return;
+
+  const nextButtonIsVisible = popover.nextButton.style.display !== 'none';
+  const closeButtonNotInFooter = closeButton.parentElement !== footerButtons;
+  if (closeButtonNotInFooter) {
+    if (nextButtonIsVisible) {
+      footerButtons.insertBefore(closeButton, popover.nextButton);
+    } else {
+      footerButtons.appendChild(closeButton);
+    }
+  }
+
+  closeButton.classList.add('guided-tour-footer-close-btn');
+  closeButton.textContent = 'Close';
+  closeButton.setAttribute('aria-label', 'Close tutorial');
+  closeButton.style.display = 'block';
+}
+
+function isGuidedTourSyncReady(): boolean {
+  return Boolean(queryTourElement(TOUR_SELECTORS.headerSyncReady));
+}
+
+function cancelPendingSyncReadyWait(): void {
+  syncReadyWaitVersion += 1;
+  pendingSyncReadyWait = null;
+}
+
+function waitForGuidedTourSyncReady(): Promise<boolean> {
+  if (isGuidedTourSyncReady()) {
+    return Promise.resolve(true);
+  }
+  if (pendingSyncReadyWait) {
+    return pendingSyncReadyWait;
+  }
+
+  const waitVersionAtStart = syncReadyWaitVersion;
+  pendingSyncReadyWait = new Promise((resolve) => {
+    const poll = () => {
+      if (waitVersionAtStart !== syncReadyWaitVersion) {
+        resolve(false);
+        return;
+      }
+      if (isGuidedTourSyncReady()) {
+        pendingSyncReadyWait = null;
+        resolve(true);
+        return;
+      }
+      window.setTimeout(poll, GUIDED_TOUR_SYNC_READY_POLL_INTERVAL_MS);
+    };
+    poll();
+  });
+
+  return pendingSyncReadyWait;
+}
+
+function clearPendingPullRefreshCueFrame(): void {
+  if (pendingPullRefreshCueFrame === null) return;
+  window.cancelAnimationFrame(pendingPullRefreshCueFrame);
+  pendingPullRefreshCueFrame = null;
+}
+
+function getPullRefreshCueMarkup(): string {
+  return `
+    <div class="guided-tour-pull-cue" aria-hidden="true">
+      <div class="guided-tour-pull-cue-bubble"></div>
+      <img class="guided-tour-pull-cue-icon" src="${fingerSlideDownIcon}" alt="" />
+    </div>
+  `;
+}
+
+function setPullRefreshCueSpecVariables(element: HTMLElement): void {
+  element.style.setProperty(
+    '--guided-tour-pull-cue-loop-duration',
+    `${PULL_REFRESH_CUE_LOOP_DURATION_MS}ms`,
+  );
+  element.style.setProperty(
+    '--guided-tour-pull-cue-drag-distance',
+    `${PULL_REFRESH_CUE_DRAG_DISTANCE_PX}px`,
+  );
+  element.style.setProperty(
+    '--guided-tour-pull-cue-icon-width',
+    `${PULL_REFRESH_CUE_ICON_WIDTH_PX}px`,
+  );
+  element.style.setProperty(
+    '--guided-tour-pull-cue-icon-height',
+    `${PULL_REFRESH_CUE_ICON_HEIGHT_PX}px`,
+  );
+  element.style.setProperty(
+    '--guided-tour-pull-cue-bubble-size',
+    `${PULL_REFRESH_CUE_BUBBLE_SIZE_PX}px`,
+  );
+}
+
+function getPullRefreshCueAnchorElement(): HTMLElement | null {
+  const syncingStatus = queryTourElement(TOUR_SELECTORS.headerSyncStatus);
+  if (syncingStatus instanceof HTMLElement) return syncingStatus;
+
+  const projectCount = queryTourElement(TOUR_SELECTORS.headerProjectCount);
+  if (projectCount instanceof HTMLElement) return projectCount;
+
+  const header = queryTourElement(TOUR_SELECTORS.header);
+  return header instanceof HTMLElement ? header : null;
+}
+
+function getPullRefreshCueAnchorPoint(): { x: number; y: number } | null {
+  const anchorElement = getPullRefreshCueAnchorElement();
+  if (!anchorElement) return null;
+  const rect = anchorElement.getBoundingClientRect();
+  if (rect.width <= 0 && rect.height <= 0) return null;
+
+  return {
+    x: rect.left + rect.width / 2 + PULL_REFRESH_CUE_ANCHOR_OFFSET_X_PX,
+    y: rect.top + PULL_REFRESH_CUE_ANCHOR_OFFSET_Y_PX,
+  };
+}
+
+function positionPullRefreshCueOverlay(): void {
+  if (!pullRefreshCueOverlay) return;
+  const anchor = getPullRefreshCueAnchorPoint();
+  if (!anchor) {
+    pullRefreshCueOverlay.style.display = 'none';
+    return;
+  }
+
+  pullRefreshCueOverlay.style.left = `${anchor.x}px`;
+  pullRefreshCueOverlay.style.top = `${anchor.y}px`;
+  if (pullRefreshCueOverlay.dataset.hidden !== 'true') {
+    pullRefreshCueOverlay.style.display = '';
+  }
+}
+
+function requestPullRefreshCueReposition(): void {
+  if (!pullRefreshCueOverlay) return;
+  if (pendingPullRefreshCueFrame !== null) return;
+
+  pendingPullRefreshCueFrame = window.requestAnimationFrame(() => {
+    pendingPullRefreshCueFrame = null;
+    positionPullRefreshCueOverlay();
+  });
+}
+
+function bindPullRefreshCueViewportListeners(): void {
+  if (unbindPullRefreshCueViewportListeners) return;
+
+  const onViewportChange = () => {
+    requestPullRefreshCueReposition();
+  };
+
+  window.addEventListener('resize', onViewportChange);
+  window.addEventListener('orientationchange', onViewportChange);
+  unbindPullRefreshCueViewportListeners = () => {
+    window.removeEventListener('resize', onViewportChange);
+    window.removeEventListener('orientationchange', onViewportChange);
+  };
+}
+
+function ensurePullRefreshCueOverlay(): HTMLElement {
+  if (pullRefreshCueOverlay && document.body.contains(pullRefreshCueOverlay)) {
+    return pullRefreshCueOverlay;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'guided-tour-pull-gesture-overlay';
+  overlay.setAttribute('aria-hidden', 'true');
+  overlay.dataset.hidden = 'false';
+  setPullRefreshCueSpecVariables(overlay);
+  overlay.innerHTML = getPullRefreshCueMarkup();
+  document.body.appendChild(overlay);
+
+  pullRefreshCueOverlay = overlay;
+  bindPullRefreshCueViewportListeners();
+  return overlay;
+}
+
+function mountPullRefreshCueOverlay(): void {
+  const overlay = ensurePullRefreshCueOverlay();
+  overlay.dataset.hidden = 'false';
+  overlay.style.display = '';
+  requestPullRefreshCueReposition();
+}
+
+function destroyPullRefreshCueOverlay(): void {
+  clearPendingPullRefreshCueFrame();
+  if (unbindPullRefreshCueViewportListeners) {
+    unbindPullRefreshCueViewportListeners();
+    unbindPullRefreshCueViewportListeners = null;
+  }
+  if (!pullRefreshCueOverlay) return;
+  pullRefreshCueOverlay.remove();
+  pullRefreshCueOverlay = null;
 }
 
 function getActiveStepId(): GuidedTourStepId | null {
@@ -295,10 +462,12 @@ function updatePullRefreshFeedback(message: string): void {
   }
 }
 
-function hidePullRefreshArrow(): void {
-  const arrow = document.querySelector('.guided-tour-pull-arrow');
-  if (arrow instanceof HTMLElement) {
-    arrow.style.display = 'none';
+function setPullRefreshCueVisibility(isVisible: boolean): void {
+  if (!pullRefreshCueOverlay) return;
+  pullRefreshCueOverlay.dataset.hidden = isVisible ? 'false' : 'true';
+  pullRefreshCueOverlay.style.display = isVisible ? '' : 'none';
+  if (isVisible) {
+    requestPullRefreshCueReposition();
   }
 }
 
@@ -307,7 +476,7 @@ function onIonRefreshEvent(event: Event): void {
   if (!eventMatchesSelector(event, TOUR_SELECTORS.refresher)) return;
 
   didObserveRefreshStart = true;
-  hidePullRefreshArrow();
+  setPullRefreshCueVisibility(false);
   updatePullRefreshFeedback('Refreshing...');
 }
 
@@ -453,8 +622,7 @@ function detachInteractionListeners(): void {
 
 function resetRunState(): void {
   clearPendingMoveTimeout();
-  clearRefreshTimeouts();
-  clearMenuTrackingInterval();
+  destroyPullRefreshCueOverlay();
   detachInteractionListeners();
   removeBodyClass(TOUR_BODY_CLASSES.pullRefreshPassthrough);
   removeBodyClass(TOUR_BODY_CLASSES.menuStepClickthrough);
@@ -467,14 +635,20 @@ function resetRunState(): void {
   didObserveCenterProjectTap = false;
   allowSyntheticMenuClick = false;
   allowSyntheticProjectClick = false;
+  shouldPersistCompletionOnDriverDestroyed = false;
   hasPersistedCompletionForRun = false;
   activeDriver = null;
 }
 
-function markCompletedAndClose(): void {
+function persistCompletionForRun(): void {
   if (hasPersistedCompletionForRun) return;
   hasPersistedCompletionForRun = true;
   setHasCompletedGuidedTour(true);
+}
+
+function markCompletedAndClose(): void {
+  persistCompletionForRun();
+  shouldPersistCompletionOnDriverDestroyed = false;
   activeDriver?.destroy();
 }
 
@@ -483,6 +657,8 @@ export function isGuidedTourActive(): boolean {
 }
 
 export function destroyGuidedTour(): void {
+  cancelPendingSyncReadyWait();
+  shouldPersistCompletionOnDriverDestroyed = false;
   const existingDriver = activeDriver;
   if (existingDriver && existingDriver.isActive()) {
     existingDriver.destroy();
@@ -502,6 +678,11 @@ export async function startGuidedTour(
   if (!options.force && getHasCompletedGuidedTour()) return;
   if (isGuidedTourActive()) return;
 
+  const syncReady = await waitForGuidedTourSyncReady();
+  if (!syncReady) return;
+  if (!options.force && getHasCompletedGuidedTour()) return;
+  if (isGuidedTourActive()) return;
+
   destroyGuidedTour();
   addBodyClass(TOUR_BODY_CLASSES.active);
 
@@ -513,10 +694,12 @@ export async function startGuidedTour(
       setHeaderStageFraming();
       addBodyClass(TOUR_BODY_CLASSES.pullRefreshPassthrough);
       didObserveRefreshStart = false;
+      mountPullRefreshCueOverlay();
       updatePullRefreshFeedback('');
     },
     onExitPullToRefresh: () => {
       removeBodyClass(TOUR_BODY_CLASSES.pullRefreshPassthrough);
+      destroyPullRefreshCueOverlay();
     },
     onEnterMenuStep: () => {
       addBodyClass(TOUR_BODY_CLASSES.menuStepClickthrough);
@@ -524,7 +707,6 @@ export async function startGuidedTour(
       setMenuStagePadding();
     },
     onExitMenuStep: () => {
-      clearMenuTrackingInterval();
       removeBodyClass(TOUR_BODY_CLASSES.menuStepClickthrough);
       restoreTourVisualsAfterActionHandoff();
       resetStagePaddingToDefault();
@@ -558,16 +740,28 @@ export async function startGuidedTour(
   });
 
   activeStepIds = stepIds;
+  shouldPersistCompletionOnDriverDestroyed = true;
   activeDriver = driver({
     animate: true,
-    allowClose: false,
+    allowClose: true,
+    // Close only through the explicit Close control in the popover.
+    overlayClickBehavior: () => {},
     allowKeyboardControl: false,
     stagePadding: GUIDED_TOUR_STAGE_PADDING_DEFAULT,
     stageRadius: GUIDED_TOUR_STAGE_RADIUS_DEFAULT,
     showProgress: true,
     progressText: '{{current}} of {{total}}',
     popoverClass: 'guided-tour-popover',
+    onPopoverRender: (popover) => {
+      styleGuidedTourCloseButton(popover);
+    },
+    onCloseClick: () => {
+      markCompletedAndClose();
+    },
     onDestroyed: () => {
+      if (shouldPersistCompletionOnDriverDestroyed) {
+        persistCompletionForRun();
+      }
       resetRunState();
     },
     steps,

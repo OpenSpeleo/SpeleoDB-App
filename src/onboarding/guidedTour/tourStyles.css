@@ -52,29 +52,104 @@
 }
 
 .driver-popover.guided-tour-popover .driver-popover-next-btn,
-.driver-popover.guided-tour-popover .driver-popover-prev-btn {
+.driver-popover.guided-tour-popover .driver-popover-prev-btn,
+.driver-popover.guided-tour-popover .guided-tour-footer-close-btn {
   background: #a855f7;
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #f8fafc;
   text-shadow: none;
   border-radius: 8px;
   padding: 6px 10px;
+  position: static;
+  width: auto;
+  height: auto;
+  cursor: pointer;
 }
 
 .driver-popover.guided-tour-popover .driver-popover-next-btn:hover,
 .driver-popover.guided-tour-popover .driver-popover-next-btn:focus,
 .driver-popover.guided-tour-popover .driver-popover-prev-btn:hover,
-.driver-popover.guided-tour-popover .driver-popover-prev-btn:focus {
+.driver-popover.guided-tour-popover .driver-popover-prev-btn:focus,
+.driver-popover.guided-tour-popover .guided-tour-footer-close-btn:hover,
+.driver-popover.guided-tour-popover .guided-tour-footer-close-btn:focus {
   background: #9333ea;
 }
 
-.guided-tour-pull-arrow {
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1;
-  color: #e2e8f0;
-  margin-bottom: 8px;
-  animation: guided-tour-bounce 0.8s ease-in-out infinite alternate;
+/* Avoid overlay re-fade flicker during rapid geometry refresh cycles. */
+.guided-tour-active.driver-fade .driver-overlay {
+  animation: none !important;
+}
+
+.guided-tour-pull-gesture-overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: var(--guided-tour-pull-cue-icon-width, 84px);
+  height: calc(
+    var(--guided-tour-pull-cue-icon-height, 84px) +
+      var(--guided-tour-pull-cue-drag-distance, 54px) + 34px
+  );
+  transform: translateX(-50%);
+  z-index: 10001;
+  pointer-events: none;
+  --guided-tour-pull-cue-loop-duration: 1450ms;
+  --guided-tour-pull-cue-drag-distance: 54px;
+  --guided-tour-pull-cue-icon-width: 84px;
+  --guided-tour-pull-cue-icon-height: 84px;
+  --guided-tour-pull-cue-bubble-size: 58px;
+}
+
+.guided-tour-pull-gesture-overlay[data-hidden='true'] {
+  display: none;
+}
+
+.guided-tour-pull-cue {
+  width: var(--guided-tour-pull-cue-icon-width);
+  height: 100%;
+  pointer-events: none;
+}
+
+.guided-tour-pull-cue-bubble {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: var(--guided-tour-pull-cue-bubble-size);
+  height: var(--guided-tour-pull-cue-bubble-size);
+  border-radius: 999px;
+  border: 2px solid rgba(248, 250, 252, 0.75);
+  background: radial-gradient(
+    circle at center,
+    rgba(196, 181, 253, 0.42) 0%,
+    rgba(196, 181, 253, 0.2) 58%,
+    rgba(196, 181, 253, 0.04) 100%
+  );
+  box-shadow:
+    0 10px 18px rgba(15, 23, 42, 0.45),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  pointer-events: none;
+  animation: guided-tour-pull-cue-bubble-pulse var(--guided-tour-pull-cue-loop-duration)
+    ease-in-out infinite;
+}
+
+.guided-tour-pull-cue-icon {
+  position: absolute;
+  left: 50%;
+  top: -24px;
+  width: var(--guided-tour-pull-cue-icon-width);
+  height: var(--guided-tour-pull-cue-icon-height);
+  transform: translate(-50%, 0);
+  transform-origin: top center;
+  filter:
+    drop-shadow(0 4px 8px rgba(15, 23, 42, 0.55))
+    drop-shadow(0 0 1px rgba(248, 250, 252, 0.3));
+  z-index: 3;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  animation: guided-tour-pull-cue-slide var(--guided-tour-pull-cue-loop-duration)
+    cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 .guided-tour-step-feedback {
@@ -84,12 +159,55 @@
   min-height: 18px;
 }
 
-@keyframes guided-tour-bounce {
-  from {
-    transform: translateY(-2px);
+@keyframes guided-tour-pull-cue-slide {
+  0% {
+    transform: translate(-50%, 0);
+    opacity: 0.96;
   }
-  to {
-    transform: translateY(3px);
+  18% {
+    transform: translate(-50%, 0);
+    opacity: 0.96;
+  }
+  62% {
+    transform: translate(-50%, var(--guided-tour-pull-cue-drag-distance));
+    opacity: 1;
+  }
+  78% {
+    transform: translate(-50%, var(--guided-tour-pull-cue-drag-distance));
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, 0);
+    opacity: 0.96;
+  }
+}
+
+@keyframes guided-tour-pull-cue-bubble-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.98);
+    opacity: 0.92;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(0.98);
+    opacity: 0.92;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guided-tour-pull-cue-icon {
+    animation: none;
+    transform: translate(
+      -50%,
+      calc(var(--guided-tour-pull-cue-drag-distance) * 0.45)
+    );
+  }
+
+  .guided-tour-pull-cue-bubble {
+    animation: none;
   }
 }
 
@@ -135,3 +253,10 @@
 .tour-step-pull-refresh.driver-active ion-refresher.dashboard-refresher * {
   pointer-events: auto !important;
 }
+
+/* Step 2: keep the instruction container lower without runtime reconfiguration. */
+.tour-step-pull-refresh.driver-active .driver-popover.guided-tour-popover {
+  transform: translateY(100px) !important;
+}
+
+/* Step 2: push instruction popover lower to avoid cue overlap. */

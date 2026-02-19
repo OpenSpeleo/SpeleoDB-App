@@ -207,6 +207,29 @@ describe('Guided Tour', () => {
     cy.contains('.driver-popover-title', 'Status bar', { timeout: 5000 }).should('be.visible');
   });
 
+  it('persists completion when closed early and does not auto-start again', () => {
+    stubAuthSuccess();
+    stubProjectsWithOneProject();
+    loginToDashboard();
+
+    dismissOnboarding();
+    cy.contains('.driver-popover-title', 'Status bar', { timeout: 5000 }).should('be.visible');
+
+    cy.contains('.driver-popover button', 'Close').click();
+    cy.get('.driver-popover').should('not.exist');
+
+    cy.window().then((win) => {
+      const raw = win.localStorage.getItem('speleo_user_preferences');
+      expect(raw).to.not.be.null;
+      const prefs = JSON.parse(raw!);
+      expect(prefs.hasCompletedGuidedTour).to.equal(true);
+    });
+
+    cy.reload();
+    cy.wait(1200);
+    cy.get('.driver-popover').should('not.exist');
+  });
+
   it('proceeds to project steps when project targets appear after show-all', () => {
     stubAuthSuccess();
     stubProjectsWithOneProjectDelayed(3500);

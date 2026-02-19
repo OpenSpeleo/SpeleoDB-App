@@ -65,7 +65,7 @@ export function buildTourSteps(
           'This bar shows sync status and the number of projects currently available on the map.',
         side: 'bottom',
         align: 'center',
-        showButtons: ['next'],
+        showButtons: ['next', 'close'],
         nextBtnText: 'Next',
       },
     },
@@ -80,13 +80,12 @@ export function buildTourSteps(
       popover: {
         title: 'Pull down and refresh',
         description: `
-          <div class="guided-tour-pull-arrow" aria-hidden="true">↓</div>
           <div>Pull down to refresh projects and verify your connection.</div>
           <div class="guided-tour-step-feedback" data-tour-feedback="pull-refresh"></div>
         `,
         side: 'bottom',
         align: 'center',
-        showButtons: [],
+        showButtons: ['close'],
       },
     },
     {
@@ -102,7 +101,7 @@ export function buildTourSteps(
         description: 'Tap this menu button to open the project panel.',
         side: 'right',
         align: 'start',
-        showButtons: [],
+        showButtons: ['close'],
       },
     },
   ];
@@ -121,7 +120,7 @@ export function buildTourSteps(
         description: 'Tap "Hide all" to temporarily hide every project layer.',
         side: 'right',
         align: 'center',
-        showButtons: [],
+        showButtons: ['close'],
       },
     },
     {
@@ -137,7 +136,7 @@ export function buildTourSteps(
         description: 'Now tap "Show all" to bring every project layer back.',
         side: 'right',
         align: 'center',
-        showButtons: [],
+        showButtons: ['close'],
       },
     },
     {
@@ -147,7 +146,7 @@ export function buildTourSteps(
         description: 'Use this switch to hide or show an individual project layer.',
         side: 'bottom',
         align: 'end',
-        showButtons: [],
+        showButtons: ['close'],
       },
     },
     {
@@ -161,9 +160,9 @@ export function buildTourSteps(
       popover: {
         title: 'Center on a project',
         description: 'Tap the project name to zoom directly to that project on the map.',
-        side: 'left',
+        side: 'bottom',
         align: 'center',
-        showButtons: [],
+        showButtons: ['close'],
       },
     },
   );

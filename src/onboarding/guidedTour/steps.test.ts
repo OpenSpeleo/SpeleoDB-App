@@ -30,26 +30,39 @@ describe('buildTourSteps', () => {
     expect(stepIds).toContain('centerProject');
   });
 
-  it('sets first step to next-only navigation', () => {
+  it('sets first step to next-and-close navigation', () => {
     const { steps } = buildTourSteps({});
-    expect(steps[0].popover?.showButtons).toEqual(['next']);
+    expect(steps[0].popover?.showButtons).toEqual(['next', 'close']);
   });
 
-  it('makes interaction-gated steps buttonless', () => {
+  it('keeps close button available on interaction-gated steps', () => {
     const { steps } = buildTourSteps({});
 
     // Pull-to-refresh, menu, hide-all, show-all, toggle, center
-    expect(steps[1].popover?.showButtons).toEqual([]);
-    expect(steps[2].popover?.showButtons).toEqual([]);
-    expect(steps[3].popover?.showButtons).toEqual([]);
-    expect(steps[4].popover?.showButtons).toEqual([]);
-    expect(steps[5].popover?.showButtons).toEqual([]);
-    expect(steps[6].popover?.showButtons).toEqual([]);
+    expect(steps[1].popover?.showButtons).toEqual(['close']);
+    expect(steps[2].popover?.showButtons).toEqual(['close']);
+    expect(steps[3].popover?.showButtons).toEqual(['close']);
+    expect(steps[4].popover?.showButtons).toEqual(['close']);
+    expect(steps[5].popover?.showButtons).toEqual(['close']);
+    expect(steps[6].popover?.showButtons).toEqual(['close']);
   });
 
   it('uses updated pull-to-refresh wording', () => {
     const { steps } = buildTourSteps({});
     expect(steps[1].popover?.title).toBe('Pull down and refresh');
+  });
+
+  it('keeps pull-to-refresh instructional copy and feedback slot', () => {
+    const { steps } = buildTourSteps({});
+    const description = steps[1].popover?.description;
+
+    expect(typeof description).toBe('string');
+    if (typeof description !== 'string') return;
+
+    expect(description).toContain('Pull down to refresh projects and verify your connection.');
+    expect(description).toContain('data-tour-feedback="pull-refresh"');
+    expect(description).not.toContain('guided-tour-pull-cue');
+    expect(description).not.toContain('guided-tour-pull-gesture-overlay');
   });
 
   it('positions toggle step popover below the project row', () => {

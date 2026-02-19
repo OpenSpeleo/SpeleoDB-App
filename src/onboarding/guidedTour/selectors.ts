@@ -1,5 +1,8 @@
 export const TOUR_SELECTORS = {
   header: '[data-tour="header"]',
+  headerSyncReady: '[data-tour="header"][data-tour-sync-ready="true"]',
+  headerSyncStatus: '[data-tour="header-sync-status"]',
+  headerProjectCount: '[data-tour="header-project-count"]',
   menuToggle: '[data-tour="menu-toggle"]',
   projectPanel: '[data-tour="project-panel"]',
   projectToggle: '[data-tour="project-toggle"]',
