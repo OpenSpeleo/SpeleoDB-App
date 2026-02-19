@@ -3,7 +3,7 @@
  * Add only what the app uses to keep the file maintainable.
  */
 
-import type { MapOverlayDefinition } from './types/mapOverlay';
+import type { MapOverlayDefinition, ProjectLayerConfig } from './types/mapOverlay';
 
 // ==================== API ENDPOINTS ====================
 const BASE_PATH = '/api/v1';
@@ -75,10 +75,6 @@ export const MAP = {
   } as const,
   // Hard cap to avoid provider "map data not available" tiles.
   MAX_ZOOM: 19.9,
-  PROJECT_LAYER_ZOOMS: {
-    LINE_MIN: 0,
-    ENTRY_SYMBOL_MIN: 0,
-  } as const,
   // Hard cap for all cached tile payloads (prefetch + runtime map browsing).
   TILE_CACHE_MAX_BYTES: 500 * 1024 * 1024,
   LONG_PRESS_DURATION_MS: 300,
@@ -110,6 +106,14 @@ export const COLOR_PALETTE = [
   '#7570b3', // Slate Blue
 ] as const;
 
+// ==================== PROJECT LAYERS ====================
+
+export const PROJECT_LAYERS: ProjectLayerConfig = {
+  lineMinZoom: 0,
+  entrySymbolMinZoom: 5,
+  entrySymbolTextSize: ['interpolate', ['linear'], ['zoom'], 8, 18, 14, 24],
+} as const;
+
 // ==================== MAP OVERLAYS ====================
 
 export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
@@ -117,8 +121,12 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
     id: 'landmarks',
     label: 'Landmarks',
     endpoint: API.LANDMARKS_GEOJSON_ENDPOINT,
-    markerMinZoom: 10,
-    labelMinZoom: 12,
+    markerMinZoom: 12,
+    labelMinZoom: 14,
+    sizes: {
+      markerTextSize: ['interpolate', ['linear'], ['zoom'], 6, 8, 10, 12, 14, 16, 18, 22],
+      labelTextSize: ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 12, 18, 14],
+    },
     legendItems: [
       {
         id: 'landmark',
@@ -135,6 +143,11 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
     endpoint: API.SUBSURFACE_STATIONS_GEOJSON_ENDPOINT,
     markerMinZoom: 12,
     labelMinZoom: 14,
+    sizes: {
+      markerCircleRadius: ['interpolate', ['linear'], ['zoom'], 14, 5, 18, 8],
+      markerIconSize: ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1.0],
+      labelTextSize: 12,
+    },
     legendItems: [
       {
         id: 'subsurface-sensor',
@@ -174,6 +187,10 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
     endpoint: API.SURFACE_STATIONS_GEOJSON_ENDPOINT,
     markerMinZoom: 12,
     labelMinZoom: 14,
+    sizes: {
+      markerTextSize: ['interpolate', ['linear'], ['zoom'], 14, 16, 18, 24],
+      labelTextSize: 12,
+    },
     legendItems: [
       {
         id: 'surface-station',
@@ -190,6 +207,10 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
     endpoint: API.EXPLORATION_LEADS_GEOJSON_ENDPOINT,
     markerMinZoom: 12,
     labelMinZoom: null,
+    sizes: {
+      markerIconSize: ['interpolate', ['linear'], ['zoom'], 14, 0.4, 18, 0.6],
+      fallbackCircleRadius: ['interpolate', ['linear'], ['zoom'], 14, 8, 18, 12],
+    },
     legendItems: [
       {
         id: 'exploration-lead',
@@ -205,6 +226,11 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
     endpoint: API.CYLINDER_INSTALLS_GEOJSON_ENDPOINT,
     markerMinZoom: 12,
     labelMinZoom: 14,
+    sizes: {
+      markerIconSize: ['interpolate', ['linear'], ['zoom'], 14, 0.8, 18, 1.2],
+      fallbackTextSize: ['interpolate', ['linear'], ['zoom'], 14, 18, 18, 26],
+      labelTextSize: 11,
+    },
     legendItems: [
       {
         id: 'cylinder-install',

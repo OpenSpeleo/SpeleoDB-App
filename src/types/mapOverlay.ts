@@ -1,3 +1,5 @@
+import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
+
 export const MAP_OVERLAY_IDS = [
   'landmarks',
   'subsurfaceStations',
@@ -19,13 +21,31 @@ export interface MapOverlayLegendItem {
   imageId?: string;
 }
 
+export type MarkerSizeExpression = number | ExpressionSpecification;
+
+export interface MapOverlaySizes {
+  markerTextSize?: MarkerSizeExpression;
+  markerIconSize?: MarkerSizeExpression;
+  markerCircleRadius?: MarkerSizeExpression;
+  fallbackTextSize?: MarkerSizeExpression;
+  fallbackCircleRadius?: MarkerSizeExpression;
+  labelTextSize?: MarkerSizeExpression;
+}
+
 export interface MapOverlayDefinition {
   id: MapOverlayId;
   label: string;
   endpoint: string;
   markerMinZoom: number;
   labelMinZoom: number | null;
+  sizes: MapOverlaySizes;
   legendItems: MapOverlayLegendItem[];
+}
+
+export interface ProjectLayerConfig {
+  lineMinZoom: number;
+  entrySymbolMinZoom: number;
+  entrySymbolTextSize: MarkerSizeExpression;
 }
 
 export type MapOverlayGeoJsonRecord = Partial<Record<MapOverlayId, GeoJSON.FeatureCollection>>;

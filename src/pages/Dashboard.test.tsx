@@ -284,10 +284,14 @@ const {
   mockGetProjectVisibilityPreferences,
   mockSetProjectVisibilityPreference,
   mockSetProjectVisibilityPreferences,
+  mockGetShowLandmarks,
+  mockSetShowLandmarks,
 } = vi.hoisted(() => ({
   mockGetProjectVisibilityPreferences: vi.fn(() => ({})),
   mockSetProjectVisibilityPreference: vi.fn(),
   mockSetProjectVisibilityPreferences: vi.fn(),
+  mockGetShowLandmarks: vi.fn(() => true),
+  mockSetShowLandmarks: vi.fn(),
 }));
 
 const { mockRestartGuidedTourFromHelp } = vi.hoisted(() => ({
@@ -298,6 +302,8 @@ vi.mock('../services/PreferencesService', () => ({
   getProjectVisibilityPreferences: mockGetProjectVisibilityPreferences,
   setProjectVisibilityPreference: mockSetProjectVisibilityPreference,
   setProjectVisibilityPreferences: mockSetProjectVisibilityPreferences,
+  getShowLandmarks: mockGetShowLandmarks,
+  setShowLandmarks: mockSetShowLandmarks,
 }));
 
 vi.mock('../onboarding/guidedTour/engine', () => ({
@@ -496,6 +502,7 @@ describe('Dashboard', () => {
     mockIsOfflineLocked = false;
     mockProjects = [];
     mockGetProjectVisibilityPreferences.mockReturnValue({});
+    mockGetShowLandmarks.mockReturnValue(true);
     mockGetOverlayGeoJSON.mockResolvedValue(null);
     mockMapHasImage.mockReturnValue(false);
     mockMapGetCanvas.mockReturnValue({
@@ -784,7 +791,7 @@ describe('Dashboard', () => {
       ) as HTMLElement | null;
       expect(pointLayer).not.toBeNull();
       expect(pointLayer?.dataset.layerText).toContain('★');
-      expect(pointLayer?.dataset.layerMinzoom).toBe('0');
+      expect(pointLayer?.dataset.layerMinzoom).toBe('5');
     });
   });
 
@@ -1702,6 +1709,48 @@ describe('Dashboard', () => {
       const panelAfter = document.querySelector('.-translate-x-full.z-30');
       expect(panelAfter).not.toBeNull();
     });
+  });
+
+  it('hides landmark layers when showLandmarks preference is false', async () => {
+    mockGetShowLandmarks.mockReturnValue(false);
+    mockProjects = [makeProject({ id: 'p1', name: 'Landmark Hidden Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'landmarks') return overlayPointFeatureCollection({ name: 'Hidden LM' });
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(mockGetOverlayGeoJSON).toHaveBeenCalledWith('landmarks');
+    });
+
+    expect(document.querySelector('[data-layer-id="landmarks-layer"]')).toBeNull();
+    expect(document.querySelector('[data-layer-id="landmarks-labels"]')).toBeNull();
+  });
+
+  it('toggles landmark visibility and persists the preference', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Landmark Toggle Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'landmarks') return overlayPointFeatureCollection({ name: 'Toggle LM' });
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+    });
+
+    await userEvent.click(screen.getByLabelText('Open project panel'));
+    await userEvent.click(screen.getByLabelText('Toggle landmarks'));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).toBeNull();
+    });
+    expect(mockSetShowLandmarks).toHaveBeenCalledWith(false);
   });
 
   it('uses the same project color in panel dot and map layer', async () => {

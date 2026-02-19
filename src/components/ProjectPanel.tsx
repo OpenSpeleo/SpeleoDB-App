@@ -31,6 +31,8 @@ export interface ProjectPanelProps {
   onGestureMove?: () => void;
   onGestureEnd?: () => void;
   isOpen: boolean;
+  showLandmarks: boolean;
+  onToggleLandmarks: () => void;
 }
 
 function prefetchStatusLabel(job: TilePrefetchJobState | undefined): string | null {
@@ -64,6 +66,8 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
   onGestureMove,
   onGestureEnd,
   isOpen,
+  showLandmarks,
+  onToggleLandmarks,
 }) => {
   const activeCount = activeProjectIds.size;
   const totalCount = projects.length;
@@ -135,6 +139,30 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
+          </button>
+        </div>
+
+        {/* Landmark visibility */}
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-700/50">
+          <span className="text-xs font-medium text-slate-300">Show landmarks</span>
+          <button
+            onClick={onToggleLandmarks}
+            className="flex h-8 w-12 shrink-0 items-center justify-center"
+            aria-label="Toggle landmarks"
+            data-testid="landmark-toggle"
+          >
+            <span
+              className={`relative block w-9 h-5 rounded-full transition-colors ${
+                showLandmarks ? 'bg-purple-500' : 'bg-slate-600'
+              }`}
+            >
+              <span
+                className={`absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white shadow-sm
+                            transition-transform ${
+                              showLandmarks ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+              />
+            </span>
           </button>
         </div>
 

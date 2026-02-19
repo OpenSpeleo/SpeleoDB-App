@@ -8,6 +8,8 @@ import {
   setProjectVisibilityPreferences,
   getHasCompletedGuidedTour,
   setHasCompletedGuidedTour,
+  getShowLandmarks,
+  setShowLandmarks,
   type UserPreferences,
 } from './PreferencesService';
 import { PREFERENCES } from '../constants';
@@ -146,6 +148,7 @@ describe('PreferencesService', () => {
       expect(prefs.token).toBeUndefined();
       expect(prefs.instance).toBe(PREFERENCES.DEFAULT_INSTANCE);
       expect(getHasCompletedGuidedTour()).toBe(false);
+      expect(getShowLandmarks()).toBe(true);
     });
   });
 
@@ -184,6 +187,52 @@ describe('PreferencesService', () => {
       expect(prefs.email).toBe('user@example.com');
       expect(prefs.projectVisibility).toEqual({ p1: true });
       expect(getHasCompletedGuidedTour()).toBe(true);
+    });
+  });
+
+  describe('show landmarks preferences', () => {
+    it('defaults to true when missing', () => {
+      expect(getShowLandmarks()).toBe(true);
+    });
+
+    it('stores and reads false', () => {
+      setShowLandmarks(false);
+      expect(getShowLandmarks()).toBe(false);
+    });
+
+    it('stores and reads true', () => {
+      setShowLandmarks(false);
+      setShowLandmarks(true);
+      expect(getShowLandmarks()).toBe(true);
+    });
+
+    it('ignores non-boolean values from storage', () => {
+      localStorage.setItem(
+        PREFERENCES.STORAGE_KEY,
+        JSON.stringify({ showLandmarks: 'yes' }),
+      );
+      expect(getShowLandmarks()).toBe(true);
+    });
+
+    it('preserves value across unrelated partial updates', () => {
+      setShowLandmarks(false);
+      setPreferences({ token: 'tok' });
+      const prefs = getPreferences();
+      expect(prefs.token).toBe('tok');
+      expect(getShowLandmarks()).toBe(false);
+    });
+
+    it('survives rapid sequential updates with other preferences', async () => {
+      await Promise.all([
+        Promise.resolve().then(() => setShowLandmarks(false)),
+        Promise.resolve().then(() => setProjectVisibilityPreference('p1', true)),
+        Promise.resolve().then(() => setPreferences({ email: 'user@example.com' })),
+      ]);
+
+      const prefs = getPreferences();
+      expect(prefs.email).toBe('user@example.com');
+      expect(prefs.projectVisibility).toEqual({ p1: true });
+      expect(getShowLandmarks()).toBe(false);
     });
   });
 });

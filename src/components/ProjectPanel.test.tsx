@@ -62,6 +62,8 @@ const defaultProps: ProjectPanelProps = {
   onHideAll: vi.fn(),
   onClose: vi.fn(),
   isOpen: true,
+  showLandmarks: true,
+  onToggleLandmarks: vi.fn(),
 };
 
 function renderPanel(overrides: Partial<ProjectPanelProps> = {}) {
@@ -172,6 +174,27 @@ describe('ProjectPanel', () => {
     const { container } = renderPanel({ isOpen: true });
     const panel = container.querySelector('.translate-x-0');
     expect(panel).not.toBeNull();
+  });
+
+  it('renders landmark toggle in on state when showLandmarks is true', () => {
+    renderPanel({ showLandmarks: true });
+    const toggle = screen.getByTestId('landmark-toggle');
+    expect(toggle).toBeInTheDocument();
+    expect(toggle.querySelector('.bg-purple-500')).not.toBeNull();
+  });
+
+  it('renders landmark toggle in off state when showLandmarks is false', () => {
+    renderPanel({ showLandmarks: false });
+    const toggle = screen.getByTestId('landmark-toggle');
+    expect(toggle.querySelector('.bg-slate-600')).not.toBeNull();
+  });
+
+  it('calls onToggleLandmarks when landmark toggle is clicked', async () => {
+    const onToggleLandmarks = vi.fn();
+    renderPanel({ onToggleLandmarks });
+
+    await userEvent.click(screen.getByLabelText('Toggle landmarks'));
+    expect(onToggleLandmarks).toHaveBeenCalledOnce();
   });
 
   it('exposes guided tour panel-open marker for runtime readiness checks', () => {

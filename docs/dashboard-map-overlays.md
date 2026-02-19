@@ -35,9 +35,9 @@ Implementation lives in:
 
 Dashboard map rendering is in `src/pages/Dashboard.tsx`.
 
-## Zoom configuration (source of truth: `src/constants.ts`)
+## Zoom and size configuration (source of truth: `src/constants.ts`)
 
-All zoom values below are sourced from `MAP` and `MAP_OVERLAYS` in `src/constants.ts`.
+All zoom and marker size values below are sourced from `PROJECT_LAYERS`, `MAP`, and `MAP_OVERLAYS` in `src/constants.ts`. Marker sizes for each overlay are in the `sizes` field of each `MAP_OVERLAYS` entry (typed as `MapOverlaySizes` in `src/types/mapOverlay.ts`).
 
 ### Global map zooms
 
@@ -46,8 +46,9 @@ All zoom values below are sourced from `MAP` and `MAP_OVERLAYS` in `src/constant
 
 ### Project GeoJSON layer zooms
 
-- Project line/polygon outline minimum zoom: `MAP.PROJECT_LAYER_ZOOMS.LINE_MIN = 0`
-- Project point/star minimum zoom: `MAP.PROJECT_LAYER_ZOOMS.ENTRY_SYMBOL_MIN = 0`
+- Project line/polygon outline minimum zoom: `PROJECT_LAYERS.lineMinZoom = 0`
+- Project point/star minimum zoom: `PROJECT_LAYERS.entrySymbolMinZoom = 5`
+- Project point/star text size: `PROJECT_LAYERS.entrySymbolTextSize` (zoom interpolation)
 
 Project GeoJSON drawing order is pinned below marker-oriented layers:
 
@@ -57,8 +58,8 @@ Project GeoJSON drawing order is pinned below marker-oriented layers:
 - Landmarks:
   - symbol marker `▼`,
   - blue color (`#3b82f6`),
-  - marker min zoom `10`,
-  - label layer (`name`) from zoom `12`.
+  - marker min zoom `12`,
+  - label layer (`name`) from zoom `14`.
 - Surface stations:
   - symbol marker `◆`,
   - color from `properties.color` (normalized from station/tag color), fallback `#fb923c`,
@@ -195,7 +196,7 @@ Project GeoJSON star features do not carry the project name in their GeoJSON pro
 
 Long-pressing anywhere on the map (touch/pen only) opens the detail modal with just the GPS coordinate of the pressed point.
 
-- Duration: `MAP.LONG_PRESS_DURATION_MS = 300` in `src/constants.ts` (0.5 second hold).
+- Duration: `MAP.LONG_PRESS_DURATION_MS = 300` in `src/constants.ts` (0.3 second hold).
 - A `setTimeout` is started on `pointerdown` for touch/pen events. If the pointer stays within the movement threshold (`12px`) for the full duration, the timer fires and opens the modal.
 - The timer is cancelled when:
   - the pointer moves beyond the movement threshold (drag),
@@ -204,13 +205,13 @@ Long-pressing anywhere on the map (touch/pen only) opens the detail modal with j
 - The resulting coordinate is formatted using `formatLatLng(lat, lng)` with the same 7-decimal-place, trailing-zero-stripped format as all other GPS fields.
 - The tap candidate ref is nulled when the long-press fires, preventing the subsequent `pointerup` from also triggering a marker tap query.
 
-Zoom levels are sourced from `MAP_OVERLAYS` in `src/constants.ts` (`markerMinZoom`, `labelMinZoom`).
+Zoom levels and marker sizes are sourced from `MAP_OVERLAYS` in `src/constants.ts` (`markerMinZoom`, `labelMinZoom`, `sizes`).
 
 ### Overlay zoom matrix
 
 - `landmarks`:
-  - `markerMinZoom = 10`
-  - `labelMinZoom = 12`
+  - `markerMinZoom = 12`
+  - `labelMinZoom = 14`
 - `surfaceStations`:
   - `markerMinZoom = 12`
   - `labelMinZoom = 14`
@@ -243,6 +244,15 @@ Zoom levels are sourced from `MAP_OVERLAYS` in `src/constants.ts` (`markerMinZoo
   - exploration leads by `properties.project`,
   - cylinder installs by `properties.project_id`.
 - Landmarks and surface stations are not project-linked and stay independent from project toggles.
+
+## Landmark visibility toggle
+
+The project panel includes a "Show landmarks" toggle above the bulk-action buttons (Show all / Hide all). This toggle controls whether landmark marker and label layers are rendered on the map.
+
+- Persisted in `UserPreferences.showLandmarks` via `PreferencesService`.
+- Default: `true` (landmarks shown when preference is missing or undefined).
+- The toggle does not carry any `data-tour*` attributes and is invisible to the guided tour.
+- Implementation: `src/components/ProjectPanel.tsx`, `src/pages/Dashboard.tsx`, `src/services/PreferencesService.ts`.
 
 ## Read-only UX constraints
 

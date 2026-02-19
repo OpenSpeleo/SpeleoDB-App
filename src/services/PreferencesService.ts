@@ -11,6 +11,7 @@ export interface UserPreferences {
   instance?: string;
   projectVisibility?: Record<string, boolean>;
   hasCompletedGuidedTour?: boolean;
+  showLandmarks?: boolean;
 }
 
 function getStorageKey(): string {
@@ -41,6 +42,11 @@ function normalizeGuidedTourCompletion(value: unknown): boolean | undefined {
   return undefined;
 }
 
+function normalizeShowLandmarks(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  return undefined;
+}
+
 function readRawPreferences(): UserPreferences {
   try {
     const raw = localStorage.getItem(getStorageKey());
@@ -49,6 +55,7 @@ function readRawPreferences(): UserPreferences {
         instance: defaultInstance(),
         projectVisibility: {},
         hasCompletedGuidedTour: undefined,
+        showLandmarks: undefined,
       };
     }
 
@@ -59,12 +66,14 @@ function readRawPreferences(): UserPreferences {
       instance: parsed.instance ?? defaultInstance(),
       projectVisibility: normalizeProjectVisibility(parsed.projectVisibility),
       hasCompletedGuidedTour: normalizeGuidedTourCompletion(parsed.hasCompletedGuidedTour),
+      showLandmarks: normalizeShowLandmarks(parsed.showLandmarks),
     };
   } catch {
     return {
       instance: defaultInstance(),
       projectVisibility: {},
       hasCompletedGuidedTour: undefined,
+      showLandmarks: undefined,
     };
   }
 }
@@ -98,6 +107,7 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
         instance: mutated.instance ?? defaultInstance(),
         projectVisibility: normalizeProjectVisibility(mutated.projectVisibility),
         hasCompletedGuidedTour: normalizeGuidedTourCompletion(mutated.hasCompletedGuidedTour),
+        showLandmarks: normalizeShowLandmarks(mutated.showLandmarks),
       };
       writePreferences(next);
     }
@@ -130,6 +140,10 @@ export function setPreferences(prefs: Partial<UserPreferences>): void {
       prefs.hasCompletedGuidedTour === undefined
         ? current.hasCompletedGuidedTour
         : normalizeGuidedTourCompletion(prefs.hasCompletedGuidedTour),
+    showLandmarks:
+      prefs.showLandmarks === undefined
+        ? current.showLandmarks
+        : normalizeShowLandmarks(prefs.showLandmarks),
   }));
 }
 
@@ -181,6 +195,20 @@ export function getHasCompletedGuidedTour(): boolean {
  */
 export function setHasCompletedGuidedTour(completed: boolean): void {
   setPreferences({ hasCompletedGuidedTour: completed });
+}
+
+/**
+ * Read landmark visibility preference. Defaults to true (shown) when missing.
+ */
+export function getShowLandmarks(): boolean {
+  return getPreferences().showLandmarks !== false;
+}
+
+/**
+ * Persist landmark visibility preference.
+ */
+export function setShowLandmarks(visible: boolean): void {
+  setPreferences({ showLandmarks: visible });
 }
 
 /**

@@ -306,7 +306,7 @@ describe('overlayMarkerDetails utilities', () => {
 
     it('parses project point details with context', () => {
       const context = {
-        projectNameByLayerPrefix: new Map([['project-p1-point', 'Cave Alpha']]),
+        projectNameByPointLayerId: new Map([['project-p1-point', 'Cave Alpha']]),
       };
       expect(parseOverlayMarkerDetails(
         {

@@ -20,13 +20,15 @@ import type { MapRef } from 'react-map-gl/maplibre';
 import type { LngLatBoundsLike } from 'maplibre-gl';
 
 import { useSpeleoDB } from '../context/SpeleoDBProvider';
-import { MAP, MAP_OVERLAYS } from '../constants';
-import type { MapOverlayGeoJsonRecord, MapOverlayId } from '../types/mapOverlay';
+import { MAP, MAP_OVERLAYS, PROJECT_LAYERS } from '../constants';
+import type { MapOverlayGeoJsonRecord, MapOverlayId, MapOverlaySizes } from '../types/mapOverlay';
 import { registerTileCacheProtocol, getCachedStyle } from '../services/TileCacheService';
 import {
   getProjectVisibilityPreferences,
   setProjectVisibilityPreference,
   setProjectVisibilityPreferences,
+  getShowLandmarks,
+  setShowLandmarks as persistShowLandmarks,
 } from '../services/PreferencesService';
 import ProjectPanel from '../components/ProjectPanel';
 import OverlayMarkerDetailsModal from '../components/OverlayMarkerDetailsModal';
@@ -125,6 +127,10 @@ function getOverlayMarkerMinZoom(overlayId: MapOverlayId): number {
 function getOverlayLabelMinZoom(overlayId: MapOverlayId): number | null {
   const zoom = MAP_OVERLAYS.find((overlay) => overlay.id === overlayId)?.labelMinZoom;
   return typeof zoom === 'number' ? zoom : null;
+}
+
+function getOverlaySizes(overlayId: MapOverlayId): MapOverlaySizes {
+  return MAP_OVERLAYS.find((o) => o.id === overlayId)?.sizes ?? {};
 }
 
 function resolveFeatureColor(properties: Record<string, unknown>): string {
@@ -442,6 +448,9 @@ const Dashboard: React.FC = () => {
   // Active projects (which layers are visible)
   const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
 
+  // Landmark layer visibility (persisted in user preferences)
+  const [showLandmarks, setShowLandmarks] = useState(() => getShowLandmarks());
+
   // Loaded GeoJSON keyed by project ID
   const [geoJsonData, setGeoJsonData] = useState<GeoJsonRecord>({});
   const [overlayGeoJsonData, setOverlayGeoJsonData] = useState<MapOverlayGeoJsonRecord>({});
@@ -737,7 +746,7 @@ const Dashboard: React.FC = () => {
     for (const project of sortedProjects) {
       nameByLayer.set(`project-${project.id}-point`, project.name);
     }
-    return { projectNameByLayerPrefix: nameByLayer };
+    return { projectNameByPointLayerId: nameByLayer };
   }, [sortedProjects]);
 
   const openOverlayMarkerDetailsAtMapPoint = useCallback((
@@ -976,6 +985,14 @@ const Dashboard: React.FC = () => {
     setActiveProjectIds(new Set());
   }, [panelProjects]);
 
+  const handleToggleLandmarks = useCallback(() => {
+    setShowLandmarks((prev) => {
+      const next = !prev;
+      persistShowLandmarks(next);
+      return next;
+    });
+  }, []);
+
   const handleZoomToProject = useCallback((projectId: string) => {
     const emitZoomComplete = () => {
       document.dispatchEvent(
@@ -1156,7 +1173,7 @@ const Dashboard: React.FC = () => {
                         id={`${sourceId}-line`}
                         type="line"
                         beforeId={PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID}
-                        minzoom={MAP.PROJECT_LAYER_ZOOMS.LINE_MIN}
+                        minzoom={PROJECT_LAYERS.lineMinZoom}
                         filter={[
                           'match',
                           ['geometry-type'],
@@ -1182,11 +1199,11 @@ const Dashboard: React.FC = () => {
                           true,
                           false,
                         ]}
-                        minzoom={MAP.PROJECT_LAYER_ZOOMS.ENTRY_SYMBOL_MIN}
+                        minzoom={PROJECT_LAYERS.entrySymbolMinZoom}
                         layout={{
                           'text-field': '★',
                           'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-                          'text-size': ['interpolate', ['linear'], ['zoom'], 8, 18, 14, 24],
+                          'text-size': PROJECT_LAYERS.entrySymbolTextSize,
                           'text-allow-overlap': true,
                           'text-ignore-placement': true,
                         }}
@@ -1200,7 +1217,7 @@ const Dashboard: React.FC = () => {
                   );
                 })}
 
-                {visibleOverlayGeoJsonData.landmarks && (
+                {showLandmarks && visibleOverlayGeoJsonData.landmarks && (
                   <Source
                     id="landmarks-source"
                     type="geojson"
@@ -1213,7 +1230,7 @@ const Dashboard: React.FC = () => {
                       layout={{
                         'text-field': '▼',
                         'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-                        'text-size': ['interpolate', ['linear'], ['zoom'], 6, 10, 10, 14, 14, 20, 18, 28],
+                        'text-size': getOverlaySizes('landmarks').markerTextSize,
                         'text-allow-overlap': true,
                         'text-ignore-placement': true,
                       }}
@@ -1232,7 +1249,7 @@ const Dashboard: React.FC = () => {
                         'text-field': ['get', 'name'],
                         'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
                         'text-offset': [0, 1.5],
-                        'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 12, 18, 14],
+                        'text-size': getOverlaySizes('landmarks').labelTextSize,
                         'text-anchor': 'top',
                         'text-allow-overlap': false,
                         'text-ignore-placement': false,
@@ -1259,7 +1276,7 @@ const Dashboard: React.FC = () => {
                       layout={{
                         'text-field': '◆',
                         'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-                        'text-size': ['interpolate', ['linear'], ['zoom'], 14, 16, 18, 24],
+                        'text-size': getOverlaySizes('surfaceStations').markerTextSize,
                         'text-allow-overlap': true,
                         'text-ignore-placement': true,
                       }}
@@ -1278,7 +1295,7 @@ const Dashboard: React.FC = () => {
                         'text-field': ['get', 'name'],
                         'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
                         'text-offset': [0, 1.2],
-                        'text-size': 12,
+                        'text-size': getOverlaySizes('surfaceStations').labelTextSize,
                         'text-anchor': 'top',
                         'text-allow-overlap': false,
                         'text-ignore-placement': false,
@@ -1309,7 +1326,7 @@ const Dashboard: React.FC = () => {
                       ]}
                       minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
                       paint={{
-                        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 5, 18, 8],
+                        'circle-radius': getOverlaySizes('subsurfaceStations').markerCircleRadius,
                         'circle-color': ['coalesce', ['get', 'color'], '#fb923c'],
                         'circle-stroke-width': 2,
                         'circle-stroke-color': '#ffffff',
@@ -1325,7 +1342,7 @@ const Dashboard: React.FC = () => {
                         minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
                         layout={{
                           'icon-image': 'biology-station-icon',
-                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1.0],
+                          'icon-size': getOverlaySizes('subsurfaceStations').markerIconSize,
                           'icon-allow-overlap': true,
                           'icon-ignore-placement': true,
                         }}
@@ -1341,7 +1358,7 @@ const Dashboard: React.FC = () => {
                         minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
                         layout={{
                           'icon-image': 'bone-station-icon',
-                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1.0],
+                          'icon-size': getOverlaySizes('subsurfaceStations').markerIconSize,
                           'icon-allow-overlap': true,
                           'icon-ignore-placement': true,
                         }}
@@ -1357,7 +1374,7 @@ const Dashboard: React.FC = () => {
                         minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
                         layout={{
                           'icon-image': 'artifact-station-icon',
-                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1.0],
+                          'icon-size': getOverlaySizes('subsurfaceStations').markerIconSize,
                           'icon-allow-overlap': true,
                           'icon-ignore-placement': true,
                         }}
@@ -1373,7 +1390,7 @@ const Dashboard: React.FC = () => {
                         minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
                         layout={{
                           'icon-image': 'geology-station-icon',
-                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1.0],
+                          'icon-size': getOverlaySizes('subsurfaceStations').markerIconSize,
                           'icon-allow-overlap': true,
                           'icon-ignore-placement': true,
                         }}
@@ -1389,7 +1406,7 @@ const Dashboard: React.FC = () => {
                         'text-field': ['get', 'name'],
                         'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
                         'text-offset': [0, 1.2],
-                        'text-size': 12,
+                        'text-size': getOverlaySizes('subsurfaceStations').labelTextSize,
                         'text-anchor': 'top',
                         'text-allow-overlap': false,
                         'text-ignore-placement': false,
@@ -1416,7 +1433,7 @@ const Dashboard: React.FC = () => {
                         minzoom={getOverlayMarkerMinZoom('explorationLeads')}
                         layout={{
                           'icon-image': 'exploration-lead-icon',
-                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.4, 18, 0.6],
+                          'icon-size': getOverlaySizes('explorationLeads').markerIconSize,
                           'icon-allow-overlap': true,
                           'icon-ignore-placement': true,
                         }}
@@ -1429,7 +1446,7 @@ const Dashboard: React.FC = () => {
                         type="circle"
                         minzoom={getOverlayMarkerMinZoom('explorationLeads')}
                         paint={{
-                          'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 8, 18, 12],
+                          'circle-radius': getOverlaySizes('explorationLeads').fallbackCircleRadius,
                           'circle-color': '#EF4444',
                           'circle-stroke-width': 2,
                           'circle-stroke-color': '#ffffff',
@@ -1453,7 +1470,7 @@ const Dashboard: React.FC = () => {
                         minzoom={getOverlayMarkerMinZoom('cylinderInstalls')}
                         layout={{
                           'icon-image': 'cylinder-icon',
-                          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.8, 18, 1.2],
+                          'icon-size': getOverlaySizes('cylinderInstalls').markerIconSize,
                           'icon-allow-overlap': true,
                           'icon-ignore-placement': true,
                         }}
@@ -1468,7 +1485,7 @@ const Dashboard: React.FC = () => {
                         layout={{
                           'text-field': '●',
                           'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-                          'text-size': ['interpolate', ['linear'], ['zoom'], 14, 18, 18, 26],
+                          'text-size': getOverlaySizes('cylinderInstalls').fallbackTextSize,
                           'text-allow-overlap': true,
                           'text-ignore-placement': true,
                         }}
@@ -1499,7 +1516,7 @@ const Dashboard: React.FC = () => {
                           ],
                         ],
                         'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
-                        'text-size': 11,
+                        'text-size': getOverlaySizes('cylinderInstalls').labelTextSize,
                         'text-offset': [0, 1.5],
                         'text-anchor': 'top',
                         'text-allow-overlap': false,
@@ -1599,6 +1616,8 @@ const Dashboard: React.FC = () => {
             onGestureMove={handlePanelGestureMove}
             onGestureEnd={handlePanelGestureEnd}
             isOpen={isPanelOpen}
+            showLandmarks={showLandmarks}
+            onToggleLandmarks={handleToggleLandmarks}
           />
 
           <OverlayMarkerDetailsModal

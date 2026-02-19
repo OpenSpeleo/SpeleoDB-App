@@ -33,7 +33,7 @@ export interface InteractiveOverlayFeature {
 }
 
 export interface MarkerParseContext {
-  projectNameByLayerPrefix?: Map<string, string>;
+  projectNameByPointLayerId?: Map<string, string>;
 }
 
 export interface ExplorationLeadDetails {
@@ -270,7 +270,7 @@ function parseProjectPoint(
   context?: MarkerParseContext,
 ): ProjectPointDetails {
   const properties = feature.properties ?? {};
-  const projectName = context?.projectNameByLayerPrefix?.get(layerId) ?? 'N/A';
+  const projectName = context?.projectNameByPointLayerId?.get(layerId) ?? 'N/A';
   return {
     type: 'projectPoint',
     id: getFeatureId(feature),
