@@ -118,7 +118,7 @@ export function buildTourSteps(
       popover: {
         title: 'Hide all projects',
         description: 'Tap "Hide all" to temporarily hide every project layer.',
-        side: 'right',
+        side: 'bottom',
         align: 'center',
         showButtons: ['close'],
       },
@@ -134,7 +134,7 @@ export function buildTourSteps(
       popover: {
         title: 'Show all projects',
         description: 'Now tap "Show all" to bring every project layer back.',
-        side: 'right',
+        side: 'bottom',
         align: 'center',
         showButtons: ['close'],
       },

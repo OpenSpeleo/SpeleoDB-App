@@ -62,13 +62,13 @@ Choices: react-joyride, @reactour/tour, NextStep, Shepherd.js, intro.js, Onboard
 ### Step 4: "Hide all projects"
 
 - **Target**: `[data-tour-action="hide-all"]` (Hide all button)
-- **Popover**: Right. Instructs the user to hide all projects.
+- **Popover**: Bottom. Instructs the user to hide all projects.
 - **Interaction**: User clicks `Hide all`.
 
 ### Step 5: "Show all projects"
 
 - **Target**: `[data-tour-action="show-all"]` (Show all button)
-- **Popover**: Right. Instructs the user to restore all projects.
+- **Popover**: Bottom. Instructs the user to restore all projects.
 - **Interaction**: User clicks `Show all`.
 - **Deferred skip point**: After click, the tour waits up to 6 seconds for first-project controls (`project-toggle` / `project-name`) to appear before moving to step 6. If targets never appear within that grace period, it jumps to completion.
 
