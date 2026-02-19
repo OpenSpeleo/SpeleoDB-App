@@ -1458,7 +1458,8 @@ const Dashboard: React.FC = () => {
               onClick={() => setIsPanelOpen(true)}
               data-tour="menu-toggle"
               className="w-10 h-10 flex items-center justify-center rounded-xl
-                         bg-slate-800/60 text-slate-200 hover:bg-slate-700/60 transition-colors"
+                         bg-slate-800/60 text-slate-200 border-2 border-solid 
+                         border-slate-500/70 hover:bg-slate-700/60 transition-colors"
               aria-label="Open project panel"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1491,7 +1492,7 @@ const Dashboard: React.FC = () => {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleRestartGuidedTour}
-                className="w-9 h-9 text-sm font-bold text-slate-100 hover:text-white
+                className="w-10 h-10 text-sm font-bold text-slate-100 hover:text-white
                            rounded-xl border border-slate-100/70 bg-slate-700/70
                            hover:bg-slate-600/80 transition-colors shadow-sm shadow-black/30"
                 aria-label="Start guided tour"
@@ -1501,8 +1502,9 @@ const Dashboard: React.FC = () => {
               </button>
               <button
                 onClick={handleLogout}
-                className="px-3 py-2 text-xs font-medium text-slate-300 hover:text-white
-                           rounded-xl bg-slate-800/60 hover:bg-slate-700/60 transition-colors"
+                className="px-3 py-2 h-10 text-xs font-medium text-slate-300 hover:text-white
+                           rounded-xl border-2 border-solid border-slate-500/70 bg-slate-800/60
+                           hover:bg-slate-700/60 transition-colors"
               >
                 Sign Out
               </button>
