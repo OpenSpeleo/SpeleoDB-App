@@ -2,19 +2,38 @@ export type InteractiveOverlayLayerId =
   | 'exploration-leads-icon-layer'
   | 'exploration-leads-fallback-layer'
   | 'cylinder-installs-icon-layer'
-  | 'cylinder-installs-fallback-layer';
+  | 'cylinder-installs-fallback-layer'
+  | 'landmarks-layer'
+  | 'surface-stations-layer'
+  | 'subsurface-stations-circles'
+  | 'subsurface-stations-biology-icons'
+  | 'subsurface-stations-bone-icons'
+  | 'subsurface-stations-artifact-icons'
+  | 'subsurface-stations-geology-icons';
 
 export const INTERACTIVE_OVERLAY_LAYER_IDS: readonly InteractiveOverlayLayerId[] = [
   'exploration-leads-icon-layer',
   'exploration-leads-fallback-layer',
   'cylinder-installs-icon-layer',
   'cylinder-installs-fallback-layer',
+  'landmarks-layer',
+  'surface-stations-layer',
+  'subsurface-stations-circles',
+  'subsurface-stations-biology-icons',
+  'subsurface-stations-bone-icons',
+  'subsurface-stations-artifact-icons',
+  'subsurface-stations-geology-icons',
 ] as const;
 
 export interface InteractiveOverlayFeature {
   id?: string | number;
   layer?: { id?: string };
   properties?: Record<string, unknown> | null;
+  geometry?: { type?: string; coordinates?: number[] } | null;
+}
+
+export interface MarkerParseContext {
+  projectNameByLayerPrefix?: Map<string, string>;
 }
 
 export interface ExplorationLeadDetails {
@@ -31,7 +50,51 @@ export interface CylinderInstallDetails {
   installDate: string;
 }
 
-export type OverlayMarkerDetails = ExplorationLeadDetails | CylinderInstallDetails;
+export interface SubsurfaceStationDetails {
+  type: 'subsurfaceStation';
+  id: string;
+  name: string;
+  description: string;
+  tag: string;
+}
+
+export interface SurfaceStationDetails {
+  type: 'surfaceStation';
+  id: string;
+  name: string;
+  description: string;
+  gpsCoordinate: string;
+}
+
+export interface LandmarkDetails {
+  type: 'landmark';
+  id: string;
+  name: string;
+  description: string;
+  gpsCoordinate: string;
+}
+
+export interface ProjectPointDetails {
+  type: 'projectPoint';
+  id: string;
+  projectName: string;
+  name: string;
+  gpsCoordinate: string;
+}
+
+export interface MapLongPressDetails {
+  type: 'mapLongPress';
+  gpsCoordinate: string;
+}
+
+export type OverlayMarkerDetails =
+  | ExplorationLeadDetails
+  | CylinderInstallDetails
+  | SubsurfaceStationDetails
+  | SurfaceStationDetails
+  | LandmarkDetails
+  | ProjectPointDetails
+  | MapLongPressDetails;
 
 export function formatPressureWithUnit(
   pressure: unknown,
@@ -75,19 +138,64 @@ export function normalizeInstallDate(value: unknown): string {
   return text;
 }
 
+export function formatLatLng(lat: number, lng: number): string {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return 'N/A';
+  }
+  return `${parseFloat(lat.toFixed(7))}, ${parseFloat(lng.toFixed(7))}`;
+}
+
+export function formatGpsCoordinate(
+  geometry: InteractiveOverlayFeature['geometry'],
+): string {
+  if (
+    !geometry
+    || geometry.type !== 'Point'
+    || !Array.isArray(geometry.coordinates)
+    || geometry.coordinates.length < 2
+  ) {
+    return 'N/A';
+  }
+
+  return formatLatLng(geometry.coordinates[1], geometry.coordinates[0]);
+}
+
+const PROJECT_POINT_LAYER_PATTERN = /^project-.+-point$/;
+
+export function isProjectPointLayerId(layerId: string): boolean {
+  return PROJECT_POINT_LAYER_PATTERN.test(layerId);
+}
+
 export function parseOverlayMarkerDetails(
   feature: InteractiveOverlayFeature,
+  context?: MarkerParseContext,
 ): OverlayMarkerDetails | null {
   const layerId = feature.layer?.id;
-  if (!layerId || !isInteractiveOverlayLayerId(layerId)) {
+  if (!layerId) {
     return null;
   }
 
-  if (layerId.startsWith('exploration-leads-')) {
-    return parseExplorationLead(feature);
+  if (isInteractiveOverlayLayerId(layerId)) {
+    if (layerId.startsWith('exploration-leads-')) {
+      return parseExplorationLead(feature);
+    }
+    if (layerId.startsWith('cylinder-installs-')) {
+      return parseCylinderInstall(feature);
+    }
+    if (layerId === 'landmarks-layer') {
+      return parseLandmark(feature);
+    }
+    if (layerId === 'surface-stations-layer') {
+      return parseSurfaceStation(feature);
+    }
+    if (layerId.startsWith('subsurface-stations-')) {
+      return parseSubsurfaceStation(feature);
+    }
+    return null;
   }
-  if (layerId.startsWith('cylinder-installs-')) {
-    return parseCylinderInstall(feature);
+
+  if (isProjectPointLayerId(layerId)) {
+    return parseProjectPoint(feature, layerId, context);
   }
 
   return null;
@@ -123,6 +231,55 @@ function parseCylinderInstall(feature: InteractiveOverlayFeature): CylinderInsta
   };
 }
 
+function parseSubsurfaceStation(feature: InteractiveOverlayFeature): SubsurfaceStationDetails {
+  const properties = feature.properties ?? {};
+  return {
+    type: 'subsurfaceStation',
+    id: getFeatureId(feature),
+    name: normalizeStringProperty(properties.name),
+    description: normalizeStringProperty(properties.description),
+    tag: resolveTagLabel(properties.tag),
+  };
+}
+
+function parseSurfaceStation(feature: InteractiveOverlayFeature): SurfaceStationDetails {
+  const properties = feature.properties ?? {};
+  return {
+    type: 'surfaceStation',
+    id: getFeatureId(feature),
+    name: normalizeStringProperty(properties.name),
+    description: normalizeStringProperty(properties.description),
+    gpsCoordinate: formatGpsCoordinate(feature.geometry),
+  };
+}
+
+function parseLandmark(feature: InteractiveOverlayFeature): LandmarkDetails {
+  const properties = feature.properties ?? {};
+  return {
+    type: 'landmark',
+    id: getFeatureId(feature),
+    name: normalizeStringProperty(properties.name),
+    description: normalizeStringProperty(properties.description),
+    gpsCoordinate: formatGpsCoordinate(feature.geometry),
+  };
+}
+
+function parseProjectPoint(
+  feature: InteractiveOverlayFeature,
+  layerId: string,
+  context?: MarkerParseContext,
+): ProjectPointDetails {
+  const properties = feature.properties ?? {};
+  const projectName = context?.projectNameByLayerPrefix?.get(layerId) ?? 'N/A';
+  return {
+    type: 'projectPoint',
+    id: getFeatureId(feature),
+    projectName,
+    name: normalizeStringProperty(properties.name),
+    gpsCoordinate: formatGpsCoordinate(feature.geometry),
+  };
+}
+
 function getFeatureId(feature: InteractiveOverlayFeature): string {
   const properties = feature.properties ?? {};
   const fromProperties = properties.id;
@@ -150,4 +307,24 @@ function normalizeNumber(value: unknown): number | null {
     }
   }
   return null;
+}
+
+function normalizeStringProperty(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  return 'N/A';
+}
+
+function resolveTagLabel(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  if (value && typeof value === 'object') {
+    const tagObj = value as Record<string, unknown>;
+    if (typeof tagObj.name === 'string' && tagObj.name.trim()) {
+      return tagObj.name.trim();
+    }
+  }
+  return 'N/A';
 }

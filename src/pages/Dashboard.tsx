@@ -36,10 +36,14 @@ import { restartGuidedTourFromHelp } from '../onboarding/guidedTour/engine';
 import { TOUR_EVENTS } from '../onboarding/guidedTour/selectors';
 import {
   INTERACTIVE_OVERLAY_LAYER_IDS,
+  formatLatLng,
+  isProjectPointLayerId,
   parseOverlayMarkerDetails,
 } from '../utils/overlayMarkerDetails';
 import type {
   InteractiveOverlayFeature,
+  MapLongPressDetails,
+  MarkerParseContext,
   OverlayMarkerDetails,
 } from '../utils/overlayMarkerDetails';
 import artifactIcon from '../assets/media/map-icons/artifact-icon.png';
@@ -176,6 +180,7 @@ type OverlayFeatureQueryMap = {
   ) => InteractiveOverlayFeature[];
   getCanvas: () => { getBoundingClientRect: () => DOMRect };
   getLayer: (id: string) => unknown;
+  unproject: (point: { x: number; y: number }) => { lng: number; lat: number };
 };
 
 type MapPointerTapCandidate = {
@@ -189,13 +194,15 @@ type MapPointerTapCandidate = {
 
 function getClickedOverlayMarkerDetails(
   features: InteractiveOverlayFeature[],
+  allInteractiveLayerIds: readonly string[],
+  context?: MarkerParseContext,
 ): OverlayMarkerDetails | null {
-  for (const layerId of INTERACTIVE_OVERLAY_LAYER_IDS) {
+  for (const layerId of allInteractiveLayerIds) {
     const feature = features.find((candidate) => candidate.layer?.id === layerId);
     if (!feature) {
       continue;
     }
-    const details = parseOverlayMarkerDetails(feature);
+    const details = parseOverlayMarkerDetails(feature, context);
     if (details) {
       return details;
     }
@@ -420,6 +427,7 @@ const Dashboard: React.FC = () => {
   const didFitRef = useRef(false);
   const mapRef = useRef<MapRef>(null);
   const mapPointerTapCandidateRef = useRef<MapPointerTapCandidate | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Panel state
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -714,6 +722,24 @@ const Dashboard: React.FC = () => {
     completeRefreshForTour();
   }, [controller, history, isOfflineLocked]);
 
+  const projectPointLayerIds = useMemo(
+    () => [...activeProjectIds].map((id) => `project-${id}-point`),
+    [activeProjectIds],
+  );
+
+  const allInteractiveLayerIds = useMemo(
+    () => [...INTERACTIVE_OVERLAY_LAYER_IDS, ...projectPointLayerIds] as readonly string[],
+    [projectPointLayerIds],
+  );
+
+  const markerParseContext = useMemo<MarkerParseContext>(() => {
+    const nameByLayer = new globalThis.Map<string, string>();
+    for (const project of sortedProjects) {
+      nameByLayer.set(`project-${project.id}-point`, project.name);
+    }
+    return { projectNameByLayerPrefix: nameByLayer };
+  }, [sortedProjects]);
+
   const openOverlayMarkerDetailsAtMapPoint = useCallback((
     point: { x: number; y: number },
     hitRadiusPx: number,
@@ -726,7 +752,7 @@ const Dashboard: React.FC = () => {
     // Filter to only layers that currently exist on the map to avoid
     // maplibre-gl throwing on non-existent layer IDs (icon-layer and
     // fallback-layer are conditionally rendered, never both present).
-    const existingLayers = INTERACTIVE_OVERLAY_LAYER_IDS.filter(
+    const existingLayers = allInteractiveLayerIds.filter(
       (id) => map.getLayer(id) != null,
     );
 
@@ -749,13 +775,13 @@ const Dashboard: React.FC = () => {
       return;
     }
 
-    const details = getClickedOverlayMarkerDetails(features);
+    const details = getClickedOverlayMarkerDetails(features, allInteractiveLayerIds, markerParseContext);
     if (!details) {
       return;
     }
 
     setSelectedOverlayMarkerDetail(details);
-  }, []);
+  }, [allInteractiveLayerIds, markerParseContext]);
 
   const openOverlayMarkerDetailsAtClientPoint = useCallback((
     clientX: number,
@@ -774,12 +800,46 @@ const Dashboard: React.FC = () => {
     }, hitRadiusPx);
   }, [openOverlayMarkerDetailsAtMapPoint]);
 
+  const openLongPressGpsDetail = useCallback((clientX: number, clientY: number) => {
+    const map = mapRef.current?.getMap() as unknown as OverlayFeatureQueryMap | undefined;
+    if (!map?.getCanvas || !map.unproject) {
+      return;
+    }
+    const canvasRect = map.getCanvas()?.getBoundingClientRect();
+    if (!canvasRect) {
+      return;
+    }
+    const mapPoint = {
+      x: clientX - canvasRect.left,
+      y: clientY - canvasRect.top,
+    };
+    const lngLat = map.unproject(mapPoint);
+    const detail: MapLongPressDetails = {
+      type: 'mapLongPress',
+      gpsCoordinate: formatLatLng(lngLat.lat, lngLat.lng),
+    };
+    setSelectedOverlayMarkerDetail(detail);
+  }, []);
+
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => clearLongPressTimer();
+  }, [clearLongPressTimer]);
+
   const handleMapGestureStart = useCallback((
     event: React.PointerEvent<HTMLDivElement>,
   ) => {
     setIsMapGestureActive(true);
+    clearLongPressTimer();
 
     if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+      const isMultiTouch = mapPointerTapCandidateRef.current !== null;
       mapPointerTapCandidateRef.current = {
         pointerId: event.pointerId,
         startClientX: event.clientX,
@@ -788,10 +848,20 @@ const Dashboard: React.FC = () => {
         moved: false,
         pointerType: event.pointerType,
       };
+
+      if (!isMultiTouch) {
+        const cx = event.clientX;
+        const cy = event.clientY;
+        longPressTimerRef.current = setTimeout(() => {
+          longPressTimerRef.current = null;
+          mapPointerTapCandidateRef.current = null;
+          openLongPressGpsDetail(cx, cy);
+        }, MAP.LONG_PRESS_DURATION_MS);
+      }
     } else {
       mapPointerTapCandidateRef.current = null;
     }
-  }, []);
+  }, [clearLongPressTimer, openLongPressGpsDetail]);
 
   const handleMapGestureMove = useCallback((
     event: React.PointerEvent<HTMLDivElement>,
@@ -807,13 +877,15 @@ const Dashboard: React.FC = () => {
     );
     if (distance > MAP_TOUCH_TAP_MAX_MOVEMENT_PX) {
       candidate.moved = true;
+      clearLongPressTimer();
     }
-  }, []);
+  }, [clearLongPressTimer]);
 
   const handleMapGestureEnd = useCallback((
     event: React.PointerEvent<HTMLDivElement>,
   ) => {
     setIsMapGestureActive(false);
+    clearLongPressTimer();
 
     const candidate = mapPointerTapCandidateRef.current;
     if (!candidate || candidate.pointerId !== event.pointerId) {
@@ -844,7 +916,7 @@ const Dashboard: React.FC = () => {
       event.clientY,
       MAP_MARKER_HIT_RADIUS_PX_TOUCH,
     );
-  }, [openOverlayMarkerDetailsAtClientPoint]);
+  }, [clearLongPressTimer, openOverlayMarkerDetailsAtClientPoint]);
 
   const handlePanelGestureStart = useCallback(() => {
     setIsPanelGestureActive(true);

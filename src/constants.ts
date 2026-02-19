@@ -81,6 +81,7 @@ export const MAP = {
   } as const,
   // Hard cap for all cached tile payloads (prefetch + runtime map browsing).
   TILE_CACHE_MAX_BYTES: 500 * 1024 * 1024,
+  LONG_PRESS_DURATION_MS: 300,
 } as const;
 
 // ==================== COLOR PALETTE ====================

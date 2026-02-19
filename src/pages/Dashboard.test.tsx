@@ -1,10 +1,11 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import Dashboard from './Dashboard';
+import { MAP } from '../constants';
 import type { Project } from '../types/project';
 import { TOUR_EVENTS } from '../onboarding/guidedTour/selectors';
 
@@ -44,6 +45,7 @@ type MockRenderedFeature = {
   id?: string | number;
   layer?: { id?: string };
   properties?: Record<string, unknown>;
+  geometry?: { type?: string; coordinates?: number[] } | null;
 };
 
 const {
@@ -60,6 +62,7 @@ const {
   mockMapGetCanvas,
   mockMapGetLayer,
   mockQueryRenderedFeatures,
+  mockMapUnproject,
 } = vi.hoisted(() => {
   const mapPropsRef = { current: null as Record<string, unknown> | null };
   const mockMapFitBounds = vi.fn();
@@ -87,6 +90,10 @@ const {
   const mockMapLoadImage = vi.fn((_url: string, callback: (error: Error | null, image?: unknown) => void) => {
     callback(null, { width: 16, height: 16 });
   });
+  const mockMapUnproject = vi.fn((point: { x: number; y: number }) => ({
+    lng: 2.3 + point.x * 0.001,
+    lat: 46.6 + point.y * 0.001,
+  }));
   const mockGetMap = vi.fn(() => ({
     once: mockMapOnce,
     touchZoomRotate: { disableRotation: mockDisableTouchRotation },
@@ -98,6 +105,7 @@ const {
     getCanvas: mockMapGetCanvas,
     getLayer: mockMapGetLayer,
     queryRenderedFeatures: mockQueryRenderedFeatures,
+    unproject: mockMapUnproject,
   }));
 
   return {
@@ -114,6 +122,7 @@ const {
     mockMapGetCanvas,
     mockMapGetLayer,
     mockQueryRenderedFeatures,
+    mockMapUnproject,
   };
 });
 
@@ -1093,24 +1102,18 @@ describe('Dashboard', () => {
 
   it('does not open marker details modal for non-interactive map layers', async () => {
     mockProjects = [makeProject({ id: 'p1', name: 'Non Interactive Layer Project' })];
-    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
-    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
-      if (overlayId === 'landmarks') {
-        return overlayPointFeatureCollection({ name: 'Landmark A' });
-      }
-      return null;
-    });
+    mockGetProjectGeoJSON.mockResolvedValue(lineFeatureCollection());
 
     renderDashboard();
 
     await waitFor(() => {
-      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
     });
 
     mockQueryRenderedFeatures.mockReturnValueOnce([
       {
-        layer: { id: 'landmarks-layer' },
-        properties: { name: 'Landmark A' },
+        layer: { id: 'project-p1-line' },
+        properties: { section_name: 'Main line' },
       },
     ]);
 
@@ -1169,6 +1172,339 @@ describe('Dashboard', () => {
 
     await userEvent.click(screen.getByText('Close'));
     expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+  });
+
+  it('opens marker details modal when tapping a landmark marker', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Landmark Tap Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'landmarks') {
+        return overlayPointFeatureCollection({ id: 'lm-1', name: 'Big Entrance', description: 'Main entrance' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'landmarks-layer' },
+        properties: { id: 'lm-1', name: 'Big Entrance', description: 'Main entrance' },
+        geometry: { type: 'Point', coordinates: [2.3, 46.6] },
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('Big Entrance');
+    expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent('Main entrance');
+    expect(screen.getByTestId('overlay-marker-gps')).toHaveTextContent('46.6, 2.3');
+  });
+
+  it('opens marker details modal when tapping a surface station marker', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Surface Tap Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'surfaceStations') {
+        return overlayPointFeatureCollection({ id: 'ss-1', name: 'Station Alpha', description: 'Weather station' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="surface-stations-layer"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'surface-stations-layer' },
+        properties: { id: 'ss-1', name: 'Station Alpha', description: 'Weather station' },
+        geometry: { type: 'Point', coordinates: [5.1, 43.2] },
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('Station Alpha');
+    expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent('Weather station');
+    expect(screen.getByTestId('overlay-marker-gps')).toHaveTextContent('43.2, 5.1');
+  });
+
+  it('opens marker details modal when tapping a subsurface station circle marker', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Subsurface Tap Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'subsurfaceStations') {
+        return overlayPointFeatureCollection({
+          id: 'sub-1', name: 'Sensor Room', description: 'CO2 sensor', tag: 'Geology', project: 'p1',
+        });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="subsurface-stations-circles"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'subsurface-stations-circles' },
+        properties: { id: 'sub-1', name: 'Sensor Room', description: 'CO2 sensor', tag: 'Geology' },
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('Sensor Room');
+    expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent('CO2 sensor');
+    expect(screen.getByTestId('overlay-marker-tag')).toHaveTextContent('Geology');
+  });
+
+  it('opens marker details modal when tapping a subsurface station icon marker', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Subsurface Icon Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'subsurfaceStations') {
+        return overlayPointFeatureCollection({
+          id: 'sub-2', name: 'Fossil Site', description: 'Ancient bones', type: 'bone', project: 'p1',
+        });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="subsurface-stations-bone-icons"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'subsurface-stations-bone-icons' },
+        properties: { id: 'sub-2', name: 'Fossil Site', description: 'Ancient bones' },
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('Fossil Site');
+    expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent('Ancient bones');
+  });
+
+  it('opens marker details modal when tapping a project star point', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Cave Alpha' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection(2.3, 46.6));
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-point"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'project-p1-point' },
+        properties: { name: 'Entrance A' },
+        geometry: { type: 'Point', coordinates: [2.3, 46.6] },
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('overlay-marker-project-name')).toHaveTextContent('Cave Alpha');
+    expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('Entrance A');
+    expect(screen.getByTestId('overlay-marker-gps')).toHaveTextContent('46.6, 2.3');
+  });
+
+  it('renders fallback values for landmark with missing properties', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Fallback Landmark Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'landmarks') {
+        return overlayPointFeatureCollection({});
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'landmarks-layer' },
+        properties: {},
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('N/A');
+    expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent('N/A');
+    expect(screen.getByTestId('overlay-marker-gps')).toHaveTextContent('N/A');
+  });
+
+  it('does not open GPS modal before long press duration completes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockProjects = [makeProject({ id: 'p1', name: 'Long Press Boundary Project' })];
+      mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+
+      const surface = getMapTouchSurface();
+
+      fireEvent.pointerDown(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      });
+
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS - 1); });
+
+      expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+      expect(mockMapUnproject).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('opens GPS coordinate modal after long press on the map', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockProjects = [makeProject({ id: 'p1', name: 'Long Press Project' })];
+      mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+
+      const surface = getMapTouchSurface();
+
+      fireEvent.pointerDown(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      });
+
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+
+      expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+      expect(screen.getByTestId('overlay-marker-gps')).toBeInTheDocument();
+      expect(mockMapUnproject).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not open GPS modal if finger moves before long press completes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockProjects = [makeProject({ id: 'p1', name: 'Long Press Move Project' })];
+      mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+
+      const surface = getMapTouchSurface();
+
+      fireEvent.pointerDown(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      });
+
+      fireEvent.pointerMove(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 170, clientY: 80,
+      });
+
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+
+      expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+      expect(mockMapUnproject).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not open GPS modal if pointer is released before long press completes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockProjects = [makeProject({ id: 'p1', name: 'Long Press Release Project' })];
+      mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+
+      const surface = getMapTouchSurface();
+
+      fireEvent.pointerDown(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      });
+
+      fireEvent.pointerUp(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      });
+
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+
+      expect(mockMapUnproject).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not open GPS modal when second touch arrives (multi-touch)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockProjects = [makeProject({ id: 'p1', name: 'Multi Touch Project' })];
+      mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+
+      const surface = getMapTouchSurface();
+
+      fireEvent.pointerDown(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      });
+
+      fireEvent.pointerDown(surface, {
+        pointerId: 2, pointerType: 'touch', clientX: 200, clientY: 80,
+      });
+
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+
+      expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+      expect(mockMapUnproject).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('hides project-linked overlays when a project is hidden and keeps global overlays visible', async () => {
