@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     types: [opened, synchronize]
     branches: ['**']
@@ -82,3 +83,107 @@ jobs:
           name: dist
           path: dist/
           retention-days: 7
+
+  build-android:
+    name: Build Android
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SENTRY_DSN_ANDROID: ${{ secrets.SENTRY_DSN_ANDROID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 21
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - run: npm ci
+      - run: mkdir -p android/app/src/main/assets/public && cp -r dist/* android/app/src/main/assets/public/
+      - run: npx cap sync android --no-build
+      - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: android-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+  build-ios:
+    name: Build iOS
+    needs: [build]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      SENTRY_DSN_IOS: ${{ secrets.SENTRY_DSN_IOS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - run: npm ci
+      - run: npx cap sync ios
+      - name: Build for iOS Simulator
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Package iOS Simulator build
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          APP_PATH=$(find build -name "App.app" -path "*/Debug-iphonesimulator/*" | head -1)
+          cd "$(dirname "$APP_PATH")"
+          zip -r "$GITHUB_WORKSPACE/App-simulator.zip" "$(basename "$APP_PATH")"
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: ios-simulator-app
+          path: App-simulator.zip
+          retention-days: 14
+
+  release:
+    name: Create Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [test, build-android, build-ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: artifacts/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: artifacts/
+      - uses: actions/download-artifact@v4
+        with:
+          name: ios-simulator-app
+          path: artifacts/
+      - name: Package web dist
+        run: cd artifacts/dist && zip -r ../web-dist.zip .
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/app-debug.apk
+            artifacts/App-simulator.zip
+            artifacts/web-dist.zip
