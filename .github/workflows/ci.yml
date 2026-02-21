@@ -106,8 +106,7 @@ jobs:
           name: dist
           path: dist/
       - run: npm ci
-      - run: mkdir -p android/app/src/main/assets/public && cp -r dist/* android/app/src/main/assets/public/
-      - run: npx cap sync android --no-build
+      - run: npx cap sync android
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/')
