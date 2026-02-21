@@ -7,6 +7,29 @@ import type { ProjectPanelProps } from './ProjectPanel';
 import type { Project } from '../types/project';
 import { COLOR_PALETTE } from '../constants';
 
+// ==================== Mocks ====================
+
+vi.mock('@ionic/react', () => ({
+  IonToggle: ({ checked, onIonChange, children, ...rest }: {
+    checked?: boolean;
+    onIonChange?: (e: { detail: { checked: boolean } }) => void;
+    children?: React.ReactNode;
+  } & Record<string, unknown>) => (
+    <label
+      data-testid={rest['data-testid'] as string}
+      data-tour={rest['data-tour'] as string}
+      aria-label={rest['aria-label'] as string}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onIonChange?.({ detail: { checked: e.target.checked } })}
+      />
+      {children}
+    </label>
+  ),
+}));
+
 // ==================== Helpers ====================
 
 function makeProject(overrides: Partial<Project> = {}): Project {
@@ -62,8 +85,6 @@ const defaultProps: ProjectPanelProps = {
   onHideAll: vi.fn(),
   onClose: vi.fn(),
   isOpen: true,
-  showLandmarks: true,
-  onToggleLandmarks: vi.fn(),
 };
 
 function renderPanel(overrides: Partial<ProjectPanelProps> = {}) {
@@ -113,7 +134,7 @@ describe('ProjectPanel', () => {
 
   it('calls onToggleProject when the toggle switch is clicked', async () => {
     const onToggle = vi.fn();
-    renderPanel({ onToggleProject: onToggle });
+    renderPanel({ onToggleProject: onToggle, activeProjectIds: new Set() });
 
     await userEvent.click(screen.getByLabelText('Toggle Beta Grotto'));
     expect(onToggle).toHaveBeenCalledWith('p2');
@@ -176,25 +197,16 @@ describe('ProjectPanel', () => {
     expect(panel).not.toBeNull();
   });
 
-  it('renders landmark toggle in on state when showLandmarks is true', () => {
-    renderPanel({ showLandmarks: true });
-    const toggle = screen.getByTestId('landmark-toggle');
-    expect(toggle).toBeInTheDocument();
-    expect(toggle.querySelector('.bg-purple-500')).not.toBeNull();
-  });
+  it('reflects project active state in toggle checked attribute', () => {
+    renderPanel({ activeProjectIds: new Set(['p1', 'p3']) });
 
-  it('renders landmark toggle in off state when showLandmarks is false', () => {
-    renderPanel({ showLandmarks: false });
-    const toggle = screen.getByTestId('landmark-toggle');
-    expect(toggle.querySelector('.bg-slate-600')).not.toBeNull();
-  });
+    const p1Toggle = screen.getByTestId('project-toggle-p1');
+    const p2Toggle = screen.getByTestId('project-toggle-p2');
+    const p3Toggle = screen.getByTestId('project-toggle-p3');
 
-  it('calls onToggleLandmarks when landmark toggle is clicked', async () => {
-    const onToggleLandmarks = vi.fn();
-    renderPanel({ onToggleLandmarks });
-
-    await userEvent.click(screen.getByLabelText('Toggle landmarks'));
-    expect(onToggleLandmarks).toHaveBeenCalledOnce();
+    expect((p1Toggle.querySelector('input') as HTMLInputElement).checked).toBe(true);
+    expect((p2Toggle.querySelector('input') as HTMLInputElement).checked).toBe(false);
+    expect((p3Toggle.querySelector('input') as HTMLInputElement).checked).toBe(true);
   });
 
   it('exposes guided tour panel-open marker for runtime readiness checks', () => {

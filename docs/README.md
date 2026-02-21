@@ -5,14 +5,16 @@ This folder contains product and engineering documentation for core app behavior
 ## Available docs
 
 - `offline-mode.md`: how offline mode works, startup auth timeout behavior, logout rules, and test expectations.
-- `pull-to-refresh.md`: dashboard pull-to-refresh behavior, gesture constraints, and reconnect semantics while offline.
 - `logout-behavior.md`: when logout/cache purge happens and what data is cleared.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding conventions, and testing expectations.
 - `onboarding-modal.md`: companion onboarding modal design intent, responsive layout behavior, and UX requirements.
 - `project-panel.md`: project panel layout, open/close behavior, zoom-to-project, auto-close UX, and persistence.
 - `guided-tour.md`: interactive guided tour flow, driver.js integration, step definitions, and architecture.
-- `dashboard-map-overlays.md`: read-only dashboard overlay endpoints, icon/label mapping, marker detail modal contract, and offline cache lifecycle.
+- `dashboard-map-overlays.md`: read-only dashboard overlay endpoints, icon/label mapping, marker detail modal contract, share functionality, and offline cache lifecycle.
+- `settings.md`: Settings page sections (sync stats, map settings, tutorial, account), state ownership, polling lifecycle, and offline behavior.
+- `app-permissions.md`: native permissions (location, internet), privacy guarantees, and purpose strings for iOS and Android.
+- `android-safe-area.md`: why `env(safe-area-inset-bottom)` fails on Android, the `initAndroidSafeArea()` fallback, and which components consume the CSS variable.
 
 ## Maintainer note
 

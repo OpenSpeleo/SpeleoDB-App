@@ -378,6 +378,50 @@ export async function hasTile(url: string): Promise<boolean> {
   return (await getTile(url)) !== null;
 }
 
+export async function getManualTileCount(): Promise<number> {
+  try {
+    const db = await openTileDB();
+    const tx = db.transaction(TILE_METADATA_STORE, 'readonly');
+    const store = tx.objectStore(TILE_METADATA_STORE);
+    return await new Promise<number>((resolve, reject) => {
+      let count = 0;
+      const req = store.openCursor();
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) { resolve(count); return; }
+        if (!(cursor.value as TileMetadataRecord).pinnedByAutoPrefetch) {
+          count += 1;
+        }
+        cursor.continue();
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return 0;
+  }
+}
+
+export async function getTotalCacheBytes(): Promise<number> {
+  try {
+    const db = await openTileDB();
+    const tx = db.transaction(TILE_METADATA_STORE, 'readonly');
+    const store = tx.objectStore(TILE_METADATA_STORE);
+    return await new Promise<number>((resolve, reject) => {
+      let total = 0;
+      const req = store.openCursor();
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) { resolve(total); return; }
+        total += (cursor.value as TileMetadataRecord).sizeBytes;
+        cursor.continue();
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return 0;
+  }
+}
+
 export async function getPrefetchJob(
   projectId: string,
 ): Promise<TilePrefetchJobState | null> {

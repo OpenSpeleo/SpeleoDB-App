@@ -10,8 +10,6 @@ describe('buildTourSteps', () => {
     const { stepIds, steps } = buildTourSteps({});
 
     expect(stepIds).toEqual([
-      'statusBar',
-      'pullToRefresh',
       'openProjectPanel',
       'hideAllProjects',
       'showAllProjects',
@@ -19,7 +17,7 @@ describe('buildTourSteps', () => {
       'centerProject',
       'completion',
     ]);
-    expect(steps).toHaveLength(8);
+    expect(steps).toHaveLength(6);
   });
 
   it('always includes project steps and defers skipping to runtime', () => {
@@ -30,48 +28,29 @@ describe('buildTourSteps', () => {
     expect(stepIds).toContain('centerProject');
   });
 
-  it('sets first step to next-and-close navigation', () => {
+  it('sets first step to close-only navigation', () => {
     const { steps } = buildTourSteps({});
-    expect(steps[0].popover?.showButtons).toEqual(['next', 'close']);
+    expect(steps[0].popover?.showButtons).toEqual(['close']);
   });
 
   it('keeps close button available on interaction-gated steps', () => {
     const { steps } = buildTourSteps({});
 
-    // Pull-to-refresh, menu, hide-all, show-all, toggle, center
+    // openProjectPanel, hide-all, show-all, toggle, center
+    expect(steps[0].popover?.showButtons).toEqual(['close']);
     expect(steps[1].popover?.showButtons).toEqual(['close']);
     expect(steps[2].popover?.showButtons).toEqual(['close']);
     expect(steps[3].popover?.showButtons).toEqual(['close']);
     expect(steps[4].popover?.showButtons).toEqual(['close']);
-    expect(steps[5].popover?.showButtons).toEqual(['close']);
-    expect(steps[6].popover?.showButtons).toEqual(['close']);
   });
 
-  it('uses updated pull-to-refresh wording', () => {
+  it('sets toggle step popover to bottom-end alignment', () => {
     const { steps } = buildTourSteps({});
-    expect(steps[1].popover?.title).toBe('Pull down and refresh');
+    expect(steps[3].popover?.side).toBe('bottom');
+    expect(steps[3].popover?.align).toBe('end');
   });
 
-  it('keeps pull-to-refresh instructional copy and feedback slot', () => {
-    const { steps } = buildTourSteps({});
-    const description = steps[1].popover?.description;
-
-    expect(typeof description).toBe('string');
-    if (typeof description !== 'string') return;
-
-    expect(description).toContain('Pull down to refresh projects and verify your connection.');
-    expect(description).toContain('data-tour-feedback="pull-refresh"');
-    expect(description).not.toContain('guided-tour-pull-cue');
-    expect(description).not.toContain('guided-tour-pull-gesture-overlay');
-  });
-
-  it('positions toggle step popover below the project row', () => {
-    const { steps } = buildTourSteps({});
-    expect(steps[5].popover?.side).toBe('bottom');
-    expect(steps[5].popover?.align).toBe('end');
-  });
-
-  it('provides completion callback on final step', () => {
+  it('fires completion callback on Finish click', () => {
     const onCompletionNext = vi.fn();
     const { steps } = buildTourSteps({
       onCompletionNext,
@@ -85,9 +64,7 @@ describe('buildTourSteps', () => {
     expect(onCompletionNext).toHaveBeenCalledOnce();
   });
 
-  it('invokes menu, pull, and bulk hooks on step lifecycle', () => {
-    const onEnterPullToRefresh = vi.fn();
-    const onExitPullToRefresh = vi.fn();
+  it('invokes menu and bulk hooks on step lifecycle', () => {
     const onEnterMenuStep = vi.fn();
     const onExitMenuStep = vi.fn();
     const onEnterHideAllStep = vi.fn();
@@ -96,8 +73,6 @@ describe('buildTourSteps', () => {
     const onExitShowAllStep = vi.fn();
 
     const { steps } = buildTourSteps({
-      onEnterPullToRefresh,
-      onExitPullToRefresh,
       onEnterMenuStep,
       onExitMenuStep,
       onEnterHideAllStep,
@@ -106,19 +81,16 @@ describe('buildTourSteps', () => {
       onExitShowAllStep,
     });
 
+    // step 0: openProjectPanel
+    steps[0].onHighlightStarted?.(undefined, steps[0], {} as never);
+    steps[0].onDeselected?.(undefined, steps[0], {} as never);
+    // step 1: hideAllProjects
     steps[1].onHighlightStarted?.(undefined, steps[1], {} as never);
     steps[1].onDeselected?.(undefined, steps[1], {} as never);
+    // step 2: showAllProjects
     steps[2].onHighlightStarted?.(undefined, steps[2], {} as never);
     steps[2].onDeselected?.(undefined, steps[2], {} as never);
-    steps[3].onHighlightStarted?.(undefined, steps[3], {} as never);
-    steps[3].onDeselected?.(undefined, steps[3], {} as never);
-    steps[4].onHighlightStarted?.(undefined, steps[4], {} as never);
-    steps[4].onDeselected?.(undefined, steps[4], {} as never);
-    steps[5].onHighlightStarted?.(undefined, steps[5], {} as never);
-    steps[5].onDeselected?.(undefined, steps[5], {} as never);
 
-    expect(onEnterPullToRefresh).toHaveBeenCalledOnce();
-    expect(onExitPullToRefresh).toHaveBeenCalledOnce();
     expect(onEnterMenuStep).toHaveBeenCalledOnce();
     expect(onExitMenuStep).toHaveBeenCalledOnce();
     expect(onEnterHideAllStep).toHaveBeenCalledOnce();

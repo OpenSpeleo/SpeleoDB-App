@@ -11,13 +11,12 @@ import { useHistory } from 'react-router-dom';
 import {
   IonPage,
   IonContent,
-  IonRefresher,
-  IonRefresherContent,
-  IonModal,
 } from '@ionic/react';
 import Map, { Layer, Source } from 'react-map-gl/maplibre';
 import type { MapRef } from 'react-map-gl/maplibre';
-import type { LngLatBoundsLike } from 'maplibre-gl';
+import type { LngLatBoundsLike, Map as MaplibreMap } from 'maplibre-gl';
+import { Geolocation } from '@capacitor/geolocation';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 import { useSpeleoDB } from '../context/SpeleoDBProvider';
 import { MAP, MAP_OVERLAYS, PROJECT_LAYERS } from '../constants';
@@ -27,19 +26,18 @@ import {
   getProjectVisibilityPreferences,
   setProjectVisibilityPreference,
   setProjectVisibilityPreferences,
-  getShowLandmarks,
-  setShowLandmarks as persistShowLandmarks,
 } from '../services/PreferencesService';
 import ProjectPanel from '../components/ProjectPanel';
+import AppTabBar from '../components/AppTabBar';
+import GeolocationErrorModal from '../components/GeolocationErrorModal';
+import { PERMISSION_DENIED_SENTINEL } from '../utils/geolocationError';
 import OverlayMarkerDetailsModal from '../components/OverlayMarkerDetailsModal';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { createProjectColorState, getProjectColor } from '../utils/projectColors';
-import { restartGuidedTourFromHelp } from '../onboarding/guidedTour/engine';
 import { TOUR_EVENTS } from '../onboarding/guidedTour/selectors';
 import {
   INTERACTIVE_OVERLAY_LAYER_IDS,
   formatLatLng,
-  isProjectPointLayerId,
   parseOverlayMarkerDetails,
 } from '../utils/overlayMarkerDetails';
 import type {
@@ -58,7 +56,6 @@ import cylinderIcon from '../assets/media/map-icons/cylinder-orange-icon.png';
 // ==================== GeoJSON type alias ====================
 
 type GeoJsonRecord = Record<string, GeoJSON.FeatureCollection>;
-type IonRefreshEvent = CustomEvent<{ complete: () => void }>;
 type OverlayIconId =
   | 'biology-station-icon'
   | 'bone-station-icon'
@@ -71,21 +68,9 @@ type OverlayIconAvailability = Record<OverlayIconId, boolean>;
 
 type ProjectLinkedOverlayId = 'subsurfaceStations' | 'explorationLeads' | 'cylinderInstalls';
 
-const REFRESH_SETTLE_MIN_DELAY_MS = 700;
-const REFRESH_SETTLE_MAX_DELAY_MS = 2400;
-const REFRESH_SETTLE_POLL_INTERVAL_MS = 80;
-const REFRESH_SETTLE_REQUIRED_STABLE_SAMPLES = 4;
-const REFRESH_SETTLE_POSITION_EPSILON_PX = 0.75;
 const MAP_MARKER_HIT_RADIUS_PX_TOUCH = 26;
 const MAP_TOUCH_TAP_MAX_MOVEMENT_PX = 12;
 const MAP_TOUCH_TAP_MAX_DURATION_MS = 550;
-const REFRESH_ACTIVE_CLASS_HINTS = [
-  'refresher-active',
-  'refresher-refreshing',
-  'refresher-pulling',
-  'refresher-ready',
-];
-
 const OVERLAY_ICON_SOURCES: Record<OverlayIconId, string> = {
   'biology-station-icon': biologyIcon,
   'bone-station-icon': boneIcon,
@@ -399,57 +384,36 @@ function lockMapOrientation(mapRef: MapRef | null): void {
   map.setPitch?.(MAP.NORTH_UP_ORIENTATION.pitch);
 }
 
-function isRefresherStillAnimating(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const className = target.className;
-  if (typeof className !== 'string') return false;
-  return REFRESH_ACTIVE_CLASS_HINTS.some((hint) => className.includes(hint));
-}
-
-function getDashboardVerticalPosition(): number {
-  const mapContainer = document.querySelector('.dashboard-map-container');
-  if (mapContainer instanceof HTMLElement) {
-    return mapContainer.getBoundingClientRect().top;
-  }
-
-  const content = document.querySelector('ion-content');
-  if (content instanceof HTMLElement) {
-    return content.getBoundingClientRect().top;
-  }
-
-  return window.scrollY;
-}
-
 // ==================== Register tile caching protocol once ====================
 
 registerTileCacheProtocol();
 
 // ==================== Component ====================
 
-const Dashboard: React.FC = () => {
+interface DashboardProps {
+  isProjectPanelOpen: boolean;
+  onProjectPanelChange: (open: boolean) => void;
+  showLandmarks: boolean;
+}
+
+const Dashboard: React.FC<DashboardProps> = ({
+  isProjectPanelOpen,
+  onProjectPanelChange,
+  showLandmarks,
+}) => {
   const history = useHistory();
-  const { controller, projects, syncStatus, tilePrefetchJobs, isOfflineLocked } = useSpeleoDB();
+  const { controller, projects, tilePrefetchJobs } = useSpeleoDB();
   const didSyncRef = useRef(false);
   const didFitRef = useRef(false);
   const mapRef = useRef<MapRef>(null);
   const mapPointerTapCandidateRef = useRef<MapPointerTapCandidate | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Panel state
-  const [isPanelOpen, setIsPanelOpen] = useState(false);
-  const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [isMapGestureActive, setIsMapGestureActive] = useState(false);
-  const [isPanelGestureActive, setIsPanelGestureActive] = useState(false);
-  const [isInitialSyncSettled, setIsInitialSyncSettled] = useState(false);
   const [selectedOverlayMarkerDetail, setSelectedOverlayMarkerDetail] =
     useState<OverlayMarkerDetails | null>(null);
 
   // Active projects (which layers are visible)
   const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
-
-  // Landmark layer visibility (persisted in user preferences)
-  const [showLandmarks, setShowLandmarks] = useState(() => getShowLandmarks());
 
   // Loaded GeoJSON keyed by project ID
   const [geoJsonData, setGeoJsonData] = useState<GeoJsonRecord>({});
@@ -493,9 +457,7 @@ const Dashboard: React.FC = () => {
           setLoadTrigger((n) => n + 1);
         })
         .finally(() => {
-          if (!cancelled) {
-            setIsInitialSyncSettled(true);
-          }
+          if (cancelled) return;
         });
 
       return () => {
@@ -532,22 +494,6 @@ const Dashboard: React.FC = () => {
       ),
     [tilePrefetchJobs],
   );
-  const tilePrefetchSummary = useMemo(() => {
-    if (tilePrefetchJobs.length === 0) return null;
-    const activeJobs = tilePrefetchJobs.filter(
-      (job) => job.status === 'queued' || job.status === 'downloading' || job.status === 'paused',
-    );
-    if (activeJobs.length === 0) return null;
-
-    const totalTiles = activeJobs.reduce((sum, job) => sum + job.totalTiles, 0);
-    const doneTiles = activeJobs.reduce(
-      (sum, job) => sum + job.completedTiles + job.failedTiles,
-      0,
-    );
-    const pct = totalTiles > 0 ? Math.floor((doneTiles / totalTiles) * 100) : 0;
-    return `${pct}% offline maps`;
-  }, [tilePrefetchJobs]);
-
   const loadOverlayIcons = useCallback(async () => {
     const map = mapRef.current?.getMap() as unknown as OverlayImageMap | undefined;
     if (!map) return;
@@ -672,65 +618,6 @@ const Dashboard: React.FC = () => {
 
   // ---- Handlers -------------------------------------------------------------
 
-  const handleRefresh = useCallback(async (event: IonRefreshEvent) => {
-    const completeRefreshForTour = () => {
-      event.detail.complete();
-      const startedAt = Date.now();
-      let stableSampleCount = 0;
-      let previousVerticalPosition = getDashboardVerticalPosition();
-
-      const tryDispatchWhenStable = () => {
-        const elapsed = Date.now() - startedAt;
-        const minDelayReached = elapsed >= REFRESH_SETTLE_MIN_DELAY_MS;
-        const maxDelayReached = elapsed >= REFRESH_SETTLE_MAX_DELAY_MS;
-        const isAnimating = isRefresherStillAnimating(event.target);
-        const currentVerticalPosition = getDashboardVerticalPosition();
-        const verticalDelta = Math.abs(currentVerticalPosition - previousVerticalPosition);
-        const isPositionStable = verticalDelta <= REFRESH_SETTLE_POSITION_EPSILON_PX;
-        previousVerticalPosition = currentVerticalPosition;
-
-        if (minDelayReached && !isAnimating && isPositionStable) {
-          stableSampleCount += 1;
-        } else {
-          stableSampleCount = 0;
-        }
-
-        if (
-          maxDelayReached ||
-          stableSampleCount >= REFRESH_SETTLE_REQUIRED_STABLE_SAMPLES
-        ) {
-          window.requestAnimationFrame(() => {
-            window.requestAnimationFrame(() => {
-              document.dispatchEvent(new CustomEvent(TOUR_EVENTS.refreshComplete));
-            });
-          });
-          return;
-        }
-
-        window.setTimeout(tryDispatchWhenStable, REFRESH_SETTLE_POLL_INTERVAL_MS);
-      };
-
-      tryDispatchWhenStable();
-    };
-
-    didFitRef.current = false;
-    if (isOfflineLocked) {
-      const result = await controller.retryConnection();
-      if (result === 'unauthorized') {
-        history.replace('/');
-        completeRefreshForTour();
-        return;
-      }
-      if (result !== 'ok') {
-        completeRefreshForTour();
-        return;
-      }
-    }
-    await controller.syncProjects();
-    setLoadTrigger((n) => n + 1);
-    completeRefreshForTour();
-  }, [controller, history, isOfflineLocked]);
-
   const projectPointLayerIds = useMemo(
     () => [...activeProjectIds].map((id) => `project-${id}-point`),
     [activeProjectIds],
@@ -844,7 +731,6 @@ const Dashboard: React.FC = () => {
   const handleMapGestureStart = useCallback((
     event: React.PointerEvent<HTMLDivElement>,
   ) => {
-    setIsMapGestureActive(true);
     clearLongPressTimer();
 
     if (event.pointerType === 'touch' || event.pointerType === 'pen') {
@@ -864,6 +750,7 @@ const Dashboard: React.FC = () => {
         longPressTimerRef.current = setTimeout(() => {
           longPressTimerRef.current = null;
           mapPointerTapCandidateRef.current = null;
+          Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {});
           openLongPressGpsDetail(cx, cy);
         }, MAP.LONG_PRESS_DURATION_MS);
       }
@@ -893,7 +780,6 @@ const Dashboard: React.FC = () => {
   const handleMapGestureEnd = useCallback((
     event: React.PointerEvent<HTMLDivElement>,
   ) => {
-    setIsMapGestureActive(false);
     clearLongPressTimer();
 
     const candidate = mapPointerTapCandidateRef.current;
@@ -927,35 +813,8 @@ const Dashboard: React.FC = () => {
     );
   }, [clearLongPressTimer, openOverlayMarkerDetailsAtClientPoint]);
 
-  const handlePanelGestureStart = useCallback(() => {
-    setIsPanelGestureActive(true);
-  }, []);
-
-  const handlePanelGestureMove = useCallback(() => {
-    setIsPanelGestureActive(true);
-  }, []);
-
-  const handlePanelGestureEnd = useCallback(() => {
-    setIsPanelGestureActive(false);
-  }, []);
-
-  const handleLogout = useCallback(async () => {
-    setShowLogoutConfirmModal(true);
-  }, []);
-
-  const handleConfirmLogout = useCallback(async () => {
-    if (isLoggingOut) return;
-    setIsLoggingOut(true);
-    try {
-      await controller.logout();
-      setShowLogoutConfirmModal(false);
-      history.push('/');
-    } finally {
-      setIsLoggingOut(false);
-    }
-  }, [controller, history, isLoggingOut]);
-
   const handleToggleProject = useCallback((projectId: string) => {
+    Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
     setActiveProjectIds((prev) => {
       const next = new Set(prev);
       if (next.has(projectId)) {
@@ -985,14 +844,6 @@ const Dashboard: React.FC = () => {
     setActiveProjectIds(new Set());
   }, [panelProjects]);
 
-  const handleToggleLandmarks = useCallback(() => {
-    setShowLandmarks((prev) => {
-      const next = !prev;
-      persistShowLandmarks(next);
-      return next;
-    });
-  }, []);
-
   const handleZoomToProject = useCallback((projectId: string) => {
     const emitZoomComplete = () => {
       document.dispatchEvent(
@@ -1012,7 +863,7 @@ const Dashboard: React.FC = () => {
     setProjectVisibilityPreference(projectId, true);
 
     // Step 1: Close the panel so the map is unobstructed before animating
-    setIsPanelOpen(false);
+    onProjectPanelChange(false);
 
     // Step 2: Zoom to this project's bounds — read geoJsonData from the
     // latest state via a functional update trick: we schedule the zoom after
@@ -1050,26 +901,50 @@ const Dashboard: React.FC = () => {
         return current; // no change
       });
     }, 0);
-  }, []);
+  }, [onProjectPanelChange]);
 
   const handleMapLoad = useCallback(() => {
     lockMapOrientation(mapRef.current);
     void loadOverlayIcons();
   }, [loadOverlayIcons]);
 
-  const handleRestartGuidedTour = useCallback(() => {
-    void restartGuidedTourFromHelp();
+  const [isLocating, setIsLocating] = useState(false);
+  const [userLocation, setUserLocation] = useState<{ lng: number; lat: number } | null>(null);
+  const [geoError, setGeoError] = useState<unknown>(null);
+  const handleGoToMyLocation = useCallback(async () => {
+    setIsLocating(true);
+    try {
+      const perms = await Geolocation.requestPermissions({ permissions: ['location'] });
+      if (perms.location !== 'granted') {
+        setGeoError(PERMISSION_DENIED_SENTINEL);
+        return;
+      }
+      const position = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 10_000,
+      });
+      const lng = position.coords.longitude;
+      const lat = position.coords.latitude;
+      setUserLocation({ lng, lat });
+      const map = mapRef.current;
+      if (map) {
+        (map.getMap() as MaplibreMap).flyTo({
+          center: [lng, lat],
+          zoom: 15,
+          duration: 1200,
+        });
+      }
+      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+    } catch (err: unknown) {
+      setGeoError(err);
+    } finally {
+      setIsLocating(false);
+    }
   }, []);
 
   const handleDismissOverlayMarkerDetailsModal = useCallback(() => {
     setSelectedOverlayMarkerDetail(null);
   }, []);
-
-  useEffect(() => {
-    if (!isPanelOpen) {
-      setIsPanelGestureActive(false);
-    }
-  }, [isPanelOpen]);
 
   // ---- Render ---------------------------------------------------------------
 
@@ -1078,26 +953,10 @@ const Dashboard: React.FC = () => {
   return (
     <IonPage>
       <IonContent fullscreen className="ion-no-padding" scrollY={false}>
-        <IonRefresher
-          className="dashboard-refresher"
-          disabled={isMapGestureActive || isPanelGestureActive}
-          slot="fixed"
-          onIonRefresh={handleRefresh}
-          pullFactor={0.5}
-          pullMin={60}
-          pullMax={200}
-        >
-          <IonRefresherContent
-            pullingIcon="arrow-down-outline"
-            pullingText="Pull down to refresh"
-            refreshingSpinner="crescent"
-            refreshingText="Syncing projects…"
-          />
-        </IonRefresher>
-
-        <div className="relative w-full h-full dashboard-map-container" style={{ height: '100dvh' }}>
+        <div className="flex flex-col w-full h-full">
+          <div className="relative flex-1 min-h-0 dashboard-map-container">
           <div
-            className="w-full h-full dashboard-map-touch-surface"
+            className="relative w-full h-full dashboard-map-touch-surface"
             onPointerDownCapture={handleMapGestureStart}
             onPointerMoveCapture={handleMapGestureMove}
             onPointerUpCapture={handleMapGestureEnd}
@@ -1530,85 +1389,70 @@ const Dashboard: React.FC = () => {
                     />
                   </Source>
                 )}
+
+                {userLocation && (
+                  <Source
+                    id="user-location-source"
+                    type="geojson"
+                    data={{
+                      type: 'FeatureCollection',
+                      features: [{
+                        type: 'Feature',
+                        geometry: { type: 'Point', coordinates: [userLocation.lng, userLocation.lat] },
+                        properties: {},
+                      }],
+                    }}
+                  >
+                    <Layer
+                      id="user-location-dot"
+                      type="circle"
+                      paint={{
+                        'circle-radius': 8,
+                        'circle-color': '#4285F4',
+                        'circle-stroke-width': 3,
+                        'circle-stroke-color': '#ffffff',
+                        'circle-opacity': 0.9,
+                      }}
+                    />
+                  </Source>
+                )}
               </Map>
             )}
-          </div>
 
-          {/* ---- Floating header ---- */}
-          <div
-            data-tour="header"
-            data-tour-sync-ready={isInitialSyncSettled ? 'true' : 'false'}
-            className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between
-                        px-3 py-2 bg-slate-900/70 backdrop-blur-sm border-b border-slate-700/30"
-            style={{ paddingTop: 'calc(env(safe-area-inset-top) + 8px)' }}
-          >
-            {/* Menu toggle */}
-            <button
-              onClick={() => setIsPanelOpen(true)}
-              data-tour="menu-toggle"
-              className="w-10 h-10 flex items-center justify-center rounded-xl
-                         bg-slate-800/60 text-slate-200 border-2 border-solid 
-                         border-slate-500/70 hover:bg-slate-700/60 transition-colors"
-              aria-label="Open project panel"
+            {/* ---- Esri attribution (inside map touch surface so bottom-2 is above tab bar) ---- */}
+            <div
+              className="absolute bottom-2 right-2 z-10 px-1.5 py-0.5
+                         text-[10px] text-white/80 hover:text-white
+                         bg-slate-700/70 rounded backdrop-blur-sm
+                         no-underline transition-colors pointer-events-auto"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-
-            {/* Sync status */}
-            <div className="flex items-center gap-2">
-              {syncStatus === 'syncing' && (
-                <span
-                  data-tour="header-sync-status"
-                  className="flex items-center gap-1.5 text-xs text-slate-300"
-                >
-                  <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
-                  Syncing…
-                </span>
-              )}
-              {tilePrefetchSummary && (
-                <span className="text-xs text-emerald-300">{tilePrefetchSummary}</span>
-              )}
-              {panelProjects.length > 0 && (
-                <span data-tour="header-project-count" className="text-xs text-slate-400">
-                  {panelProjects.length} project{panelProjects.length !== 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-
-            {/* Logout */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleRestartGuidedTour}
-                className="w-10 h-10 text-sm font-bold text-slate-100 hover:text-white
-                           rounded-xl border border-slate-100/70 bg-slate-700/70
-                           hover:bg-slate-600/80 transition-colors shadow-sm shadow-black/30"
-                aria-label="Start guided tour"
-                title="Start guided tour"
-              >
-                ?
-              </button>
-              <button
-                onClick={handleLogout}
-                className="px-3 py-2 h-10 text-xs font-medium text-slate-300 hover:text-white
-                           rounded-xl border-2 border-solid border-slate-500/70 bg-slate-800/60
-                           hover:bg-slate-700/60 transition-colors"
-              >
-                Sign Out
-              </button>
+              Powered by Esri
             </div>
           </div>
 
-          {/* ---- Esri attribution ---- */}
-          <div
-            className="absolute bottom-[0px] right-[0px] py-1.5 pl-4 pr-6 z-10 px-1.5 py-0.5
-                       text-[10px] text-white/80 hover:text-white
-                       bg-slate-700/70 rounded backdrop-blur-sm
-                       no-underline transition-colors"
+          {/* ---- My Location FAB ---- */}
+          <button
+            onClick={handleGoToMyLocation}
+            disabled={isLocating}
+            className="absolute right-3 z-10 w-11 h-11 flex items-center justify-center
+                       rounded-full bg-slate-900/80 backdrop-blur-sm border border-slate-600/60
+                       text-slate-200 hover:bg-slate-800/90 disabled:opacity-50
+                       transition-colors shadow-lg shadow-black/40"
+            style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 12px)' }}
+            aria-label="Go to my location"
+            data-testid="my-location-button"
           >
-            Powered by Esri
-          </div>
+            {isLocating ? (
+              <div className="w-5 h-5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M12 2v2m0 16v2m10-10h-2M4 12H2" />
+              </svg>
+            )}
+          </button>
 
           {/* ---- Project panel ---- */}
           <ProjectPanel
@@ -1621,13 +1465,8 @@ const Dashboard: React.FC = () => {
             onZoomToProject={handleZoomToProject}
             onShowAll={handleShowAll}
             onHideAll={handleHideAll}
-            onClose={() => setIsPanelOpen(false)}
-            onGestureStart={handlePanelGestureStart}
-            onGestureMove={handlePanelGestureMove}
-            onGestureEnd={handlePanelGestureEnd}
-            isOpen={isPanelOpen}
-            showLandmarks={showLandmarks}
-            onToggleLandmarks={handleToggleLandmarks}
+            onClose={() => onProjectPanelChange(false)}
+            isOpen={isProjectPanelOpen}
           />
 
           <OverlayMarkerDetailsModal
@@ -1635,54 +1474,7 @@ const Dashboard: React.FC = () => {
             onClose={handleDismissOverlayMarkerDetailsModal}
           />
 
-          <IonModal
-            isOpen={showLogoutConfirmModal}
-            onDidDismiss={() => setShowLogoutConfirmModal(false)}
-            canDismiss={!isLoggingOut}
-            backdropDismiss={!isLoggingOut}
-          >
-            <IonContent className="ion-padding">
-              <div className="flex flex-col h-full justify-center max-w-sm mx-auto text-center">
-                <div className="mb-6">
-                  <span className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-red-500/20 text-red-300 mb-4">
-                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 9v2m0 4h.01m-7.938 4h15.876c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L2.33 16c-.77 1.333.192 3 1.732 3z"
-                      />
-                    </svg>
-                  </span>
-                  <h2 className="text-xl font-semibold text-slate-100 mb-2">Clear local data and sign out?</h2>
-                  <p className="text-slate-300 text-sm mb-2">
-                    All local data will be cleared immediately from this device.
-                  </p>
-                  <p className="text-slate-400 text-sm">
-                    This includes cached maps, GeoJSON, projects, and offline credentials. You will not be able to reconnect without network access.
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 gap-3">
-                  <button
-                    type="button"
-                    disabled={isLoggingOut}
-                    onClick={() => setShowLogoutConfirmModal(false)}
-                    className="px-4 py-3 rounded-xl bg-slate-800/70 text-slate-200 hover:bg-slate-700/70 disabled:opacity-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isLoggingOut}
-                    onClick={handleConfirmLogout}
-                    className="px-4 py-3 rounded-xl bg-red-600 text-white hover:bg-red-500 disabled:opacity-50 transition-colors"
-                  >
-                    {isLoggingOut ? 'Clearing data…' : 'Wipe local data & Sign Out'}
-                  </button>
-                </div>
-              </div>
-            </IonContent>
-          </IonModal>
+          <GeolocationErrorModal error={geoError} onDismiss={() => setGeoError(null)} />
 
           {/* ---- Loading state when style not yet loaded ---- */}
           {!mapStyle && (
@@ -1693,6 +1485,11 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
           )}
+          </div>
+          <AppTabBar
+            isProjectPanelOpen={isProjectPanelOpen}
+            onProjectPanelChange={onProjectPanelChange}
+          />
         </div>
       </IonContent>
     </IonPage>

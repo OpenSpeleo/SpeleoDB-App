@@ -10,6 +10,7 @@
  */
 
 import React from 'react';
+import { IonToggle } from '@ionic/react';
 import type { Project } from '../types/project';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import { getProjectColor } from '../utils/projectColors';
@@ -27,12 +28,7 @@ export interface ProjectPanelProps {
   onShowAll: () => void;
   onHideAll: () => void;
   onClose: () => void;
-  onGestureStart?: () => void;
-  onGestureMove?: () => void;
-  onGestureEnd?: () => void;
   isOpen: boolean;
-  showLandmarks: boolean;
-  onToggleLandmarks: () => void;
 }
 
 function prefetchStatusLabel(job: TilePrefetchJobState | undefined): string | null {
@@ -62,36 +58,10 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
   onShowAll,
   onHideAll,
   onClose,
-  onGestureStart,
-  onGestureMove,
-  onGestureEnd,
   isOpen,
-  showLandmarks,
-  onToggleLandmarks,
 }) => {
   const activeCount = activeProjectIds.size;
   const totalCount = projects.length;
-
-  const handleGestureStart = (
-    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
-  ) => {
-    event.stopPropagation();
-    onGestureStart?.();
-  };
-
-  const handleGestureMove = (
-    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
-  ) => {
-    event.stopPropagation();
-    onGestureMove?.();
-  };
-
-  const handleGestureEnd = (
-    event: React.TouchEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
-  ) => {
-    event.stopPropagation();
-    onGestureEnd?.();
-  };
 
   return (
     <>
@@ -109,18 +79,10 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
           bg-slate-900/95 backdrop-blur-md border-r border-slate-700/50
           flex flex-col transition-transform duration-300 ease-in-out
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
-        style={{ paddingTop: 'env(safe-area-inset-top)' }}
+        style={{ paddingTop: 'var(--safe-area-inset-top, env(safe-area-inset-top))' }}
         data-tour="project-panel"
         data-tour-open={isOpen ? 'true' : 'false'}
         data-testid="project-panel"
-        onTouchStart={handleGestureStart}
-        onTouchMove={handleGestureMove}
-        onTouchEnd={handleGestureEnd}
-        onTouchCancel={handleGestureEnd}
-        onPointerDown={handleGestureStart}
-        onPointerMove={handleGestureMove}
-        onPointerUp={handleGestureEnd}
-        onPointerCancel={handleGestureEnd}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
@@ -139,30 +101,6 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-          </button>
-        </div>
-
-        {/* Landmark visibility */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-700/50">
-          <span className="text-xs font-medium text-slate-300">Show landmarks</span>
-          <button
-            onClick={onToggleLandmarks}
-            className="flex h-8 w-12 shrink-0 items-center justify-center"
-            aria-label="Toggle landmarks"
-            data-testid="landmark-toggle"
-          >
-            <span
-              className={`relative block w-9 h-5 rounded-full transition-colors ${
-                showLandmarks ? 'bg-purple-500' : 'bg-slate-600'
-              }`}
-            >
-              <span
-                className={`absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white shadow-sm
-                            transition-transform ${
-                              showLandmarks ? 'translate-x-4' : 'translate-x-0'
-                            }`}
-              />
-            </span>
           </button>
         </div>
 
@@ -254,26 +192,16 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
                         </button>
                       </div>
 
-                      {/* Toggle switch -- kept in normal flow to prevent overflow */}
-                      <button
-                        onClick={() => onToggleProject(project.id)}
+                      {/* Toggle switch */}
+                      <IonToggle
+                        checked={isActive}
+                        onIonChange={(e) => {
+                          if (e.detail.checked !== isActive) onToggleProject(project.id);
+                        }}
                         data-tour={isFirstProject ? 'project-toggle' : undefined}
-                        className="flex h-8 w-12 shrink-0 items-center justify-center"
                         aria-label={`Toggle ${project.name}`}
-                      >
-                        <span
-                          className={`relative block w-9 h-5 rounded-full transition-colors ${
-                            isActive ? 'bg-purple-500' : 'bg-slate-600'
-                          }`}
-                        >
-                          <span
-                            className={`absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white shadow-sm
-                                        transition-transform ${
-                                          isActive ? 'translate-x-4' : 'translate-x-0'
-                                        }`}
-                          />
-                        </span>
-                      </button>
+                        data-testid={`project-toggle-${project.id}`}
+                      />
                     </div>
                   </li>
                 );

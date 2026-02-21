@@ -1,13 +1,15 @@
-import { Redirect, Route, Switch } from 'react-router-dom';
-import { IonApp, IonRouterOutlet, setupIonicReact } from '@ionic/react';
+import { useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { IonApp, setupIonicReact } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
 
 import { SpeleoDBProvider } from './context/SpeleoDBProvider';
+import { getShowLandmarks } from './services/PreferencesService';
 
 /* Pages */
-import Home from './pages/Home';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import Settings from './pages/Settings';
 
 /* Core CSS required for Ionic components to work properly */
 import '@ionic/react/css/core.css';
@@ -40,24 +42,65 @@ import './theme/variables.css';
 import './index.css';
 
 setupIonicReact({
-  mode: 'ios', // Use iOS styling for consistent look
+  mode: 'ios',
 });
+
+/**
+ * Renders the login page for unauthenticated routes, or keeps
+ * Dashboard + Settings both mounted (hiding the inactive one)
+ * so map state survives tab switches.
+ */
+const AppRoutes: React.FC = () => {
+  const location = useLocation();
+  const path = location.pathname;
+  const isDashboard = path === '/dashboard';
+  const isSettings = path === '/settings';
+  const isAuthenticated = isDashboard || isSettings;
+  const [isProjectPanelOpen, setIsProjectPanelOpen] = useState(false);
+  const [showLandmarks, setShowLandmarks] = useState(() => getShowLandmarks());
+
+  if (path === '/login') {
+    return <Login />;
+  }
+
+  if (!isAuthenticated) {
+    return <Login />;
+  }
+
+  return (
+    <>
+      <div style={{
+        position: 'fixed', inset: 0,
+        visibility: isDashboard ? 'visible' : 'hidden',
+        pointerEvents: isDashboard ? 'auto' : 'none',
+      }}>
+        <Dashboard
+          isProjectPanelOpen={isProjectPanelOpen}
+          onProjectPanelChange={setIsProjectPanelOpen}
+          showLandmarks={showLandmarks}
+        />
+      </div>
+      <div style={{
+        position: 'fixed', inset: 0,
+        visibility: isSettings ? 'visible' : 'hidden',
+        pointerEvents: isSettings ? 'auto' : 'none',
+      }}>
+        <Settings
+          showLandmarks={showLandmarks}
+          onShowLandmarksChange={setShowLandmarks}
+          isProjectPanelOpen={isProjectPanelOpen}
+          onProjectPanelChange={setIsProjectPanelOpen}
+        />
+      </div>
+    </>
+  );
+};
 
 const App: React.FC = () => (
   <IonApp>
     <IonReactRouter>
       <SpeleoDBProvider>
-        <IonRouterOutlet>
-          <Switch>
-            <Route exact path="/" component={Home} />
-            <Route exact path="/login" component={Login} />
-            <Route exact path="/dashboard" component={Dashboard} />
-            {/* Fallback route */}
-            <Route>
-              <Redirect to="/" />
-            </Route>
-          </Switch>
-        </IonRouterOutlet>
+        <AppRoutes />
       </SpeleoDBProvider>
     </IonReactRouter>
   </IonApp>

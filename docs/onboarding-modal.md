@@ -19,7 +19,7 @@ The modal presents four content blocks in order:
 
 1. **Brand hero**: SpeleoDB logo and headline ("Your surveys, always with you").
 2. **Tagline**: "The SpeleoDB app is built for fieldwork. Online or Offline."
-3. **Feature highlights**: Three cards -- survey sync, pull-to-refresh, offline access.
+3. **Feature highlights**: Three cards -- survey sync, Settings sync action, offline access.
 4. **Promotional callout**: Survey-publish-sync workflow and field visualization pitch.
 5. **CTA**: "Start exploring" button that dismisses the modal.
 

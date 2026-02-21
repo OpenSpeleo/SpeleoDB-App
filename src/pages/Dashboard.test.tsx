@@ -140,35 +140,52 @@ vi.mock('@ionic/react', () => ({
     children?: React.ReactNode;
     isOpen?: boolean;
   }) => (isOpen ? <div data-testid="ion-modal">{children}</div> : null),
-  IonRefresher: ({
-    children,
-    className,
-    disabled,
-    onIonRefresh,
-  }: {
+  IonToggle: ({ checked, onIonChange, children, ...rest }: {
+    checked?: boolean;
+    onIonChange?: (e: { detail: { checked: boolean } }) => void;
     children?: React.ReactNode;
-    className?: string;
-    disabled?: boolean;
-    onIonRefresh?: (event: CustomEvent) => void;
-  }) => (
-    <div
-      data-testid="ion-refresher"
-      className={className}
-      data-disabled={disabled ? 'true' : 'false'}
-    >
-      <button
-        type="button"
-        data-testid="trigger-refresh"
-        onClick={() => onIonRefresh?.({
-          detail: { complete: () => {} },
-        } as unknown as CustomEvent)}
-      >
-        Trigger refresh
-      </button>
+  } & Record<string, unknown>) => (
+    <label data-testid={rest['data-testid'] as string} aria-label={rest['aria-label'] as string}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onIonChange?.({ detail: { checked: e.target.checked } })}
+      />
       {children}
-    </div>
+    </label>
   ),
-  IonRefresherContent: () => <div data-testid="ion-refresher-content" />,
+  IonIcon: () => <span data-testid="ion-icon" />,
+}));
+
+const { mockRequestPermissions, mockGetCurrentPosition } = vi.hoisted(() => ({
+  mockRequestPermissions: vi.fn().mockResolvedValue({ location: 'granted' }),
+  mockGetCurrentPosition: vi.fn().mockResolvedValue({
+    coords: { latitude: 46.6, longitude: 2.3, accuracy: 10 },
+    timestamp: Date.now(),
+  }),
+}));
+
+vi.mock('@capacitor/core', () => ({
+  Capacitor: { getPlatform: () => 'android' },
+}));
+
+vi.mock('@capacitor/geolocation', () => ({
+  Geolocation: {
+    getCurrentPosition: mockGetCurrentPosition,
+    requestPermissions: mockRequestPermissions,
+  },
+}));
+
+vi.mock('@capacitor/haptics', () => ({
+  Haptics: {
+    impact: vi.fn().mockResolvedValue(undefined),
+    notification: vi.fn().mockResolvedValue(undefined),
+    selectionStart: vi.fn().mockResolvedValue(undefined),
+    selectionChanged: vi.fn().mockResolvedValue(undefined),
+    selectionEnd: vi.fn().mockResolvedValue(undefined),
+  },
+  ImpactStyle: { Light: 'LIGHT', Medium: 'MEDIUM', Heavy: 'HEAVY' },
+  NotificationType: { Success: 'SUCCESS', Warning: 'WARNING', Error: 'ERROR' },
 }));
 
 // Mock maplibre-gl (used by TileCacheService)
@@ -177,6 +194,18 @@ vi.mock('maplibre-gl', () => ({
     addProtocol: vi.fn(),
     setWorkerUrl: vi.fn(),
   },
+}));
+
+vi.mock('../components/AppTabBar', () => ({
+  default: ({
+    onProjectPanelChange,
+  }: {
+    onProjectPanelChange?: (open: boolean) => void;
+  }) => (
+    <div data-testid="app-tab-bar">
+      <button data-testid="projects-tab" onClick={() => onProjectPanelChange?.(true)}>Projects</button>
+    </div>
+  ),
 }));
 
 // Mock react-map-gl/maplibre
@@ -342,11 +371,23 @@ vi.mock('../context/SpeleoDBProvider', () => ({
 
 // ==================== Helpers ====================
 
-function renderDashboard() {
+function renderDashboard(options?: { showLandmarks?: boolean }) {
   const history = createMemoryHistory({ initialEntries: ['/dashboard'] });
+  const initialShowLandmarks = options?.showLandmarks ?? mockGetShowLandmarks();
+  const Harness: React.FC = () => {
+    const [isProjectPanelOpen, setIsProjectPanelOpen] = React.useState(false);
+    const [showLandmarks] = React.useState(initialShowLandmarks);
+    return (
+      <Dashboard
+        isProjectPanelOpen={isProjectPanelOpen}
+        onProjectPanelChange={setIsProjectPanelOpen}
+        showLandmarks={showLandmarks}
+      />
+    );
+  };
   render(
     <Router history={history}>
-      <Dashboard />
+      <Harness />
     </Router>,
   );
   return history;
@@ -532,59 +573,6 @@ describe('Dashboard', () => {
     });
   });
 
-  it('renders Sign Out button', async () => {
-    renderDashboard();
-    await waitFor(() => {
-      expect(screen.getByText('Sign Out')).toBeInTheDocument();
-    });
-  });
-
-  it('renders dashboard-specific refresher class', async () => {
-    renderDashboard();
-    await waitFor(() => {
-      expect(screen.getByTestId('ion-refresher')).toHaveClass('dashboard-refresher');
-    });
-  });
-
-  it('renders guided tour selectors for header and menu toggle', async () => {
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(document.querySelector('[data-tour="header"]')).not.toBeNull();
-      expect(document.querySelector('[data-tour="menu-toggle"]')).not.toBeNull();
-    });
-  });
-
-  it('asks for confirmation before wiping data on Sign Out', async () => {
-    const history = renderDashboard();
-    await waitFor(() => {
-      expect(screen.getByText('Sign Out')).toBeInTheDocument();
-    });
-
-    await userEvent.click(screen.getByText('Sign Out'));
-    expect(mockLogout).not.toHaveBeenCalled();
-    expect(
-      screen.getByText('Clear local data and sign out?'),
-    ).toBeInTheDocument();
-
-    await userEvent.click(screen.getByText('Wipe local data & Sign Out'));
-    await waitFor(() => {
-      expect(mockLogout).toHaveBeenCalledOnce();
-      expect(history.location.pathname).toBe('/');
-    });
-  });
-
-  it('restarts guided tour from help button', async () => {
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Start guided tour')).toBeInTheDocument();
-    });
-
-    await userEvent.click(screen.getByLabelText('Start guided tour'));
-    expect(mockRestartGuidedTourFromHelp).toHaveBeenCalledWith();
-  });
-
   it('redirects to /login when not authenticated', () => {
     mockIsAuthenticated.mockReturnValue(false);
     const history = renderDashboard();
@@ -600,15 +588,14 @@ describe('Dashboard', () => {
     });
   });
 
-  it('opens project panel when menu button is clicked', async () => {
+  it('opens project panel when Projects tab is clicked', async () => {
     renderDashboard();
     await waitFor(() => {
-      expect(screen.getByLabelText('Open project panel')).toBeInTheDocument();
+      expect(screen.getByTestId('projects-tab')).toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByLabelText('Open project panel'));
-    // Panel should now show "Projects" heading
-    expect(screen.getByText('Projects')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('projects-tab'));
+    expect(screen.getByTestId('project-panel')).toBeInTheDocument();
   });
 
   it('does not render navigation control', async () => {
@@ -642,105 +629,6 @@ describe('Dashboard', () => {
       expect(mockSetBearing).toHaveBeenCalledWith(0);
       expect(mockSetPitch).toHaveBeenCalledWith(0);
     });
-  });
-
-  it('disables refresher while map pointer gesture is active', async () => {
-    renderDashboard();
-    await waitFor(() => {
-      expect(screen.getByTestId('map')).toBeInTheDocument();
-    });
-
-    const refresher = screen.getByTestId('ion-refresher');
-    const mapTouchSurface = document.querySelector('.dashboard-map-touch-surface');
-    expect(mapTouchSurface).toBeTruthy();
-
-    expect(refresher).toHaveAttribute('data-disabled', 'false');
-
-    fireEvent.pointerDown(mapTouchSurface as Element);
-    expect(refresher).toHaveAttribute('data-disabled', 'true');
-
-    fireEvent.pointerUp(mapTouchSurface as Element);
-    expect(refresher).toHaveAttribute('data-disabled', 'false');
-  });
-
-  it('disables refresher while interacting with the project panel list', async () => {
-    mockProjects = [makeProject({ id: 'p1', name: 'Panel Scroll Project' })];
-    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Open project panel')).toBeInTheDocument();
-    });
-    await userEvent.click(screen.getByLabelText('Open project panel'));
-
-    const refresher = screen.getByTestId('ion-refresher');
-    const panelList = await screen.findByTestId('project-panel-list');
-
-    expect(refresher).toHaveAttribute('data-disabled', 'false');
-
-    fireEvent.pointerDown(panelList);
-    expect(refresher).toHaveAttribute('data-disabled', 'true');
-
-    fireEvent.pointerMove(panelList);
-    expect(refresher).toHaveAttribute('data-disabled', 'true');
-
-    fireEvent.pointerUp(panelList);
-    expect(refresher).toHaveAttribute('data-disabled', 'false');
-  });
-
-  it('uses pull-to-refresh as online recovery attempt while offline-locked', async () => {
-    mockIsOfflineLocked = true;
-    mockRetryConnection.mockResolvedValueOnce('network_error');
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(mockSyncProjects).toHaveBeenCalledTimes(1);
-    });
-
-    await userEvent.click(screen.getByTestId('trigger-refresh'));
-
-    await waitFor(() => {
-      expect(mockRetryConnection).toHaveBeenCalledOnce();
-    });
-    expect(mockSyncProjects).toHaveBeenCalledTimes(1);
-  });
-
-  it('retries then syncs when pull-to-refresh reconnect succeeds', async () => {
-    mockIsOfflineLocked = true;
-    mockRetryConnection.mockResolvedValueOnce('ok');
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(mockSyncProjects).toHaveBeenCalledTimes(1);
-    });
-
-    await userEvent.click(screen.getByTestId('trigger-refresh'));
-
-    await waitFor(() => {
-      expect(mockRetryConnection).toHaveBeenCalledOnce();
-      expect(mockSyncProjects).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  it('dispatches guided-tour refresh completion after pull refresh settles', async () => {
-    renderDashboard();
-
-    const onRefreshComplete = vi.fn();
-    document.addEventListener(TOUR_EVENTS.refreshComplete, onRefreshComplete as EventListener);
-
-    await userEvent.click(screen.getByTestId('trigger-refresh'));
-
-    await waitFor(
-      () => {
-        expect(onRefreshComplete).toHaveBeenCalled();
-      },
-      { timeout: 3000 },
-    );
-
-    document.removeEventListener(
-      TOUR_EVENTS.refreshComplete,
-      onRefreshComplete as EventListener,
-    );
   });
 
   it('renders GeoJSON layer when payload is a JSON string', async () => {
@@ -1580,17 +1468,6 @@ describe('Dashboard', () => {
     });
   });
 
-  it('shows project count when cached panel projects are available (even with idle sync status)', async () => {
-    mockProjects = [makeProject({ id: 'p-count', name: 'Count Project' })];
-    mockGetProjectGeoJSON.mockResolvedValueOnce(pointFeatureCollection());
-
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByText('1 project')).toBeInTheDocument();
-    });
-  });
-
   it('persists project visibility when toggled', async () => {
     mockProjects = [makeProject({ id: 'p1', name: 'Toggle Me' })];
     mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
@@ -1692,10 +1569,9 @@ describe('Dashboard', () => {
 
     // Open the panel first
     await waitFor(() => {
-      expect(screen.getByLabelText('Open project panel')).toBeInTheDocument();
+      expect(screen.getByTestId('projects-tab')).toBeInTheDocument();
     });
-    await userEvent.click(screen.getByLabelText('Open project panel'));
-    expect(screen.getByText('Projects')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('projects-tab'));
 
     // Panel should be visible (translate-x-0)
     const panelBefore = document.querySelector('.translate-x-0.z-30');
@@ -1728,29 +1604,6 @@ describe('Dashboard', () => {
 
     expect(document.querySelector('[data-layer-id="landmarks-layer"]')).toBeNull();
     expect(document.querySelector('[data-layer-id="landmarks-labels"]')).toBeNull();
-  });
-
-  it('toggles landmark visibility and persists the preference', async () => {
-    mockProjects = [makeProject({ id: 'p1', name: 'Landmark Toggle Project' })];
-    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
-    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
-      if (overlayId === 'landmarks') return overlayPointFeatureCollection({ name: 'Toggle LM' });
-      return null;
-    });
-
-    renderDashboard();
-
-    await waitFor(() => {
-      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
-    });
-
-    await userEvent.click(screen.getByLabelText('Open project panel'));
-    await userEvent.click(screen.getByLabelText('Toggle landmarks'));
-
-    await waitFor(() => {
-      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).toBeNull();
-    });
-    expect(mockSetShowLandmarks).toHaveBeenCalledWith(false);
   });
 
   it('uses the same project color in panel dot and map layer', async () => {
@@ -1790,5 +1643,111 @@ describe('Dashboard', () => {
 
     const panelDot = screen.getByTestId('project-color-dot-p-visible');
     expect(panelDot.getAttribute('style')).toContain(`border-color: ${layerColor}`);
+  });
+});
+
+describe('Dashboard -- My Location button', () => {
+  it('renders the my-location button', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByTestId('my-location-button')).toBeInTheDocument();
+    });
+  });
+
+  it('has accessible label', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByLabelText('Go to my location')).toBeInTheDocument();
+    });
+  });
+});
+
+describe('Dashboard -- User location dot', () => {
+  beforeEach(() => {
+    mockRequestPermissions.mockReset().mockResolvedValue({ location: 'granted' });
+    mockGetCurrentPosition.mockReset().mockResolvedValue({
+      coords: { latitude: 46.6, longitude: 2.3, accuracy: 10 },
+      timestamp: Date.now(),
+    });
+  });
+
+  it('renders user location dot layer after successful geolocation', async () => {
+    renderDashboard();
+
+    const btn = await screen.findByTestId('my-location-button');
+    await userEvent.click(btn);
+
+    await waitFor(() => {
+      const layer = document.querySelector('[data-layer-id="user-location-dot"]');
+      expect(layer).not.toBeNull();
+    });
+  });
+});
+
+describe('Dashboard -- Geolocation error modal', () => {
+  beforeEach(() => {
+    mockRequestPermissions.mockReset().mockResolvedValue({ location: 'granted' });
+    mockGetCurrentPosition.mockReset().mockResolvedValue({
+      coords: { latitude: 46.6, longitude: 2.3, accuracy: 10 },
+      timestamp: Date.now(),
+    });
+  });
+
+  it('shows error modal when permission is denied via requestPermissions return value', async () => {
+    mockRequestPermissions.mockResolvedValue({ location: 'denied' });
+    renderDashboard();
+
+    const btn = await screen.findByTestId('my-location-button');
+    await userEvent.click(btn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Location Permission Required')).toBeInTheDocument();
+    });
+  });
+
+  it('shows error modal when requestPermissions rejects (location disabled)', async () => {
+    const err = new Error('Location services are not enabled.') as Error & { code: string };
+    err.code = 'OS-PLUG-GLOC-0007';
+    mockRequestPermissions.mockRejectedValue(err);
+    renderDashboard();
+
+    const btn = await screen.findByTestId('my-location-button');
+    await userEvent.click(btn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Location Services Disabled')).toBeInTheDocument();
+    });
+  });
+
+  it('shows error modal when getCurrentPosition times out', async () => {
+    const err = new Error('Could not obtain location in time.') as Error & { code: string };
+    err.code = 'OS-PLUG-GLOC-0010';
+    mockGetCurrentPosition.mockRejectedValue(err);
+    renderDashboard();
+
+    const btn = await screen.findByTestId('my-location-button');
+    await userEvent.click(btn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Could Not Determine Location')).toBeInTheDocument();
+    });
+  });
+
+  it('dismisses error modal when OK is clicked', async () => {
+    mockRequestPermissions.mockResolvedValue({ location: 'denied' });
+    renderDashboard();
+
+    const btn = await screen.findByTestId('my-location-button');
+    await userEvent.click(btn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Location Permission Required')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'OK' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Location Permission Required')).not.toBeInTheDocument();
+    });
   });
 });

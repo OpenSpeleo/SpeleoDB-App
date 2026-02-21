@@ -1,17 +1,27 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
-import { addIcons } from 'ionicons';
-import { arrowDownOutline } from 'ionicons/icons';
 import * as SentryReact from '@sentry/react';
 import App from './App';
 import { initSentry } from './monitoring/sentry';
 
-addIcons({
-  'arrow-down-outline': arrowDownOutline,
-});
+/**
+ * On Android the WebView always returns 0 for CSS `env(safe-area-inset-*)`.
+ * Capacitor 8's built-in SystemBars plugin injects accurate values as inline
+ * CSS custom properties on <html>, but only on Android 15+ (API 35).
+ *
+ * We set a sensible default here BEFORE React renders so the UI never sits
+ * flush against the system navigation bar.  On Android 15+ the SystemBars
+ * plugin will overwrite our defaults with the real values once its
+ * DOMContentLoaded → onDOMReady callback chain completes.
+ */
+function initAndroidSafeArea(): void {
+  if (Capacitor.getPlatform() !== 'android') return;
+  document.documentElement.style.setProperty('--safe-area-inset-bottom', '40px');
+}
 
 initSentry();
+initAndroidSafeArea();
 
 function registerServiceWorker(): void {
   if (import.meta.env.DEV) return;

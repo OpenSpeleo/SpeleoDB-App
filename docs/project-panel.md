@@ -5,13 +5,14 @@ The project panel is a slide-in side panel on the dashboard that lets users mana
 ## Opening and closing
 
 | Trigger | Result |
-|---|---|
-| Hamburger button (top-left header) | Panel slides in from the left |
+| "Projects" tab in bottom navigation bar | Panel slides in from the left |
 | Close button (X in panel header) | Panel slides out |
 | Backdrop tap (dark overlay behind panel) | Panel slides out |
 | Clicking a project name | Panel slides out (auto-close) |
+| Tapping "Projects" tab again (when open) | Panel slides out |
+| Tapping "Map" tab (when open) | Panel slides out |
 
-State is owned by `isPanelOpen` in `Dashboard.tsx`. The panel itself (`ProjectPanel.tsx`) is a stateless presentational component controlled via `isOpen` / `onClose` props.
+State is owned by `isPanelOpen` in `Dashboard.tsx`. The panel itself (`ProjectPanel.tsx`) is a stateless presentational component controlled via `isOpen` / `onClose` props. The bottom nav bar can toggle the panel via module-level callbacks exported from `Dashboard.tsx` (`openProjectPanel`, `closeProjectPanel`).
 
 ### Auto-close on project selection
 
@@ -21,7 +22,7 @@ When the user taps a project name to zoom to it, the panel closes automatically 
 
 - Position: absolute overlay, anchored top-left, full height.
 - Width: `w-72` (`18rem`), capped at `max-w-[80vw]` on small screens.
-- Z-index: panel at `z-30`, backdrop at `z-20` (above the map and floating header at `z-10`).
+- Z-index: panel at `z-30`, backdrop at `z-20`.
 - Slide animation: 300ms ease-in-out translate on the X axis (`translate-x-0` open, `-translate-x-full` closed).
 - Backdrop: `bg-black/40` fades in/out with the panel.
 
@@ -44,8 +45,6 @@ Both operate on all projects in the list regardless of which were individually t
 
 A scrollable list of all projects that have GeoJSON data (projects with `exclude_geojson: true` or no `geojson_file` are filtered out before reaching the panel).
 
-List scrolling is self-contained and must not leak gesture handling to dashboard pull-to-refresh.
-
 Each row contains:
 
 ### Color dot
@@ -65,7 +64,7 @@ Tapping the name or the color dot triggers `onZoomToProject(projectId)`, which:
 
 ### Toggle switch
 
-A purple/slate toggle to show or hide the project's map layer without zooming. Persists the visibility preference per project. Does **not** close the panel -- the user stays in the panel to continue managing layers.
+A native IonToggle to show or hide the project's map layer without zooming. Persists the visibility preference per project. Does **not** close the panel -- the user stays in the panel to continue managing layers.
 
 ### Overlay effect of project toggles
 
@@ -93,6 +92,7 @@ When no projects are available, the list area shows "No projects available" cent
 ```
 src/components/ProjectPanel.tsx   -- Presentational component (stateless)
 src/pages/Dashboard.tsx           -- State owner (isPanelOpen, activeProjectIds, handlers)
+src/components/AppTabBar.tsx      -- Navigation trigger (Projects tab toggles panel)
 ```
 
 `ProjectPanel` receives all data and callbacks as props. It does not hold state, perform network calls, or interact with the map directly. All business logic lives in `Dashboard.tsx` handlers:
@@ -115,7 +115,7 @@ Preferences are cleared on logout (full preference wipe).
 
 - `ProjectPanel.test.tsx` -- unit tests for the presentational component (rendering, callback wiring, open/close CSS classes).
 - `Dashboard.test.tsx` -- integration tests for panel behavior within the dashboard:
-  - Panel opens when menu button is clicked.
+  - Panel opens when Projects tab is clicked.
   - Show All / Hide All persist preferences.
   - Zoom-to-project persists `visible: true`.
   - Panel auto-closes after zooming to a project.

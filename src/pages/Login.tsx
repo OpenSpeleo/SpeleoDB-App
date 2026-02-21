@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useHistory } from 'react-router-dom';
+import { useHistory } from 'react-router-dom';
 import { IonPage, IonContent } from '@ionic/react';
 import { useSpeleoDB } from '../context/SpeleoDBProvider';
 import { PREFERENCES } from '../constants';
@@ -62,14 +62,12 @@ const Login: React.FC = () => {
             </div>
 
             <div className="relative max-w-6xl mx-auto px-4 sm:px-6">
-              <div className="py-8 pt-[calc(2rem+env(safe-area-inset-top))]">
+              <div className="py-8 pt-[calc(2rem_+_var(--safe-area-inset-top,env(safe-area-inset-top)))]">
                 {/* Page header */}
                 <div className="max-w-3xl mx-auto text-center pb-12">
                   {/* Logo */}
-                  <div className="mb-5">
-                    <Link to="/" className="flex justify-center">
-                      <img className="h-20 max-w-full" src={logoSvg} alt="Logo" />
-                    </Link>
+                  <div className="mb-5 flex justify-center">
+                    <img className="h-20 max-w-full" src={logoSvg} alt="SpeleoDB" />
                   </div>
                   {/* Page title */}
                   <h1 className="pt-8 text-2xl md:text-3xl font-bold bg-gradient-to-r from-slate-200/60 via-slate-200 to-slate-200/60 bg-clip-text text-transparent">

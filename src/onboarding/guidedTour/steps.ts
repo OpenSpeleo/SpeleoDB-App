@@ -5,8 +5,6 @@ export const GUIDED_TOUR_STAGE_PADDING_DEFAULT = 8;
 export const GUIDED_TOUR_STAGE_PADDING_MENU = 14;
 
 export type GuidedTourStepId =
-  | 'statusBar'
-  | 'pullToRefresh'
   | 'openProjectPanel'
   | 'hideAllProjects'
   | 'showAllProjects'
@@ -15,10 +13,6 @@ export type GuidedTourStepId =
   | 'completion';
 
 export interface GuidedTourStepHooks {
-  onEnterStatusBar?: () => void;
-  onExitStatusBar?: () => void;
-  onEnterPullToRefresh?: () => void;
-  onExitPullToRefresh?: () => void;
   onEnterMenuStep?: () => void;
   onExitMenuStep?: () => void;
   onEnterHideAllStep?: () => void;
@@ -41,8 +35,6 @@ export function buildTourSteps(
   options: BuildGuidedTourStepsOptions,
 ): BuildGuidedTourStepsResult {
   const stepIds: GuidedTourStepId[] = [
-    'statusBar',
-    'pullToRefresh',
     'openProjectPanel',
     'hideAllProjects',
     'showAllProjects',
@@ -51,43 +43,6 @@ export function buildTourSteps(
   ];
 
   const steps: DriveStep[] = [
-    {
-      element: TOUR_SELECTORS.header,
-      onHighlightStarted: () => {
-        options.onEnterStatusBar?.();
-      },
-      onDeselected: () => {
-        options.onExitStatusBar?.();
-      },
-      popover: {
-        title: 'Status bar',
-        description:
-          'This bar shows sync status and the number of projects currently available on the map.',
-        side: 'bottom',
-        align: 'center',
-        showButtons: ['next', 'close'],
-        nextBtnText: 'Next',
-      },
-    },
-    {
-      element: TOUR_SELECTORS.header,
-      onHighlightStarted: () => {
-        options.onEnterPullToRefresh?.();
-      },
-      onDeselected: () => {
-        options.onExitPullToRefresh?.();
-      },
-      popover: {
-        title: 'Pull down and refresh',
-        description: `
-          <div>Pull down to refresh projects and verify your connection.</div>
-          <div class="guided-tour-step-feedback" data-tour-feedback="pull-refresh"></div>
-        `,
-        side: 'bottom',
-        align: 'center',
-        showButtons: ['close'],
-      },
-    },
     {
       element: TOUR_SELECTORS.menuToggle,
       onHighlightStarted: () => {
@@ -98,8 +53,8 @@ export function buildTourSteps(
       },
       popover: {
         title: 'Open the project panel',
-        description: 'Tap this menu button to open the project panel.',
-        side: 'right',
+        description: 'Tap the Projects button to open the project panel.',
+        side: 'top',
         align: 'start',
         showButtons: ['close'],
       },

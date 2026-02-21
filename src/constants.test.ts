@@ -75,8 +75,8 @@ describe('constants', () => {
       expect(MAP.MAX_ZOOM).toBeGreaterThanOrEqual(MAP.DEFAULT_ZOOM);
     });
 
-    it('caps MAX_ZOOM at 18 for satellite reliability', () => {
-      expect(MAP.MAX_ZOOM).toBe(18);
+    it('caps MAX_ZOOM at 19.9 for satellite reliability', () => {
+      expect(MAP.MAX_ZOOM).toBe(19.9);
     });
 
     it('locks map orientation to north-up defaults', () => {

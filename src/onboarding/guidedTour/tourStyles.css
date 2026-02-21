@@ -80,138 +80,7 @@
   animation: none !important;
 }
 
-.guided-tour-pull-gesture-overlay {
-  position: fixed;
-  left: 0;
-  top: 0;
-  width: var(--guided-tour-pull-cue-icon-width, 84px);
-  height: calc(
-    var(--guided-tour-pull-cue-icon-height, 84px) +
-      var(--guided-tour-pull-cue-drag-distance, 54px) + 34px
-  );
-  transform: translateX(-50%);
-  z-index: 10001;
-  pointer-events: none;
-  --guided-tour-pull-cue-loop-duration: 1450ms;
-  --guided-tour-pull-cue-drag-distance: 54px;
-  --guided-tour-pull-cue-icon-width: 84px;
-  --guided-tour-pull-cue-icon-height: 84px;
-  --guided-tour-pull-cue-bubble-size: 58px;
-}
-
-.guided-tour-pull-gesture-overlay[data-hidden='true'] {
-  display: none;
-}
-
-.guided-tour-pull-cue {
-  width: var(--guided-tour-pull-cue-icon-width);
-  height: 100%;
-  pointer-events: none;
-}
-
-.guided-tour-pull-cue-bubble {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  width: var(--guided-tour-pull-cue-bubble-size);
-  height: var(--guided-tour-pull-cue-bubble-size);
-  border-radius: 999px;
-  border: 2px solid rgba(248, 250, 252, 0.75);
-  background: radial-gradient(
-    circle at center,
-    rgba(196, 181, 253, 0.42) 0%,
-    rgba(196, 181, 253, 0.2) 58%,
-    rgba(196, 181, 253, 0.04) 100%
-  );
-  box-shadow:
-    0 10px 18px rgba(15, 23, 42, 0.45),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.28);
-  transform: translate(-50%, -50%);
-  z-index: 2;
-  pointer-events: none;
-  animation: guided-tour-pull-cue-bubble-pulse var(--guided-tour-pull-cue-loop-duration)
-    ease-in-out infinite;
-}
-
-.guided-tour-pull-cue-icon {
-  position: absolute;
-  left: 50%;
-  top: -24px;
-  width: var(--guided-tour-pull-cue-icon-width);
-  height: var(--guided-tour-pull-cue-icon-height);
-  transform: translate(-50%, 0);
-  transform-origin: top center;
-  filter:
-    drop-shadow(0 4px 8px rgba(15, 23, 42, 0.55))
-    drop-shadow(0 0 1px rgba(248, 250, 252, 0.3));
-  z-index: 3;
-  pointer-events: none;
-  user-select: none;
-  -webkit-user-drag: none;
-  animation: guided-tour-pull-cue-slide var(--guided-tour-pull-cue-loop-duration)
-    cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-.guided-tour-step-feedback {
-  margin-top: 8px;
-  color: #a78bfa;
-  font-weight: 600;
-  min-height: 18px;
-}
-
-@keyframes guided-tour-pull-cue-slide {
-  0% {
-    transform: translate(-50%, 0);
-    opacity: 0.96;
-  }
-  18% {
-    transform: translate(-50%, 0);
-    opacity: 0.96;
-  }
-  62% {
-    transform: translate(-50%, var(--guided-tour-pull-cue-drag-distance));
-    opacity: 1;
-  }
-  78% {
-    transform: translate(-50%, var(--guided-tour-pull-cue-drag-distance));
-    opacity: 1;
-  }
-  100% {
-    transform: translate(-50%, 0);
-    opacity: 0.96;
-  }
-}
-
-@keyframes guided-tour-pull-cue-bubble-pulse {
-  0% {
-    transform: translate(-50%, -50%) scale(0.98);
-    opacity: 0.92;
-  }
-  50% {
-    transform: translate(-50%, -50%) scale(1.05);
-    opacity: 1;
-  }
-  100% {
-    transform: translate(-50%, -50%) scale(0.98);
-    opacity: 0.92;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .guided-tour-pull-cue-icon {
-    animation: none;
-    transform: translate(
-      -50%,
-      calc(var(--guided-tour-pull-cue-drag-distance) * 0.45)
-    );
-  }
-
-  .guided-tour-pull-cue-bubble {
-    animation: none;
-  }
-}
-
-/* Step 3 keeps the real hamburger button clickable even if cutout alignment drifts. */
+/* Keep the real Projects tab button clickable during the open-panel step. */
 .tour-step-menu-clickthrough.driver-active .driver-overlay,
 .tour-step-menu-clickthrough.driver-active .driver-overlay path {
   pointer-events: none !important;
@@ -230,7 +99,7 @@
   pointer-events: auto !important;
 }
 
-/* Steps 4-5 sequentially expose only the intended bulk-action button. */
+/* Sequentially expose only the intended bulk-action button. */
 .tour-step-bulk-hide-only.driver-active [data-tour-action='show-all'] {
   display: none !important;
 }
@@ -239,24 +108,10 @@
   display: none !important;
 }
 
-/* Steps 3 and 7 briefly hide tour chrome before replaying native clicks. */
+/* Briefly hide tour chrome before replaying native clicks. */
 .tour-step-transition-handoff.driver-active .driver-overlay,
 .tour-step-transition-handoff.driver-active .driver-overlay path,
 .tour-step-transition-handoff.driver-active .driver-popover {
   opacity: 0 !important;
   pointer-events: none !important;
 }
-
-/* Step 2 allows refresh/map gestures while the tour remains active. */
-.tour-step-pull-refresh.driver-active .dashboard-map-touch-surface,
-.tour-step-pull-refresh.driver-active ion-refresher.dashboard-refresher,
-.tour-step-pull-refresh.driver-active ion-refresher.dashboard-refresher * {
-  pointer-events: auto !important;
-}
-
-/* Step 2: keep the instruction container lower without runtime reconfiguration. */
-.tour-step-pull-refresh.driver-active .driver-popover.guided-tour-popover {
-  transform: translateY(100px) !important;
-}
-
-/* Step 2: push instruction popover lower to avoid cue overlap. */

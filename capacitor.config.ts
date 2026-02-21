@@ -9,9 +9,13 @@ const config: CapacitorConfig = {
     androidScheme: 'https',
   },
   plugins: {
-    // Use native HTTP for fetch/XHR on iOS and Android so API calls bypass the web view and avoid CORS.
     CapacitorHttp: {
       enabled: true,
+    },
+    SplashScreen: {
+      launchAutoHide: false,
+      backgroundColor: '#0f172a',
+      showSpinner: false,
     },
   },
 };

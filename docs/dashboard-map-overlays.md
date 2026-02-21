@@ -230,7 +230,7 @@ Zoom levels and marker sizes are sourced from `MAP_OVERLAYS` in `src/constants.t
 - Overlay payloads are cached in IndexedDB (`geojson` store) using namespaced keys (`overlay:<id>`).
 - Sync trigger parity with projects:
   - app open/login path (`syncProjects()`),
-  - dashboard pull-to-refresh.
+  - Settings page sync button.
 - Offline behavior:
   - dashboard loads overlays from cache,
   - normal offline lock skips outbound sync calls.
@@ -247,12 +247,25 @@ Zoom levels and marker sizes are sourced from `MAP_OVERLAYS` in `src/constants.t
 
 ## Landmark visibility toggle
 
-The project panel includes a "Show landmarks" toggle above the bulk-action buttons (Show all / Hide all). This toggle controls whether landmark marker and label layers are rendered on the map.
+The Settings page includes a "Show landmarks" toggle under the "Map Settings" section. This toggle controls whether landmark marker and label layers are rendered on the map.
 
 - Persisted in `UserPreferences.showLandmarks` via `PreferencesService`.
 - Default: `true` (landmarks shown when preference is missing or undefined).
-- The toggle does not carry any `data-tour*` attributes and is invisible to the guided tour.
-- Implementation: `src/components/ProjectPanel.tsx`, `src/pages/Dashboard.tsx`, `src/services/PreferencesService.ts`.
+- Settings communicates the toggle state to Dashboard in real time via a module-level callback (`setDashboardLandmarks`) since both pages stay mounted simultaneously.
+- Implementation: `src/pages/Settings.tsx`, `src/pages/Dashboard.tsx`, `src/services/PreferencesService.ts`.
+
+## Share functionality
+
+The marker detail modal includes a native Share button (via `@capacitor/share`) for a subset of marker types:
+
+- **Landmark**: shares name, description, and GPS coordinate.
+- **Surface station**: shares name and GPS coordinate.
+- **Project entry point** (star): shares project name, name, and GPS coordinate.
+- **Map point** (long press): shares GPS coordinate.
+
+Other marker types (exploration leads, cylinder installs, subsurface stations) do not show the Share button. When Share is not available, the Close button renders full-width.
+
+The shareable type set is defined as `SHAREABLE_TYPES` in `src/components/OverlayMarkerDetailsModal.tsx`.
 
 ## Read-only UX constraints
 
@@ -267,3 +280,4 @@ The project panel includes a "Show landmarks" toggle above the bulk-action butto
 - `src/controllers/SpeleoDBController.test.ts`
 - `src/pages/Dashboard.test.tsx`
 - `src/utils/overlayMarkerDetails.test.ts`
+- `src/components/OverlayMarkerDetailsModal.test.tsx`

@@ -1,11 +1,14 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { IonContent, IonModal } from '@ionic/react';
+import { Share } from '@capacitor/share';
 import type { OverlayMarkerDetails } from '../utils/overlayMarkerDetails';
 
 interface OverlayMarkerDetailsModalProps {
   detail: OverlayMarkerDetails | null;
   onClose: () => void;
 }
+
+const SHAREABLE_TYPES = new Set<OverlayMarkerDetails['type']>(['landmark', 'surfaceStation', 'projectPoint', 'mapLongPress']);
 
 const TITLE_BY_TYPE: Record<OverlayMarkerDetails['type'], string> = {
   explorationLead: 'Exploration Lead',
@@ -16,6 +19,55 @@ const TITLE_BY_TYPE: Record<OverlayMarkerDetails['type'], string> = {
   projectPoint: 'Project Entry Point',
   mapLongPress: 'Map Point',
 };
+
+function isShareCancellation(error: unknown): boolean {
+  if (typeof error === 'string') {
+    return /cancel/i.test(error);
+  }
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    return typeof message === 'string' && /cancel/i.test(message);
+  }
+  return false;
+}
+
+function buildShareText(detail: OverlayMarkerDetails): string {
+  const title = TITLE_BY_TYPE[detail.type];
+  const lines: string[] = [title];
+
+  switch (detail.type) {
+    case 'explorationLead':
+      lines.push(detail.description);
+      break;
+    case 'cylinderInstall':
+      lines.push(`Pressure: ${detail.pressure}`);
+      lines.push(`Gas mix: ${detail.gasMix}`);
+      lines.push(`Install date: ${detail.installDate}`);
+      break;
+    case 'subsurfaceStation':
+      lines.push(`Name: ${detail.name}`);
+      if (detail.description) lines.push(detail.description);
+      break;
+    case 'surfaceStation':
+      lines.push(`Name: ${detail.name}`);
+      lines.push(`GPS: ${detail.gpsCoordinate}`);
+      break;
+    case 'landmark':
+      lines.push(`Name: ${detail.name}`);
+      lines.push(`GPS: ${detail.gpsCoordinate}`);
+      break;
+    case 'projectPoint':
+      lines.push(`Project: ${detail.projectName}`);
+      lines.push(`Name: ${detail.name}`);
+      lines.push(`GPS: ${detail.gpsCoordinate}`);
+      break;
+    case 'mapLongPress':
+      lines.push(`GPS: ${detail.gpsCoordinate}`);
+      break;
+  }
+
+  return lines.join('\n');
+}
 
 function DetailField({ label, testId, value }: {
   label: string;
@@ -105,6 +157,21 @@ const OverlayMarkerDetailsModal: React.FC<OverlayMarkerDetailsModalProps> = ({
   detail,
   onClose,
 }) => {
+  const handleShare = useCallback(async () => {
+    if (!detail) return;
+    try {
+      await Share.share({
+        title: TITLE_BY_TYPE[detail.type],
+        text: buildShareText(detail),
+      });
+    } catch (error) {
+      if (isShareCancellation(error)) {
+        return;
+      }
+      console.warn('[overlay-share] Failed to share marker details.', error);
+    }
+  }, [detail]);
+
   if (!detail) {
     return null;
   }
@@ -132,13 +199,29 @@ const OverlayMarkerDetailsModal: React.FC<OverlayMarkerDetailsModalProps> = ({
 
           {renderDetailFields(detail)}
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-3 rounded-xl bg-slate-800/70 text-slate-200 hover:bg-slate-700/70 transition-colors"
-          >
-            Close
-          </button>
+          <div className={`grid gap-3 ${SHAREABLE_TYPES.has(detail.type) ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-3 rounded-xl bg-slate-800/70 text-slate-200 hover:bg-slate-700/70 transition-colors"
+            >
+              Close
+            </button>
+            {SHAREABLE_TYPES.has(detail.type) && (
+              <button
+                type="button"
+                onClick={handleShare}
+                data-testid="share-button"
+                className="px-4 py-3 rounded-xl bg-purple-600/80 text-white hover:bg-purple-500/80 transition-colors flex items-center justify-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                Share
+              </button>
+            )}
+          </div>
         </div>
       </IonContent>
     </IonModal>

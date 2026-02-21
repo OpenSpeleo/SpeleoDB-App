@@ -27,12 +27,11 @@ This document defines the offline cache feature, user-facing offline modal behav
 
 ## Online recovery behavior (strict)
 
-When app is in offline mode, only two actions are allowed to attempt returning online:
+When app is in offline mode, only one action is allowed to attempt returning online:
 
 1. Close and reopen the app (startup validation attempt).
-2. Pull-to-refresh on dashboard (manual reconnect attempt).
 
-Both actions must run a tentative reconnect flow and resolve to exactly one outcome:
+This action must run a tentative reconnect flow and resolve to exactly one outcome:
 
 - reconnect success: clear offline lock and resume online behavior.
 - still offline: remain offline without forced logout and without repeated blocking prompts.
@@ -52,8 +51,8 @@ Both actions must run a tentative reconnect flow and resolve to exactly one outc
 - Offline mode uses cached app data and cached map resources.
 - Dashboard map overlays (landmarks, stations, exploration leads, cylinder installs) are read from cached GeoJSON when offline.
 - Outbound network requests should be skipped for normal offline operation paths.
-- Explicit reconnect attempts are limited to the two recovery paths above.
-- Pull-to-refresh is the only in-session manual reconnect trigger while offline.
+- Explicit reconnect attempts are limited to the app relaunch recovery path above.
+- The Settings page sync button calls `syncProjects()` but does not attempt offline reconnect (`retryConnection()`).
 - The app does not use passive `online`/`offline` browser listeners. Connectivity changes alone do not trigger reconnect or modal state changes.
 
 ## Logout and data purge
@@ -88,6 +87,6 @@ When modifying auth/offline logic:
 1. Verify timeout and network failures do not call `logout()`.
 2. Verify only 4xx auth failures trigger cache purge.
 3. Verify modal can be acknowledged with `Go Offline` and is not repeatedly re-shown in same offline period.
-4. Verify only two reconnect paths are active while offline: app relaunch and dashboard pull-to-refresh.
+4. Verify the only reconnect path while offline is app relaunch.
 5. Run targeted tests for controller, provider, dashboard, tile cache, and tile prefetch paths.
 6. Update this document if any behavior changes.

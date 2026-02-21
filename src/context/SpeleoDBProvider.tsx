@@ -6,9 +6,17 @@
  * OnlineStateProvider.
  */
 
-import React, { createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useSyncExternalStore,
+} from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { IonModal, IonContent, IonButton } from '@ionic/react';
+import { SplashScreen } from '@capacitor/splash-screen';
 import logoPng from '../assets/media/logo.png';
 
 import { HttpClient } from '../services/HttpClient';
@@ -62,6 +70,11 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   const history = useHistory();
   const location = useLocation();
   const didValidateRef = useRef(false);
+  const hideSplashScreenSafely = useCallback((reason: string) => {
+    SplashScreen.hide().catch((error) => {
+      console.warn(`[splash] Failed to hide splash screen (${reason}).`, error);
+    });
+  }, []);
 
   // ---- Create controller once (stable across re-renders) --------------------
 
@@ -135,7 +148,10 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     const prefs = getPreferences();
     const hasCredentials = Boolean(prefs.email?.trim() && prefs.token?.trim());
 
-    if (!hasCredentials) return;
+    if (!hasCredentials) {
+      hideSplashScreenSafely('no stored credentials');
+      return;
+    }
 
     // If user has credentials and is on a public page, go to dashboard.
     const pathname = location.pathname;
@@ -149,19 +165,20 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
 
     controller.validateSession().then((result) => {
       if (result === 'unauthorized') {
-        history.replace('/');
+        history.replace('/login');
         return;
       }
       if (result === 'ok') {
-        // isOnline is updated inside the controller; React picks it up via useSyncExternalStore.
         return;
       }
       // network_error
       if (!controller.isAuthenticated()) {
-        history.replace('/');
+        history.replace('/login');
       }
+    }).finally(() => {
+      hideSplashScreenSafely('session validation finished');
     });
-  }, [history, location.pathname, controller]);
+  }, [history, location.pathname, controller, hideSplashScreenSafely]);
 
   useEffect(() => {
     if (isOfflineLocked) {
@@ -280,7 +297,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
                   <p className="text-sm font-medium text-slate-100">Sync all your SpeleoDB surveys to your phone</p>
                 </div>
                 <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-3 py-2">
-                  <p className="text-sm font-medium text-slate-100">Pull down anytime to refresh</p>
+                  <p className="text-sm font-medium text-slate-100">Use Settings &gt; Sync to refresh when online</p>
                 </div>
                 <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-3 py-2">
                   <p className="text-sm font-medium text-slate-100">Full offline access: no internet required.</p>
@@ -344,7 +361,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
                     <p className="text-base font-medium text-slate-100">Sync all your SpeleoDB surveys to your device</p>
                   </div>
                   <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-4 py-3">
-                    <p className="text-base font-medium text-slate-100">Pull down anytime to refresh</p>
+                    <p className="text-base font-medium text-slate-100">Use Settings &gt; Sync to refresh when online</p>
                   </div>
                   <div className="rounded-xl border border-slate-700/70 bg-slate-800/50 px-4 py-3">
                     <p className="text-base font-medium text-slate-100">Full offline access: no internet required</p>
@@ -407,7 +424,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
                 The app could not reach the server in time. You are operating in offline mode.
               </p>
               <p className="text-slate-500 text-xs mt-3">
-                To attempt reconnect, close and reopen the app, or use pull-to-refresh on the dashboard.
+                To attempt reconnect, close and reopen the app. After reconnecting, use Settings &gt; Sync to refresh data.
               </p>
             </div>
             <IonButton

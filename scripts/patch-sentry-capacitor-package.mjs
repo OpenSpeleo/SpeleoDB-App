@@ -96,6 +96,75 @@ function patchSentryCapacitorAndroidProguardDefault() {
   console.log('[gradle] Updated default ProGuard file for: @sentry/capacitor');
 }
 
+function patchCapacitorKotlinPluginForAgp9() {
+  if (!existsSync(capacitorPackagesDir)) {
+    console.log('[gradle] Skipping Kotlin patch: @capacitor directory not found.');
+    return;
+  }
+
+  const bare = "apply plugin: 'kotlin-android'";
+  const guardLine = "if (!project.extensions.findByName('kotlin')) {";
+
+  const patchedPackages = [];
+
+  const packageDirs = readdirSync(capacitorPackagesDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+
+  for (const packageName of packageDirs) {
+    const gradleFilePath = path.join(capacitorPackagesDir, packageName, 'android', 'build.gradle');
+    if (!existsSync(gradleFilePath)) {
+      continue;
+    }
+
+    const content = readFileSync(gradleFilePath, 'utf8');
+    if (!content.includes(bare)) {
+      continue;
+    }
+
+    const lines = content.split('\n');
+    let changed = false;
+    const patchedLines = [];
+
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.trim() !== bare) {
+        patchedLines.push(line);
+        continue;
+      }
+
+      const prevTrim = (lines[i - 1] ?? '').trim();
+      const nextTrim = (lines[i + 1] ?? '').trim();
+      if (prevTrim === guardLine && nextTrim === '}') {
+        patchedLines.push(line);
+        continue;
+      }
+
+      const indent = line.match(/^\s*/)?.[0] ?? '';
+      patchedLines.push(`${indent}${guardLine}`);
+      patchedLines.push(`${indent}    ${bare}`);
+      patchedLines.push(`${indent}}`);
+      changed = true;
+    }
+
+    if (!changed) {
+      continue;
+    }
+
+    const patched = patchedLines.join('\n');
+    writeFileSync(gradleFilePath, patched, 'utf8');
+    patchedPackages.push(`@capacitor/${packageName}`);
+  }
+
+  if (patchedPackages.length === 0) {
+    console.log('[gradle] No @capacitor Kotlin plugin patches were needed (AGP 9 compat).');
+    return;
+  }
+
+  console.log(`[gradle] Guarded kotlin-android plugin for AGP 9 in: ${patchedPackages.join(', ')}`);
+}
+
 patchSentrySwiftPackage();
 patchCapacitorAndroidProguardDefaults();
 patchSentryCapacitorAndroidProguardDefault();
+patchCapacitorKotlinPluginForAgp9();

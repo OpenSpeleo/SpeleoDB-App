@@ -114,19 +114,15 @@ interface RenderTourTargetsOptions {
   includeBulkTargets?: boolean;
   includeProjectTargets?: boolean;
   panelOpen?: boolean;
-  syncReady?: boolean;
 }
 
 function renderTourTargets(options: RenderTourTargetsOptions = {}): void {
   const includeBulkTargets = options.includeBulkTargets ?? true;
   const includeProjectTargets = options.includeProjectTargets ?? true;
   const panelOpen = options.panelOpen ?? true;
-  const syncReady = options.syncReady ?? true;
 
   document.body.innerHTML = `
-    <div data-tour="header" data-tour-sync-ready="${syncReady ? 'true' : 'false'}"></div>
     <button data-tour="menu-toggle"></button>
-    <ion-refresher class="dashboard-refresher"></ion-refresher>
     <div data-tour="project-panel" data-tour-open="${panelOpen ? 'true' : 'false'}">
     ${
       includeBulkTargets
@@ -220,44 +216,6 @@ describe('guided tour engine', () => {
     expect(footerButtons.children).toHaveLength(2);
   });
 
-  it('waits for dashboard initial sync readiness before starting', async () => {
-    renderTourTargets({
-      includeProjectTargets: false,
-      syncReady: false,
-    });
-
-    const startPromise = startGuidedTour();
-    await vi.advanceTimersByTimeAsync(500);
-    expect(mockDriverFactory).not.toHaveBeenCalled();
-
-    const header = document.querySelector('[data-tour="header"]');
-    header?.setAttribute('data-tour-sync-ready', 'true');
-    await vi.advanceTimersByTimeAsync(150);
-    await startPromise;
-
-    expect(mockDriverFactory).toHaveBeenCalledOnce();
-  });
-
-  it('cancels pending sync-ready start when destroyed before readiness', async () => {
-    renderTourTargets({
-      includeProjectTargets: false,
-      syncReady: false,
-    });
-
-    const startPromise = startGuidedTour();
-    await vi.advanceTimersByTimeAsync(500);
-    expect(mockDriverFactory).not.toHaveBeenCalled();
-
-    destroyGuidedTour();
-
-    const header = document.querySelector('[data-tour="header"]');
-    header?.setAttribute('data-tour-sync-ready', 'true');
-    await vi.advanceTimersByTimeAsync(150);
-    await startPromise;
-
-    expect(mockDriverFactory).not.toHaveBeenCalled();
-  });
-
   it('restarts from help by resetting completion and forcing start', async () => {
     renderTourTargets({ includeProjectTargets: false });
 
@@ -304,97 +262,11 @@ describe('guided tour engine', () => {
     expect(mockSetHasCompletedGuidedTour).not.toHaveBeenCalled();
   });
 
-  it('advances pull-to-refresh step only after refresh-complete event', async () => {
-    renderTourTargets({ includeProjectTargets: false });
-    await startGuidedTour();
-
-    const pullStep = driverOptionsRef.current.steps[1];
-    driverState.activeIndex = 1;
-    pullStep.onHighlightStarted?.(undefined, pullStep, {} as never);
-
-    const refresher = document.querySelector('ion-refresher.dashboard-refresher');
-    refresher?.dispatchEvent(new Event('ionRefresh', { bubbles: true }));
-    vi.advanceTimersByTime(500);
-    expect(mockDriverMoveNext).not.toHaveBeenCalled();
-
-    document.dispatchEvent(new CustomEvent(TOUR_EVENTS.refreshComplete));
-    vi.advanceTimersByTime(300);
-
-    expect(mockDriverMoveNext).toHaveBeenCalledOnce();
-  });
-
-  it('shows and then hides the pull cue when refresh starts', async () => {
-    renderTourTargets({ includeProjectTargets: false });
-    await startGuidedTour();
-
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      `
-        <div data-tour-feedback="pull-refresh">Old text</div>
-      `,
-    );
-
-    const pullStep = driverOptionsRef.current.steps[1];
-    driverState.activeIndex = 1;
-    pullStep.onHighlightStarted?.(undefined, pullStep, {} as never);
-
-    const visualCue = document.querySelector('.guided-tour-pull-gesture-overlay');
-    const feedback = document.querySelector('[data-tour-feedback="pull-refresh"]');
-    expect(visualCue).toBeInstanceOf(HTMLElement);
-    expect(feedback).toBeInstanceOf(HTMLElement);
-    expect((visualCue as HTMLElement).dataset.hidden).toBe('false');
-    expect((feedback as HTMLElement).textContent).toBe('');
-
-    const refresher = document.querySelector('ion-refresher.dashboard-refresher');
-    refresher?.dispatchEvent(new Event('ionRefresh', { bubbles: true }));
-
-    expect((visualCue as HTMLElement).dataset.hidden).toBe('true');
-    expect((visualCue as HTMLElement).style.display).toBe('none');
-    expect((feedback as HTMLElement).textContent).toBe('Refreshing...');
-  });
-
-  it('removes the pull cue overlay when leaving the pull-to-refresh step', async () => {
-    renderTourTargets({ includeProjectTargets: false });
-    await startGuidedTour();
-
-    const pullStep = driverOptionsRef.current.steps[1];
-    driverState.activeIndex = 1;
-    pullStep.onHighlightStarted?.(undefined, pullStep, {} as never);
-    expect(document.querySelector('.guided-tour-pull-gesture-overlay')).not.toBeNull();
-
-    pullStep.onDeselected?.(undefined, pullStep, {} as never);
-    expect(document.querySelector('.guided-tour-pull-gesture-overlay')).toBeNull();
-  });
-
-  it('cleans up pull cue overlay when tour is destroyed mid-step', async () => {
-    renderTourTargets({ includeProjectTargets: false });
-    await startGuidedTour();
-
-    const pullStep = driverOptionsRef.current.steps[1];
-    driverState.activeIndex = 1;
-    pullStep.onHighlightStarted?.(undefined, pullStep, {} as never);
-    expect(document.querySelector('.guided-tour-pull-gesture-overlay')).not.toBeNull();
-
-    destroyGuidedTour();
-    expect(document.querySelector('.guided-tour-pull-gesture-overlay')).toBeNull();
-  });
-
-  it('uses zero-offset framing for header-focused steps', async () => {
-    renderTourTargets({ includeProjectTargets: false });
-    await startGuidedTour();
-
-    const statusBarStep = driverOptionsRef.current.steps[0];
-    statusBarStep.onHighlightStarted?.(undefined, statusBarStep, {} as never);
-
-    expect(driverState.config.stagePadding).toBe(0);
-    expect(driverState.config.stageRadius).toBe(0);
-  });
-
   it('advances menu step after tapping menu toggle', async () => {
     renderTourTargets({ includeProjectTargets: false });
     await startGuidedTour();
 
-    driverState.activeIndex = 2;
+    driverState.activeIndex = 0;
     const menu = document.querySelector('[data-tour="menu-toggle"]');
     menu?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     vi.advanceTimersByTime(700);
@@ -402,15 +274,15 @@ describe('guided tour engine', () => {
     expect(mockDriverMoveNext).toHaveBeenCalledOnce();
   });
 
-  it('hides visuals and re-emits menu click during step-3 handoff', async () => {
+  it('hides visuals and re-emits menu click during step handoff', async () => {
     renderTourTargets({ includeProjectTargets: false });
     await startGuidedTour();
 
-    const menuStep = driverOptionsRef.current.steps[2];
+    const menuStep = driverOptionsRef.current.steps[0];
     const menu = document.querySelector('[data-tour="menu-toggle"]');
     const onMenuClick = vi.fn();
     menu?.addEventListener('click', onMenuClick);
-    driverState.activeIndex = 2;
+    driverState.activeIndex = 0;
     menuStep.onHighlightStarted?.(undefined, menuStep, {} as never);
 
     menu?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -431,24 +303,24 @@ describe('guided tour engine', () => {
     renderTourTargets({ includeProjectTargets: false, panelOpen: false });
     await startGuidedTour();
 
-    driverState.activeIndex = 2;
+    driverState.activeIndex = 0;
     const menu = document.querySelector('[data-tour="menu-toggle"]');
     menu?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     vi.advanceTimersByTime(900);
-    expect(driverState.activeIndex).toBe(2);
+    expect(driverState.activeIndex).toBe(0);
 
     const panel = document.querySelector('[data-tour="project-panel"]');
     panel?.setAttribute('data-tour-open', 'true');
     vi.advanceTimersByTime(800);
-    expect(driverState.activeIndex).toBe(3);
+    expect(driverState.activeIndex).toBe(1);
   });
 
   it('applies menu-stage framing without repeated layout tracking refresh', async () => {
     renderTourTargets({ includeProjectTargets: false });
     await startGuidedTour();
 
-    driverState.activeIndex = 2;
-    const menuStep = driverOptionsRef.current.steps[2];
+    driverState.activeIndex = 0;
+    const menuStep = driverOptionsRef.current.steps[0];
     menuStep.onHighlightStarted?.(undefined, menuStep, {} as never);
     vi.advanceTimersByTime(900);
 
@@ -460,8 +332,8 @@ describe('guided tour engine', () => {
     renderTourTargets({ includeProjectTargets: false });
     await startGuidedTour();
 
-    const menuStep = driverOptionsRef.current.steps[2];
-    driverState.activeIndex = 2;
+    const menuStep = driverOptionsRef.current.steps[0];
+    driverState.activeIndex = 0;
     menuStep.onHighlightStarted?.(undefined, menuStep, {} as never);
 
     vi.advanceTimersByTime(1600);
@@ -479,7 +351,7 @@ describe('guided tour engine', () => {
     renderTourTargets({ includeProjectTargets: false });
     await startGuidedTour();
 
-    const menuStep = driverOptionsRef.current.steps[2];
+    const menuStep = driverOptionsRef.current.steps[0];
     expect(
       document.body.classList.contains(TOUR_BODY_CLASSES.menuStepClickthrough),
     ).toBe(false);
@@ -499,7 +371,7 @@ describe('guided tour engine', () => {
     renderTourTargets({ includeProjectTargets: false });
     await startGuidedTour();
 
-    const menuStep = driverOptionsRef.current.steps[2];
+    const menuStep = driverOptionsRef.current.steps[0];
     menuStep.onHighlightStarted?.(undefined, menuStep, {} as never);
     expect(
       document.body.classList.contains(TOUR_BODY_CLASSES.menuStepClickthrough),
@@ -521,7 +393,7 @@ describe('guided tour engine', () => {
     renderTourTargets({ includeBulkTargets: false, includeProjectTargets: false });
     await startGuidedTour();
 
-    driverState.activeIndex = 2;
+    driverState.activeIndex = 0;
     const menu = document.querySelector('[data-tour="menu-toggle"]');
     menu?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     vi.advanceTimersByTime(2000);
@@ -535,16 +407,16 @@ describe('guided tour engine', () => {
     renderTourTargets({ includeProjectTargets: false });
     await startGuidedTour();
 
-    driverState.activeIndex = 2;
+    driverState.activeIndex = 0;
     const menu = document.querySelector('[data-tour="menu-toggle"]');
     menu?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     vi.advanceTimersByTime(700);
-    expect(driverState.activeIndex).toBe(3);
+    expect(driverState.activeIndex).toBe(1);
 
     const hideAll = document.querySelector('[data-tour-action="hide-all"]');
     hideAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     vi.advanceTimersByTime(300);
-    expect(driverState.activeIndex).toBe(4);
+    expect(driverState.activeIndex).toBe(2);
 
     const showAll = document.querySelector('[data-tour-action="show-all"]');
     showAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -558,16 +430,16 @@ describe('guided tour engine', () => {
     renderTourTargets({ includeProjectTargets: false });
     await startGuidedTour();
 
-    driverState.activeIndex = 2;
+    driverState.activeIndex = 0;
     const menu = document.querySelector('[data-tour="menu-toggle"]');
     menu?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     vi.advanceTimersByTime(700);
-    expect(driverState.activeIndex).toBe(3);
+    expect(driverState.activeIndex).toBe(1);
 
     const hideAll = document.querySelector('[data-tour-action="hide-all"]');
     hideAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     vi.advanceTimersByTime(300);
-    expect(driverState.activeIndex).toBe(4);
+    expect(driverState.activeIndex).toBe(2);
 
     const panel = document.querySelector('[data-tour="project-panel"]');
     window.setTimeout(() => {
@@ -581,14 +453,14 @@ describe('guided tour engine', () => {
     const showAll = document.querySelector('[data-tour-action="show-all"]');
     showAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     vi.advanceTimersByTime(1700);
-    expect(driverState.activeIndex).toBe(5);
+    expect(driverState.activeIndex).toBe(3);
   });
 
   it('advances through dedicated hide-all then show-all bulk steps', async () => {
     renderTourTargets();
     await startGuidedTour();
 
-    driverState.activeIndex = 3;
+    driverState.activeIndex = 1;
 
     const showAll = document.querySelector('[data-tour-action="show-all"]');
     const hideAll = document.querySelector('[data-tour-action="hide-all"]');
@@ -601,7 +473,7 @@ describe('guided tour engine', () => {
     vi.advanceTimersByTime(300);
     expect(mockDriverMoveNext).toHaveBeenCalledOnce();
 
-    driverState.activeIndex = 4;
+    driverState.activeIndex = 2;
     hideAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     vi.advanceTimersByTime(300);
     expect(mockDriverMoveNext).toHaveBeenCalledOnce();
@@ -615,8 +487,8 @@ describe('guided tour engine', () => {
     renderTourTargets();
     await startGuidedTour();
 
-    const hideStep = driverOptionsRef.current.steps[3];
-    const showStep = driverOptionsRef.current.steps[4];
+    const hideStep = driverOptionsRef.current.steps[1];
+    const showStep = driverOptionsRef.current.steps[2];
 
     hideStep.onHighlightStarted?.(undefined, hideStep, {} as never);
     expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkHideOnly)).toBe(
@@ -649,7 +521,7 @@ describe('guided tour engine', () => {
     renderTourTargets();
     await startGuidedTour();
 
-    const toggleStep = driverOptionsRef.current.steps[5];
+    const toggleStep = driverOptionsRef.current.steps[3];
     expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkHideOnly)).toBe(false);
     expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkShowOnly)).toBe(false);
     expect(document.body.classList.contains(TOUR_BODY_CLASSES.menuStepClickthrough)).toBe(false);
@@ -669,8 +541,8 @@ describe('guided tour engine', () => {
     renderTourTargets();
     await startGuidedTour();
 
-    const toggleStep = driverOptionsRef.current.steps[5];
-    driverState.activeIndex = 5;
+    const toggleStep = driverOptionsRef.current.steps[3];
+    driverState.activeIndex = 3;
     toggleStep.onHighlightStarted?.(undefined, toggleStep, {} as never);
     const projectName = document.querySelector('[data-tour="project-name"]');
     const nonTargetProjectName = document.querySelectorAll(
@@ -693,8 +565,8 @@ describe('guided tour engine', () => {
     renderTourTargets();
     await startGuidedTour();
 
-    driverState.activeIndex = 6;
-    const centerStep = driverOptionsRef.current.steps[6];
+    driverState.activeIndex = 4;
+    const centerStep = driverOptionsRef.current.steps[4];
     centerStep.onHighlightStarted?.(undefined, centerStep, {} as never);
 
     const projectName = document.querySelector('[data-tour="project-name"]');

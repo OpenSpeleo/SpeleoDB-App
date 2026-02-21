@@ -16,12 +16,11 @@ This document defines how network state is handled in the app and what is intent
 
 ## Allowed reconnect triggers
 
-Only two actions may attempt to return online from offline mode:
+Only one action may attempt to return online from offline mode:
 
 1. Close and reopen the app (startup validation flow).
-2. Pull-to-refresh on dashboard (manual reconnect flow).
 
-If neither action occurs, app remains in offline behavior even if device connectivity changes.
+If this action does not occur, app remains in offline behavior even if device connectivity changes. The Settings page sync button calls `syncProjects()` but does not attempt offline reconnect.
 
 ## Offline modal contract
 
@@ -33,7 +32,7 @@ If neither action occurs, app remains in offline behavior even if device connect
 
 - During offline lock, normal data/map fetch paths should skip outbound network and use cache.
 - This includes dashboard project GeoJSON and read-only overlay GeoJSON (landmarks, stations, exploration leads, cylinder installs).
-- Reconnect attempts are explicit and limited to the two triggers above.
+- Reconnect attempts are explicit and limited to the app relaunch trigger above.
 - Transport errors/timeouts remain non-destructive (no logout, no cache purge).
 
 ## Auth and logout
@@ -50,7 +49,6 @@ If neither action occurs, app remains in offline behavior even if device connect
 See also:
 
 - `docs/offline-mode.md`
-- `docs/pull-to-refresh.md`
 - `docs/logout-behavior.md`
 - `docs/implementation-guidelines.md`
 - `docs/dashboard-map-overlays.md`

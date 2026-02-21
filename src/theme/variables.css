@@ -131,16 +131,6 @@ ion-content::part(scroll) {
   scrollbar-color: #475569 transparent;
 }
 
-/* Dashboard pull-to-refresh: keep indicator below notch + floating header */
-ion-refresher.dashboard-refresher {
-  height: calc(64px + env(safe-area-inset-top));
-  padding-top: calc(env(safe-area-inset-top) + 16px);
-}
-
-ion-refresher.dashboard-refresher ion-refresher-content {
-  --color: #94a3b8; /* slate-400 */
-}
-
 /* Hide the native Ionic back button */
 ion-back-button {
   display: none !important;

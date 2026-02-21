@@ -25,7 +25,7 @@ This document defines high-level architecture boundaries and coding expectations
 ## Networking and offline rules
 
 - Do not add passive `window` `online`/`offline` listeners for reconnect orchestration.
-- Explicit reconnect paths are limited to app relaunch startup validation and dashboard pull-to-refresh.
+- Explicit reconnect paths are limited to app relaunch startup validation.
 - Timeout/transport/non-`4xx` auth failures must preserve session and local cache.
 - Only auth-invalid `4xx` outcomes should trigger logout and local data purge.
 - When offline lock is active, normal data/map flows should avoid outbound network calls.
@@ -53,7 +53,7 @@ This document defines high-level architecture boundaries and coding expectations
 
 - Add or update tests for every behavior change in controller/service orchestration.
 - Prefer focused unit tests around controller decisions and service fallbacks.
-- Keep provider/dashboard tests for user-visible contracts (offline modal, pull-to-refresh reconnect).
+- Keep provider/dashboard tests for user-visible contracts (offline modal, Settings sync).
 - Include regression coverage when fixing edge cases (timeouts, retries, offline lock transitions).
 
 ## Change checklist
@@ -68,5 +68,4 @@ This document defines high-level architecture boundaries and coding expectations
 
 - `docs/networking.md`
 - `docs/offline-mode.md`
-- `docs/pull-to-refresh.md`
 - `docs/logout-behavior.md`
