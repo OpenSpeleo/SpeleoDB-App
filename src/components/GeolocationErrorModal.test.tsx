@@ -18,7 +18,7 @@ vi.mock('@ionic/react', () => ({
   IonModal: ({
     children,
     isOpen,
-    onDidDismiss,
+    onDidDismiss: _onDidDismiss,
   }: {
     children?: React.ReactNode;
     isOpen?: boolean;

@@ -10,6 +10,7 @@ const {
   mockSetHasCompletedGuidedTour,
   mockGetHasCompletedGuidedTour,
 } = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const driverOptionsRef: { current: any } = { current: null };
   const driverState = {
     active: false,

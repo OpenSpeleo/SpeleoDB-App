@@ -8,7 +8,7 @@ The guided tour walks users through the dashboard UI step-by-step, highlighting 
 
 ## Lifecycle
 
-- **Auto-start**: Triggers after the user dismisses the onboarding modal on first login. If `hasCompletedGuidedTour` is true, skip the tutorial. If false or missing, start the tutorial.
+- **Auto-start**: Triggers after the user dismisses the onboarding modal on first login, but only once project sync (including all GeoJSON downloads) has completed (`syncStatus` is `done` or `error`). If `hasCompletedGuidedTour` is true, skip the tutorial. If false or missing, start the tutorial.
 - **Re-trigger**: A "Show Tutorial" button in the Settings page resets `hasCompletedGuidedTour` and restarts the tour.
 - **Persistence**: Tour completion is persisted as `hasCompletedGuidedTour: true` in `UserPreferences` via `PreferencesService`. Cleared on logout (full preference wipe).
 - **Manual close**: Steps 1-5 expose a close control so users can stop early.

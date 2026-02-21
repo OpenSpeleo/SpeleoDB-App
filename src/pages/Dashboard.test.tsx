@@ -57,7 +57,7 @@ const {
   mockSetBearing,
   mockSetPitch,
   mockMapHasImage,
-  mockMapAddImage,
+  mockMapAddImage: _mockMapAddImage,
   mockMapLoadImage,
   mockMapGetCanvas,
   mockMapGetLayer,

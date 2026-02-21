@@ -87,7 +87,7 @@ export class HttpClient {
       if (req.formData) {
         init.body = req.formData;
         if (req.headers) {
-          const { 'Content-Type': _, ...rest } = req.headers;
+          const { 'Content-Type': _ct, ...rest } = req.headers;
           if (Object.keys(rest).length > 0) {
             init.headers = rest;
           }

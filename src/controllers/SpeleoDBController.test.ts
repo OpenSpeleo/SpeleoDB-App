@@ -522,7 +522,7 @@ describe('SpeleoDBController', () => {
 
     it('continues project sync when geojson downloads fail', async () => {
       service = createMockService({
-        getProjectsGeoJSON: vi.fn(async (_instance: string, _token: string) => ({
+        getProjectsGeoJSON: vi.fn(async (_instance, _token) => ({
           status: 200,
           data: {
             data: [{

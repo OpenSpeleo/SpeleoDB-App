@@ -24,7 +24,7 @@ export interface GuidedTourStepHooks {
   onCompletionNext?: () => void;
 }
 
-export interface BuildGuidedTourStepsOptions extends GuidedTourStepHooks {}
+export type BuildGuidedTourStepsOptions = GuidedTourStepHooks;
 
 export interface BuildGuidedTourStepsResult {
   stepIds: GuidedTourStepId[];

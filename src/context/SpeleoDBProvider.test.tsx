@@ -23,6 +23,7 @@ const {
   authStateSnapshotRef,
   projectsSnapshot,
   tilePrefetchJobsSnapshot,
+  syncStatusRef,
 } = vi.hoisted(() => {
   const storeSubscribers = new Set<() => void>();
   return {
@@ -56,6 +57,7 @@ const {
     },
     projectsSnapshot: [] as unknown[],
     tilePrefetchJobsSnapshot: [] as unknown[],
+    syncStatusRef: { current: 'idle' as string },
   };
 });
 
@@ -153,7 +155,7 @@ vi.mock('../controllers/SpeleoDBController', () => {
     }
 
     get syncStatus() {
-      return 'idle' as const;
+      return syncStatusRef.current;
     }
 
     get tilePrefetchJobs() {
@@ -185,6 +187,7 @@ describe('SpeleoDBProvider', () => {
       user: { id: 'restored', email: 'user@example.com', name: 'user@example.com' },
       token: 'tok',
     };
+    syncStatusRef.current = 'idle';
   });
 
   it('shows offline modal on startup network_error and does not logout', async () => {
@@ -290,6 +293,11 @@ describe('SpeleoDBProvider', () => {
     });
 
     await userEvent.click(screen.getAllByText('Start exploring')[0]);
+
+    act(() => {
+      syncStatusRef.current = 'done';
+      emitStoreUpdate();
+    });
 
     await waitFor(() => {
       expect(mockStartGuidedTour).toHaveBeenCalledWith();

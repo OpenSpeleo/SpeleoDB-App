@@ -137,6 +137,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   const previousAuthStateRef = useRef(authState.isAuthenticated);
   const shouldOpenCompanionInfoRef = useRef(false);
   const shouldAutostartGuidedTourRef = useRef(false);
+  const [pendingGuidedTourStart, setPendingGuidedTourStart] = React.useState(false);
 
   useEffect(() => {
     void runTileCacheStartupMaintenance();
@@ -208,6 +209,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
       setShowCompanionInfoModal(false);
       setAllowCompanionInfoModalDismiss(false);
       shouldAutostartGuidedTourRef.current = false;
+      setPendingGuidedTourStart(false);
       destroyGuidedTour();
     }
 
@@ -231,6 +233,18 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
       destroyGuidedTour();
     };
   }, []);
+
+  // ---- Deferred guided tour start (wait for GeoJSON sync to finish) ---------
+
+  useEffect(() => {
+    if (!pendingGuidedTourStart) return;
+    if (syncStatus === 'idle' || syncStatus === 'syncing') return;
+
+    setPendingGuidedTourStart(false);
+    if (authState.isAuthenticated && location.pathname === '/dashboard') {
+      void startGuidedTour();
+    }
+  }, [pendingGuidedTourStart, syncStatus, authState.isAuthenticated, location.pathname]);
 
   // ---- Render ---------------------------------------------------------------
 
@@ -262,9 +276,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
             location.pathname === '/dashboard';
           shouldAutostartGuidedTourRef.current = false;
           if (shouldStartTour) {
-            // Provider does not own project-panel DOM state.
-            // The tour engine resolves project-target availability at runtime.
-            void startGuidedTour();
+            setPendingGuidedTourStart(true);
           }
         }}
         canDismiss={allowCompanionInfoModalDismiss}
