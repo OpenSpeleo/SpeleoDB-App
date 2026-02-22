@@ -1,12 +1,12 @@
-import type { CapacitorConfig } from '@capacitor/cli';
+import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
-  appId: 'org.speleodb.app',
-  appName: 'SpeleoDB',
-  webDir: 'dist',
+  appId: "org.speleodb.app",
+  appName: "SpeleoDB",
+  webDir: "dist",
   server: {
-    hostname: 'www.speleodb.org',
-    androidScheme: 'https',
+    hostname: "www.speleodb.org",
+    androidScheme: "https",
   },
   plugins: {
     CapacitorHttp: {
@@ -14,10 +14,10 @@ const config: CapacitorConfig = {
     },
     SplashScreen: {
       launchAutoHide: false,
-      backgroundColor: '#0f172a',
+      backgroundColor: "#0f172a",
       showSpinner: false,
     },
-  },
+  }
 };
 
 export default config;
