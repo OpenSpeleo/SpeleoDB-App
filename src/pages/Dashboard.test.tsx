@@ -215,6 +215,7 @@ vi.mock('react-map-gl/maplibre', () => {
       { children, ...mapProps }: { children?: React.ReactNode } & Record<string, unknown>,
       ref: React.Ref<unknown>,
     ) => {
+      // eslint-disable-next-line react-hooks/immutability -- test mock capturing render props
       mapPropsRef.current = mapProps;
 
       React.useImperativeHandle(ref, () => ({
@@ -357,7 +358,7 @@ const mockController = {
   isAuthenticated: mockIsAuthenticated,
 };
 
-vi.mock('../context/SpeleoDBProvider', () => ({
+vi.mock('../context/useSpeleoDB', () => ({
   useSpeleoDB: () => ({
     controller: mockController,
     projects: mockProjects,
@@ -1642,7 +1643,12 @@ describe('Dashboard', () => {
     expect(layerColor).toBeTruthy();
 
     const panelDot = screen.getByTestId('project-color-dot-p-visible');
-    expect(panelDot.getAttribute('style')).toContain(`border-color: ${layerColor}`);
+    // jsdom v28 normalizes inline CSS hex colors to rgb()
+    const rgbColor = layerColor!.replace(
+      /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i,
+      (_, r, g, b) => `rgb(${parseInt(r, 16)}, ${parseInt(g, 16)}, ${parseInt(b, 16)})`,
+    );
+    expect(panelDot.getAttribute('style')).toContain(`border-color: ${rgbColor}`);
   });
 });
 

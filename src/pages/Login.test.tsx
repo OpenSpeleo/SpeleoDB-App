@@ -11,7 +11,7 @@ import { clearPreferences, setPreferences } from '../services/PreferencesService
 // Mock the SpeleoDBProvider hook -- return a fake controller.
 const mockLogin = vi.fn();
 
-vi.mock('../context/SpeleoDBProvider', () => ({
+vi.mock('../context/useSpeleoDB', () => ({
   useSpeleoDB: () => ({
     controller: {
       login: mockLogin,

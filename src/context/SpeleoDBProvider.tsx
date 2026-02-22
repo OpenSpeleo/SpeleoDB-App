@@ -7,11 +7,10 @@
  */
 
 import React, {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useRef,
+  useState,
   useSyncExternalStore,
 } from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
@@ -29,36 +28,9 @@ import {
   clearPreferences,
 } from '../services/PreferencesService';
 import { SpeleoDBController } from '../controllers/SpeleoDBController';
-import type { SyncStatus } from '../controllers/SpeleoDBController';
-import type { AuthState } from '../types';
-import type { Project } from '../types/project';
-import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import { destroyGuidedTour, startGuidedTour } from '../onboarding/guidedTour/engine';
-
-// ==================== Context value shape ====================
-
-export interface SpeleoDBContextValue {
-  controller: SpeleoDBController;
-  authState: AuthState;
-  isOnline: boolean;
-  isOfflineLocked: boolean;
-  isRetryingConnection: boolean;
-  projects: Project[];
-  syncStatus: SyncStatus;
-  tilePrefetchJobs: TilePrefetchJobState[];
-}
-
-const SpeleoDBContext = createContext<SpeleoDBContextValue | null>(null);
-
-// ==================== Hook ====================
-
-export function useSpeleoDB(): SpeleoDBContextValue {
-  const ctx = useContext(SpeleoDBContext);
-  if (!ctx) {
-    throw new Error('useSpeleoDB must be used within SpeleoDBProvider');
-  }
-  return ctx;
-}
+import { SpeleoDBContext } from './useSpeleoDB';
+import type { SpeleoDBContextValue } from './useSpeleoDB';
 
 // ==================== Provider ====================
 
@@ -78,18 +50,16 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
 
   // ---- Create controller once (stable across re-renders) --------------------
 
-  const controllerRef = useRef<SpeleoDBController | null>(null);
-  if (!controllerRef.current) {
+  const [controller] = useState(() => {
     const http = new HttpClient();
     const service = new SpeleoDBService(http);
     const projectCache = new ProjectCacheService();
-    controllerRef.current = new SpeleoDBController(
+    return new SpeleoDBController(
       service,
       { getPreferences, setPreferences, clearPreferences },
       projectCache,
     );
-  }
-  const controller = controllerRef.current;
+  });
 
   // ---- Subscribe to controller state via useSyncExternalStore ---------------
 
@@ -128,16 +98,50 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     () => controller.tilePrefetchJobs,
   );
 
-  // ---- Offline modal local state -------------------------------------------
-  const [showOfflineModal, setShowOfflineModal] = React.useState(false);
-  const [allowOfflineModalDismiss, setAllowOfflineModalDismiss] = React.useState(false);
+  // ---- Offline modal state (derived + render-time adjustment) --------------
   const [offlineModeAcknowledged, setOfflineModeAcknowledged] = React.useState(false);
+  const [allowOfflineModalDismiss, setAllowOfflineModalDismiss] = React.useState(false);
+  const [prevIsOfflineLocked, setPrevIsOfflineLocked] = React.useState(isOfflineLocked);
+
+  if (prevIsOfflineLocked !== isOfflineLocked) {
+    setPrevIsOfflineLocked(isOfflineLocked);
+    setAllowOfflineModalDismiss(false);
+    if (!isOfflineLocked) {
+      setOfflineModeAcknowledged(false);
+    }
+  }
+
+  const showOfflineModal = isOfflineLocked && !offlineModeAcknowledged;
+
+  // ---- Companion info modal state ----------------------------------------
   const [showCompanionInfoModal, setShowCompanionInfoModal] = React.useState(false);
   const [allowCompanionInfoModalDismiss, setAllowCompanionInfoModalDismiss] = React.useState(false);
-  const previousAuthStateRef = useRef(authState.isAuthenticated);
-  const shouldOpenCompanionInfoRef = useRef(false);
+  const [shouldOpenCompanionInfo, setShouldOpenCompanionInfo] = React.useState(false);
   const shouldAutostartGuidedTourRef = useRef(false);
   const [pendingGuidedTourStart, setPendingGuidedTourStart] = React.useState(false);
+
+  // ---- Auth transition tracking (render-time state adjustment) -----------
+  const [prevAuthenticated, setPrevAuthenticated] = React.useState(authState.isAuthenticated);
+
+  if (prevAuthenticated !== authState.isAuthenticated) {
+    setPrevAuthenticated(authState.isAuthenticated);
+    if (!prevAuthenticated && authState.isAuthenticated) {
+      setShouldOpenCompanionInfo(true);
+    } else if (prevAuthenticated && !authState.isAuthenticated) {
+      setShouldOpenCompanionInfo(false);
+      setShowCompanionInfoModal(false);
+      setAllowCompanionInfoModalDismiss(false);
+      setPendingGuidedTourStart(false);
+    }
+  }
+
+  if (shouldOpenCompanionInfo && authState.isAuthenticated && location.pathname === '/dashboard') {
+    setShouldOpenCompanionInfo(false);
+    setAllowCompanionInfoModalDismiss(false);
+    setShowCompanionInfoModal(true);
+  }
+
+  // ---- Effects (side effects only, no setState) --------------------------
 
   useEffect(() => {
     void runTileCacheStartupMaintenance();
@@ -182,51 +186,12 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   }, [history, location.pathname, controller, hideSplashScreenSafely]);
 
   useEffect(() => {
-    if (isOfflineLocked) {
-      if (!offlineModeAcknowledged) {
-        setAllowOfflineModalDismiss(false);
-        setShowOfflineModal(true);
-      }
-      return;
-    }
-
-    setAllowOfflineModalDismiss(false);
-    setOfflineModeAcknowledged(false);
-    setShowOfflineModal(false);
-  }, [isOfflineLocked, offlineModeAcknowledged]);
-
-  // ---- Companion info modal (show once right after login) ------------------
-
-  useEffect(() => {
-    const wasAuthenticated = previousAuthStateRef.current;
-    const isAuthenticated = authState.isAuthenticated;
-
-    if (!wasAuthenticated && isAuthenticated) {
-      shouldOpenCompanionInfoRef.current = true;
-    } else if (wasAuthenticated && !isAuthenticated) {
+    if (!authState.isAuthenticated) {
       didValidateRef.current = false;
-      shouldOpenCompanionInfoRef.current = false;
-      setShowCompanionInfoModal(false);
-      setAllowCompanionInfoModalDismiss(false);
       shouldAutostartGuidedTourRef.current = false;
-      setPendingGuidedTourStart(false);
       destroyGuidedTour();
     }
-
-    previousAuthStateRef.current = isAuthenticated;
   }, [authState.isAuthenticated]);
-
-  useEffect(() => {
-    if (
-      shouldOpenCompanionInfoRef.current &&
-      authState.isAuthenticated &&
-      location.pathname === '/dashboard'
-    ) {
-      setAllowCompanionInfoModalDismiss(false);
-      setShowCompanionInfoModal(true);
-      shouldOpenCompanionInfoRef.current = false;
-    }
-  }, [authState.isAuthenticated, location.pathname]);
 
   useEffect(() => {
     return () => {
@@ -240,7 +205,6 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     if (!pendingGuidedTourStart) return;
     if (syncStatus === 'idle' || syncStatus === 'syncing') return;
 
-    setPendingGuidedTourStart(false);
     if (authState.isAuthenticated && location.pathname === '/dashboard') {
       void startGuidedTour();
     }
@@ -412,7 +376,6 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
       <IonModal
         isOpen={showOfflineModal}
         onDidDismiss={() => {
-          setShowOfflineModal(false);
           setAllowOfflineModalDismiss(false);
         }}
         canDismiss={allowOfflineModalDismiss}
@@ -444,7 +407,6 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
               onClick={() => {
                 setOfflineModeAcknowledged(true);
                 setAllowOfflineModalDismiss(true);
-                setShowOfflineModal(false);
               }}
             >
               Go Offline

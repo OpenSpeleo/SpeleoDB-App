@@ -18,7 +18,7 @@ import {
 import { syncOutline } from 'ionicons/icons';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
-import { useSpeleoDB } from '../context/SpeleoDBProvider';
+import { useSpeleoDB } from '../context/useSpeleoDB';
 import { getManualTileCount, getTotalCacheBytes } from '../services/tileCache/TileCacheRepository';
 import AppTabBar from '../components/AppTabBar';
 import {

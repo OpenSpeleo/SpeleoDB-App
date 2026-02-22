@@ -17,7 +17,7 @@ const { mockTilePrefetchJobs, mockProjects } = vi.hoisted(() => ({
   mockProjects: { current: [] as unknown[] },
 }));
 
-vi.mock('../context/SpeleoDBProvider', () => ({
+vi.mock('../context/useSpeleoDB', () => ({
   useSpeleoDB: () => ({
     controller: {
       logout: mockLogout,

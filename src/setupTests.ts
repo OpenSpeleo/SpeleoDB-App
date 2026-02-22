@@ -1,9 +1,18 @@
-// jest-dom adds custom jest matchers for asserting on DOM nodes.
-// allows you to do things like:
-// expect(element).toHaveTextContent(/react/i)
-// learn more: https://github.com/testing-library/jest-dom
-import '@testing-library/jest-dom/extend-expect';
+import '@testing-library/jest-dom/vitest';
 import 'fake-indexeddb/auto';
+
+// @stencil/core (used by @ionic/core) probes adoptedStyleSheets at import time
+// and during component lifecycle. jsdom does not implement it, so we shim it on
+// both Document and ShadowRoot prototypes.
+for (const Ctor of [typeof Document !== 'undefined' ? Document : undefined, typeof ShadowRoot !== 'undefined' ? ShadowRoot : undefined]) {
+  if (Ctor && !('adoptedStyleSheets' in Ctor.prototype)) {
+    Object.defineProperty(Ctor.prototype, 'adoptedStyleSheets', {
+      get(this: { _adoptedStyleSheets?: CSSStyleSheet[] }) { return this._adoptedStyleSheets ?? []; },
+      set(this: { _adoptedStyleSheets?: CSSStyleSheet[] }, v: CSSStyleSheet[]) { this._adoptedStyleSheets = v; },
+      configurable: true,
+    });
+  }
+}
 
 // Mock matchmedia
 window.matchMedia = window.matchMedia || function() {

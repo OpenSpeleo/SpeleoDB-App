@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { IonPage, IonContent } from '@ionic/react';
-import { useSpeleoDB } from '../context/SpeleoDBProvider';
+import { useSpeleoDB } from '../context/useSpeleoDB';
 import { PREFERENCES } from '../constants';
 import { getPreferences } from '../services/PreferencesService';
 import { getInstanceBaseUrl, INSTANCE_PATHS } from '../utils/url';

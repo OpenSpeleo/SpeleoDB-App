@@ -18,7 +18,7 @@ import type { LngLatBoundsLike, Map as MaplibreMap } from 'maplibre-gl';
 import { Geolocation } from '@capacitor/geolocation';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
-import { useSpeleoDB } from '../context/SpeleoDBProvider';
+import { useSpeleoDB } from '../context/useSpeleoDB';
 import { MAP, MAP_OVERLAYS, PROJECT_LAYERS } from '../constants';
 import type { MapOverlayGeoJsonRecord, MapOverlayId, MapOverlaySizes } from '../types/mapOverlay';
 import { registerTileCacheProtocol, getCachedStyle } from '../services/TileCacheService';
