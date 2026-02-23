@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import DistanceScale, { computeDistanceScaleMetrics } from './DistanceScale';
+import DistanceScale from './DistanceScale';
+import { computeDistanceScaleMetrics } from '../../utils/distanceScale';
 import { FEET_TO_METERS } from '../../utils/measurementUnits';
 
 describe('DistanceScale', () => {

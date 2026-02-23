@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { MapRef, MapLayerMouseEvent } from 'react-map-gl/maplibre';
 import type { MapColorMode } from '../types/mapColorMode';
 import type { InteractiveOverlayFeature } from '../utils/overlayMarkerDetails';
@@ -81,11 +81,10 @@ export function useDepthProbe(
     return mergeDepthDomains(activeDomains);
   }, [activeProjectIds, colorMode, projectDepthDomains]);
 
-  useEffect(() => {
-    if (colorMode !== 'depth' || !depthDomain) {
-      setProbedDepth(null);
-    }
-  }, [colorMode, depthDomain]);
+  // Derive the exposed depth: mask the internal probe state when depth mode
+  // is inactive or the domain is unavailable, avoiding a cascading-render
+  // effect to clear it.
+  const effectiveProbedDepth = (colorMode === 'depth' && depthDomain) ? probedDepth : null;
 
   const sampleDepthAtMapPoint = useCallback((
     point: { x: number; y: number },
@@ -170,7 +169,7 @@ export function useDepthProbe(
   }, []);
 
   return {
-    probedDepth,
+    probedDepth: effectiveProbedDepth,
     depthDomain,
     clearProbedDepth,
     sampleDepthAtClientPoint,

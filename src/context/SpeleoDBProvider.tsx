@@ -127,18 +127,28 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   if (prevAuthenticated !== authState.isAuthenticated) {
     setPrevAuthenticated(authState.isAuthenticated);
     if (!prevAuthenticated && authState.isAuthenticated) {
-      // Fresh in-app login already produced a token from POST /auth-token.
-      // Skip one immediate startup-style token validation on route transition.
-      skipNextStartupValidationRef.current = true;
       setShouldOpenCompanionInfo(true);
     } else if (prevAuthenticated && !authState.isAuthenticated) {
-      skipNextStartupValidationRef.current = false;
       setShouldOpenCompanionInfo(false);
       setShowCompanionInfoModal(false);
       setAllowCompanionInfoModalDismiss(false);
       setPendingGuidedTourStart(false);
     }
   }
+
+  // Ref writes must happen outside render (react-hooks/refs).
+  // Fresh login sets the skip flag so the next startup validation is bypassed;
+  // logout clears it. Tracks transitions via prevAuthForSkipRef.
+  const prevAuthForSkipRef = useRef(authState.isAuthenticated);
+  useEffect(() => {
+    const wasAuthenticated = prevAuthForSkipRef.current;
+    prevAuthForSkipRef.current = authState.isAuthenticated;
+    if (!wasAuthenticated && authState.isAuthenticated) {
+      skipNextStartupValidationRef.current = true;
+    } else if (wasAuthenticated && !authState.isAuthenticated) {
+      skipNextStartupValidationRef.current = false;
+    }
+  }, [authState.isAuthenticated]);
 
   if (shouldOpenCompanionInfo && authState.isAuthenticated && location.pathname === '/dashboard') {
     setShouldOpenCompanionInfo(false);
