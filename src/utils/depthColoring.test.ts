@@ -9,6 +9,7 @@ import {
   getDepthFromProperties,
   getFeatureDepth,
   getDepthRatio,
+  mergeDepthDomains,
 } from './depthColoring';
 
 function makeFeature(
@@ -237,6 +238,35 @@ describe('depthColoring', () => {
       expect(getDepthRatio(-5, domain)).toBe(0);
       expect(getDepthRatio(0, domain)).toBe(0);
       expect(getDepthRatio(5, domain)).toBe(1);
+    });
+  });
+
+  describe('mergeDepthDomains', () => {
+    it('returns null for empty array', () => {
+      expect(mergeDepthDomains([])).toBeNull();
+    });
+
+    it('returns null when all entries are null', () => {
+      expect(mergeDepthDomains([null, null])).toBeNull();
+    });
+
+    it('returns single domain when only one is non-null', () => {
+      expect(mergeDepthDomains([{ min: 0, max: 50 }, null])).toEqual({ min: 0, max: 50 });
+    });
+
+    it('merges multiple domains taking max of maxes', () => {
+      expect(mergeDepthDomains([
+        { min: 0, max: 30 },
+        { min: 0, max: 80 },
+      ])).toEqual({ min: 0, max: 80 });
+    });
+
+    it('always returns min 0 regardless of input min values', () => {
+      const result = mergeDepthDomains([
+        { min: 5, max: 30 },
+        { min: 10, max: 80 },
+      ]);
+      expect(result).toEqual({ min: 0, max: 80 });
     });
   });
 });

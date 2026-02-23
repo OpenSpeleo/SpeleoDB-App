@@ -255,6 +255,7 @@ Zoom levels and marker sizes are sourced from `MAP_OVERLAYS` in `src/constants.t
   - exploration leads by `properties.project`,
   - cylinder installs by `properties.project_id`.
 - Landmarks and surface stations are not project-linked and stay independent from project toggles.
+- In depth color mode, toggling project visibility automatically recomputes the depth domain (min/max range) using only visible projects. Depth gauge labels and layer color expressions update immediately.
 
 ## Landmark visibility toggle
 

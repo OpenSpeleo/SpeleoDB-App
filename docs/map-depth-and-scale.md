@@ -93,7 +93,7 @@ Project line/fill layers support two modes:
     - keeps gauge depth position linear while color distribution remains non-linear.
   - fallback to project color when feature depth is missing.
 
-Depth domain (`min`, `max`) is computed from active project feature collections only.
+Depth domain (`min`, `max`) is computed from active (visible) project feature collections only. When a project is shown or hidden via the project panel, the depth domain is recomputed automatically. Per-project depth domains are cached at GeoJSON load time and merged in O(projects) on visibility change, so toggling is instant regardless of feature count. The depth gauge min/max labels and all visible project layer color expressions update immediately to reflect the new domain.
 
 ## Distance scale behavior
 

@@ -542,6 +542,25 @@ function lineFeatureCollectionWithDepth(): GeoJSON.FeatureCollection {
   };
 }
 
+function depthFeatureCollection(depthValue: number): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { _speleoDepth: depthValue },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [2.3, 46.6],
+            [2.31, 46.61],
+          ],
+        },
+      },
+    ],
+  };
+}
+
 function mixedProjectFeatureCollection(): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
@@ -793,6 +812,85 @@ describe('Dashboard', () => {
     });
 
     expect(screen.getByTestId('depth-gauge-current')).toHaveTextContent('-9.1 m');
+  });
+
+  it('recalculates depth domain when a project is hidden in depth mode', async () => {
+    mockProjects = [
+      makeProject({ id: 'p1', name: 'Shallow Cave' }),
+      makeProject({ id: 'p2', name: 'Deep Cave' }),
+    ];
+    mockGetProjectGeoJSON.mockImplementation(async (projectId: string) => {
+      if (projectId === 'p1') return depthFeatureCollection(25);
+      if (projectId === 'p2') return depthFeatureCollection(80);
+      return null;
+    });
+
+    renderDashboard({ colorMode: 'depth' });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+      expect(document.querySelector('[data-layer-id="project-p2-line"]')).not.toBeNull();
+      expect(screen.getByTestId('depth-gauge')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('depth-gauge-max')).toHaveTextContent('80 ft');
+
+    await userEvent.click(screen.getByLabelText('Toggle Deep Cave'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('depth-gauge-max')).toHaveTextContent('25 ft');
+    });
+  });
+
+  it('recalculates depth domain when a project is shown in depth mode', async () => {
+    mockProjects = [
+      makeProject({ id: 'p1', name: 'Shallow Cave' }),
+      makeProject({ id: 'p2', name: 'Deep Cave' }),
+    ];
+    mockGetProjectGeoJSON.mockImplementation(async (projectId: string) => {
+      if (projectId === 'p1') return depthFeatureCollection(25);
+      if (projectId === 'p2') return depthFeatureCollection(80);
+      return null;
+    });
+    mockGetProjectVisibilityPreferences.mockReturnValue({ p1: true, p2: false });
+
+    renderDashboard({ colorMode: 'depth' });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+      expect(screen.getByTestId('depth-gauge')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('depth-gauge-max')).toHaveTextContent('25 ft');
+
+    await userEvent.click(screen.getByLabelText('Toggle Deep Cave'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('depth-gauge-max')).toHaveTextContent('80 ft');
+    });
+  });
+
+  it('shows N/A depth domain when all projects are hidden in depth mode', async () => {
+    mockProjects = [
+      makeProject({ id: 'p1', name: 'Only Cave' }),
+    ];
+    mockGetProjectGeoJSON.mockResolvedValue(depthFeatureCollection(50));
+
+    renderDashboard({ colorMode: 'depth' });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+      expect(screen.getByTestId('depth-gauge')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('depth-gauge-max')).toHaveTextContent('50 ft');
+
+    await userEvent.click(screen.getByLabelText('Toggle Only Cave'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('depth-gauge-max')).toHaveTextContent('N/A');
+      expect(screen.getByTestId('depth-gauge-min')).toHaveTextContent('N/A');
+    });
   });
 
   it('renders GeoJSON layer when payload is a JSON string', async () => {

@@ -4,6 +4,7 @@ import type { MapColorMode } from '../types/mapColorMode';
 import type { InteractiveOverlayFeature } from '../utils/overlayMarkerDetails';
 import {
   computeDepthDomain,
+  mergeDepthDomains,
   getFeatureDepth,
   type DepthDomain,
 } from '../utils/depthColoring';
@@ -58,17 +59,27 @@ export function useDepthProbe(
   const [probedDepth, setProbedDepth] = useState<number | null>(null);
   const lastSampleTimeRef = useRef(0);
 
+  // Stage A: per-project domain cache — recomputes only when geoJsonData
+  // changes (sync/reload), not on every project toggle.
+  const projectDepthDomains = useMemo(() => {
+    const domains: Record<string, DepthDomain | null> = {};
+    for (const [projectId, fc] of Object.entries(geoJsonData)) {
+      domains[projectId] = computeDepthDomain([fc]);
+    }
+    return domains;
+  }, [geoJsonData]);
+
+  // Stage B: merge cached domains for visible projects — O(projects) per toggle.
   const depthDomain = useMemo(() => {
-    if (colorMode !== 'depth') {
-      return null;
-    }
-    const activeCollections: GeoJSON.FeatureCollection[] = [];
+    if (colorMode !== 'depth') return null;
+    const activeDomains: (DepthDomain | null)[] = [];
     for (const projectId of activeProjectIds) {
-      const fc = geoJsonData[projectId];
-      if (fc) activeCollections.push(fc);
+      if (projectId in projectDepthDomains) {
+        activeDomains.push(projectDepthDomains[projectId]);
+      }
     }
-    return computeDepthDomain(activeCollections);
-  }, [activeProjectIds, colorMode, geoJsonData]);
+    return mergeDepthDomains(activeDomains);
+  }, [activeProjectIds, colorMode, projectDepthDomains]);
 
   useEffect(() => {
     if (colorMode !== 'depth' || !depthDomain) {

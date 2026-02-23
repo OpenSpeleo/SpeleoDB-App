@@ -241,6 +241,22 @@ export function createDepthColorExpression(
   ];
 }
 
+export function mergeDepthDomains(
+  domains: (DepthDomain | null)[],
+): DepthDomain | null {
+  let max = 0;
+  let hasDepth = false;
+
+  for (const domain of domains) {
+    if (!domain) continue;
+    hasDepth = true;
+    if (domain.max > max) max = domain.max;
+  }
+
+  if (!hasDepth) return null;
+  return { min: 0, max };
+}
+
 export function getDepthRatio(depth: number, domain: DepthDomain): number {
   if (!Number.isFinite(depth)) return 0;
   const span = domain.max - domain.min;
