@@ -1,12 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { HttpClient, type HttpRequest } from './HttpClient';
+import { Capacitor } from '@capacitor/core';
+import { __resetNativeUserAgentCacheForTests, HttpClient, type HttpRequest } from './HttpClient';
+import { clearPreferences, setPreferences } from './PreferencesService';
 
 describe('HttpClient (web transport)', () => {
   let client: HttpClient;
 
   beforeEach(() => {
+    __resetNativeUserAgentCacheForTests();
     client = new HttpClient();
     vi.restoreAllMocks();
+    clearPreferences();
   });
 
   it('sends a GET request and returns parsed JSON', async () => {
@@ -111,5 +115,116 @@ describe('HttpClient (web transport)', () => {
     expect((error as DOMException).name).toBe('AbortError');
 
     vi.useRealTimers();
+  });
+});
+
+describe('HttpClient (native transport)', () => {
+  let client: HttpClient;
+
+  beforeEach(() => {
+    __resetNativeUserAgentCacheForTests();
+    client = new HttpClient();
+    vi.restoreAllMocks();
+    clearPreferences();
+    setPreferences({ instance: 'https://api.test' });
+  });
+
+  it('injects iOS User-Agent when not provided', async () => {
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('ios');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ ok: true }),
+      text: async () => JSON.stringify({ ok: true }),
+    } as Response);
+
+    const res = await client.request({ url: 'https://api.test/api/v1/projects/geojson/', method: 'GET' });
+
+    expect(res.status).toBe(200);
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headersObject = (init.headers ?? {}) as Record<string, string>;
+    const userAgent = headersObject['User-Agent'];
+    expect(userAgent.startsWith('SpeleoDB-iOS/')).toBe(true);
+    expect(userAgent.includes(' - iOS')).toBe(true);
+  });
+
+  it('injects Android User-Agent when not provided', async () => {
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('android');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ ok: true }),
+      text: async () => JSON.stringify({ ok: true }),
+    } as Response);
+
+    await client.request({ url: 'https://api.test/api/v1/projects/geojson/', method: 'GET' });
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headersObject = (init.headers ?? {}) as Record<string, string>;
+    const userAgent = headersObject['User-Agent'];
+    expect(userAgent.startsWith('SpeleoDB-Android/')).toBe(true);
+    expect(userAgent.includes(' - Android')).toBe(true);
+  });
+
+  it('preserves caller-provided User-Agent header', async () => {
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('android');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ ok: true }),
+      text: async () => JSON.stringify({ ok: true }),
+    } as Response);
+
+    await client.request({
+      url: 'https://api.test/api/v1/projects/geojson/',
+      method: 'GET',
+      headers: { 'User-Agent': 'Custom-UA/1.0' },
+    });
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    expect(init.headers).toEqual(expect.objectContaining({ 'User-Agent': 'Custom-UA/1.0' }));
+  });
+
+  it('does not inject app User-Agent for non-API URLs (e.g. map tiles)', async () => {
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('android');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ ok: true }),
+      text: async () => JSON.stringify({ ok: true }),
+    } as Response);
+
+    await client.request({
+      url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/1/1/1',
+      method: 'GET',
+    });
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headersObject = (init.headers ?? {}) as Record<string, string>;
+    expect(Object.keys(headersObject).some((key) => key.toLowerCase() === 'user-agent')).toBe(false);
+  });
+
+  it('does not inject app User-Agent when host differs from current instance', async () => {
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('ios');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ ok: true }),
+      text: async () => JSON.stringify({ ok: true }),
+    } as Response);
+
+    await client.request({
+      url: 'https://other-instance.test/api/v1/projects/geojson/',
+      method: 'GET',
+    });
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headersObject = (init.headers ?? {}) as Record<string, string>;
+    expect(Object.keys(headersObject).some((key) => key.toLowerCase() === 'user-agent')).toBe(false);
   });
 });
