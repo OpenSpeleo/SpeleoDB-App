@@ -78,6 +78,12 @@ export const MAP = {
   // Hard cap for all cached tile payloads (prefetch + runtime map browsing).
   TILE_CACHE_MAX_BYTES: 500 * 1024 * 1024,
   LONG_PRESS_DURATION_MS: 300,
+  LONG_PRESS_EMPTY_SPOT_RADIUS_PX: 18,
+  // Minimum zoom for any marker interaction that opens a modal
+  // (marker taps, long-press GPS). Below this zoom, taps on markers
+  // and long-press GPS are silently ignored to prevent accidental
+  // triggers at region scale.
+  MARKER_INTERACTION_MIN_ZOOM: 15,
 } as const;
 
 // ==================== COLOR PALETTE ====================

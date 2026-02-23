@@ -15,16 +15,20 @@ import {
   IonToggle,
   IonToolbar,
 } from '@ionic/react';
-import { syncOutline } from 'ionicons/icons';
+import { chevronDownOutline, syncOutline } from 'ionicons/icons';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 import { useSpeleoDB } from '../context/useSpeleoDB';
 import { getManualTileCount, getTotalCacheBytes } from '../services/tileCache/TileCacheRepository';
 import AppTabBar from '../components/AppTabBar';
 import {
+  setColorMode as persistColorMode,
+  setMeasurementUnit as persistMeasurementUnit,
   setShowLandmarks as persistShowLandmarks,
 } from '../services/PreferencesService';
 import { restartGuidedTourFromHelp } from '../onboarding/guidedTour/engine';
+import { isMapColorMode, DEFAULT_MAP_COLOR_MODE, type MapColorMode } from '../types/mapColorMode';
+import { isMeasurementUnit, DEFAULT_MEASUREMENT_UNIT, type MeasurementUnit } from '../types/measurementUnit';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -38,9 +42,15 @@ function formatNumber(n: number): string {
   return n.toLocaleString();
 }
 
+const MAP_SELECT_CLASS = 'appearance-none min-w-[148px] rounded-lg border border-slate-500/70 bg-slate-800/90 text-sm text-slate-100 px-3 py-2 pr-9 shadow-inner shadow-black/20 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-cyan-400/60 focus:border-cyan-400/60';
+
 interface SettingsProps {
   showLandmarks: boolean;
   onShowLandmarksChange: (visible: boolean) => void;
+  colorMode: MapColorMode;
+  onColorModeChange: (mode: MapColorMode) => void;
+  measurementUnit: MeasurementUnit;
+  onMeasurementUnitChange: (unit: MeasurementUnit) => void;
   isProjectPanelOpen: boolean;
   onProjectPanelChange: (open: boolean) => void;
 }
@@ -48,6 +58,10 @@ interface SettingsProps {
 const Settings: React.FC<SettingsProps> = ({
   showLandmarks,
   onShowLandmarksChange,
+  colorMode,
+  onColorModeChange,
+  measurementUnit,
+  onMeasurementUnitChange,
   isProjectPanelOpen,
   onProjectPanelChange,
 }) => {
@@ -97,6 +111,26 @@ const Settings: React.FC<SettingsProps> = ({
     getTotalCacheBytes().then(setCacheBytes).catch(() => {});
     getManualTileCount().then(setManualTileCount).catch(() => {});
   }, [controller]);
+
+  const handleSelectColorMode = useCallback(
+    (value: string) => {
+      const nextMode: MapColorMode = isMapColorMode(value) ? value : DEFAULT_MAP_COLOR_MODE;
+      persistColorMode(nextMode);
+      onColorModeChange(nextMode);
+      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+    },
+    [onColorModeChange],
+  );
+
+  const handleSelectMeasurementUnit = useCallback(
+    (value: string) => {
+      const nextUnit: MeasurementUnit = isMeasurementUnit(value) ? value : DEFAULT_MEASUREMENT_UNIT;
+      persistMeasurementUnit(nextUnit);
+      onMeasurementUnitChange(nextUnit);
+      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+    },
+    [onMeasurementUnitChange],
+  );
 
   const handleShowTutorial = useCallback(() => {
     onProjectPanelChange(false);
@@ -210,6 +244,46 @@ const Settings: React.FC<SettingsProps> = ({
             >
               Show landmarks
             </IonToggle>
+          </IonItem>
+          <IonItem>
+            <IonLabel>Color mode</IonLabel>
+            <div slot="end" className="relative">
+              <select
+                value={colorMode}
+                onChange={(e) => handleSelectColorMode(e.target.value)}
+                data-testid="color-mode-selector"
+                aria-label="Color mode"
+                className={MAP_SELECT_CLASS}
+              >
+                <option value="project">By Project</option>
+                <option value="depth">By Depth</option>
+              </select>
+              <IonIcon
+                icon={chevronDownOutline}
+                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"
+                aria-hidden="true"
+              />
+            </div>
+          </IonItem>
+          <IonItem>
+            <IonLabel>Map unit</IonLabel>
+            <div slot="end" className="relative">
+              <select
+                value={measurementUnit}
+                onChange={(e) => handleSelectMeasurementUnit(e.target.value)}
+                data-testid="measurement-unit-selector"
+                aria-label="Map unit"
+                className={MAP_SELECT_CLASS}
+              >
+                <option value="meters">Meters</option>
+                <option value="feet">Feet</option>
+              </select>
+              <IonIcon
+                icon={chevronDownOutline}
+                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"
+                aria-hidden="true"
+              />
+            </div>
           </IonItem>
         </IonList>
 

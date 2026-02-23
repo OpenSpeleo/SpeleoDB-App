@@ -41,6 +41,22 @@ vi.mock('../components/AppTabBar', () => ({
   default: () => <div data-testid="app-tab-bar" />,
 }));
 
+const {
+  mockPersistShowLandmarks,
+  mockPersistColorMode,
+  mockPersistMeasurementUnit,
+} = vi.hoisted(() => ({
+  mockPersistShowLandmarks: vi.fn(),
+  mockPersistColorMode: vi.fn(),
+  mockPersistMeasurementUnit: vi.fn(),
+}));
+
+vi.mock('../services/PreferencesService', () => ({
+  setShowLandmarks: mockPersistShowLandmarks,
+  setColorMode: mockPersistColorMode,
+  setMeasurementUnit: mockPersistMeasurementUnit,
+}));
+
 
 vi.mock('../onboarding/guidedTour/engine', () => ({
   restartGuidedTourFromHelp: vi.fn().mockResolvedValue(undefined),
@@ -114,15 +130,26 @@ vi.mock('@ionic/react', () => ({
 
 // ==================== Helpers ====================
 
-function renderSettings(initialShowLandmarks = true, initialPath = '/settings') {
+function renderSettings(
+  initialShowLandmarks = true,
+  initialPath = '/settings',
+  initialColorMode: 'project' | 'depth' = 'project',
+  initialMeasurementUnit: 'feet' | 'meters' = 'meters',
+) {
   const history = createMemoryHistory({ initialEntries: [initialPath] });
   const Harness: React.FC = () => {
     const [showLandmarks, setShowLandmarks] = React.useState(initialShowLandmarks);
+    const [colorMode, setColorMode] = React.useState(initialColorMode);
+    const [measurementUnit, setMeasurementUnit] = React.useState(initialMeasurementUnit);
     const [isProjectPanelOpen, setIsProjectPanelOpen] = React.useState(false);
     return (
       <Settings
         showLandmarks={showLandmarks}
         onShowLandmarksChange={setShowLandmarks}
+        colorMode={colorMode}
+        onColorModeChange={setColorMode}
+        measurementUnit={measurementUnit}
+        onMeasurementUnitChange={setMeasurementUnit}
         isProjectPanelOpen={isProjectPanelOpen}
         onProjectPanelChange={setIsProjectPanelOpen}
       />
@@ -147,6 +174,9 @@ describe('Settings page', () => {
     mockGetTotalCacheBytes.mockReset().mockResolvedValue(0);
     mockTilePrefetchJobs.current = [];
     mockProjects.current = [];
+    mockPersistShowLandmarks.mockReset();
+    mockPersistColorMode.mockReset();
+    mockPersistMeasurementUnit.mockReset();
   });
 
   it('renders settings header', () => {
@@ -291,6 +321,68 @@ describe('Settings page', () => {
 
     await user.click(toggle);
     expect(toggle.checked).toBe(false);
+    expect(mockPersistShowLandmarks).toHaveBeenCalledWith(false);
+  });
+
+  it('renders color mode selector with project default state', () => {
+    renderSettings(true, '/settings', 'project');
+    const selector = screen.getByTestId('color-mode-selector') as HTMLSelectElement;
+    expect(selector.value).toBe('project');
+    expect(screen.getByRole('option', { name: 'By Project' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'By Depth' })).toBeInTheDocument();
+  });
+
+  it('updates color mode selector state when changed', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'project');
+    const selector = screen.getByTestId('color-mode-selector') as HTMLSelectElement;
+    expect(selector.value).toBe('project');
+
+    await user.selectOptions(selector, 'depth');
+    expect(selector.value).toBe('depth');
+    expect(mockPersistColorMode).toHaveBeenCalledWith('depth');
+  });
+
+  it('persists project mode when selected from depth', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'depth');
+    const selector = screen.getByTestId('color-mode-selector') as HTMLSelectElement;
+    expect(selector.value).toBe('depth');
+
+    await user.selectOptions(selector, 'project');
+    expect(selector.value).toBe('project');
+    expect(mockPersistColorMode).toHaveBeenCalledWith('project');
+  });
+
+  it('renders measurement unit selector with meters as default', () => {
+    renderSettings(true, '/settings', 'project', 'meters');
+    const selector = screen.getByTestId('measurement-unit-selector') as HTMLSelectElement;
+    expect(selector.value).toBe('meters');
+    expect(screen.getByRole('option', { name: 'Meters' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Feet' })).toBeInTheDocument();
+  });
+
+  it('updates measurement unit selector state when changed', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'project', 'meters');
+    const selector = screen.getByTestId('measurement-unit-selector') as HTMLSelectElement;
+    expect(selector.value).toBe('meters');
+
+    await user.selectOptions(selector, 'feet');
+    expect(selector.value).toBe('feet');
+    expect(mockPersistMeasurementUnit).toHaveBeenCalledWith('feet');
+  });
+
+  it('persists meters when selected from feet', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'project', 'meters');
+    const selector = screen.getByTestId('measurement-unit-selector') as HTMLSelectElement;
+    expect(selector.value).toBe('meters');
+
+    await user.selectOptions(selector, 'feet');
+    await user.selectOptions(selector, 'meters');
+    expect(selector.value).toBe('meters');
+    expect(mockPersistMeasurementUnit).toHaveBeenCalledWith('meters');
   });
 
   it('renders "Show Tutorial" button', () => {

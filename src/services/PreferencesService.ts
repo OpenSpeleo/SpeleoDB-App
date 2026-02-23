@@ -4,6 +4,16 @@
  */
 
 import { PREFERENCES } from '../constants';
+import {
+  DEFAULT_MAP_COLOR_MODE,
+  isMapColorMode,
+  type MapColorMode,
+} from '../types/mapColorMode';
+import {
+  DEFAULT_MEASUREMENT_UNIT,
+  isMeasurementUnit,
+  type MeasurementUnit,
+} from '../types/measurementUnit';
 
 export interface UserPreferences {
   email?: string;
@@ -12,6 +22,8 @@ export interface UserPreferences {
   projectVisibility?: Record<string, boolean>;
   hasCompletedGuidedTour?: boolean;
   showLandmarks?: boolean;
+  colorMode?: MapColorMode;
+  measurementUnit?: MeasurementUnit;
 }
 
 function getStorageKey(): string {
@@ -47,6 +59,16 @@ function normalizeShowLandmarks(value: unknown): boolean | undefined {
   return undefined;
 }
 
+function normalizeColorMode(value: unknown): MapColorMode | undefined {
+  if (isMapColorMode(value)) return value;
+  return undefined;
+}
+
+function normalizeMeasurementUnit(value: unknown): MeasurementUnit | undefined {
+  if (isMeasurementUnit(value)) return value;
+  return undefined;
+}
+
 function readRawPreferences(): UserPreferences {
   try {
     const raw = localStorage.getItem(getStorageKey());
@@ -56,6 +78,8 @@ function readRawPreferences(): UserPreferences {
         projectVisibility: {},
         hasCompletedGuidedTour: undefined,
         showLandmarks: undefined,
+        colorMode: undefined,
+        measurementUnit: undefined,
       };
     }
 
@@ -67,6 +91,8 @@ function readRawPreferences(): UserPreferences {
       projectVisibility: normalizeProjectVisibility(parsed.projectVisibility),
       hasCompletedGuidedTour: normalizeGuidedTourCompletion(parsed.hasCompletedGuidedTour),
       showLandmarks: normalizeShowLandmarks(parsed.showLandmarks),
+      colorMode: normalizeColorMode(parsed.colorMode),
+      measurementUnit: normalizeMeasurementUnit(parsed.measurementUnit),
     };
   } catch {
     return {
@@ -74,6 +100,8 @@ function readRawPreferences(): UserPreferences {
       projectVisibility: {},
       hasCompletedGuidedTour: undefined,
       showLandmarks: undefined,
+      colorMode: undefined,
+      measurementUnit: undefined,
     };
   }
 }
@@ -108,6 +136,8 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
         projectVisibility: normalizeProjectVisibility(mutated.projectVisibility),
         hasCompletedGuidedTour: normalizeGuidedTourCompletion(mutated.hasCompletedGuidedTour),
         showLandmarks: normalizeShowLandmarks(mutated.showLandmarks),
+        colorMode: normalizeColorMode(mutated.colorMode),
+        measurementUnit: normalizeMeasurementUnit(mutated.measurementUnit),
       };
       writePreferences(next);
     }
@@ -144,6 +174,14 @@ export function setPreferences(prefs: Partial<UserPreferences>): void {
       prefs.showLandmarks === undefined
         ? current.showLandmarks
         : normalizeShowLandmarks(prefs.showLandmarks),
+    colorMode:
+      prefs.colorMode === undefined
+        ? current.colorMode
+        : normalizeColorMode(prefs.colorMode),
+    measurementUnit:
+      prefs.measurementUnit === undefined
+        ? current.measurementUnit
+        : normalizeMeasurementUnit(prefs.measurementUnit),
   }));
 }
 
@@ -209,6 +247,34 @@ export function getShowLandmarks(): boolean {
  */
 export function setShowLandmarks(visible: boolean): void {
   setPreferences({ showLandmarks: visible });
+}
+
+/**
+ * Read map color mode preference. Defaults to project coloring when missing.
+ */
+export function getColorMode(): MapColorMode {
+  return getPreferences().colorMode ?? DEFAULT_MAP_COLOR_MODE;
+}
+
+/**
+ * Persist map color mode preference.
+ */
+export function setColorMode(mode: MapColorMode): void {
+  setPreferences({ colorMode: mode });
+}
+
+/**
+ * Read map measurement unit. Defaults to meters when missing.
+ */
+export function getMeasurementUnit(): MeasurementUnit {
+  return getPreferences().measurementUnit ?? DEFAULT_MEASUREMENT_UNIT;
+}
+
+/**
+ * Persist map measurement unit preference.
+ */
+export function setMeasurementUnit(unit: MeasurementUnit): void {
+  setPreferences({ measurementUnit: unit });
 }
 
 /**

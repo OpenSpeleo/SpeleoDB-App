@@ -4,7 +4,7 @@ import { IonApp, setupIonicReact } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
 
 import { SpeleoDBProvider } from './context/SpeleoDBProvider';
-import { getShowLandmarks } from './services/PreferencesService';
+import { getColorMode, getMeasurementUnit, getShowLandmarks } from './services/PreferencesService';
 
 /* Pages */
 import Login from './pages/Login';
@@ -58,6 +58,8 @@ const AppRoutes: React.FC = () => {
   const isAuthenticated = isDashboard || isSettings;
   const [isProjectPanelOpen, setIsProjectPanelOpen] = useState(false);
   const [showLandmarks, setShowLandmarks] = useState(() => getShowLandmarks());
+  const [colorMode, setColorMode] = useState(() => getColorMode());
+  const [measurementUnit, setMeasurementUnit] = useState(() => getMeasurementUnit());
 
   if (path === '/login') {
     return <Login />;
@@ -78,6 +80,8 @@ const AppRoutes: React.FC = () => {
           isProjectPanelOpen={isProjectPanelOpen}
           onProjectPanelChange={setIsProjectPanelOpen}
           showLandmarks={showLandmarks}
+          colorMode={colorMode}
+          measurementUnit={measurementUnit}
         />
       </div>
       <div style={{
@@ -88,6 +92,10 @@ const AppRoutes: React.FC = () => {
         <Settings
           showLandmarks={showLandmarks}
           onShowLandmarksChange={setShowLandmarks}
+          colorMode={colorMode}
+          onColorModeChange={setColorMode}
+          measurementUnit={measurementUnit}
+          onMeasurementUnitChange={setMeasurementUnit}
           isProjectPanelOpen={isProjectPanelOpen}
           onProjectPanelChange={setIsProjectPanelOpen}
         />

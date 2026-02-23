@@ -104,6 +104,33 @@ function stubProjectsWithOneProjectDelayed(delayMs = 2500): void {
   });
 }
 
+function stubProjectsWithOneProjectWithDepth(): void {
+  cy.intercept('GET', PROJECTS_ENDPOINT, {
+    statusCode: 200,
+    body: singleProjectResponseBody(),
+  });
+
+  cy.intercept('GET', GEOJSON_URL, {
+    statusCode: 200,
+    body: {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [2.3, 46.6, -10],
+              [2.31, 46.61, -25],
+            ],
+          },
+        },
+      ],
+    },
+  });
+}
+
 function stubProjectsEmpty(): void {
   cy.intercept('GET', PROJECTS_ENDPOINT, {
     statusCode: 200,
@@ -268,5 +295,52 @@ describe('Guided Tour', () => {
     cy.get('[data-tour-action="show-all"]').click();
 
     cy.contains('.driver-popover-title', 'Tour complete', { timeout: 5000 }).should('be.visible');
+  });
+
+  it('updates color mode from settings and persists depth mode on reload', () => {
+    stubAuthSuccess();
+    stubProjectsWithOneProjectWithDepth();
+
+    cy.visit('/login', {
+      onBeforeLoad(win) {
+        win.localStorage.setItem(
+          'speleo_user_preferences',
+          JSON.stringify({
+            hasCompletedGuidedTour: true,
+            instance: 'https://www.speleodb.org',
+          }),
+        );
+      },
+    });
+
+    cy.get('input#email').type('user@example.com');
+    cy.get('input#password').type('password123');
+    cy.get('button[type="submit"]').click();
+    cy.contains('Start exploring', { timeout: 15000 }).should('be.visible');
+    cy.contains('button', 'Start exploring').filter(':visible').first().click();
+
+    cy.contains('button', 'Settings').click();
+    cy.get('[data-testid="color-mode-selector"]').select('depth', { force: true });
+    cy.get('[data-testid="measurement-unit-selector"]').select('feet', { force: true });
+
+    cy.window().then((win) => {
+      const raw = win.localStorage.getItem('speleo_user_preferences');
+      expect(raw).to.not.be.null;
+      const prefs = JSON.parse(raw!);
+      expect(prefs.colorMode).to.equal('depth');
+      expect(prefs.measurementUnit).to.equal('feet');
+    });
+
+    cy.contains('button', 'Map').click();
+    cy.get('[data-testid="depth-gauge"]', { timeout: 10000 }).should('be.visible');
+    cy.get('[data-testid="distance-scale"]').should('be.visible');
+
+    cy.reload();
+    cy.get('body').then(($body) => {
+      if ($body.text().includes('Start exploring')) {
+        cy.contains('button', 'Start exploring').filter(':visible').first().click();
+      }
+    });
+    cy.get('[data-testid="depth-gauge"]', { timeout: 10000 }).should('be.visible');
   });
 });

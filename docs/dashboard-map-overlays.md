@@ -44,6 +44,10 @@ All zoom and marker size values below are sourced from `PROJECT_LAYERS`, `MAP`, 
 - Initial map zoom: `MAP.DEFAULT_ZOOM = 5`
 - Max map zoom cap: `MAP.MAX_ZOOM = 19.9` (at 20 the map turns black)
 
+### Distance scale, depth coloring, and depth gauge
+
+Distance scale overlay, project depth color mode, depth gauge behavior, and measurement unit settings are documented in `docs/map-depth-and-scale.md`.
+
 ### Project GeoJSON layer zooms
 
 - Project line/polygon outline minimum zoom: `PROJECT_LAYERS.lineMinZoom = 0`
@@ -108,7 +112,9 @@ Marker context is provided by **map label layers** (Django parity), not a static
 
 ## Interactive marker details (read-only)
 
-All overlay markers and project GeoJSON point features are interactive. Tapping/clicking a marker opens a read-only detail modal.
+All overlay markers and project GeoJSON point features are interactive. Tapping a marker opens a read-only detail modal.
+
+**Minimum zoom gate**: all marker interactions that open a modal (marker taps and long-press GPS) require `zoom >= MAP.MARKER_INTERACTION_MIN_ZOOM` (`15`). Below this zoom, taps on markers and long-press GPS are silently ignored to prevent accidental triggers at region scale.
 
 ### Interactive layers
 
@@ -194,13 +200,18 @@ Project GeoJSON star features do not carry the project name in their GeoJSON pro
 
 ### Long press GPS coordinate
 
-Long-pressing anywhere on the map (touch/pen only) opens the detail modal with just the GPS coordinate of the pressed point.
+Long-pressing on an empty map spot (touch/pen only) opens the detail modal with just the GPS coordinate of the pressed point.
 
 - Duration: `MAP.LONG_PRESS_DURATION_MS = 300` in `src/constants.ts` (0.3 second hold).
+- Minimum zoom gate: `MAP.MARKER_INTERACTION_MIN_ZOOM = 15` (shared with marker taps).
 - A `setTimeout` is started on `pointerdown` for touch/pen events. If the pointer stays within the movement threshold (`12px`) for the full duration, the timer fires and opens the modal.
 - The timer is cancelled when:
   - the pointer moves beyond the movement threshold (drag),
   - the pointer is released before the timer fires (short tap or cancelled gesture).
+- Empty-spot gating:
+  - On timer fire, the app queries rendered features in a bbox around the pointer (`MAP.LONG_PRESS_EMPTY_SPOT_RADIUS_PX = 18`).
+  - The bbox is checked against existing interactive/overlay marker layers, project geometry layers (`project-{id}-point|line|fill`), key overlay label layers, and user location dot.
+  - If any feature exists in that bbox, `Map Point` does not open.
 - Pixel-to-coordinate conversion uses maplibre-gl's `map.unproject()` to convert the pointer's canvas position to `{ lng, lat }`.
 - The resulting coordinate is formatted using `formatLatLng(lat, lng)` with the same 7-decimal-place, trailing-zero-stripped format as all other GPS fields.
 - The tap candidate ref is nulled when the long-press fires, preventing the subsequent `pointerup` from also triggering a marker tap query.
@@ -251,7 +262,7 @@ The Settings page includes a "Show landmarks" toggle under the "Map Settings" se
 
 - Persisted in `UserPreferences.showLandmarks` via `PreferencesService`.
 - Default: `true` (landmarks shown when preference is missing or undefined).
-- Settings communicates the toggle state to Dashboard in real time via a module-level callback (`setDashboardLandmarks`) since both pages stay mounted simultaneously.
+- Settings communicates the toggle state to Dashboard in real time via shared React state in `App.tsx` since both pages stay mounted simultaneously.
 - Implementation: `src/pages/Settings.tsx`, `src/pages/Dashboard.tsx`, `src/services/PreferencesService.ts`.
 
 ## Share functionality

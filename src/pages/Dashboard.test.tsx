@@ -61,6 +61,7 @@ const {
   mockMapLoadImage,
   mockMapGetCanvas,
   mockMapGetLayer,
+  mockMapGetZoom,
   mockQueryRenderedFeatures,
   mockMapUnproject,
 } = vi.hoisted(() => {
@@ -87,6 +88,7 @@ const {
   }));
   const mockQueryRenderedFeatures = vi.fn((): MockRenderedFeature[] => []);
   const mockMapGetLayer = vi.fn((id: string) => ({ id }));
+  const mockMapGetZoom = vi.fn(() => 15);
   const mockMapLoadImage = vi.fn((_url: string, callback: (error: Error | null, image?: unknown) => void) => {
     callback(null, { width: 16, height: 16 });
   });
@@ -104,6 +106,7 @@ const {
     loadImage: mockMapLoadImage,
     getCanvas: mockMapGetCanvas,
     getLayer: mockMapGetLayer,
+    getZoom: mockMapGetZoom,
     queryRenderedFeatures: mockQueryRenderedFeatures,
     unproject: mockMapUnproject,
   }));
@@ -121,6 +124,7 @@ const {
     mockMapLoadImage,
     mockMapGetCanvas,
     mockMapGetLayer,
+    mockMapGetZoom,
     mockQueryRenderedFeatures,
     mockMapUnproject,
   };
@@ -273,6 +277,9 @@ vi.mock('react-map-gl/maplibre', () => {
       const layerColor = [lineColor, fillColor, circleColor].find(
         (value): value is string => typeof value === 'string',
       ) ?? '';
+      const layerColorExpression = [lineColor, fillColor, circleColor].find(
+        (value) => value !== undefined && typeof value !== 'string',
+      );
       const iconImage = typeof layout?.['icon-image'] === 'string'
         ? layout['icon-image']
         : '';
@@ -288,6 +295,7 @@ vi.mock('react-map-gl/maplibre', () => {
           data-testid="map-layer"
           data-layer-id={id}
           data-layer-color={layerColor}
+          data-layer-color-expression={layerColorExpression ? JSON.stringify(layerColorExpression) : ''}
           data-layer-filter={layerFilter}
           data-layer-icon={iconImage}
           data-layer-text={layerText}
@@ -372,9 +380,15 @@ vi.mock('../context/useSpeleoDB', () => ({
 
 // ==================== Helpers ====================
 
-function renderDashboard(options?: { showLandmarks?: boolean }) {
+function renderDashboard(options?: {
+  showLandmarks?: boolean;
+  colorMode?: 'project' | 'depth';
+  measurementUnit?: 'feet' | 'meters';
+}) {
   const history = createMemoryHistory({ initialEntries: ['/dashboard'] });
   const initialShowLandmarks = options?.showLandmarks ?? mockGetShowLandmarks();
+  const initialColorMode = options?.colorMode ?? 'project';
+  const initialMeasurementUnit = options?.measurementUnit ?? 'feet';
   const Harness: React.FC = () => {
     const [isProjectPanelOpen, setIsProjectPanelOpen] = React.useState(false);
     const [showLandmarks] = React.useState(initialShowLandmarks);
@@ -383,6 +397,8 @@ function renderDashboard(options?: { showLandmarks?: boolean }) {
         isProjectPanelOpen={isProjectPanelOpen}
         onProjectPanelChange={setIsProjectPanelOpen}
         showLandmarks={showLandmarks}
+        colorMode={initialColorMode}
+        measurementUnit={initialMeasurementUnit}
       />
     );
   };
@@ -507,6 +523,25 @@ function lineFeatureCollection(): GeoJSON.FeatureCollection {
   };
 }
 
+function lineFeatureCollectionWithDepth(): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { section_name: 'Depth line' },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [2.3, 46.6, -10],
+            [2.31, 46.61, -25],
+          ],
+        },
+      },
+    ],
+  };
+}
+
 function mixedProjectFeatureCollection(): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
@@ -562,6 +597,7 @@ describe('Dashboard', () => {
     });
     mockQueryRenderedFeatures.mockReturnValue([]);
     mockMapGetLayer.mockImplementation((id: string) => ({ id }));
+    mockMapGetZoom.mockReturnValue(15);
     mockMapLoadImage.mockImplementation((_url: string, callback: (error: Error | null, image?: unknown) => void) => {
       callback(null, { width: 16, height: 16 });
     });
@@ -630,6 +666,133 @@ describe('Dashboard', () => {
       expect(mockSetBearing).toHaveBeenCalledWith(0);
       expect(mockSetPitch).toHaveBeenCalledWith(0);
     });
+  });
+
+  it('renders distance scale overlay', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByTestId('distance-scale')).toBeInTheDocument();
+    });
+  });
+
+  it('renders depth gauge only in depth mode', async () => {
+    renderDashboard({ colorMode: 'depth' });
+    await waitFor(() => {
+      expect(screen.getByTestId('depth-gauge')).toBeInTheDocument();
+    });
+  });
+
+  it('does not render depth gauge in project mode', async () => {
+    renderDashboard({ colorMode: 'project' });
+    await waitFor(() => {
+      expect(screen.queryByTestId('depth-gauge')).not.toBeInTheDocument();
+    });
+  });
+
+  it('uses depth color expressions for project line/fill layers in depth mode', async () => {
+    mockProjects = [makeProject({ id: 'p-depth', name: 'Depth Color Project' })];
+    mockGetProjectGeoJSON.mockResolvedValueOnce(lineFeatureCollectionWithDepth());
+
+    renderDashboard({ colorMode: 'depth' });
+
+    await waitFor(() => {
+      const lineLayer = document.querySelector(
+        '[data-layer-id="project-p-depth-line"]',
+      ) as HTMLElement | null;
+      expect(lineLayer).not.toBeNull();
+      expect(lineLayer?.dataset.layerColorExpression).toContain('_speleoDepth');
+    });
+  });
+
+  it('updates depth gauge from mouse hover in depth mode', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Depth Hover Project' })];
+    mockGetProjectGeoJSON.mockResolvedValueOnce(lineFeatureCollectionWithDepth());
+
+    renderDashboard({ colorMode: 'depth' });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+      expect(screen.getByTestId('depth-gauge')).toBeInTheDocument();
+      expect(mapPropsRef.current).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'project-p1-line' },
+        properties: { _speleoDepth: -22 },
+      },
+    ]);
+
+    act(() => {
+      const mapProps = mapPropsRef.current as Record<string, unknown>;
+      const onMouseMove = mapProps.onMouseMove as ((event: { point: { x: number; y: number } }) => void) | undefined;
+      onMouseMove?.({ point: { x: 120, y: 80 } });
+    });
+
+    expect(screen.getByTestId('depth-gauge-current')).toHaveTextContent('-22 ft');
+  });
+
+  it('updates and clears depth gauge with touch probe interactions', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Depth Touch Project' })];
+    mockGetProjectGeoJSON.mockResolvedValueOnce(lineFeatureCollectionWithDepth());
+
+    renderDashboard({ colorMode: 'depth' });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+      expect(screen.getByTestId('depth-gauge')).toBeInTheDocument();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValue([
+      {
+        layer: { id: 'project-p1-line' },
+        properties: { _speleoDepth: -30 },
+      },
+    ]);
+
+    const surface = getMapTouchSurface();
+    fireEvent.pointerDown(surface, {
+      pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+    });
+    fireEvent.pointerMove(surface, {
+      pointerId: 1, pointerType: 'touch', clientX: 122, clientY: 82,
+    });
+
+    expect(screen.getByTestId('depth-gauge-current')).toHaveTextContent('-30 ft');
+
+    fireEvent.pointerUp(surface, {
+      pointerId: 1, pointerType: 'touch', clientX: 122, clientY: 82,
+    });
+
+    expect(screen.getByTestId('depth-gauge-current')).toHaveTextContent('');
+  });
+
+  it('converts depth gauge values to meters when metric unit is selected', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Depth Metric Project' })];
+    mockGetProjectGeoJSON.mockResolvedValueOnce(lineFeatureCollectionWithDepth());
+
+    renderDashboard({ colorMode: 'depth', measurementUnit: 'meters' });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+      expect(screen.getByTestId('depth-gauge')).toBeInTheDocument();
+      expect(mapPropsRef.current).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'project-p1-line' },
+        properties: { _speleoDepth: -30 },
+      },
+    ]);
+
+    act(() => {
+      const mapProps = mapPropsRef.current as Record<string, unknown>;
+      const onMouseMove = mapProps.onMouseMove as ((event: { point: { x: number; y: number } }) => void) | undefined;
+      onMouseMove?.({ point: { x: 120, y: 80 } });
+    });
+
+    expect(screen.getByTestId('depth-gauge-current')).toHaveTextContent('-9.1 m');
   });
 
   it('renders GeoJSON layer when payload is a JSON string', async () => {
@@ -879,6 +1042,59 @@ describe('Dashboard', () => {
 
     expect(mockQueryRenderedFeatures).not.toHaveBeenCalled();
     expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+  });
+
+  it('does not open marker details modal when tapping a marker below minimum zoom', async () => {
+    mockMapGetZoom.mockReturnValue(MAP.MARKER_INTERACTION_MIN_ZOOM - 1);
+    mockProjects = [makeProject({ id: 'p1', name: 'Low Zoom Tap Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'explorationLeads') {
+        return overlayPointFeatureCollection({ project: 'p1' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).not.toBeNull();
+    });
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(mockQueryRenderedFeatures).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+  });
+
+  it('opens marker details modal when tapping a marker at minimum zoom', async () => {
+    mockMapGetZoom.mockReturnValue(MAP.MARKER_INTERACTION_MIN_ZOOM);
+    mockProjects = [makeProject({ id: 'p1', name: 'Boundary Zoom Tap Project' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'explorationLeads') {
+        return overlayPointFeatureCollection({ project: 'p1' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).not.toBeNull();
+    });
+
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'exploration-leads-icon-layer' },
+        properties: { id: 'lead-1', description: 'visible at boundary' },
+      },
+    ]);
+
+    simulatePointerTap(getMapTouchSurface());
+
+    expect(mockQueryRenderedFeatures).toHaveBeenCalled();
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
   });
 
   it('opens marker details modal when tapping an exploration lead fallback marker', async () => {
@@ -1305,7 +1521,75 @@ describe('Dashboard', () => {
 
       expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
       expect(screen.getByTestId('overlay-marker-gps')).toBeInTheDocument();
+      expect(mockQueryRenderedFeatures).toHaveBeenCalledWith(
+        [
+          [120 - MAP.LONG_PRESS_EMPTY_SPOT_RADIUS_PX, 80 - MAP.LONG_PRESS_EMPTY_SPOT_RADIUS_PX],
+          [120 + MAP.LONG_PRESS_EMPTY_SPOT_RADIUS_PX, 80 + MAP.LONG_PRESS_EMPTY_SPOT_RADIUS_PX],
+        ],
+        expect.objectContaining({ layers: expect.any(Array) }),
+      );
       expect(mockMapUnproject).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not open GPS modal when long press is below minimum zoom', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockMapGetZoom.mockReturnValue(MAP.MARKER_INTERACTION_MIN_ZOOM - 1);
+      mockProjects = [makeProject({ id: 'p1', name: 'Low Zoom Long Press Project' })];
+      mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+
+      const surface = getMapTouchSurface();
+      fireEvent.pointerDown(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      });
+
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+
+      expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+      expect(mockQueryRenderedFeatures).not.toHaveBeenCalled();
+      expect(mockMapUnproject).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not open GPS modal when long press intersects survey line area', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockProjects = [makeProject({ id: 'p1', name: 'Line Hit Long Press Project' })];
+      mockGetProjectGeoJSON.mockResolvedValue(lineFeatureCollection());
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+      });
+
+      mockQueryRenderedFeatures.mockReturnValueOnce([
+        {
+          layer: { id: 'project-p1-line' },
+          properties: { section_name: 'Main line' },
+        },
+      ]);
+
+      const surface = getMapTouchSurface();
+      fireEvent.pointerDown(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      });
+
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+
+      expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+      expect(mockMapUnproject).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

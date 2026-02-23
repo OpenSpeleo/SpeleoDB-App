@@ -24,6 +24,8 @@ vi.mock('./context/SpeleoDBProvider', () => ({
 
 vi.mock('./services/PreferencesService', () => ({
   getShowLandmarks: () => true,
+  getColorMode: () => 'project',
+  getMeasurementUnit: () => 'meters',
 }));
 
 vi.mock('./pages/Login', () => ({
@@ -33,14 +35,20 @@ vi.mock('./pages/Login', () => ({
 vi.mock('./pages/Dashboard', () => ({
   default: ({
     showLandmarks,
+    colorMode,
+    measurementUnit,
     isProjectPanelOpen,
   }: {
     showLandmarks: boolean;
+    colorMode: 'project' | 'depth';
+    measurementUnit: 'feet' | 'meters';
     isProjectPanelOpen: boolean;
   }) => (
     <div
       data-testid="mock-dashboard"
       data-show-landmarks={String(showLandmarks)}
+      data-color-mode={colorMode}
+      data-measurement-unit={measurementUnit}
       data-panel-open={String(isProjectPanelOpen)}
     />
   ),
@@ -49,9 +57,13 @@ vi.mock('./pages/Dashboard', () => ({
 vi.mock('./pages/Settings', () => ({
   default: ({
     onShowLandmarksChange,
+    onColorModeChange,
+    onMeasurementUnitChange,
     onProjectPanelChange,
   }: {
     onShowLandmarksChange: (visible: boolean) => void;
+    onColorModeChange: (mode: 'project' | 'depth') => void;
+    onMeasurementUnitChange: (unit: 'feet' | 'meters') => void;
     onProjectPanelChange: (open: boolean) => void;
   }) => (
     <div data-testid="mock-settings">
@@ -61,6 +73,20 @@ vi.mock('./pages/Settings', () => ({
         onClick={() => onShowLandmarksChange(false)}
       >
         Hide landmarks
+      </button>
+      <button
+        type="button"
+        data-testid="settings-enable-depth-mode"
+        onClick={() => onColorModeChange('depth')}
+      >
+        Enable depth mode
+      </button>
+      <button
+        type="button"
+        data-testid="settings-enable-feet"
+        onClick={() => onMeasurementUnitChange('feet')}
+      >
+        Enable feet
       </button>
       <button
         type="button"
@@ -84,11 +110,23 @@ describe('App shared state wiring', () => {
 
     const dashboard = screen.getByTestId('mock-dashboard');
     expect(dashboard).toHaveAttribute('data-show-landmarks', 'true');
+    expect(dashboard).toHaveAttribute('data-color-mode', 'project');
+    expect(dashboard).toHaveAttribute('data-measurement-unit', 'meters');
     expect(dashboard).toHaveAttribute('data-panel-open', 'false');
 
     await user.click(screen.getByTestId('settings-hide-landmarks'));
     await waitFor(() => {
       expect(screen.getByTestId('mock-dashboard')).toHaveAttribute('data-show-landmarks', 'false');
+    });
+
+    await user.click(screen.getByTestId('settings-enable-depth-mode'));
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-dashboard')).toHaveAttribute('data-color-mode', 'depth');
+    });
+
+    await user.click(screen.getByTestId('settings-enable-feet'));
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-dashboard')).toHaveAttribute('data-measurement-unit', 'feet');
     });
 
     await user.click(screen.getByTestId('settings-open-panel'));

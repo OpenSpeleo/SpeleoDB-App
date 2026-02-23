@@ -203,7 +203,7 @@ const OverlayMarkerDetailsModal: React.FC<OverlayMarkerDetailsModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-3 rounded-xl bg-slate-800/70 text-slate-200 hover:bg-slate-700/70 transition-colors"
+              className="px-4 py-3 rounded-xl bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors"
             >
               Close
             </button>

@@ -10,6 +10,10 @@ import {
   setHasCompletedGuidedTour,
   getShowLandmarks,
   setShowLandmarks,
+  getColorMode,
+  setColorMode,
+  getMeasurementUnit,
+  setMeasurementUnit,
   type UserPreferences,
 } from './PreferencesService';
 import { PREFERENCES } from '../constants';
@@ -149,6 +153,8 @@ describe('PreferencesService', () => {
       expect(prefs.instance).toBe(PREFERENCES.DEFAULT_INSTANCE);
       expect(getHasCompletedGuidedTour()).toBe(false);
       expect(getShowLandmarks()).toBe(true);
+      expect(getColorMode()).toBe('project');
+      expect(getMeasurementUnit()).toBe('meters');
     });
   });
 
@@ -233,6 +239,68 @@ describe('PreferencesService', () => {
       expect(prefs.email).toBe('user@example.com');
       expect(prefs.projectVisibility).toEqual({ p1: true });
       expect(getShowLandmarks()).toBe(false);
+    });
+  });
+
+  describe('color mode preferences', () => {
+    it('defaults to project when missing', () => {
+      expect(getColorMode()).toBe('project');
+    });
+
+    it('stores and reads depth', () => {
+      setColorMode('depth');
+      expect(getColorMode()).toBe('depth');
+    });
+
+    it('stores and reads project', () => {
+      setColorMode('depth');
+      setColorMode('project');
+      expect(getColorMode()).toBe('project');
+    });
+
+    it('ignores invalid storage values', () => {
+      localStorage.setItem(
+        PREFERENCES.STORAGE_KEY,
+        JSON.stringify({ colorMode: 'invalid' }),
+      );
+      expect(getColorMode()).toBe('project');
+    });
+
+    it('preserves value across unrelated updates', () => {
+      setColorMode('depth');
+      setPreferences({ token: 'tok' });
+      expect(getColorMode()).toBe('depth');
+    });
+  });
+
+  describe('measurement unit preferences', () => {
+    it('defaults to meters when missing', () => {
+      expect(getMeasurementUnit()).toBe('meters');
+    });
+
+    it('stores and reads meters', () => {
+      setMeasurementUnit('meters');
+      expect(getMeasurementUnit()).toBe('meters');
+    });
+
+    it('stores and reads feet', () => {
+      setMeasurementUnit('meters');
+      setMeasurementUnit('feet');
+      expect(getMeasurementUnit()).toBe('feet');
+    });
+
+    it('ignores invalid storage values', () => {
+      localStorage.setItem(
+        PREFERENCES.STORAGE_KEY,
+        JSON.stringify({ measurementUnit: 'invalid' }),
+      );
+      expect(getMeasurementUnit()).toBe('meters');
+    });
+
+    it('preserves value across unrelated updates', () => {
+      setMeasurementUnit('meters');
+      setPreferences({ token: 'tok' });
+      expect(getMeasurementUnit()).toBe('meters');
     });
   });
 });

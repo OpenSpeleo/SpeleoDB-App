@@ -12,7 +12,7 @@ The project panel is a slide-in side panel on the dashboard that lets users mana
 | Tapping "Projects" tab again (when open) | Panel slides out |
 | Tapping "Map" tab (when open) | Panel slides out |
 
-State is owned by `isPanelOpen` in `Dashboard.tsx`. The panel itself (`ProjectPanel.tsx`) is a stateless presentational component controlled via `isOpen` / `onClose` props. The bottom nav bar can toggle the panel via module-level callbacks exported from `Dashboard.tsx` (`openProjectPanel`, `closeProjectPanel`).
+State is owned by `isProjectPanelOpen` in `App.tsx` (`AppRoutes`) and shared with both `Dashboard.tsx` and `Settings.tsx`. The panel itself (`ProjectPanel.tsx`) is a stateless presentational component controlled via `isOpen` / `onClose` props. The bottom nav bar toggles the panel through the shared `onProjectPanelChange` callback prop.
 
 ### Auto-close on project selection
 
@@ -91,8 +91,9 @@ When no projects are available, the list area shows "No projects available" cent
 
 ```
 src/components/ProjectPanel.tsx   -- Presentational component (stateless)
-src/pages/Dashboard.tsx           -- State owner (isPanelOpen, activeProjectIds, handlers)
-src/components/AppTabBar.tsx      -- Navigation trigger (Projects tab toggles panel)
+src/App.tsx                       -- Shared panel state owner + prop wiring (`isProjectPanelOpen`)
+src/pages/Dashboard.tsx           -- Map + project visibility handlers passed to panel
+src/components/AppTabBar.tsx      -- Navigation trigger (Projects tab calls `onProjectPanelChange`)
 ```
 
 `ProjectPanel` receives all data and callbacks as props. It does not hold state, perform network calls, or interact with the map directly. All business logic lives in `Dashboard.tsx` handlers:
@@ -122,7 +123,7 @@ Preferences are cleared on logout (full preference wipe).
 
 ## Change checklist
 
-1. Keep `ProjectPanel` stateless; all state belongs in `Dashboard.tsx`.
+1. Keep `ProjectPanel` stateless; panel open/close state belongs in `App.tsx` (`AppRoutes`).
 2. If adding new panel actions, wire them as `onXxx` callback props.
 3. Verify auto-close still works after any changes to zoom or panel logic.
 4. Run `npx vitest run src/components/ProjectPanel.test.tsx src/pages/Dashboard.test.tsx`.

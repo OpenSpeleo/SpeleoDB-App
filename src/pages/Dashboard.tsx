@@ -13,7 +13,7 @@ import {
   IonContent,
 } from '@ionic/react';
 import Map, { Layer, Source } from 'react-map-gl/maplibre';
-import type { MapRef } from 'react-map-gl/maplibre';
+import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
 import type { LngLatBoundsLike, Map as MaplibreMap } from 'maplibre-gl';
 import { Geolocation } from '@capacitor/geolocation';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
@@ -30,10 +30,20 @@ import {
 import ProjectPanel from '../components/ProjectPanel';
 import AppTabBar from '../components/AppTabBar';
 import GeolocationErrorModal from '../components/GeolocationErrorModal';
+import DistanceScale from '../components/map/DistanceScale';
+import DepthGauge from '../components/map/DepthGauge';
 import { PERMISSION_DENIED_SENTINEL } from '../utils/geolocationError';
 import OverlayMarkerDetailsModal from '../components/OverlayMarkerDetailsModal';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { createProjectColorState, getProjectColor } from '../utils/projectColors';
+import type { MapColorMode } from '../types/mapColorMode';
+import type { MeasurementUnit } from '../types/measurementUnit';
+import {
+  DEPTH_PROPERTY_KEY,
+  attachDepthToFeatureCollection,
+  createDepthColorExpression,
+} from '../utils/depthColoring';
+import { useDepthProbe } from '../hooks/useDepthProbe';
 import { TOUR_EVENTS } from '../onboarding/guidedTour/selectors';
 import {
   INTERACTIVE_OVERLAY_LAYER_IDS,
@@ -94,6 +104,14 @@ const PROJECT_LINKED_OVERLAY_IDS = new Set<ProjectLinkedOverlayId>([
   'explorationLeads',
   'cylinderInstalls',
 ]);
+const LONG_PRESS_BLOCKING_STATIC_LAYER_IDS = [
+  ...INTERACTIVE_OVERLAY_LAYER_IDS,
+  'landmarks-labels',
+  'surface-stations-labels',
+  'subsurface-stations-labels',
+  'cylinder-installs-labels',
+  'user-location-dot',
+] as const;
 
 const PROJECT_LAYER_ORDER_ANCHOR_SOURCE_ID = 'project-layer-order-anchor-source';
 const PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID = 'project-layer-order-anchor';
@@ -171,6 +189,7 @@ type OverlayFeatureQueryMap = {
   ) => InteractiveOverlayFeature[];
   getCanvas: () => { getBoundingClientRect: () => DOMRect };
   getLayer: (id: string) => unknown;
+  getZoom: () => number;
   unproject: (point: { x: number; y: number }) => { lng: number; lat: number };
 };
 
@@ -394,12 +413,16 @@ interface DashboardProps {
   isProjectPanelOpen: boolean;
   onProjectPanelChange: (open: boolean) => void;
   showLandmarks: boolean;
+  colorMode: MapColorMode;
+  measurementUnit: MeasurementUnit;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({
   isProjectPanelOpen,
   onProjectPanelChange,
   showLandmarks,
+  colorMode,
+  measurementUnit,
 }) => {
   const history = useHistory();
   const { controller, projects, tilePrefetchJobs } = useSpeleoDB();
@@ -411,6 +434,10 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const [selectedOverlayMarkerDetail, setSelectedOverlayMarkerDetail] =
     useState<OverlayMarkerDetails | null>(null);
+  const [mapViewMetrics, setMapViewMetrics] = useState<{ zoom: number; latitude: number }>(() => ({
+    zoom: MAP.DEFAULT_ZOOM,
+    latitude: MAP.DEFAULT_CENTER[1],
+  }));
 
   // Active projects (which layers are visible)
   const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
@@ -528,7 +555,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
           const fc = normalizeGeoJSON(raw);
           if (fc && fc.features.length > 0) {
-            newData[project.id] = fc;
+            newData[project.id] = attachDepthToFeatureCollection(fc, DEPTH_PROPERTY_KEY);
           }
         } catch (err) {
           console.warn(`Failed to load GeoJSON for ${project.id}:`, err);
@@ -622,10 +649,36 @@ const Dashboard: React.FC<DashboardProps> = ({
     () => [...activeProjectIds].map((id) => `project-${id}-point`),
     [activeProjectIds],
   );
+  const projectGeometryLayerIds = useMemo(
+    () =>
+      [...activeProjectIds].flatMap((id) => [
+        `project-${id}-point`,
+        `project-${id}-line`,
+        `project-${id}-fill`,
+      ]),
+    [activeProjectIds],
+  );
+
+  const {
+    probedDepth,
+    depthDomain,
+    clearProbedDepth,
+    sampleDepthAtClientPoint,
+    handleMapMouseMove,
+    handleMapMouseLeave,
+  } = useDepthProbe(mapRef, colorMode, activeProjectIds, geoJsonData, projectGeometryLayerIds);
 
   const allInteractiveLayerIds = useMemo(
     () => [...INTERACTIVE_OVERLAY_LAYER_IDS, ...projectPointLayerIds] as readonly string[],
     [projectPointLayerIds],
+  );
+  const longPressBlockingLayerIds = useMemo(
+    () =>
+      [
+        ...LONG_PRESS_BLOCKING_STATIC_LAYER_IDS,
+        ...projectGeometryLayerIds,
+      ] as readonly string[],
+    [projectGeometryLayerIds],
   );
 
   const markerParseContext = useMemo<MarkerParseContext>(() => {
@@ -641,7 +694,12 @@ const Dashboard: React.FC<DashboardProps> = ({
     hitRadiusPx: number,
   ) => {
     const map = mapRef.current?.getMap() as unknown as OverlayFeatureQueryMap | undefined;
-    if (!map?.queryRenderedFeatures || !map.getLayer) {
+    if (!map?.queryRenderedFeatures || !map.getLayer || !map.getZoom) {
+      return;
+    }
+
+    const zoom = map.getZoom();
+    if (!Number.isFinite(zoom) || zoom < MAP.MARKER_INTERACTION_MIN_ZOOM) {
       return;
     }
 
@@ -717,6 +775,43 @@ const Dashboard: React.FC<DashboardProps> = ({
     setSelectedOverlayMarkerDetail(detail);
   }, []);
 
+  const isEmptyMapSpotAtClientPoint = useCallback((clientX: number, clientY: number): boolean => {
+    const map = mapRef.current?.getMap() as unknown as OverlayFeatureQueryMap | undefined;
+    if (!map?.queryRenderedFeatures || !map.getLayer || !map.getCanvas || !map.getZoom) {
+      return false;
+    }
+    const zoom = map.getZoom();
+    if (!Number.isFinite(zoom) || zoom < MAP.MARKER_INTERACTION_MIN_ZOOM) {
+      return false;
+    }
+
+    const canvasRect = map.getCanvas()?.getBoundingClientRect();
+    if (!canvasRect) {
+      return false;
+    }
+    const mapPoint = {
+      x: clientX - canvasRect.left,
+      y: clientY - canvasRect.top,
+    };
+
+    const existingLayers = longPressBlockingLayerIds.filter(
+      (id) => map.getLayer(id) != null,
+    );
+    if (existingLayers.length === 0) {
+      return true;
+    }
+
+    try {
+      const features = map.queryRenderedFeatures(
+        getMarkerHitQueryBounds(mapPoint, MAP.LONG_PRESS_EMPTY_SPOT_RADIUS_PX),
+        { layers: existingLayers as string[] },
+      );
+      return features.length === 0;
+    } catch {
+      return false;
+    }
+  }, [longPressBlockingLayerIds]);
+
   const clearLongPressTimer = useCallback(() => {
     if (longPressTimerRef.current !== null) {
       clearTimeout(longPressTimerRef.current);
@@ -745,19 +840,25 @@ const Dashboard: React.FC<DashboardProps> = ({
       };
 
       if (!isMultiTouch) {
+        sampleDepthAtClientPoint(event.clientX, event.clientY);
         const cx = event.clientX;
         const cy = event.clientY;
         longPressTimerRef.current = setTimeout(() => {
           longPressTimerRef.current = null;
           mapPointerTapCandidateRef.current = null;
+          if (!isEmptyMapSpotAtClientPoint(cx, cy)) {
+            return;
+          }
           Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {});
           openLongPressGpsDetail(cx, cy);
         }, MAP.LONG_PRESS_DURATION_MS);
+      } else {
+        clearProbedDepth();
       }
     } else {
       mapPointerTapCandidateRef.current = null;
     }
-  }, [clearLongPressTimer, openLongPressGpsDetail]);
+  }, [clearLongPressTimer, clearProbedDepth, isEmptyMapSpotAtClientPoint, openLongPressGpsDetail, sampleDepthAtClientPoint]);
 
   const handleMapGestureMove = useCallback((
     event: React.PointerEvent<HTMLDivElement>,
@@ -775,7 +876,10 @@ const Dashboard: React.FC<DashboardProps> = ({
       candidate.moved = true;
       clearLongPressTimer();
     }
-  }, [clearLongPressTimer]);
+    if (candidate.pointerType === 'touch' || candidate.pointerType === 'pen') {
+      sampleDepthAtClientPoint(event.clientX, event.clientY);
+    }
+  }, [clearLongPressTimer, sampleDepthAtClientPoint]);
 
   const handleMapGestureEnd = useCallback((
     event: React.PointerEvent<HTMLDivElement>,
@@ -788,6 +892,9 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
 
     mapPointerTapCandidateRef.current = null;
+    if (candidate.pointerType === 'touch' || candidate.pointerType === 'pen') {
+      clearProbedDepth();
+    }
 
     if (event.type !== 'pointerup') {
       return;
@@ -811,7 +918,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       event.clientY,
       MAP_MARKER_HIT_RADIUS_PX_TOUCH,
     );
-  }, [clearLongPressTimer, openOverlayMarkerDetailsAtClientPoint]);
+  }, [clearLongPressTimer, clearProbedDepth, openOverlayMarkerDetailsAtClientPoint]);
 
   const handleToggleProject = useCallback((projectId: string) => {
     Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
@@ -908,6 +1015,19 @@ const Dashboard: React.FC<DashboardProps> = ({
     void loadOverlayIcons();
   }, [loadOverlayIcons]);
 
+  const handleMapMove = useCallback((event: ViewStateChangeEvent) => {
+    const { zoom, latitude } = event.viewState;
+    if (!Number.isFinite(zoom) || !Number.isFinite(latitude)) {
+      return;
+    }
+    setMapViewMetrics((prev) => {
+      if (prev.zoom === zoom && prev.latitude === latitude) {
+        return prev;
+      }
+      return { zoom, latitude };
+    });
+  }, []);
+
   const [isLocating, setIsLocating] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lng: number; lat: number } | null>(null);
   const [geoError, setGeoError] = useState<unknown>(null);
@@ -978,6 +1098,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                 mapStyle={mapStyle as maplibregl.StyleSpecification}
                 attributionControl={{ compact: true }}
                 onLoad={handleMapLoad}
+                onMove={handleMapMove}
+                onMouseMove={handleMapMouseMove}
+                onMouseLeave={handleMapMouseLeave}
               >
                 <Source
                   id={PROJECT_LAYER_ORDER_ANCHOR_SOURCE_ID}
@@ -1000,6 +1123,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                     return null;
                   }
                   const color = getProjectColor(project.id, projectColorsById);
+                  const lineAndFillColor = colorMode === 'depth'
+                    ? createDepthColorExpression(depthDomain, color, DEPTH_PROPERTY_KEY)
+                    : color;
                   const sourceId = `project-${project.id}`;
 
                   return (
@@ -1022,7 +1148,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                           false,
                         ]}
                         paint={{
-                          'fill-color': color,
+                          'fill-color': lineAndFillColor,
                           'fill-opacity': 0.25,
                         }}
                       />
@@ -1041,7 +1167,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                           false,
                         ]}
                         paint={{
-                          'line-color': color,
+                          'line-color': lineAndFillColor,
                           'line-width': 2.5,
                         }}
                       />
@@ -1417,6 +1543,29 @@ const Dashboard: React.FC<DashboardProps> = ({
                   </Source>
                 )}
               </Map>
+            )}
+
+            <div
+              className="absolute bottom-2 left-2 z-10"
+            >
+              <DistanceScale
+                zoom={mapViewMetrics.zoom}
+                latitude={mapViewMetrics.latitude}
+                measurementUnit={measurementUnit}
+              />
+            </div>
+
+            {colorMode === 'depth' && (
+              <div
+                className="absolute right-3 z-10"
+                style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 64px)' }}
+              >
+                <DepthGauge
+                  depthDomain={depthDomain}
+                  currentDepth={probedDepth}
+                  measurementUnit={measurementUnit}
+                />
+              </div>
             )}
 
             {/* ---- Esri attribution (inside map touch surface so bottom-2 is above tab bar) ---- */}

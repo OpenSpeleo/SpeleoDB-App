@@ -26,6 +26,8 @@ Manual tile count and cache byte totals are read from IndexedDB via cursor-based
 ### Map Settings
 
 - **Show landmarks** toggle: controls visibility of landmark marker and label layers on the map. Persisted in `UserPreferences.showLandmarks` via `PreferencesService`. Default: `true`. Changes propagate to Dashboard in real time via a shared React state in `App.tsx`.
+- **Color mode** selector: `By Project` / `By Depth`. `By Project` uses the standard project color palette; `By Depth` enables depth-based coloring and the dashboard depth gauge. Persisted in `UserPreferences.colorMode` via `PreferencesService`. Default: `project`. Changes propagate to Dashboard in real time via shared React state in `App.tsx`.
+- **Map unit** selector: `Meters` / `Feet`. Controls display units for both distance scale and depth gauge values. Base values remain feet-based internally and are converted for display when metric mode is active. Persisted in `UserPreferences.measurementUnit` via `PreferencesService`. Default: `meters`. Changes propagate to Dashboard in real time via shared React state in `App.tsx`.
 
 ### Tutorial
 
@@ -40,6 +42,8 @@ Manual tile count and cache byte totals are read from IndexedDB via cursor-based
 - Sync stats (`cacheBytes`, `manualTileCount`): local state, polled via `useEffect`.
 - Sync metrics (`syncTotalTiles`, `syncProcessedTiles`, `syncPct`): derived via `useMemo` from `tilePrefetchJobs` + `manualTileCount`.
 - `showLandmarks`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
+- `colorMode`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
+- `measurementUnit`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
 - `isProjectPanelOpen`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
 - Logout modal: local state (`showLogoutConfirmModal`, `isLoggingOut`).
 
@@ -58,6 +62,8 @@ The 3-second polling interval for cache stats activates only when `location.path
 - Tab bar: `src/components/AppTabBar.tsx`
 - Tile cache queries: `src/services/tileCache/TileCacheRepository.ts`
 - Landmark persistence: `src/services/PreferencesService.ts`
+- Color mode persistence: `src/services/PreferencesService.ts`
+- Measurement unit persistence: `src/services/PreferencesService.ts`
 - Tour re-trigger: `src/onboarding/guidedTour/engine.ts`
 - Tests: `src/pages/Settings.test.tsx`
 
@@ -67,5 +73,7 @@ The 3-second polling interval for cache stats activates only when `location.path
 2. Verify the polling interval stops when navigating away from `/settings`.
 3. Verify the logout guard prevents double-submission.
 4. Verify landmark toggle propagates to Dashboard map layers in real time.
-5. Run `npx vitest run src/pages/Settings.test.tsx`.
-6. Update this document if sections, state ownership, or offline behavior changes.
+5. Verify color mode selector propagates to Dashboard map rendering in real time.
+6. Verify map unit selector changes depth gauge + distance scale labels on Dashboard.
+7. Run `npx vitest run src/pages/Settings.test.tsx`.
+8. Update this document if sections, state ownership, or offline behavior changes.
