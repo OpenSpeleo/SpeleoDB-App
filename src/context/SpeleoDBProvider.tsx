@@ -42,6 +42,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   const history = useHistory();
   const location = useLocation();
   const didValidateRef = useRef(false);
+  const skipNextStartupValidationRef = useRef(false);
   const hideSplashScreenSafely = useCallback((reason: string) => {
     SplashScreen.hide().catch((error) => {
       console.warn(`[splash] Failed to hide splash screen (${reason}).`, error);
@@ -126,8 +127,12 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   if (prevAuthenticated !== authState.isAuthenticated) {
     setPrevAuthenticated(authState.isAuthenticated);
     if (!prevAuthenticated && authState.isAuthenticated) {
+      // Fresh in-app login already produced a token from POST /auth-token.
+      // Skip one immediate startup-style token validation on route transition.
+      skipNextStartupValidationRef.current = true;
       setShouldOpenCompanionInfo(true);
     } else if (prevAuthenticated && !authState.isAuthenticated) {
+      skipNextStartupValidationRef.current = false;
       setShouldOpenCompanionInfo(false);
       setShowCompanionInfoModal(false);
       setAllowCompanionInfoModalDismiss(false);
@@ -162,6 +167,13 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     const pathname = location.pathname;
     if (pathname === '/' || pathname === '/login') {
       history.replace('/dashboard');
+    }
+
+    if (skipNextStartupValidationRef.current) {
+      skipNextStartupValidationRef.current = false;
+      didValidateRef.current = true;
+      hideSplashScreenSafely('post-login validation skipped');
+      return;
     }
 
     // Validate once per app lifetime.

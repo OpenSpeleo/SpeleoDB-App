@@ -265,6 +265,50 @@ describe('SpeleoDBProvider', () => {
     });
   });
 
+  it('skips immediate startup validation after fresh in-app login', async () => {
+    const history = createMemoryHistory({ initialEntries: ['/login'] });
+    authStateSnapshotRef.current = {
+      isAuthenticated: false,
+      user: null,
+      token: null,
+    };
+    mockIsAuthenticated.mockReturnValue(false);
+    mockGetPreferences.mockReturnValue({});
+
+    render(
+      <Router history={history}>
+        <SpeleoDBProvider>
+          <div>child</div>
+        </SpeleoDBProvider>
+      </Router>,
+    );
+
+    await waitFor(() => {
+      expect(mockValidateSession).not.toHaveBeenCalled();
+    });
+
+    act(() => {
+      authStateSnapshotRef.current = {
+        isAuthenticated: true,
+        user: { id: 'restored', email: 'user@example.com', name: 'user@example.com' },
+        token: 'tok',
+      };
+      mockIsAuthenticated.mockReturnValue(true);
+      mockGetPreferences.mockReturnValue({
+        email: 'user@example.com',
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      emitStoreUpdate();
+      history.push('/dashboard');
+    });
+
+    await waitFor(() => {
+      expect(history.location.pathname).toBe('/dashboard');
+      expect(mockValidateSession).not.toHaveBeenCalled();
+    });
+  });
+
   it('starts guided tour after onboarding modal dismissal on first dashboard login', async () => {
     authStateSnapshotRef.current = {
       isAuthenticated: false,
