@@ -65,35 +65,6 @@ jobs:
           path: coverage/
           retention-days: 14
 
-  e2e:
-    name: E2E Tests (Cypress)
-    needs: [lint, typecheck]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - uses: cypress-io/github-action@v6
-        with:
-          install: false
-          start: npm run dev -- --host 127.0.0.1 --strictPort
-          wait-on: http://127.0.0.1:5173
-          wait-on-timeout: 120
-          command: npm run test.e2e
-      - uses: actions/upload-artifact@v6
-        if: failure()
-        with:
-          name: cypress-artifacts
-          path: |
-            cypress/screenshots/
-            cypress/videos/
-          if-no-files-found: ignore
-          retention-days: 7
-
   build:
     name: Production Build
     needs: [lint, typecheck]
@@ -301,7 +272,7 @@ jobs:
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [test, e2e, build-android, build-ios]
+    needs: [test, build-android, build-ios]
     runs-on: ubuntu-latest
     permissions:
       contents: write

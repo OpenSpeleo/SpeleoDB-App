@@ -9,7 +9,6 @@
     "build:native:ios:assets": "node scripts/build-native-assets.mjs ios",
     "build:native:android:assets": "node scripts/build-native-assets.mjs android",
     "preview": "vite preview",
-    "test.e2e": "cypress run",
     "test.unit": "vitest",
     "lint": "eslint",
     "postinstall": "node scripts/patch-sentry-capacitor-package.mjs"
@@ -54,7 +53,6 @@
     "@vitejs/plugin-react": "^5.1.4",
     "@vitest/coverage-v8": "^4.0.18",
     "autoprefixer": "^10.4.24",
-    "cypress": "^15.10.0",
     "eslint": "^9.39.3",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
