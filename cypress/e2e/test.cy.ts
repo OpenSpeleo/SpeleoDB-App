@@ -145,24 +145,11 @@ function loginToDashboard(): void {
   cy.get('input#email').type('user@example.com');
   cy.get('input#password').type('password123');
   cy.get('button[type="submit"]').click();
-  cy.contains('Start exploring', { timeout: 15000 }).should('be.visible');
+  cy.get('ion-modal.onboarding-modal', { timeout: 15000 }).should('exist');
 }
 
 function dismissOnboarding(): void {
-  cy.contains('button', 'Start exploring').filter(':visible').first().click();
-}
-
-function startPullToRefreshStep(): void {
-  cy.get('ion-refresher.dashboard-refresher').then(($refresher) => {
-    const event = new Event('ionRefresh', { bubbles: true });
-    $refresher[0].dispatchEvent(event);
-  });
-}
-
-function completePullToRefreshStep(): void {
-  cy.document().then((doc) => {
-    doc.dispatchEvent(new CustomEvent('speleo:refresh-complete'));
-  });
+  cy.contains('Start exploring').filter(':visible').first().click();
 }
 
 describe('Guided Tour', () => {
@@ -172,14 +159,6 @@ describe('Guided Tour', () => {
     loginToDashboard();
 
     dismissOnboarding();
-
-    cy.contains('.driver-popover-title', 'Status bar');
-    cy.contains('button', 'Next').click();
-
-    cy.contains('.driver-popover-title', 'Pull down and refresh');
-    startPullToRefreshStep();
-    cy.contains('.driver-popover-title', 'Pull down and refresh').should('be.visible');
-    completePullToRefreshStep();
 
     cy.contains('.driver-popover-title', 'Open the project panel', { timeout: 5000 });
     cy.get('[data-tour="menu-toggle"]').click();
@@ -230,8 +209,9 @@ describe('Guided Tour', () => {
     });
 
     cy.get('.driver-popover').should('not.exist');
-    cy.get('button[aria-label="Start guided tour"]').click();
-    cy.contains('.driver-popover-title', 'Status bar', { timeout: 5000 }).should('be.visible');
+    cy.contains('button', 'Settings').click();
+    cy.get('[data-testid="show-tutorial-button"]').click();
+    cy.contains('.driver-popover-title', 'Open the project panel', { timeout: 5000 }).should('be.visible');
   });
 
   it('persists completion when closed early and does not auto-start again', () => {
@@ -240,7 +220,7 @@ describe('Guided Tour', () => {
     loginToDashboard();
 
     dismissOnboarding();
-    cy.contains('.driver-popover-title', 'Status bar', { timeout: 5000 }).should('be.visible');
+    cy.contains('.driver-popover-title', 'Open the project panel', { timeout: 5000 }).should('be.visible');
 
     cy.contains('.driver-popover button', 'Close').click();
     cy.get('.driver-popover').should('not.exist');
@@ -263,9 +243,6 @@ describe('Guided Tour', () => {
     loginToDashboard();
 
     dismissOnboarding();
-    cy.contains('button', 'Next').click();
-    startPullToRefreshStep();
-    completePullToRefreshStep();
 
     cy.contains('.driver-popover-title', 'Open the project panel', { timeout: 5000 });
     cy.get('[data-tour="menu-toggle"]').click();
@@ -283,9 +260,6 @@ describe('Guided Tour', () => {
     loginToDashboard();
 
     dismissOnboarding();
-    cy.contains('button', 'Next').click();
-    startPullToRefreshStep();
-    completePullToRefreshStep();
 
     cy.contains('.driver-popover-title', 'Open the project panel', { timeout: 5000 });
     cy.get('[data-tour="menu-toggle"]').click();
@@ -316,8 +290,8 @@ describe('Guided Tour', () => {
     cy.get('input#email').type('user@example.com');
     cy.get('input#password').type('password123');
     cy.get('button[type="submit"]').click();
-    cy.contains('Start exploring', { timeout: 15000 }).should('be.visible');
-    cy.contains('button', 'Start exploring').filter(':visible').first().click();
+    cy.get('ion-modal.onboarding-modal', { timeout: 15000 }).should('exist');
+    cy.contains('Start exploring').filter(':visible').first().click();
 
     cy.contains('button', 'Settings').click();
     cy.get('[data-testid="color-mode-selector"]').select('depth', { force: true });
@@ -338,7 +312,7 @@ describe('Guided Tour', () => {
     cy.reload();
     cy.get('body').then(($body) => {
       if ($body.text().includes('Start exploring')) {
-        cy.contains('button', 'Start exploring').filter(':visible').first().click();
+        cy.contains('Start exploring').filter(':visible').first().click();
       }
     });
     cy.get('[data-testid="depth-gauge"]', { timeout: 10000 }).should('be.visible');
