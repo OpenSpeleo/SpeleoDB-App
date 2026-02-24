@@ -194,9 +194,17 @@ export class SpeleoDBController {
         }
 
         // Error response from server
-        const body = response.data as { detail?: string; message?: string } | undefined;
+        const body = response.data as
+          | {
+              detail?: string;
+              message?: string;
+              errors?: { non_field_errors?: string[] };
+            }
+          | undefined;
         const message =
-          body?.detail ?? body?.message ??
+          body?.detail ??
+          body?.message ??
+          body?.errors?.non_field_errors?.[0] ??
           (response.status === HTTP_STATUS.UNAUTHORIZED ? 'Invalid email or password' : 'Login failed');
         return { success: false, message };
       } catch (error) {

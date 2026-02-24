@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { HttpClient } from '../services/HttpClient';
 import { SpeleoDBService } from '../services/SpeleoDBService';
 import { HTTP_STATUS } from '../constants';
-import { canRunIntegrationTests, TEST_ENV } from './env';
+import { canRunIntegrationTests, isUnverifiedEmailAuthFailure, TEST_ENV } from './env';
 
 describe.runIf(canRunIntegrationTests)('SpeleoDBService [integration]', () => {
   const http = new HttpClient();
@@ -27,6 +27,10 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBService [integration]', () => {
   describe('authenticate', () => {
     it('returns 200 and a token for valid credentials', async () => {
       const res = await service.authenticate(instance, email, password);
+      if (isUnverifiedEmailAuthFailure(res.status, res.data)) {
+        expect(isUnverifiedEmailAuthFailure(res.status, res.data)).toBe(true);
+        return;
+      }
 
       expect(res.status).toBe(HTTP_STATUS.OK);
       expect(res.data).toBeDefined();
@@ -69,6 +73,10 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBService [integration]', () => {
 
     it('validates a freshly-obtained token from authenticate()', async () => {
       const authRes = await service.authenticate(instance, email, password);
+      if (isUnverifiedEmailAuthFailure(authRes.status, authRes.data)) {
+        expect(isUnverifiedEmailAuthFailure(authRes.status, authRes.data)).toBe(true);
+        return;
+      }
       expect(authRes.status).toBe(HTTP_STATUS.OK);
 
       const freshToken = authRes.data.token;

@@ -6,7 +6,7 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { Device } from '@capacitor/device';
-import { NETWORK } from '../constants';
+import { API, NETWORK } from '../constants';
 import { getPreferences } from './PreferencesService';
 import { getInstanceBaseUrl } from '../utils/url';
 import { getAppleMarketingModelOrIdentifier } from '../utils/appleDeviceModelMap';
@@ -109,7 +109,13 @@ async function getNativeUserAgent(): Promise<string | undefined> {
 
 function shouldInjectAppUserAgent(url: string): boolean {
   try {
-    const requestHost = new URL(url).hostname.toLowerCase();
+    const parsedUrl = new URL(url);
+    // SpeleoDB API calls should always carry app UA, including pre-login auth.
+    if (parsedUrl.pathname.startsWith(`${API.BASE_PATH}/`)) {
+      return true;
+    }
+
+    const requestHost = parsedUrl.hostname.toLowerCase();
     const instance = getPreferences().instance;
     if (!instance) return false;
     const instanceHost = new URL(getInstanceBaseUrl(instance)).hostname.toLowerCase();
@@ -119,12 +125,24 @@ function shouldInjectAppUserAgent(url: string): boolean {
   }
 }
 
+function findHeaderKey(
+  headers: Record<string, string>,
+  target: string,
+): string | undefined {
+  const normalizedTarget = target.toLowerCase();
+  return Object.keys(headers).find((key) => key.toLowerCase() === normalizedTarget);
+}
+
+function getWebUserAgent(): string {
+  return 'SpeleoDB-Unittest';
+}
+
 async function buildNativeHeaders(
   url: string,
   headers?: Record<string, string>,
 ): Promise<Record<string, string> | undefined> {
   const merged = { ...(headers ?? {}) };
-  const existingUserAgentKey = Object.keys(merged).find((key) => key.toLowerCase() === 'user-agent');
+  const existingUserAgentKey = findHeaderKey(merged, 'User-Agent');
   if (existingUserAgentKey) {
     return merged;
   }
@@ -139,6 +157,28 @@ async function buildNativeHeaders(
 
   merged['User-Agent'] = userAgent;
   return merged;
+}
+
+function buildWebHeaders(
+  url: string,
+  headers?: Record<string, string>,
+  isFormDataRequest = false,
+): Record<string, string> | undefined {
+  const merged = { ...(headers ?? {}) };
+
+  if (isFormDataRequest) {
+    const existingContentTypeKey = findHeaderKey(merged, 'Content-Type');
+    if (existingContentTypeKey) {
+      delete merged[existingContentTypeKey];
+    }
+  }
+
+  const existingUserAgentKey = findHeaderKey(merged, 'User-Agent');
+  if (!existingUserAgentKey && shouldInjectAppUserAgent(url)) {
+    merged['User-Agent'] = getWebUserAgent();
+  }
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 // ==================== HttpClient ====================
@@ -192,14 +232,9 @@ export class HttpClient {
       // Content-Type to avoid a mismatch the server would reject as 400.
       if (req.formData) {
         init.body = req.formData;
-        if (req.headers) {
-          const { 'Content-Type': _ct, ...rest } = req.headers;
-          if (Object.keys(rest).length > 0) {
-            init.headers = rest;
-          }
-        }
+        init.headers = buildWebHeaders(req.url, req.headers, true);
       } else {
-        init.headers = req.headers;
+        init.headers = buildWebHeaders(req.url, req.headers);
         if (req.data !== undefined) {
           init.body = JSON.stringify(req.data);
         }

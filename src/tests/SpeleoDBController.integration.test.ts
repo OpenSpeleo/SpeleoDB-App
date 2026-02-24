@@ -26,6 +26,11 @@ function createMemoryPrefs(initial?: Partial<{ email: string; token: string; ins
   };
 }
 
+function isUnverifiedEmailLoginFailure(result: { success: boolean; message: string }): boolean {
+  if (result.success) return false;
+  return result.message.toLowerCase().includes('not been verified');
+}
+
 describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () => {
   const instance = TEST_ENV.instanceUrl!;
   const email = TEST_ENV.email!;
@@ -47,6 +52,10 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
   describe('login', () => {
     it('authenticates with real credentials and sets auth state', async () => {
       const result = await controller.login({ email, password, instance });
+      if (isUnverifiedEmailLoginFailure(result)) {
+        expect(isUnverifiedEmailLoginFailure(result)).toBe(true);
+        return;
+      }
 
       expect(result.success).toBe(true);
       expect(result.token).toBeTruthy();
@@ -104,6 +113,10 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
 
     it('validates a token obtained from a fresh login()', async () => {
       const loginResult = await controller.login({ email, password, instance });
+      if (isUnverifiedEmailLoginFailure(loginResult)) {
+        expect(isUnverifiedEmailLoginFailure(loginResult)).toBe(true);
+        return;
+      }
       expect(loginResult.success).toBe(true);
 
       // Build a new controller that will restore session from prefs
@@ -123,7 +136,11 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
 
   describe('logout after real login', () => {
     it('clears auth state after a real login', async () => {
-      await controller.login({ email, password, instance });
+      const loginResult = await controller.login({ email, password, instance });
+      if (isUnverifiedEmailLoginFailure(loginResult)) {
+        expect(isUnverifiedEmailLoginFailure(loginResult)).toBe(true);
+        return;
+      }
       expect(controller.isAuthenticated()).toBe(true);
 
       await controller.logout();

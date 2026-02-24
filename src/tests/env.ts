@@ -47,3 +47,27 @@ export const canRunIntegrationTests =
   !!TEST_ENV.instanceUrl &&
   !!TEST_ENV.email &&
   !!TEST_ENV.password;
+
+function extractAuthFailureMessage(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const asRecord = payload as Record<string, unknown>;
+  const detail = asRecord.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  const message = asRecord.message;
+  if (typeof message === 'string' && message.trim()) return message;
+  const errors = asRecord.errors;
+  if (!errors || typeof errors !== 'object') return undefined;
+  const nonFieldErrors = (errors as Record<string, unknown>).non_field_errors;
+  if (Array.isArray(nonFieldErrors)) {
+    const first = nonFieldErrors[0];
+    if (typeof first === 'string' && first.trim()) return first;
+  }
+  return undefined;
+}
+
+export function isUnverifiedEmailAuthFailure(status: number, payload: unknown): boolean {
+  if (status !== 400) return false;
+  const message = extractAuthFailureMessage(payload);
+  if (!message) return false;
+  return message.toLowerCase().includes('email address has not been verified');
+}

@@ -87,6 +87,64 @@ describe('HttpClient (web transport)', () => {
     ).rejects.toThrow('Failed to fetch');
   });
 
+  it('injects web app User-Agent for current instance URLs', async () => {
+    setPreferences({ instance: 'https://api.test' });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 200,
+      json: async () => ({ ok: true }),
+    } as Response);
+
+    await client.request({ url: 'https://api.test/api/v1/user/auth-token/', method: 'GET' });
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headersObject = (init.headers ?? {}) as Record<string, string>;
+    expect(headersObject['User-Agent']).toBe('SpeleoDB-Unittest');
+  });
+
+  it('injects web app User-Agent for auth endpoint even without saved instance', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 200,
+      json: async () => ({ ok: true }),
+    } as Response);
+
+    await client.request({ url: 'https://www.speleodb.org/api/v1/user/auth-token/', method: 'GET' });
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headersObject = (init.headers ?? {}) as Record<string, string>;
+    expect(headersObject['User-Agent']).toBe('SpeleoDB-Unittest');
+  });
+
+  it('injects web app User-Agent for API endpoint even when host differs from current instance', async () => {
+    setPreferences({ instance: 'https://api.test' });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 200,
+      json: async () => ({ ok: true }),
+    } as Response);
+
+    await client.request({ url: 'https://other-instance.test/api/v1/user/auth-token/', method: 'GET' });
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const headersObject = (init.headers ?? {}) as Record<string, string>;
+    expect(headersObject['User-Agent']).toBe('SpeleoDB-Unittest');
+  });
+
+  it('preserves caller-provided User-Agent on web transport', async () => {
+    setPreferences({ instance: 'https://api.test' });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 200,
+      json: async () => ({ ok: true }),
+    } as Response);
+
+    await client.request({
+      url: 'https://api.test/api/v1/user/auth-token/',
+      method: 'GET',
+      headers: { 'User-Agent': 'Custom-UA/1.0' },
+    });
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    expect(init.headers).toEqual(expect.objectContaining({ 'User-Agent': 'Custom-UA/1.0' }));
+  });
+
   it('aborts on timeout', async () => {
     vi.useFakeTimers();
 
@@ -208,7 +266,7 @@ describe('HttpClient (native transport)', () => {
     expect(Object.keys(headersObject).some((key) => key.toLowerCase() === 'user-agent')).toBe(false);
   });
 
-  it('does not inject app User-Agent when host differs from current instance', async () => {
+  it('does not inject app User-Agent when host differs and URL is not API', async () => {
     vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
     vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('ios');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
@@ -219,7 +277,7 @@ describe('HttpClient (native transport)', () => {
     } as Response);
 
     await client.request({
-      url: 'https://other-instance.test/api/v1/projects/geojson/',
+      url: 'https://other-instance.test/tiles/1/2/3.png',
       method: 'GET',
     });
 
