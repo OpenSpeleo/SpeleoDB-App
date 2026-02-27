@@ -4,7 +4,7 @@ import { IonPage, IonContent } from '@ionic/react';
 import { useSpeleoDB } from '../context/useSpeleoDB';
 import { PREFERENCES } from '../constants';
 import { getPreferences } from '../services/PreferencesService';
-import { getInstanceBaseUrl, INSTANCE_PATHS } from '../utils/url';
+import { getInstanceBaseUrl, INSTANCE_PATHS, openExternalUrl } from '../utils/url';
 import logoSvg from '../assets/media/logo.png';
 import authIllustrationSvg from '../assets/media/auth-illustration.svg';
 
@@ -115,8 +115,10 @@ const Login: React.FC = () => {
                           </label>
                           <a
                             href={forgotPasswordUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              openExternalUrl(forgotPasswordUrl);
+                            }}
                             className="text-sm font-medium text-purple-500 hover:text-purple-400 transition-colors"
                           >
                             Forgot?
@@ -175,8 +177,10 @@ const Login: React.FC = () => {
                       Don't have an account?{' '}
                       <a
                         href={signupUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          openExternalUrl(signupUrl);
+                        }}
                         className="font-medium text-purple-500 hover:text-purple-400 transition-colors"
                       >
                         Sign up

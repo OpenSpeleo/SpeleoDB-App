@@ -1,3 +1,14 @@
+import { Browser } from '@capacitor/browser';
+
+/**
+ * Opens a URL in the platform's external browser.
+ * Uses Chrome Custom Tabs on Android, SFSafariViewController on iOS,
+ * and window.open on web — avoids the broken target="_blank" WebView path.
+ */
+export async function openExternalUrl(url: string): Promise<void> {
+  await Browser.open({ url });
+}
+
 /**
  * Normalizes instance base URL (trim, default https, no trailing slash).
  */

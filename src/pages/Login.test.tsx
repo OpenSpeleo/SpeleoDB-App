@@ -8,6 +8,14 @@ import Login from './Login';
 import { PREFERENCES } from '../constants';
 import { clearPreferences, setPreferences } from '../services/PreferencesService';
 
+const { mockBrowserOpen } = vi.hoisted(() => ({
+  mockBrowserOpen: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@capacitor/browser', () => ({
+  Browser: { open: mockBrowserOpen },
+}));
+
 // Mock the SpeleoDBProvider hook -- return a fake controller.
 const mockLogin = vi.fn();
 
@@ -40,6 +48,7 @@ function renderLogin() {
 describe('Login page', () => {
   beforeEach(() => {
     mockLogin.mockReset();
+    mockBrowserOpen.mockClear();
     clearPreferences();
   });
 
@@ -119,6 +128,50 @@ describe('Login page', () => {
         password: 'pass',
         instance: 'https://custom.speleodb.org',
       });
+    });
+  });
+
+  it('opens forgot-password link via Browser.open', async () => {
+    renderLogin();
+    await userEvent.click(screen.getByText(/forgot\?/i));
+
+    expect(mockBrowserOpen).toHaveBeenCalledWith({
+      url: `${PREFERENCES.DEFAULT_INSTANCE}/account/password/reset/`,
+    });
+  });
+
+  it('opens sign-up link via Browser.open', async () => {
+    renderLogin();
+    await userEvent.click(screen.getByText(/sign up/i));
+
+    expect(mockBrowserOpen).toHaveBeenCalledWith({
+      url: `${PREFERENCES.DEFAULT_INSTANCE}/signup/`,
+    });
+  });
+
+  it('does not use target="_blank" on external links', () => {
+    renderLogin();
+    const forgotLink = screen.getByText(/forgot\?/i);
+    const signupLink = screen.getByText(/sign up/i);
+
+    expect(forgotLink).not.toHaveAttribute('target');
+    expect(signupLink).not.toHaveAttribute('target');
+  });
+
+  it('uses Browser.open with custom instance for external links', async () => {
+    setPreferences({ instance: 'https://custom.speleodb.org' });
+    renderLogin();
+
+    await userEvent.click(screen.getByText(/forgot\?/i));
+    expect(mockBrowserOpen).toHaveBeenCalledWith({
+      url: 'https://custom.speleodb.org/account/password/reset/',
+    });
+
+    mockBrowserOpen.mockClear();
+
+    await userEvent.click(screen.getByText(/sign up/i));
+    expect(mockBrowserOpen).toHaveBeenCalledWith({
+      url: 'https://custom.speleodb.org/signup/',
     });
   });
 });
