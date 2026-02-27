@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { IonApp, setupIonicReact } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
 
+import { App as CapApp } from '@capacitor/app';
 import { SpeleoDBProvider } from './context/SpeleoDBProvider';
 import { getColorMode, getMeasurementUnit, getShowLandmarks } from './services/PreferencesService';
 
@@ -104,14 +105,23 @@ const AppRoutes: React.FC = () => {
   );
 };
 
-const App: React.FC = () => (
-  <IonApp>
-    <IonReactRouter>
-      <SpeleoDBProvider>
-        <AppRoutes />
-      </SpeleoDBProvider>
-    </IonReactRouter>
-  </IonApp>
-);
+const App: React.FC = () => {
+  useEffect(() => {
+    const listener = CapApp.addListener('appUrlOpen', (event) => {
+      console.debug('[DeepLink] opened via:', event.url);
+    });
+    return () => { listener.then((h) => h.remove()); };
+  }, []);
+
+  return (
+    <IonApp>
+      <IonReactRouter>
+        <SpeleoDBProvider>
+          <AppRoutes />
+        </SpeleoDBProvider>
+      </IonReactRouter>
+    </IonApp>
+  );
+};
 
 export default App;

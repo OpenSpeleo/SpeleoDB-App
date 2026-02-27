@@ -51,5 +51,16 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>speleodb</string>
+			</array>
+			<key>CFBundleURLName</key>
+			<string>org.speleodb.app</string>
+		</dict>
+	</array>
 </dict>
 </plist>
