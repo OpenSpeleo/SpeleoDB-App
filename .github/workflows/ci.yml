@@ -58,7 +58,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx vitest run --reporter=verbose --coverage
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage
@@ -78,7 +78,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -129,13 +129,13 @@ jobs:
         run: npx cap build android --androidreleasetype=APK --keystorepath="$ANDROID_KEYSTORE_PATH" --keystorepass="$ANDROID_KEYSTORE_PASS" --keystorealias="$ANDROID_KEY_ALIAS" --keystorealiaspass="$ANDROID_KEY_ALIAS_PASS"
       - name: Android Release Build (AAB)
         run: npx cap build android --androidreleasetype=AAB --keystorepath="$ANDROID_KEYSTORE_PATH" --keystorepass="$ANDROID_KEYSTORE_PASS" --keystorealias="$ANDROID_KEY_ALIAS" --keystorealiaspass="$ANDROID_KEY_ALIAS_PASS"
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: android-apk
           path: android/app/build/outputs/apk/release/*.apk
           retention-days: 14
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: android-aab
@@ -262,7 +262,7 @@ jobs:
           codesign --verify --deep --strict output/Payload/App.app
           cd output
           zip -r App-temporary-signed.ipa Payload
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: ios-ipa
