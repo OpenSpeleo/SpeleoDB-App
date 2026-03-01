@@ -101,7 +101,7 @@ jobs:
         with:
           distribution: zulu
           java-version: 21
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -155,7 +155,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -277,15 +277,15 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           name: android-apk
           path: artifacts/android-apk
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           name: android-aab
           path: artifacts/android-aab
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           name: ios-ipa
           path: artifacts/ios-ipa
