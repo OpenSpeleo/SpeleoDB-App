@@ -21,6 +21,7 @@ This document defines high-level architecture boundaries and coding expectations
 - Treat `SpeleoDBController` as the source of truth for auth, offline lock, sync, and retry state.
 - Avoid parallel state machines across UI and services for the same behavior.
 - UI local state is acceptable for presentation-only concerns (modal visibility, form state, layout state).
+- Default SpeleoDB instance prefill is a login-form concern only. Services, controller, and persisted preferences must not auto-inject a fallback instance.
 
 ## Networking and offline rules
 

@@ -35,10 +35,6 @@ describe('constants', () => {
   });
 
   describe('PREFERENCES', () => {
-    it('has DEFAULT_INSTANCE as https://www.speleodb.org', () => {
-      expect(PREFERENCES.DEFAULT_INSTANCE).toBe('https://www.speleodb.org');
-    });
-
     it('has STORAGE_KEY and pref keys', () => {
       expect(PREFERENCES.STORAGE_KEY).toBe('speleo_user_preferences');
       expect(PREFERENCES.PREF_EMAIL).toBe('email');

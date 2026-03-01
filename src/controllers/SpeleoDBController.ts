@@ -247,7 +247,12 @@ export class SpeleoDBController {
     const prefs = this.prefs.getPreferences();
     const token = prefs.token;
     const instance = prefs.instance?.trim();
-    if (!token || !instance) return 'unauthorized';
+    if (!token || !instance) {
+      if (prefs.token && !instance) {
+        this.prefs.clearPreferences();
+      }
+      return 'unauthorized';
+    }
 
     try {
       const response = await this.service.validateToken(
@@ -576,6 +581,10 @@ export class SpeleoDBController {
   private restoreSession(): void {
     try {
       const prefs = this.prefs.getPreferences();
+      if (prefs.token && !prefs.instance) {
+        this.prefs.clearPreferences();
+        return;
+      }
       if (prefs.token && prefs.instance) {
         const email = prefs.email ?? '';
         this._authState = {

@@ -41,6 +41,7 @@ This action must run a tentative reconnect flow and resolve to exactly one outco
 
 | Condition | Startup result | Logout | Cache purge | UX |
 | --- | --- | --- | --- | --- |
+| Persisted auth prefs missing `instance` | `unauthorized` | Yes (preferences cleared as invalid) | No | Continue unauthenticated; user must log in again |
 | HTTP 2xx | `ok` | No | No | Continue online |
 | HTTP 4xx | `unauthorized` | Yes | Yes | Redirect to home/login |
 | HTTP 5xx or non-4xx error status | `network_error` | No | No | Offline modal shown (acknowledge once with `Go Offline`) |

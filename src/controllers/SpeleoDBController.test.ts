@@ -4,7 +4,6 @@ import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import type { HttpResponse } from '../services/HttpClient';
 import type { AuthTokenResponse } from '../types';
-import { PREFERENCES } from '../constants';
 import { TilePrefetchService } from '../services/TilePrefetchService';
 import type { Project, ProjectsGeoJSONResponse } from '../types/project';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
@@ -81,10 +80,7 @@ function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBServic
 function createMockPrefs(initial?: { email?: string; token?: string; instance?: string }): PreferencesPort {
   let store: { email?: string; token?: string; instance?: string } = initial ?? {};
   return {
-    getPreferences: vi.fn(() => ({
-      ...store,
-      instance: store.instance ?? PREFERENCES.DEFAULT_INSTANCE,
-    })),
+    getPreferences: vi.fn(() => ({ ...store })),
     setPreferences: vi.fn((p: Partial<{ email?: string; token?: string; instance?: string }>) => {
       store = { ...store, ...p };
     }),
@@ -321,6 +317,18 @@ describe('SpeleoDBController', () => {
       expect(fresh.isAuthenticated()).toBe(false);
       expect(fresh.currentUser).toBeNull();
     });
+
+    it('clears preferences when token exists without instance', () => {
+      const invalidPrefs = createMockPrefs({
+        email: 'restored@example.com',
+        token: 'saved-token',
+      });
+
+      const fresh = new SpeleoDBController(service, invalidPrefs, cache);
+
+      expect(fresh.isAuthenticated()).toBe(false);
+      expect(invalidPrefs.clearPreferences).toHaveBeenCalledOnce();
+    });
   });
 
   // ---- validateSession ------------------------------------------------------
@@ -391,6 +399,17 @@ describe('SpeleoDBController', () => {
     it('returns "unauthorized" when no token in preferences', async () => {
       const result = await controller.validateSession();
       expect(result).toBe('unauthorized');
+    });
+
+    it('returns "unauthorized" and clears preferences when token has no instance', async () => {
+      const withInvalidPrefs = createMockPrefs({
+        token: 't',
+      });
+      const ctrl = new SpeleoDBController(service, withInvalidPrefs, cache);
+
+      const result = await ctrl.validateSession();
+      expect(result).toBe('unauthorized');
+      expect(withInvalidPrefs.clearPreferences).toHaveBeenCalled();
     });
 
     it('keeps session on disconnect and allows retry recovery', async () => {
@@ -521,6 +540,7 @@ describe('SpeleoDBController', () => {
     });
 
     it('continues project sync when geojson downloads fail', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       service = createMockService({
         getProjectsGeoJSON: vi.fn(async (_instance, _token) => ({
           status: 200,
@@ -574,6 +594,10 @@ describe('SpeleoDBController', () => {
       expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
       expect(service.downloadJSON).toHaveBeenCalledOnce();
       expect(cache.setGeoJSON).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to cache geojson for project p1:'),
+        expect.any(Error),
+      );
     });
 
     it('syncs read-only overlay geojson payloads during project sync', async () => {
@@ -613,6 +637,7 @@ describe('SpeleoDBController', () => {
     });
 
     it('continues sync when one overlay endpoint fails', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const getLandmarksGeoJSON = vi.fn(async () => {
         throw new Error('overlay endpoint failed');
       });
@@ -633,6 +658,10 @@ describe('SpeleoDBController', () => {
       expect(service.getSurfaceStationsGeoJSON).toHaveBeenCalledOnce();
       expect(service.getExplorationLeadsGeoJSON).toHaveBeenCalledOnce();
       expect(service.getCylinderInstallsGeoJSON).toHaveBeenCalledOnce();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to sync overlay landmarks:'),
+        expect.any(Error),
+      );
     });
   });
 

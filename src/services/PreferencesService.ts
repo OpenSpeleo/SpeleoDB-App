@@ -26,12 +26,16 @@ export interface UserPreferences {
   measurementUnit?: MeasurementUnit;
 }
 
-function getStorageKey(): string {
-  return PREFERENCES.STORAGE_KEY;
+function clearStoredPreferencesSilently(): void {
+  try {
+    localStorage.removeItem(getStorageKey());
+  } catch {
+    // no-op; callers still receive a safe in-memory fallback.
+  }
 }
 
-function defaultInstance(): string {
-  return PREFERENCES.DEFAULT_INSTANCE;
+function getStorageKey(): string {
+  return PREFERENCES.STORAGE_KEY;
 }
 
 function normalizeProjectVisibility(
@@ -73,8 +77,9 @@ function readRawPreferences(): UserPreferences {
   try {
     const raw = localStorage.getItem(getStorageKey());
     if (!raw) {
+      clearStoredPreferencesSilently();
       return {
-        instance: defaultInstance(),
+        instance: undefined,
         projectVisibility: {},
         hasCompletedGuidedTour: undefined,
         showLandmarks: undefined,
@@ -84,10 +89,25 @@ function readRawPreferences(): UserPreferences {
     }
 
     const parsed = JSON.parse(raw) as UserPreferences;
+    const hasAuthToken = typeof parsed.token === 'string' && parsed.token.trim().length > 0;
+    const hasInstance = typeof parsed.instance === 'string' && parsed.instance.trim().length > 0;
+    if (!hasAuthToken || !hasInstance) {
+      // Corrupted auth preferences are invalid by contract. Clear storage so
+      // startup never restores an authenticated session without an instance.
+      clearStoredPreferencesSilently();
+      return {
+        instance: undefined,
+        projectVisibility: {},
+        hasCompletedGuidedTour: undefined,
+        showLandmarks: undefined,
+        colorMode: undefined,
+        measurementUnit: undefined,
+      };
+    }
     return {
       email: parsed.email,
       token: parsed.token,
-      instance: parsed.instance ?? defaultInstance(),
+      instance: parsed.instance,
       projectVisibility: normalizeProjectVisibility(parsed.projectVisibility),
       hasCompletedGuidedTour: normalizeGuidedTourCompletion(parsed.hasCompletedGuidedTour),
       showLandmarks: normalizeShowLandmarks(parsed.showLandmarks),
@@ -95,8 +115,9 @@ function readRawPreferences(): UserPreferences {
       measurementUnit: normalizeMeasurementUnit(parsed.measurementUnit),
     };
   } catch {
+    clearStoredPreferencesSilently();
     return {
-      instance: defaultInstance(),
+      instance: undefined,
       projectVisibility: {},
       hasCompletedGuidedTour: undefined,
       showLandmarks: undefined,
@@ -132,7 +153,7 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
       const next: UserPreferences = {
         email: mutated.email,
         token: mutated.token,
-        instance: mutated.instance ?? defaultInstance(),
+        instance: mutated.instance,
         projectVisibility: normalizeProjectVisibility(mutated.projectVisibility),
         hasCompletedGuidedTour: normalizeGuidedTourCompletion(mutated.hasCompletedGuidedTour),
         showLandmarks: normalizeShowLandmarks(mutated.showLandmarks),

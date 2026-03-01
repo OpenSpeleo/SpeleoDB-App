@@ -1043,6 +1043,7 @@ describe('Dashboard', () => {
   });
 
   it('uses fallback non-icon layers for exploration leads and cylinders when icons fail to load', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockProjects = [makeProject({ id: 'p1', name: 'Fallback Project' })];
     mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
     mockMapLoadImage.mockImplementation((url: string, callback: (error: Error | null, image?: unknown) => void) => {
@@ -1076,6 +1077,14 @@ describe('Dashboard', () => {
       expect(explorationLayer?.dataset.layerIcon).toBe('');
       expect(cylinderLayer?.dataset.layerIcon).toBe('');
     });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to load map icon exploration-lead-icon'),
+      expect.any(Error),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to load map icon cylinder-icon'),
+      expect.any(Error),
+    );
   });
 
   it('opens marker details modal when tapping an exploration lead icon marker', async () => {

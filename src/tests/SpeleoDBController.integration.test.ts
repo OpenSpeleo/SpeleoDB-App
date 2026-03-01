@@ -10,17 +10,13 @@ import { HttpClient } from '../services/HttpClient';
 import { SpeleoDBService } from '../services/SpeleoDBService';
 import { ProjectCacheService } from '../services/ProjectCacheService';
 import { SpeleoDBController, type PreferencesPort } from '../controllers/SpeleoDBController';
-import { PREFERENCES } from '../constants';
 import { canRunIntegrationTests, TEST_ENV } from './env';
 
 /** In-memory preferences (mirrors PreferencesService without touching localStorage). */
 function createMemoryPrefs(initial?: Partial<{ email: string; token: string; instance: string }>): PreferencesPort {
   let store: { email?: string; token?: string; instance?: string } = { ...initial };
   return {
-    getPreferences: () => ({
-      ...store,
-      instance: store.instance ?? PREFERENCES.DEFAULT_INSTANCE,
-    }),
+    getPreferences: () => ({ ...store }),
     setPreferences: (p) => { store = { ...store, ...p }; },
     clearPreferences: () => { store = {}; },
   };
