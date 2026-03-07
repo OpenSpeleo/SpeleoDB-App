@@ -27,7 +27,7 @@
     "@capacitor/splash-screen": "^8.0.1",
     "@capacitor/status-bar": "8.0.1",
     "@ionic/react": "^8.7.18",
-    "@ionic/react-router": "^8.7.18",
+    "@ionic/react-router": "^8.8.1",
     "@sentry/capacitor": "^3.1.0",
     "@sentry/react": "10.40.0",
     "@types/react-router": "^5.1.20",
