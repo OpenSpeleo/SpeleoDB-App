@@ -6,7 +6,7 @@
 import type { MapOverlayDefinition, ProjectLayerConfig } from './types/mapOverlay';
 
 // ==================== API ENDPOINTS ====================
-const BASE_PATH = '/api/v1';
+const BASE_PATH = '/api/v2';
 export const API = {
   BASE_PATH,
   AUTH_TOKEN_ENDPOINT: BASE_PATH + '/user/auth-token/',

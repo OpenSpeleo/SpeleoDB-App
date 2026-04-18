@@ -17,11 +17,11 @@ This document defines the additional dashboard overlay layers rendered from cach
 
 The app fetches these authenticated endpoints during dashboard sync:
 
-- `/api/v1/landmarks/geojson/`
-- `/api/v1/stations/subsurface/geojson/`
-- `/api/v1/stations/surface/geojson/`
-- `/api/v1/exploration-leads/geojson/`
-- `/api/v1/cylinder-installs/geojson/`
+- `/api/v2/landmarks/geojson/`
+- `/api/v2/stations/subsurface/geojson/`
+- `/api/v2/stations/surface/geojson/`
+- `/api/v2/exploration-leads/geojson/`
+- `/api/v2/cylinder-installs/geojson/`
 
 Implementation lives in:
 
@@ -239,6 +239,7 @@ Zoom levels and marker sizes are sourced from `MAP_OVERLAYS` in `src/constants.t
 ## Offline/cache/resync/logout lifecycle
 
 - Overlay payloads are cached in IndexedDB (`geojson` store) using namespaced keys (`overlay:<id>`).
+- Successful overlay sync only persists payloads that normalize to a GeoJSON `FeatureCollection`. Non-`2xx` or malformed `2xx` responses are ignored so the last good cached overlay remains available offline.
 - Sync trigger parity with projects:
   - app open/login path (`syncProjects()`),
   - Settings page sync button.

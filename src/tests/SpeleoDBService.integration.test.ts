@@ -11,6 +11,7 @@ import { HttpClient } from '../services/HttpClient';
 import { SpeleoDBService } from '../services/SpeleoDBService';
 import { HTTP_STATUS } from '../constants';
 import { canRunIntegrationTests, isUnverifiedEmailAuthFailure, TEST_ENV } from './env';
+import type { AuthTokenResponse } from '../types';
 
 describe.runIf(canRunIntegrationTests)('SpeleoDBService [integration]', () => {
   const http = new HttpClient();
@@ -33,10 +34,11 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBService [integration]', () => {
       }
 
       expect(res.status).toBe(HTTP_STATUS.OK);
-      expect(res.data).toBeDefined();
-      expect(res.data.token).toBeTruthy();
-      expect(typeof res.data.token).toBe('string');
-      expect(res.data.user).toBeTruthy();
+      const data = res.data as AuthTokenResponse;
+      expect(data).toBeDefined();
+      expect(data.token).toBeTruthy();
+      expect(typeof data.token).toBe('string');
+      expect(data.user).toBeTruthy();
     }, TEST_ENV.timeoutMs);
 
     it('returns 400/401 for wrong password', async () => {
@@ -79,7 +81,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBService [integration]', () => {
       }
       expect(authRes.status).toBe(HTTP_STATUS.OK);
 
-      const freshToken = authRes.data.token;
+      const freshToken = (authRes.data as AuthTokenResponse).token;
       const validateRes = await service.validateToken(instance, freshToken);
 
       expect(validateRes.status).toBeGreaterThanOrEqual(200);

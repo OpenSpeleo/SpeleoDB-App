@@ -3,13 +3,13 @@ import { API, HTTP_STATUS, HEADERS, PREFERENCES, NETWORK, MAP, COLOR_PALETTE } f
 
 describe('constants', () => {
   describe('API', () => {
-    it('has BASE_PATH /api/v1', () => {
-      expect(API.BASE_PATH).toBe('/api/v1');
+    it('has BASE_PATH /api/v2', () => {
+      expect(API.BASE_PATH).toBe('/api/v2');
     });
 
     it('has AUTH_TOKEN_ENDPOINT containing /user/auth-token/', () => {
       expect(API.AUTH_TOKEN_ENDPOINT).toContain('/user/auth-token/');
-      expect(API.AUTH_TOKEN_ENDPOINT).toBe('/api/v1/user/auth-token/');
+      expect(API.AUTH_TOKEN_ENDPOINT).toBe('/api/v2/user/auth-token/');
     });
   });
 

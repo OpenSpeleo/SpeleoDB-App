@@ -5,47 +5,75 @@ import type { ProjectCacheService } from '../services/ProjectCacheService';
 import type { HttpResponse } from '../services/HttpClient';
 import type { AuthTokenResponse } from '../types';
 import { TilePrefetchService } from '../services/TilePrefetchService';
-import type { Project, ProjectsGeoJSONResponse } from '../types/project';
+import type { Project } from '../types/project';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import { getTile, upsertTile } from '../services/tileCache/TileCacheRepository';
 
-// ==================== Mocks ====================
+function createProjectFixture(
+  overrides: Omit<Partial<Project>, 'latest_commit'> & {
+    latest_commit?: Partial<Project['latest_commit']>;
+  } = {},
+): Project {
+  const { latest_commit: latestCommitOverrides, ...projectOverrides } = overrides;
 
-function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBService {
-  const project: Project = {
+  return {
     id: 'p1',
-    name: 'Prefetch project',
+    name: 'Project',
     description: '',
-    country: 'FR',
-    type: 'survey',
-    visibility: 'public',
+    country: 'US',
+    type: 'COMPASS',
+    visibility: 'PRIVATE',
     is_active: true,
-    created_by: 'u',
-    creation_date: '2025-01-01',
-    modified_date: '2025-01-01',
+    created_by: 'u@x.com',
+    creation_date: '2026-01-01',
+    modified_date: '2026-01-01',
     commit_count: 1,
     active_mutex: null,
     fork_from: null,
     exclude_geojson: false,
     geojson_file: 'https://example.com/p1.geojson',
+    ...projectOverrides,
     latest_commit: {
-      id: 'commit-1',
+      id: 'c1',
       message: 'init',
-      author_email: 'u@example.com',
-      author_name: 'User',
-      authored_date: '2025-01-01',
+      author_email: 'u@x.com',
+      author_name: 'U',
+      authored_date: '2026-01-01',
       dt_since: 'today',
       parent_ids: [],
       url: '',
       formats: [],
       tree: [],
+      ...latestCommitOverrides,
     },
   };
+}
 
+const DEFAULT_PROJECT = createProjectFixture({
+  id: 'p1',
+  name: 'Prefetch project',
+  country: 'FR',
+  latest_commit: {
+    id: 'commit-1',
+    author_email: 'u@example.com',
+    author_name: 'User',
+    authored_date: '2025-01-01',
+  },
+});
+
+const V2_PROJECT = createProjectFixture({
+  id: 'p-v2',
+  name: 'V2 Project',
+  geojson_file: 'https://example.com/p-v2.geojson',
+});
+
+// ==================== Mocks ====================
+
+function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBService {
   return {
     authenticate: vi.fn(async () => ({ status: 200, data: { user: 'u@x.com', token: 'tok' } }) as HttpResponse<AuthTokenResponse>),
     validateToken: vi.fn(async () => ({ status: 200, data: {} }) as HttpResponse<unknown>),
-    getProjectsGeoJSON: vi.fn(async () => ({ status: 200, data: { data: [project] } }) as HttpResponse<unknown>),
+    getProjectsGeoJSON: vi.fn(async () => ({ status: 200, data: [DEFAULT_PROJECT] }) as HttpResponse<Project[]>),
     getLandmarksGeoJSON: vi.fn(async () => ({
       status: 200,
       data: { type: 'FeatureCollection', features: [] },
@@ -146,6 +174,45 @@ describe('SpeleoDBController', () => {
         token: 'tok',
         instance: validCreds.instance,
       });
+    });
+
+    it('accepts any 2xx auth response that includes a token body', async () => {
+      service = createMockService({
+        authenticate: vi.fn(async () => ({
+          status: 201,
+          data: { user: 'created@x.com', token: 'created-token' },
+        }) as HttpResponse<AuthTokenResponse>),
+      });
+      controller = new SpeleoDBController(service, prefs, cache);
+
+      const result = await controller.login(validCreds);
+
+      expect(result.success).toBe(true);
+      expect(result.token).toBe('created-token');
+      expect(controller.isAuthenticated()).toBe(true);
+      expect(controller.currentUser?.email).toBe('created@x.com');
+      expect(prefs.setPreferences).toHaveBeenCalledWith({
+        email: 'created@x.com',
+        token: 'created-token',
+        instance: validCreds.instance,
+      });
+    });
+
+    it('rejects malformed 2xx auth responses that do not include a token', async () => {
+      service = createMockService({
+        authenticate: vi.fn(async () => ({
+          status: 201,
+          data: { user: 'created@x.com' },
+        }) as HttpResponse<AuthTokenResponse | unknown>),
+      });
+      controller = new SpeleoDBController(service, prefs, cache);
+
+      const result = await controller.login(validCreds);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe('Login failed');
+      expect(controller.isAuthenticated()).toBe(false);
+      expect(prefs.setPreferences).not.toHaveBeenCalled();
     });
 
     it('on 401 returns failure and does not update auth state', async () => {
@@ -541,44 +608,9 @@ describe('SpeleoDBController', () => {
 
     it('continues project sync when geojson downloads fail', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      // Default mock returns a single project with id 'p1' and a non-null
+      // geojson_file; only override the failing transport call.
       service = createMockService({
-        getProjectsGeoJSON: vi.fn(async (_instance, _token) => ({
-          status: 200,
-          data: {
-            data: [{
-              id: 'p1',
-              name: 'Project 1',
-              description: '',
-              country: 'FR',
-              type: 'survey',
-              visibility: 'public',
-              is_active: true,
-              created_by: 'u',
-              creation_date: '2025-01-01',
-              modified_date: '2025-01-01',
-              commit_count: 1,
-              active_mutex: null,
-              fork_from: null,
-              exclude_geojson: false,
-              geojson_file: 'https://example.com/p1.geojson',
-              latest_commit: {
-                id: 'c1',
-                message: 'init',
-                author_email: 'u@example.com',
-                author_name: 'User',
-                authored_date: '2025-01-01',
-                dt_since: 'today',
-                parent_ids: [],
-                url: '',
-                formats: [],
-                tree: [],
-              },
-            }],
-            success: true,
-            timestamp: '2026-01-01T00:00:00.000Z',
-            url: 'https://www.speleodb.org/api/v1/projects/geojson/',
-          },
-        }) as HttpResponse<ProjectsGeoJSONResponse>),
         downloadJSON: vi.fn(async () => {
           throw new Error('Network dropped');
         }),
@@ -600,7 +632,59 @@ describe('SpeleoDBController', () => {
       );
     });
 
+    it('skips project geojson cache writes for non-2xx download responses', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      service = createMockService({
+        downloadJSON: vi.fn(async <T = unknown>() => ({
+          status: 403,
+          data: { Code: 'AccessDenied' } as T,
+        })) as unknown as SpeleoDBService['downloadJSON'],
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
+      expect(service.downloadJSON).toHaveBeenCalledOnce();
+      expect(cache.setGeoJSON).not.toHaveBeenCalled();
+      expect(cache.setProjects).toHaveBeenCalledOnce();
+      expect(controller.syncStatus).toBe('done');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Skipping geojson cache for project p1: status 403'),
+      );
+    });
+
     it('syncs read-only overlay geojson payloads during project sync', async () => {
+      const customFeatureCollection: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: { test: true }, geometry: { type: 'Point', coordinates: [0, 0] } }],
+      };
+      service = createMockService({
+        getLandmarksGeoJSON: vi.fn(async () => ({
+          status: 200,
+          data: customFeatureCollection,
+        }) as HttpResponse<GeoJSON.FeatureCollection | unknown>),
+        getSubsurfaceStationsGeoJSON: vi.fn(async () => ({
+          status: 200,
+          data: customFeatureCollection,
+        }) as HttpResponse<GeoJSON.FeatureCollection | unknown>),
+        getSurfaceStationsGeoJSON: vi.fn(async () => ({
+          status: 200,
+          data: customFeatureCollection,
+        }) as HttpResponse<GeoJSON.FeatureCollection | unknown>),
+        getExplorationLeadsGeoJSON: vi.fn(async () => ({
+          status: 200,
+          data: customFeatureCollection,
+        }) as HttpResponse<GeoJSON.FeatureCollection | unknown>),
+        getCylinderInstallsGeoJSON: vi.fn(async () => ({
+          status: 200,
+          data: customFeatureCollection,
+        }) as HttpResponse<GeoJSON.FeatureCollection | unknown>),
+      });
       const withToken = createMockPrefs({
         token: 'tok',
         instance: 'https://www.speleodb.org',
@@ -614,26 +698,11 @@ describe('SpeleoDBController', () => {
       expect(service.getSurfaceStationsGeoJSON).toHaveBeenCalledOnce();
       expect(service.getExplorationLeadsGeoJSON).toHaveBeenCalledOnce();
       expect(service.getCylinderInstallsGeoJSON).toHaveBeenCalledOnce();
-      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('landmarks', {
-        type: 'FeatureCollection',
-        features: [],
-      });
-      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('subsurfaceStations', {
-        type: 'FeatureCollection',
-        features: [],
-      });
-      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('surfaceStations', {
-        type: 'FeatureCollection',
-        features: [],
-      });
-      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('explorationLeads', {
-        type: 'FeatureCollection',
-        features: [],
-      });
-      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('cylinderInstalls', {
-        type: 'FeatureCollection',
-        features: [],
-      });
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('landmarks', customFeatureCollection);
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('subsurfaceStations', customFeatureCollection);
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('surfaceStations', customFeatureCollection);
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('explorationLeads', customFeatureCollection);
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('cylinderInstalls', customFeatureCollection);
     });
 
     it('continues sync when one overlay endpoint fails', async () => {
@@ -660,6 +729,269 @@ describe('SpeleoDBController', () => {
       expect(service.getCylinderInstallsGeoJSON).toHaveBeenCalledOnce();
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Failed to sync overlay landmarks:'),
+        expect.any(Error),
+      );
+    });
+
+    it('skips malformed overlay payloads without blocking the rest of overlay sync', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      service = createMockService({
+        getLandmarksGeoJSON: vi.fn(async () => ({
+          status: 200,
+          data: { detail: 'not geojson' },
+        }) as HttpResponse<GeoJSON.FeatureCollection | unknown>),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(cache.setProjects).toHaveBeenCalledOnce();
+      expect(cache.setOverlayGeoJSON).not.toHaveBeenCalledWith('landmarks', expect.anything());
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('subsurfaceStations', {
+        type: 'FeatureCollection',
+        features: [],
+      });
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('surfaceStations', {
+        type: 'FeatureCollection',
+        features: [],
+      });
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('explorationLeads', {
+        type: 'FeatureCollection',
+        features: [],
+      });
+      expect(cache.setOverlayGeoJSON).toHaveBeenCalledWith('cylinderInstalls', {
+        type: 'FeatureCollection',
+        features: [],
+      });
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Overlay sync skipped for landmarks: malformed 2xx payload',
+      );
+    });
+  });
+
+  // ==========================================================================
+  // syncProjects v2 envelope-free contract
+  //
+  // Locks in that the controller treats the v2 response as a bare `Project[]`
+  // (not the legacy `{ data, success, timestamp, url }` envelope) across the
+  // success / 4xx / 5xx / transport-error matrix.
+  //
+  // Critical invariants:
+  //   - non-2xx responses preserve cache and never overwrite projects state;
+  //   - syncStatus surfaces 'error' iff there are no cached projects to show;
+  //   - data-fetch 4xx never triggers logout / clearPreferences (only
+  //     validateSession may, per docs/offline-mode.md).
+  // ==========================================================================
+  describe('syncProjects v2 envelope-free contract', () => {
+    it('on 200 stores the bare Project[] body verbatim into the cache', async () => {
+      const v2Body: Project[] = [V2_PROJECT];
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => ({
+          status: 200,
+          data: v2Body,
+        }) as HttpResponse<Project[]>),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
+      expect(cache.setProjects).toHaveBeenCalledOnce();
+      expect(cache.setProjects).toHaveBeenCalledWith(v2Body);
+      expect(controller.projects).toEqual(v2Body);
+      expect(controller.syncStatus).toBe('done');
+      expect(controller.isOnline).toBe(true);
+    });
+
+    it('on 200 with an empty Project[]: clears stale cached projects and keeps sync successful', async () => {
+      cache.getProjects = vi.fn(async () => [V2_PROJECT]);
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => ({
+          status: 200,
+          data: [],
+        }) as HttpResponse<Project[]>),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(controller.projects).toEqual([]);
+      expect(cache.setProjects).toHaveBeenCalledWith([]);
+      expect(service.downloadJSON).not.toHaveBeenCalled();
+      expect(service.getLandmarksGeoJSON).toHaveBeenCalledOnce();
+      expect(controller.syncStatus).toBe('done');
+      expect(controller.isOnline).toBe(true);
+    });
+
+    it('on 200 with a legacy envelope body: treats the payload as malformed and skips side-effects', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => ({
+          status: 200,
+          data: { data: [V2_PROJECT] },
+        }) as HttpResponse<Project[] | unknown>),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(controller.projects).toEqual([]);
+      expect(cache.setProjects).not.toHaveBeenCalled();
+      expect(service.downloadJSON).not.toHaveBeenCalled();
+      expect(service.getLandmarksGeoJSON).not.toHaveBeenCalled();
+      expect(controller.syncStatus).toBe('error');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('syncProjects: refresh skipped (status=200)'),
+      );
+    });
+
+    it('on 4xx with empty cache: surfaces error, skips cache write, skips overlay sync, never logs out', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => ({
+          status: 401,
+          data: { detail: 'Invalid token.' },
+        }) as HttpResponse<Project[] | unknown>),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
+      expect(cache.setProjects).not.toHaveBeenCalled();
+      expect(service.getLandmarksGeoJSON).not.toHaveBeenCalled();
+      expect(service.getSubsurfaceStationsGeoJSON).not.toHaveBeenCalled();
+      expect(service.getSurfaceStationsGeoJSON).not.toHaveBeenCalled();
+      expect(service.getExplorationLeadsGeoJSON).not.toHaveBeenCalled();
+      expect(service.getCylinderInstallsGeoJSON).not.toHaveBeenCalled();
+      expect(controller.projects).toEqual([]);
+      expect(controller.syncStatus).toBe('error');
+      // Data-fetch 4xx must NOT trigger logout or preference clearing -- only
+      // validateSession may (see docs/offline-mode.md).
+      expect(withToken.clearPreferences).not.toHaveBeenCalled();
+      expect(controller.isAuthenticated()).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('syncProjects: refresh skipped (status=401)'),
+      );
+    });
+
+    it('on 4xx with cached projects: keeps cache, reports done, never logs out', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      cache.getProjects = vi.fn(async () => [V2_PROJECT]);
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => ({
+          status: 401,
+          data: { detail: 'Invalid token.' },
+        }) as HttpResponse<Project[] | unknown>),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(controller.projects).toEqual([V2_PROJECT]);
+      expect(controller.syncStatus).toBe('done');
+      expect(cache.setProjects).not.toHaveBeenCalled();
+      expect(withToken.clearPreferences).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('syncProjects: refresh skipped (status=401)'),
+      );
+    });
+
+    it('on 5xx with empty cache: surfaces error, skips cache write, skips overlay sync', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => ({
+          status: 500,
+          data: { detail: 'Internal server error.' },
+        }) as HttpResponse<Project[] | unknown>),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
+      expect(cache.setProjects).not.toHaveBeenCalled();
+      expect(service.getLandmarksGeoJSON).not.toHaveBeenCalled();
+      expect(controller.projects).toEqual([]);
+      expect(controller.syncStatus).toBe('error');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('syncProjects: refresh skipped (status=500)'),
+      );
+    });
+
+    it('on transport rejection sets syncStatus to "error" when cache is empty', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => {
+          throw new Error('Network dropped');
+        }),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
+      expect(cache.setProjects).not.toHaveBeenCalled();
+      expect(controller.projects).toEqual([]);
+      expect(controller.syncStatus).toBe('error');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('syncProjects: API fetch failed:'),
+        expect.any(Error),
+      );
+    });
+
+    it('on transport rejection keeps syncStatus "done" when cached projects exist', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      cache.getProjects = vi.fn(async () => [V2_PROJECT]);
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => {
+          throw new Error('Network dropped');
+        }),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache);
+
+      await controller.syncProjects();
+
+      expect(controller.projects).toEqual([V2_PROJECT]);
+      expect(controller.syncStatus).toBe('done');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('syncProjects: API fetch failed:'),
         expect.any(Error),
       );
     });

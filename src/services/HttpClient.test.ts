@@ -20,7 +20,7 @@ describe('HttpClient (web transport)', () => {
       json: async () => body,
     } as Response);
 
-    const res = await client.request({ url: 'https://api.test/v1', method: 'GET' });
+    const res = await client.request({ url: 'https://api.test/v2', method: 'GET' });
 
     expect(res.status).toBe(200);
     expect(res.data).toEqual(body);
@@ -34,7 +34,7 @@ describe('HttpClient (web transport)', () => {
     } as Response);
 
     const req: HttpRequest = {
-      url: 'https://api.test/v1/resource',
+      url: 'https://api.test/v2/resource',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       data: { name: 'test' },
@@ -73,7 +73,7 @@ describe('HttpClient (web transport)', () => {
       json: async () => { throw new Error('no body'); },
     } as unknown as Response);
 
-    const res = await client.request({ url: 'https://api.test/v1', method: 'DELETE' });
+    const res = await client.request({ url: 'https://api.test/v2', method: 'DELETE' });
 
     expect(res.status).toBe(204);
     expect(res.data).toEqual({});
@@ -94,7 +94,7 @@ describe('HttpClient (web transport)', () => {
       json: async () => ({ ok: true }),
     } as Response);
 
-    await client.request({ url: 'https://api.test/api/v1/user/auth-token/', method: 'GET' });
+    await client.request({ url: 'https://api.test/api/v2/user/auth-token/', method: 'GET' });
 
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     const headersObject = (init.headers ?? {}) as Record<string, string>;
@@ -107,7 +107,7 @@ describe('HttpClient (web transport)', () => {
       json: async () => ({ ok: true }),
     } as Response);
 
-    await client.request({ url: 'https://www.speleodb.org/api/v1/user/auth-token/', method: 'GET' });
+    await client.request({ url: 'https://www.speleodb.org/api/v2/user/auth-token/', method: 'GET' });
 
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     const headersObject = (init.headers ?? {}) as Record<string, string>;
@@ -121,7 +121,7 @@ describe('HttpClient (web transport)', () => {
       json: async () => ({ ok: true }),
     } as Response);
 
-    await client.request({ url: 'https://other-instance.test/api/v1/user/auth-token/', method: 'GET' });
+    await client.request({ url: 'https://other-instance.test/api/v2/user/auth-token/', method: 'GET' });
 
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     const headersObject = (init.headers ?? {}) as Record<string, string>;
@@ -136,7 +136,7 @@ describe('HttpClient (web transport)', () => {
     } as Response);
 
     await client.request({
-      url: 'https://api.test/api/v1/user/auth-token/',
+      url: 'https://api.test/api/v2/user/auth-token/',
       method: 'GET',
       headers: { 'User-Agent': 'Custom-UA/1.0' },
     });
@@ -197,7 +197,7 @@ describe('HttpClient (native transport)', () => {
       text: async () => JSON.stringify({ ok: true }),
     } as Response);
 
-    const res = await client.request({ url: 'https://api.test/api/v1/projects/geojson/', method: 'GET' });
+    const res = await client.request({ url: 'https://api.test/api/v2/projects/geojson/', method: 'GET' });
 
     expect(res.status).toBe(200);
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
@@ -217,7 +217,7 @@ describe('HttpClient (native transport)', () => {
       text: async () => JSON.stringify({ ok: true }),
     } as Response);
 
-    await client.request({ url: 'https://api.test/api/v1/projects/geojson/', method: 'GET' });
+    await client.request({ url: 'https://api.test/api/v2/projects/geojson/', method: 'GET' });
 
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     const headersObject = (init.headers ?? {}) as Record<string, string>;
@@ -237,7 +237,7 @@ describe('HttpClient (native transport)', () => {
     } as Response);
 
     await client.request({
-      url: 'https://api.test/api/v1/projects/geojson/',
+      url: 'https://api.test/api/v2/projects/geojson/',
       method: 'GET',
       headers: { 'User-Agent': 'Custom-UA/1.0' },
     });

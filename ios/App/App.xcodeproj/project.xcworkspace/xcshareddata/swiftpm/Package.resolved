@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ionic-team/capacitor-swift-pm.git",
       "state" : {
-        "revision" : "1f324fe7bdbdc8c5cc28bea48a231545a8c2e823",
-        "version" : "8.1.0"
+        "revision" : "f1a8fadf1437c23b825c818fb6509c9dbbae2f61",
+        "version" : "8.3.1"
       }
     },
     {
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ionic-team/ion-ios-geolocation.git",
       "state" : {
-        "revision" : "5b722138d4ddc81275e0405acfd812a497519970",
-        "version" : "2.0.0"
+        "revision" : "db363927d3a954e3ea24d2e72b6e9814769a84be",
+        "version" : "2.1.1"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/getsentry/sentry-cocoa",
       "state" : {
-        "revision" : "8a7ae8c0290c83fa0253c5bf8eaf88e49150b6d3",
-        "version" : "9.4.1"
+        "revision" : "3a22ecd00ad1398747bfd587e44df82716908dd3",
+        "version" : "9.10.0"
       }
     }
   ],

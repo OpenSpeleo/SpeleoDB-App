@@ -1,7 +1,8 @@
 /**
  * Type definitions for the SpeleoDB projects/geojson API.
  *
- * Matches the response shape of GET /api/v1/projects/geojson/.
+ * Matches the response shape of GET /api/v2/projects/geojson/ — a bare `Project[]`.
+ * The v1 envelope (`data`, `success`, `timestamp`, `url`) is no longer present.
  */
 
 // ==================== Nested types ====================
@@ -54,11 +55,3 @@ export interface Project {
   latest_commit: ProjectCommit;
 }
 
-// ==================== API response wrapper ====================
-
-export interface ProjectsGeoJSONResponse {
-  data: Project[];
-  success: boolean;
-  timestamp: string;
-  url: string;
-}

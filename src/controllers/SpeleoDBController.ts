@@ -21,6 +21,7 @@ import { TilePrefetchService } from '../services/TilePrefetchService';
 import type {
   AuthResponse,
   AuthState,
+  AuthTokenResponse,
   LoginCredentials,
   User,
 } from '../types';
@@ -47,6 +48,23 @@ export interface PreferencesPort {
 const STORAGE_KEYS = {
   USERS_DB: 'speleo_users_db',
 } as const;
+
+function isSuccessfulStatus(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
+function isClientErrorStatus(status: number): boolean {
+  return status >= 400 && status < 500;
+}
+
+function hasAuthTokenResponse(data: unknown): data is AuthTokenResponse {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+
+  return typeof (data as { token?: unknown }).token === 'string'
+    && (data as { token: string }).token.trim().length > 0;
+}
 
 // ==================== Controller ====================
 
@@ -183,8 +201,10 @@ export class SpeleoDBController {
       try {
         const response = await this.service.authenticate(instance, email, password);
 
-        if (response.status === HTTP_STATUS.OK) {
-          const userEmail = response.data.user ?? email;
+        if (isSuccessfulStatus(response.status) && hasAuthTokenResponse(response.data)) {
+          const userEmail = typeof response.data.user === 'string' && response.data.user.trim()
+            ? response.data.user
+            : email;
           const user: User = { id: 'auth', email: userEmail, name: userEmail };
           this._authState = { isAuthenticated: true, user, token: response.data.token };
           this._isOnline = true;
@@ -261,13 +281,13 @@ export class SpeleoDBController {
         NETWORK.STARTUP_AUTH_TIMEOUT_MS,
       );
 
-      if (response.status >= 200 && response.status < 300) {
+      if (isSuccessfulStatus(response.status)) {
         this._isOnline = true;
         this.setOfflineLocked(false);
         this.notify();
         return 'ok';
       }
-      if (response.status >= 400 && response.status < 500) {
+      if (isClientErrorStatus(response.status)) {
         await this.logout();
         return 'unauthorized';
       }
@@ -396,8 +416,8 @@ export class SpeleoDBController {
     try {
       const response = await this.service.getProjectsGeoJSON(instance, token);
 
-      if (response.status >= 200 && response.status < 300 && response.data?.data) {
-        const freshProjects = response.data.data;
+      if (isSuccessfulStatus(response.status) && Array.isArray(response.data)) {
+        const freshProjects = response.data;
         this._projects = freshProjects;
         this._isOnline = true;
         this.setOfflineLocked(false);
@@ -412,9 +432,18 @@ export class SpeleoDBController {
 
         // Step 5 -- start aggressive tile prefetch in background for offline mode.
         void this.scheduleTilePrefetch(freshProjects);
-      }
 
-      this._syncStatus = 'done';
+        this._syncStatus = 'done';
+      } else {
+        // Non-2xx, malformed body, or both: do not overwrite cache, do not run
+        // overlay/prefetch side-effects, and surface 'error' only when there is
+        // nothing cached to fall back to. A 4xx during data fetch never triggers
+        // logout -- only validateSession does (see docs/offline-mode.md).
+        console.warn(
+          `syncProjects: refresh skipped (status=${response.status}); preserving cached projects.`,
+        );
+        this._syncStatus = this._projects.length > 0 ? 'done' : 'error';
+      }
     } catch (error) {
       console.warn('syncProjects: API fetch failed:', error);
       this._syncStatus = this._projects.length > 0 ? 'done' : 'error';
@@ -464,7 +493,18 @@ export class SpeleoDBController {
 
           if (!this.hasNetworkAccess()) return;
           const res = await this.service.downloadJSON(project.geojson_file!);
-          await this.cache.setGeoJSON(project.id, res.data, project.latest_commit.id);
+          if (!isSuccessfulStatus(res.status)) {
+            console.warn(`Skipping geojson cache for project ${project.id}: status ${res.status}`);
+            continue;
+          }
+
+          const normalized = normalizeGeoJSON(res.data);
+          if (!normalized) {
+            console.warn(`Skipping geojson cache for project ${project.id}: malformed payload`);
+            continue;
+          }
+
+          await this.cache.setGeoJSON(project.id, normalized, project.latest_commit.id);
         } catch (error) {
           console.warn(`Failed to cache geojson for project ${project.id}:`, error);
         }
@@ -486,8 +526,14 @@ export class SpeleoDBController {
 
       try {
         const response = await this.fetchOverlayGeoJSON(overlay.id, instance, token);
-        if (response.status >= 200 && response.status < 300) {
-          await this.cache.setOverlayGeoJSON(overlay.id, response.data);
+        if (isSuccessfulStatus(response.status)) {
+          const normalized = normalizeGeoJSON(response.data);
+          if (!normalized) {
+            console.warn(`Overlay sync skipped for ${overlay.id}: malformed 2xx payload`);
+            return;
+          }
+
+          await this.cache.setOverlayGeoJSON(overlay.id, normalized);
           return;
         }
 

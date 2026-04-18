@@ -18,7 +18,8 @@ IOS_RUNTIME     ?= iOS-26-2
 DEVICE_UDID     = $(shell xcrun simctl list devices available | grep "$(SIMULATOR)" | head -1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
 BUILD_DIR       := build
 
-.PHONY: help install clean dev build lint typecheck test test.e2e ci \
+.PHONY: help install clean dev build lint typecheck test test-ci test.e2e ci \
+        pre-commit \
         sync ios-open ios-build ios-sim ios-sim-run ios-sim-boot ios-sim-shutdown \
         ios-device ios-log cap-doctor
 
@@ -56,8 +57,15 @@ typecheck: ## Run TypeScript type checking
 test: ## Run unit tests (Vitest)
 	npm run test.unit
 
+test-ci: ## Run unit tests (Vitest, one-shot)
+	npm run test.unit -- --run
+
 # ── CI ────────────────────────────────────────────────────────
-ci: lint typecheck test build ## Run the full CI pipeline locally
+ci: lint typecheck test-ci build ## Run the full CI pipeline locally
+
+# ── Git hooks (prek) ──────────────────────────────────────────
+pre-commit: ## Run all pre-commit hooks against the entire repo
+	npx prek run --all-files
 
 # ── Capacitor ─────────────────────────────────────────────────
 sync: build ## Build web + sync to native platforms

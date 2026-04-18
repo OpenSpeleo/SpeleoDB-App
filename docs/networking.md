@@ -40,6 +40,26 @@ If this action does not occur, app remains in offline behavior even if device co
 - `4xx` from auth validation means token/session is invalid and must trigger logout + local purge.
 - Network errors, timeouts, and non-`4xx` failures must preserve session and local cache.
 
+## API contract (v2)
+
+All `/api/v2/*` endpoints return the raw payload on success and a flat error object on failure. The legacy v1 envelope (`data`, `success`, `timestamp`, `url`) is no longer present and must not be parsed.
+
+- Success bodies (status `2xx`):
+  - `GET /api/v2/projects/geojson/` -> `Project[]`
+  - `GET /api/v2/landmarks/geojson/`, `stations/{subsurface,surface}/geojson/`, `exploration-leads/geojson/`, `cylinder-installs/geojson/` -> `GeoJSON.FeatureCollection`
+  - `POST /api/v2/user/auth-token/` -> `{ user, token }`
+  - `GET /api/v2/user/auth-token/` (validate) -> `2xx` with arbitrary body (treated as opaque)
+- Error bodies (status `4xx` / `5xx`): flat object such as `{ detail: '...' }`, `{ message: '...' }`, or `{ errors: { non_field_errors: ['...'] } }`. The same fields existed under v1 alongside the envelope; only the envelope was removed.
+
+Implementation notes:
+
+- `SpeleoDBService` returns `HttpResponse<T>` where `T` is the raw v2 payload (no wrapper).
+- `SpeleoDBController.login` treats any `2xx` auth response with a token body as success; malformed `2xx` auth payloads fall back to normal error handling instead of creating a partial session.
+- `SpeleoDBController.syncProjects` treats only `2xx + Project[]` as the project-list success path. `2xx + []` is a valid empty refresh and replaces stale cached projects; non-array `2xx` payloads are malformed and are treated like failed refreshes. Failed refreshes preserve cache, skip overlay/prefetch side-effects, and set `syncStatus` to `'error'` only when no cached projects are available, otherwise `'done'`. A 4xx during data fetch never triggers logout — only `validateSession` does.
+- Background GeoJSON cache writes validate the downloaded body before persisting it. Non-`2xx` or malformed GeoJSON payloads are skipped so stale cache is preserved instead of being overwritten with garbage.
+- Login error parsing in `SpeleoDBController.login` reads `detail` / `message` / `errors.non_field_errors` directly off `response.data` (already v2-shaped).
+- Endpoint URLs and the v2 base path live in `src/constants.ts` (`API.BASE_PATH = '/api/v2'`).
+
 ## Implementation expectations
 
 - Treat controller offline lock as the authoritative network gate for app behavior.
