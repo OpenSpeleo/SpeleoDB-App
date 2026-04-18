@@ -219,7 +219,6 @@ vi.mock('react-map-gl/maplibre', () => {
       { children, ...mapProps }: { children?: React.ReactNode } & Record<string, unknown>,
       ref: React.Ref<unknown>,
     ) => {
-      // eslint-disable-next-line react-hooks/immutability -- test mock capturing render props
       mapPropsRef.current = mapProps;
 
       React.useImperativeHandle(ref, () => ({

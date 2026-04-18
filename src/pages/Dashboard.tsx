@@ -538,16 +538,16 @@ const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     // Only load when triggered (after sync completes)
     if (loadTrigger === 0) return;
-    if (geoJsonProjects.length === 0) {
-      setGeoJsonData({});
-      return;
-    }
 
     let stale = false;
 
     (async () => {
       const newData: GeoJsonRecord = {};
 
+      // When geoJsonProjects is empty, the loop is a no-op and newData stays {},
+      // which clears any previously-loaded data via the setGeoJsonData call below.
+      // Setting state inside this async callback avoids the cascading-render
+      // cost of calling setState synchronously in the effect body.
       for (const project of geoJsonProjects) {
         try {
           const raw = await controller.getProjectGeoJSON(project.id);

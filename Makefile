@@ -56,9 +56,6 @@ typecheck: ## Run TypeScript type checking
 test: ## Run unit tests (Vitest)
 	npm run test.unit
 
-test.e2e: ## Run end-to-end tests (Cypress)
-	npm run test.e2e
-
 # ── CI ────────────────────────────────────────────────────────
 ci: lint typecheck test build ## Run the full CI pipeline locally
 
