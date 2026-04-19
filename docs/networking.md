@@ -22,6 +22,13 @@ Only one action may attempt to return online from offline mode:
 
 If this action does not occur, app remains in offline behavior even if device connectivity changes. The Settings page sync button calls `syncProjects()` but does not attempt offline reconnect.
 
+## Startup connectivity feedback
+
+- Startup validation uses `NETWORK.STARTUP_AUTH_TIMEOUT_MS` (10s) so spotty networks get a fair attempt before falling back to offline.
+- When validation is still pending after a 1s gate, `SpeleoDBProvider` renders a small `Connecting to SpeleoDB…` banner (`data-testid="connecting-banner"`). This is purely visual feedback; it does not change networking state, retry, or trigger any side effects.
+- The banner is removed when validation resolves. On a fast network it never appears.
+- **The native splash must hide the moment the banner appears.** Capacitor's splash is configured `launchAutoHide: false` with an opaque background, so it sits above React until `SplashScreen.hide()` runs. If the splash is left up until validation resolves, the banner is rendered behind it and the user sees nothing for the full timeout — defeating the purpose of the feature. `SpeleoDBProvider` therefore calls `hideSplashScreenSafely('connecting banner shown')` from inside the 1s gate's setTimeout callback, in addition to the existing call in the validation `.finally()`. Both calls are idempotent at the plugin level.
+
 ## Offline modal contract
 
 - Offline modal visibility is driven by controller offline lock state (`isOfflineLocked`).

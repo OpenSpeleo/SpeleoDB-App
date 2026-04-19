@@ -14,12 +14,17 @@ Displays live sync statistics and a manual sync trigger.
 
 | Row | Value source | Update frequency |
 |---|---|---|
+| Last sync | `lastSyncedAt` from `useSpeleoDB()`, formatted via `formatLastSync()` (device-locale absolute date + time, or `Never`) | Reactive (controller notify after every successful sync) |
 | Synced projects | `projects` from `useSpeleoDB()`, filtered to those with GeoJSON | Reactive (context update) |
 | Cache size | `getTotalCacheBytes()` from `TileCacheRepository` | Polled every 3 s while on `/settings` |
 | Sync progress | Computed from `tilePrefetchJobs` + manual tile count | Reactive + polled |
 | Tiles synced | Same as sync progress, formatted as `processed / total` | Reactive + polled |
 
 The **Sync button** (circular arrow icon in the section header) calls `controller.syncProjects()`. It does not attempt offline reconnect (`retryConnection()`). Errors from `syncProjects()` are caught and swallowed; cache stats are refreshed afterward regardless.
+
+While `syncStatus === 'syncing'`, the sync button widens to display an inline spinner plus a `Syncing…` label (`data-testid="sync-status-label"`). The button is also disabled in this state to prevent double-submission.
+
+`Last sync` is set by `SpeleoDBController.syncProjects()` only after the projects payload is successfully fetched and persisted. Timeouts, transport errors, and non-2xx responses do **not** advance the timestamp. The value is persisted via `PreferencesService.setPreferences({ lastSyncedAt })` and restored on the next app launch via `restoreSession()`. It resets to `null` on logout.
 
 Manual tile count and cache byte totals are read from IndexedDB via cursor-based iteration to avoid loading the full metadata store into memory.
 
@@ -41,6 +46,7 @@ Manual tile count and cache byte totals are read from IndexedDB via cursor-based
 
 - Sync stats (`cacheBytes`, `manualTileCount`): local state, polled via `useEffect`.
 - Sync metrics (`syncTotalTiles`, `syncProcessedTiles`, `syncPct`): derived via `useMemo` from `tilePrefetchJobs` + `manualTileCount`.
+- `lastSyncedAt`: owned by `SpeleoDBController`, persisted via `PreferencesService`, exposed through `useSpeleoDB()`. UI is read-only.
 - `showLandmarks`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
 - `colorMode`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
 - `measurementUnit`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
@@ -64,8 +70,9 @@ The 3-second polling interval for cache stats activates only when `location.path
 - Landmark persistence: `src/services/PreferencesService.ts`
 - Color mode persistence: `src/services/PreferencesService.ts`
 - Measurement unit persistence: `src/services/PreferencesService.ts`
+- Last sync timestamp: tracked in `SpeleoDBController._lastSyncedAt`, persisted via `PreferencesService.setPreferences({ lastSyncedAt })`, formatted by `src/utils/formatLastSync.ts`.
 - Tour re-trigger: `src/onboarding/guidedTour/engine.ts`
-- Tests: `src/pages/Settings.test.tsx`
+- Tests: `src/pages/Settings.test.tsx`, `src/utils/formatLastSync.test.ts`
 
 ## Change checklist
 
@@ -75,5 +82,7 @@ The 3-second polling interval for cache stats activates only when `location.path
 4. Verify landmark toggle propagates to Dashboard map layers in real time.
 5. Verify color mode selector propagates to Dashboard map rendering in real time.
 6. Verify map unit selector changes depth gauge + distance scale labels on Dashboard.
-7. Run `npx vitest run src/pages/Settings.test.tsx`.
-8. Update this document if sections, state ownership, or offline behavior changes.
+7. Verify `Last sync` updates after a successful sync and shows `Never` after logout.
+8. Verify the `Syncing…` label appears on the sync button while `syncStatus === 'syncing'`.
+9. Run `npx vitest run src/pages/Settings.test.tsx`.
+10. Update this document if sections, state ownership, or offline behavior changes.

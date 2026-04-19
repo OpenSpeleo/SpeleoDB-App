@@ -1,12 +1,19 @@
 /**
  * ProjectPanel -- collapsible side panel for toggling project GeoJSON layers.
  *
- * Slides in from the left over the map. Each project gets a colored dot
- * (driven by Dashboard's project color mapping) and a toggle switch. A backdrop click or the close
- * button dismisses the panel.
+ * Slides in from the left over the map. Renders projects either as a flat
+ * list (when no project carries a country) or grouped by ISO country code
+ * with collapsible sections and a per-country gate. Each project row shows
+ * a colored dot and a per-project toggle.
  *
- * Clicking the project name/dot zooms the map to that project.
- * Clicking the toggle switch activates/deactivates the layer.
+ * Two-level visibility model:
+ *  - The per-project toggle reflects the user's individual preference.
+ *  - The country gate is a hard mask layered on top.
+ *  - A project is "effectively visible" iff both are ON. The Dashboard owns
+ *    that AND and feeds it to the map; the panel only displays the result
+ *    via dot fill style and muted text.
+ *
+ * Stateless: data and callbacks come in via props.
  */
 
 import React from 'react';
@@ -14,6 +21,11 @@ import { IonToggle } from '@ionic/react';
 import type { Project } from '../types/project';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import { getProjectColor } from '../utils/projectColors';
+import { countryFlag } from '../utils/countryFlag';
+
+// ==================== Constants ====================
+
+const UNKNOWN_COUNTRY_LABEL = 'Unknown';
 
 // ==================== Props ====================
 
@@ -23,13 +35,19 @@ export interface ProjectPanelProps {
   geoJsonData: Record<string, unknown>;
   projectColorsById: Record<string, string>;
   tilePrefetchByProject: Record<string, TilePrefetchJobState | undefined>;
+  countryVisibility: Record<string, boolean>;
+  countryCollapsed: Record<string, boolean>;
   onToggleProject: (projectId: string) => void;
   onZoomToProject: (projectId: string) => void;
   onShowAll: () => void;
   onHideAll: () => void;
+  onToggleCountry: (country: string, visible: boolean) => void;
+  onToggleCountryCollapsed: (country: string, collapsed: boolean) => void;
   onClose: () => void;
   isOpen: boolean;
 }
+
+// ==================== Helpers ====================
 
 function prefetchStatusLabel(job: TilePrefetchJobState | undefined): string | null {
   if (!job) return null;
@@ -45,6 +63,112 @@ function prefetchStatusLabel(job: TilePrefetchJobState | undefined): string | nu
   return null;
 }
 
+function isCountryOn(
+  country: string,
+  countryVisibility: Record<string, boolean>,
+): boolean {
+  return countryVisibility[country] !== false;
+}
+
+function isCountryCollapsed(
+  country: string,
+  countryCollapsed: Record<string, boolean>,
+): boolean {
+  return countryCollapsed[country] === true;
+}
+
+function groupProjectsByCountry(projects: Project[]): Map<string, Project[]> {
+  const groups = new Map<string, Project[]>();
+  for (const project of projects) {
+    const key = project.country || UNKNOWN_COUNTRY_LABEL;
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(project);
+    else groups.set(key, [project]);
+  }
+  return groups;
+}
+
+function sortCountriesAlphabetically(
+  groups: Map<string, Project[]>,
+): Array<[string, Project[]]> {
+  return [...groups.entries()].sort(([a], [b]) =>
+    a.toLowerCase().localeCompare(b.toLowerCase()),
+  );
+}
+
+// ==================== Country header ====================
+
+interface CountryHeaderProps {
+  country: string;
+  count: number;
+  countryOn: boolean;
+  collapsed: boolean;
+  onToggleCountry: (country: string, visible: boolean) => void;
+  onToggleCollapsed: (country: string, collapsed: boolean) => void;
+}
+
+const CountryHeader: React.FC<CountryHeaderProps> = ({
+  country,
+  count,
+  countryOn,
+  collapsed,
+  onToggleCountry,
+  onToggleCollapsed,
+}) => {
+  const flag = countryFlag(country);
+  const label = country === UNKNOWN_COUNTRY_LABEL ? UNKNOWN_COUNTRY_LABEL : country;
+
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-2 cursor-pointer
+                 hover:bg-slate-700/30 transition-colors select-none"
+      onClick={() => onToggleCollapsed(country, !collapsed)}
+      data-testid={`country-collapse-${country}`}
+    >
+      <svg
+        className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200
+                    ${collapsed ? '-rotate-90' : 'rotate-0'}`}
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M19 9l-7 7-7-7"
+        />
+      </svg>
+      {flag && (
+        <span className="text-base leading-none" aria-hidden="true">
+          {flag}
+        </span>
+      )}
+      <span className="flex-1 text-xs font-semibold text-slate-200 uppercase tracking-wide">
+        {label}
+      </span>
+      <span className="text-[10px] text-slate-500">({count})</span>
+      <div
+        // The toggle and its container must not bubble into the header click,
+        // otherwise tapping the gate would also collapse the section.
+        onClick={(e) => e.stopPropagation()}
+      >
+        <IonToggle
+          checked={countryOn}
+          onIonChange={(e) => {
+            if (e.detail.checked !== countryOn) {
+              onToggleCountry(country, e.detail.checked);
+            }
+          }}
+          data-testid={`country-toggle-${country}`}
+          aria-label={`Toggle country ${country}`}
+        />
+      </div>
+    </div>
+  );
+};
+
 // ==================== Component ====================
 
 const ProjectPanel: React.FC<ProjectPanelProps> = ({
@@ -53,15 +177,111 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
   geoJsonData,
   projectColorsById,
   tilePrefetchByProject,
+  countryVisibility,
+  countryCollapsed,
   onToggleProject,
   onZoomToProject,
   onShowAll,
   onHideAll,
+  onToggleCountry,
+  onToggleCountryCollapsed,
   onClose,
   isOpen,
 }) => {
-  const activeCount = activeProjectIds.size;
   const totalCount = projects.length;
+  const effectiveActiveCount = projects.filter((p) => {
+    if (!activeProjectIds.has(p.id)) return false;
+    const country = p.country || UNKNOWN_COUNTRY_LABEL;
+    return isCountryOn(country, countryVisibility);
+  }).length;
+
+  const renderProjectRow = (project: Project, countryOn: boolean): React.ReactNode => {
+    const individualOn = activeProjectIds.has(project.id);
+    const effectiveOn = individualOn && countryOn;
+    const color = getProjectColor(project.id, projectColorsById);
+    const hasGeoJson = project.id in geoJsonData;
+    const prefetchLabel = prefetchStatusLabel(tilePrefetchByProject[project.id]);
+
+    return (
+      <li key={project.id} className="hover:bg-slate-700/30 transition-colors">
+        <div className="flex items-center gap-2 pl-4 pr-3 py-2.5">
+          <div className="min-w-0 flex-1">
+            <button
+              onClick={() => onZoomToProject(project.id)}
+              className="flex min-w-0 w-full items-center gap-3 text-left"
+              title={hasGeoJson ? `Zoom to ${project.name}` : project.name}
+            >
+              <span
+                data-testid={`project-color-dot-${project.id}`}
+                className="w-3 h-3 rounded-full flex-shrink-0 ring-1 ring-white/20"
+                style={{
+                  backgroundColor: effectiveOn ? color : 'transparent',
+                  borderWidth: effectiveOn ? 0 : 2,
+                  borderColor: color,
+                  borderStyle: 'solid',
+                }}
+              />
+              <div className="min-w-0 flex-1">
+                <span
+                  className={`block text-sm truncate ${
+                    effectiveOn ? 'text-slate-100' : 'text-slate-500'
+                  }`}
+                >
+                  {project.name}
+                </span>
+                {prefetchLabel && (
+                  <span className="block text-[10px] text-emerald-300/90 truncate">
+                    {prefetchLabel}
+                  </span>
+                )}
+              </div>
+            </button>
+          </div>
+          <IonToggle
+            checked={individualOn}
+            onIonChange={(e) => {
+              if (e.detail.checked !== individualOn) onToggleProject(project.id);
+            }}
+            aria-label={`Toggle ${project.name}`}
+            data-testid={`project-toggle-${project.id}`}
+          />
+        </div>
+      </li>
+    );
+  };
+
+  const hasAnyCountry = projects.some((p) => Boolean(p.country));
+
+  const renderFlatProjects = (): React.ReactNode =>
+    projects.map((project) => renderProjectRow(project, true));
+
+  const renderGroupedProjects = (): React.ReactNode => {
+    const groups = groupProjectsByCountry(projects);
+    const sortedGroups = sortCountriesAlphabetically(groups);
+
+    return sortedGroups.map(([country, countryProjects]) => {
+      const countryOn = isCountryOn(country, countryVisibility);
+      const collapsed = isCountryCollapsed(country, countryCollapsed);
+
+      return (
+        <li key={`country-${country}`} data-testid={`country-group-${country}`}>
+          <CountryHeader
+            country={country}
+            count={countryProjects.length}
+            countryOn={countryOn}
+            collapsed={collapsed}
+            onToggleCountry={onToggleCountry}
+            onToggleCollapsed={onToggleCountryCollapsed}
+          />
+          {!collapsed && (
+            <ul className="pl-3">
+              {countryProjects.map((project) => renderProjectRow(project, countryOn))}
+            </ul>
+          )}
+        </li>
+      );
+    });
+  };
 
   return (
     <>
@@ -89,7 +309,7 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
           <div>
             <h2 className="text-sm font-semibold text-slate-100">Projects</h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              {activeCount} of {totalCount} visible
+              {effectiveActiveCount} of {totalCount} visible
             </p>
           </div>
           <button
@@ -99,7 +319,12 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
             aria-label="Close panel"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -111,7 +336,6 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
         >
           <button
             onClick={onShowAll}
-            data-tour-action="show-all"
             className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg
                        bg-slate-700/50 text-slate-300 hover:bg-slate-600/50
                        hover:text-slate-100 transition-colors"
@@ -120,7 +344,6 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
           </button>
           <button
             onClick={onHideAll}
-            data-tour-action="hide-all"
             className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg
                        bg-slate-700/50 text-slate-300 hover:bg-slate-600/50
                        hover:text-slate-100 transition-colors"
@@ -140,72 +363,7 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
             </div>
           ) : (
             <ul className="py-1">
-              {projects.map((project, index) => {
-                const color = getProjectColor(project.id, projectColorsById);
-                const isActive = activeProjectIds.has(project.id);
-                const hasGeoJson = project.id in geoJsonData;
-                const prefetchLabel = prefetchStatusLabel(tilePrefetchByProject[project.id]);
-                const isFirstProject = index === 0;
-
-                return (
-                  <li
-                    key={project.id}
-                    className="hover:bg-slate-700/30 transition-colors"
-                  >
-                    <div className="flex items-center gap-2 pl-4 pr-3 py-2.5">
-                      {/* Name area -- click to zoom */}
-                      <div className="min-w-0 flex-1">
-                        <button
-                          onClick={() => onZoomToProject(project.id)}
-                          data-tour={isFirstProject ? 'project-name' : undefined}
-                          data-tour-action="project-row-zoom"
-                          className="flex min-w-0 w-full items-center gap-3 text-left"
-                          title={hasGeoJson ? `Zoom to ${project.name}` : project.name}
-                        >
-                          {/* Color dot */}
-                          <span
-                            data-testid={`project-color-dot-${project.id}`}
-                            className="w-3 h-3 rounded-full flex-shrink-0 ring-1 ring-white/20"
-                            style={{
-                              backgroundColor: isActive ? color : 'transparent',
-                              borderWidth: isActive ? 0 : 2,
-                              borderColor: color,
-                              borderStyle: 'solid',
-                            }}
-                          />
-
-                          {/* Project name */}
-                          <div className="min-w-0 flex-1">
-                            <span
-                              className={`block text-sm truncate ${
-                                isActive ? 'text-slate-100' : 'text-slate-500'
-                              }`}
-                            >
-                              {project.name}
-                            </span>
-                            {prefetchLabel && (
-                              <span className="block text-[10px] text-emerald-300/90 truncate">
-                                {prefetchLabel}
-                              </span>
-                            )}
-                          </div>
-                        </button>
-                      </div>
-
-                      {/* Toggle switch */}
-                      <IonToggle
-                        checked={isActive}
-                        onIonChange={(e) => {
-                          if (e.detail.checked !== isActive) onToggleProject(project.id);
-                        }}
-                        data-tour={isFirstProject ? 'project-toggle' : undefined}
-                        aria-label={`Toggle ${project.name}`}
-                        data-testid={`project-toggle-${project.id}`}
-                      />
-                    </div>
-                  </li>
-                );
-              })}
+              {hasAnyCountry ? renderGroupedProjects() : renderFlatProjects()}
             </ul>
           )}
         </div>

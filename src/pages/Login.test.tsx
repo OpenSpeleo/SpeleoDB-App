@@ -31,6 +31,7 @@ vi.mock('../context/useSpeleoDB', () => ({
     isRetryingConnection: false,
     projects: [],
     syncStatus: 'idle',
+    lastSyncedAt: null,
     tilePrefetchJobs: [],
   }),
 }));

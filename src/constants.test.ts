@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { API, HTTP_STATUS, HEADERS, PREFERENCES, NETWORK, MAP, COLOR_PALETTE } from './constants';
+import { API, HTTP_STATUS, HEADERS, PREFERENCES, NETWORK, MAP, COLORS } from './constants';
 
 describe('constants', () => {
   describe('API', () => {
@@ -47,6 +47,10 @@ describe('constants', () => {
     it('has REQUEST_TIMEOUT_MS', () => {
       expect(NETWORK.REQUEST_TIMEOUT_MS).toBe(10000);
     });
+
+    it('has STARTUP_AUTH_TIMEOUT_MS of 10s for spotty networks', () => {
+      expect(NETWORK.STARTUP_AUTH_TIMEOUT_MS).toBe(10000);
+    });
   });
 
   describe('MAP', () => {
@@ -89,21 +93,13 @@ describe('constants', () => {
     });
   });
 
-  describe('COLOR_PALETTE', () => {
-    it('has exactly 20 entries', () => {
-      expect(COLOR_PALETTE).toHaveLength(20);
+  describe('COLORS', () => {
+    it('exposes a neutral fallback for missing project colors', () => {
+      expect(COLORS.FALLBACK).toBe('#94a3b8');
     });
 
-    it('contains only valid hex color strings', () => {
-      const hexRegex = /^#[0-9a-fA-F]{6}$/;
-      for (const color of COLOR_PALETTE) {
-        expect(color).toMatch(hexRegex);
-      }
-    });
-
-    it('has no duplicate colors', () => {
-      const unique = new Set(COLOR_PALETTE);
-      expect(unique.size).toBe(COLOR_PALETTE.length);
+    it('uses a valid 6-digit hex string for the fallback', () => {
+      expect(COLORS.FALLBACK).toMatch(/^#[0-9a-fA-F]{6}$/);
     });
   });
 });

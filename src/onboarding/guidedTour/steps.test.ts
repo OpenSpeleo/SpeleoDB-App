@@ -6,48 +6,43 @@ import {
 } from './steps';
 
 describe('buildTourSteps', () => {
-  it('builds full step flow', () => {
+  it('builds the new 6-step flow', () => {
     const { stepIds, steps } = buildTourSteps({});
 
     expect(stepIds).toEqual([
       'openProjectPanel',
-      'hideAllProjects',
-      'showAllProjects',
-      'toggleProject',
-      'centerProject',
+      'goToSettings',
+      'settingsColorMode',
+      'settingsShowLandmarks',
+      'settingsMeasurementUnit',
       'completion',
     ]);
     expect(steps).toHaveLength(6);
   });
 
-  it('always includes project steps and defers skipping to runtime', () => {
-    const { stepIds } = buildTourSteps({});
-    expect(stepIds).toContain('hideAllProjects');
-    expect(stepIds).toContain('showAllProjects');
-    expect(stepIds).toContain('toggleProject');
-    expect(stepIds).toContain('centerProject');
-  });
-
-  it('sets first step to close-only navigation', () => {
+  it('keeps the close-only navigation on the two gesture-driven steps', () => {
     const { steps } = buildTourSteps({});
-    expect(steps[0].popover?.showButtons).toEqual(['close']);
-  });
-
-  it('keeps close button available on interaction-gated steps', () => {
-    const { steps } = buildTourSteps({});
-
-    // openProjectPanel, hide-all, show-all, toggle, center
     expect(steps[0].popover?.showButtons).toEqual(['close']);
     expect(steps[1].popover?.showButtons).toEqual(['close']);
-    expect(steps[2].popover?.showButtons).toEqual(['close']);
-    expect(steps[3].popover?.showButtons).toEqual(['close']);
-    expect(steps[4].popover?.showButtons).toEqual(['close']);
   });
 
-  it('sets toggle step popover to bottom-end alignment', () => {
+  it('shows next + close on the three descriptive settings steps', () => {
     const { steps } = buildTourSteps({});
-    expect(steps[3].popover?.side).toBe('bottom');
-    expect(steps[3].popover?.align).toBe('end');
+    expect(steps[2].popover?.showButtons).toEqual(['next', 'close']);
+    expect(steps[3].popover?.showButtons).toEqual(['next', 'close']);
+    expect(steps[4].popover?.showButtons).toEqual(['next', 'close']);
+  });
+
+  it('places the project-panel step popover at top-start', () => {
+    const { steps } = buildTourSteps({});
+    expect(steps[0].popover?.side).toBe('top');
+    expect(steps[0].popover?.align).toBe('start');
+  });
+
+  it('places the settings-tab step popover at top-end (Settings is the rightmost tab)', () => {
+    const { steps } = buildTourSteps({});
+    expect(steps[1].popover?.side).toBe('top');
+    expect(steps[1].popover?.align).toBe('end');
   });
 
   it('fires completion callback on Finish click', () => {
@@ -64,40 +59,49 @@ describe('buildTourSteps', () => {
     expect(onCompletionNext).toHaveBeenCalledOnce();
   });
 
-  it('invokes menu and bulk hooks on step lifecycle', () => {
+  it('invokes menu and settings-tab hooks on step lifecycle', () => {
     const onEnterMenuStep = vi.fn();
     const onExitMenuStep = vi.fn();
-    const onEnterHideAllStep = vi.fn();
-    const onExitHideAllStep = vi.fn();
-    const onEnterShowAllStep = vi.fn();
-    const onExitShowAllStep = vi.fn();
+    const onEnterSettingsTabStep = vi.fn();
+    const onExitSettingsTabStep = vi.fn();
 
     const { steps } = buildTourSteps({
       onEnterMenuStep,
       onExitMenuStep,
-      onEnterHideAllStep,
-      onExitHideAllStep,
-      onEnterShowAllStep,
-      onExitShowAllStep,
+      onEnterSettingsTabStep,
+      onExitSettingsTabStep,
     });
 
-    // step 0: openProjectPanel
     steps[0].onHighlightStarted?.(undefined, steps[0], {} as never);
     steps[0].onDeselected?.(undefined, steps[0], {} as never);
-    // step 1: hideAllProjects
     steps[1].onHighlightStarted?.(undefined, steps[1], {} as never);
     steps[1].onDeselected?.(undefined, steps[1], {} as never);
-    // step 2: showAllProjects
-    steps[2].onHighlightStarted?.(undefined, steps[2], {} as never);
-    steps[2].onDeselected?.(undefined, steps[2], {} as never);
 
     expect(onEnterMenuStep).toHaveBeenCalledOnce();
     expect(onExitMenuStep).toHaveBeenCalledOnce();
-    expect(onEnterHideAllStep).toHaveBeenCalledOnce();
-    expect(onExitHideAllStep).toHaveBeenCalledOnce();
-    expect(onEnterShowAllStep).toHaveBeenCalledOnce();
-    expect(onExitShowAllStep).toHaveBeenCalledOnce();
+    expect(onEnterSettingsTabStep).toHaveBeenCalledOnce();
+    expect(onExitSettingsTabStep).toHaveBeenCalledOnce();
+  });
 
+  it('shares one settings-content hook across the three descriptive steps', () => {
+    const onEnterSettingsContentStep = vi.fn();
+    const onExitSettingsContentStep = vi.fn();
+
+    const { steps } = buildTourSteps({
+      onEnterSettingsContentStep,
+      onExitSettingsContentStep,
+    });
+
+    for (const index of [2, 3, 4]) {
+      steps[index].onHighlightStarted?.(undefined, steps[index], {} as never);
+      steps[index].onDeselected?.(undefined, steps[index], {} as never);
+    }
+
+    expect(onEnterSettingsContentStep).toHaveBeenCalledTimes(3);
+    expect(onExitSettingsContentStep).toHaveBeenCalledTimes(3);
+  });
+
+  it('exposes stable padding constants', () => {
     expect(GUIDED_TOUR_STAGE_PADDING_DEFAULT).toBe(8);
     expect(GUIDED_TOUR_STAGE_PADDING_MENU).toBe(14);
   });

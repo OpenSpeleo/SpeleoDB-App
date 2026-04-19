@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COLOR_PALETTE } from '../constants';
+import { COLORS } from '../constants';
 import type { Project } from '../types/project';
 import { createProjectColorState, getProjectColor } from './projectColors';
 
@@ -9,6 +9,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     name: 'Test Project',
     description: '',
     country: 'FR',
+    color: '#377eb8',
     type: 'survey',
     visibility: 'public',
     is_active: true,
@@ -37,43 +38,79 @@ function makeProject(overrides: Partial<Project> = {}): Project {
 }
 
 describe('projectColors', () => {
-  it('assigns colors from name-sorted project order', () => {
+  it('uses project.color from the model', () => {
     const projects = [
-      makeProject({ id: 'c', name: 'Charlie' }),
-      makeProject({ id: 'a', name: 'Alpha' }),
-      makeProject({ id: 'b', name: 'Bravo' }),
+      makeProject({ id: 'a', name: 'Alpha', color: '#ff0000' }),
+      makeProject({ id: 'b', name: 'Bravo', color: '#00ff00' }),
+    ];
+    const { projectColorsById } = createProjectColorState(projects);
+    expect(projectColorsById.a).toBe('#ff0000');
+    expect(projectColorsById.b).toBe('#00ff00');
+  });
+
+  it('preserves panel order via case-insensitive name sort', () => {
+    const projects = [
+      makeProject({ id: 'c', name: 'charlie', color: '#000001' }),
+      makeProject({ id: 'a', name: 'Alpha', color: '#000002' }),
+      makeProject({ id: 'b', name: 'bravo', color: '#000003' }),
     ];
 
-    const { sortedProjects, projectColorsById } = createProjectColorState(projects);
+    const { sortedProjects } = createProjectColorState(projects);
 
     expect(sortedProjects.map((project) => project.id)).toEqual(['a', 'b', 'c']);
-    expect(projectColorsById.a).toBe(COLOR_PALETTE[0]);
-    expect(projectColorsById.b).toBe(COLOR_PALETTE[1]);
-    expect(projectColorsById.c).toBe(COLOR_PALETTE[2]);
   });
 
-  it('returns a deterministic fallback color for unknown project id', () => {
+  it('falls back to COLORS.FALLBACK when project.color is empty', () => {
+    const projects = [makeProject({ id: 'a', color: '' })];
+    const { projectColorsById } = createProjectColorState(projects);
+    expect(projectColorsById.a).toBe(COLORS.FALLBACK);
+  });
+
+  it('falls back when project.color is not a valid 6-digit hex', () => {
+    const projects = [
+      makeProject({ id: 'a', name: 'Alpha', color: 'red' }),
+      makeProject({ id: 'b', name: 'Bravo', color: '#fff' }),
+      makeProject({ id: 'c', name: 'Charlie', color: '#1234567' }),
+    ];
+    const { projectColorsById } = createProjectColorState(projects);
+    expect(projectColorsById.a).toBe(COLORS.FALLBACK);
+    expect(projectColorsById.b).toBe(COLORS.FALLBACK);
+    expect(projectColorsById.c).toBe(COLORS.FALLBACK);
+  });
+
+  it('accepts both lower- and upper-case hex digits', () => {
+    const projects = [
+      makeProject({ id: 'a', name: 'Alpha', color: '#ABCDEF' }),
+      makeProject({ id: 'b', name: 'Bravo', color: '#abcdef' }),
+    ];
+    const { projectColorsById } = createProjectColorState(projects);
+    expect(projectColorsById.a).toBe('#ABCDEF');
+    expect(projectColorsById.b).toBe('#abcdef');
+  });
+
+  it('returns the fallback color when looking up an unknown project id', () => {
     const { projectColorsById } = createProjectColorState([]);
-
-    expect(getProjectColor('unknown', projectColorsById)).toBe(COLOR_PALETTE[0]);
+    expect(getProjectColor('unknown', projectColorsById)).toBe(COLORS.FALLBACK);
   });
 
-  it('keeps a project color stable even when another project is filtered out of the panel', () => {
+  it('keeps a project color stable when another project is filtered out of the panel', () => {
     const projects = [
       makeProject({
         id: 'p-hidden',
         name: 'Alpha Hidden',
+        color: '#aaaaaa',
         exclude_geojson: true,
         geojson_file: null,
       }),
       makeProject({
         id: 'p-visible',
         name: 'Beta Visible',
+        color: '#bbbbbb',
       }),
     ];
 
     const { projectColorsById } = createProjectColorState(projects);
 
-    expect(getProjectColor('p-visible', projectColorsById)).toBe(COLOR_PALETTE[1]);
+    expect(getProjectColor('p-visible', projectColorsById)).toBe('#bbbbbb');
   });
 });

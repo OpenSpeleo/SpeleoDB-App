@@ -6,21 +6,19 @@ export const GUIDED_TOUR_STAGE_PADDING_MENU = 14;
 
 export type GuidedTourStepId =
   | 'openProjectPanel'
-  | 'hideAllProjects'
-  | 'showAllProjects'
-  | 'toggleProject'
-  | 'centerProject'
+  | 'goToSettings'
+  | 'settingsColorMode'
+  | 'settingsShowLandmarks'
+  | 'settingsMeasurementUnit'
   | 'completion';
 
 export interface GuidedTourStepHooks {
   onEnterMenuStep?: () => void;
   onExitMenuStep?: () => void;
-  onEnterHideAllStep?: () => void;
-  onExitHideAllStep?: () => void;
-  onEnterShowAllStep?: () => void;
-  onExitShowAllStep?: () => void;
-  onEnterCenterProject?: () => void;
-  onExitCenterProject?: () => void;
+  onEnterSettingsTabStep?: () => void;
+  onExitSettingsTabStep?: () => void;
+  onEnterSettingsContentStep?: () => void;
+  onExitSettingsContentStep?: () => void;
   onCompletionNext?: () => void;
 }
 
@@ -36,10 +34,11 @@ export function buildTourSteps(
 ): BuildGuidedTourStepsResult {
   const stepIds: GuidedTourStepId[] = [
     'openProjectPanel',
-    'hideAllProjects',
-    'showAllProjects',
-    'toggleProject',
-    'centerProject',
+    'goToSettings',
+    'settingsColorMode',
+    'settingsShowLandmarks',
+    'settingsMeasurementUnit',
+    'completion',
   ];
 
   const steps: DriveStep[] = [
@@ -59,83 +58,84 @@ export function buildTourSteps(
         showButtons: ['close'],
       },
     },
-  ];
-
-  steps.push(
     {
-      element: TOUR_SELECTORS.hideAllAction,
+      element: TOUR_SELECTORS.settingsTab,
       onHighlightStarted: () => {
-        options.onEnterHideAllStep?.();
+        options.onEnterSettingsTabStep?.();
       },
       onDeselected: () => {
-        options.onExitHideAllStep?.();
+        options.onExitSettingsTabStep?.();
       },
       popover: {
-        title: 'Hide all projects',
-        description: 'Tap "Hide all" to temporarily hide every project layer.',
-        side: 'bottom',
-        align: 'center',
-        showButtons: ['close'],
-      },
-    },
-    {
-      element: TOUR_SELECTORS.showAllAction,
-      onHighlightStarted: () => {
-        options.onEnterShowAllStep?.();
-      },
-      onDeselected: () => {
-        options.onExitShowAllStep?.();
-      },
-      popover: {
-        title: 'Show all projects',
-        description: 'Now tap "Show all" to bring every project layer back.',
-        side: 'bottom',
-        align: 'center',
-        showButtons: ['close'],
-      },
-    },
-    {
-      element: TOUR_SELECTORS.projectToggle,
-      popover: {
-        title: 'Toggle one project',
-        description: 'Use this switch to hide or show an individual project layer.',
-        side: 'bottom',
+        title: 'Open Settings',
+        description: 'Tap Settings to customize your map.',
+        side: 'top',
         align: 'end',
         showButtons: ['close'],
       },
     },
     {
-      element: TOUR_SELECTORS.projectName,
+      element: TOUR_SELECTORS.settingsColorMode,
       onHighlightStarted: () => {
-        options.onEnterCenterProject?.();
+        options.onEnterSettingsContentStep?.();
       },
       onDeselected: () => {
-        options.onExitCenterProject?.();
+        options.onExitSettingsContentStep?.();
       },
       popover: {
-        title: 'Center on a project',
-        description: 'Tap the project name to zoom directly to that project on the map.',
+        title: 'Color mode',
+        description: 'Choose between coloring projects individually or by depth.',
         side: 'bottom',
         align: 'center',
-        showButtons: ['close'],
+        showButtons: ['next', 'close'],
       },
     },
-  );
-
-  stepIds.push('completion');
-  steps.push({
-    popover: {
-      title: 'Tour complete',
-      description: 'You are ready to explore. Tap Finish to continue.',
-      side: 'over',
-      align: 'center',
-      showButtons: ['next'],
-      nextBtnText: 'Finish',
-      onNextClick: () => {
-        options.onCompletionNext?.();
+    {
+      element: TOUR_SELECTORS.settingsShowLandmarks,
+      onHighlightStarted: () => {
+        options.onEnterSettingsContentStep?.();
+      },
+      onDeselected: () => {
+        options.onExitSettingsContentStep?.();
+      },
+      popover: {
+        title: 'Show landmarks',
+        description: 'Toggle map landmarks on or off.',
+        side: 'bottom',
+        align: 'center',
+        showButtons: ['next', 'close'],
       },
     },
-  });
+    {
+      element: TOUR_SELECTORS.settingsMeasurementUnit,
+      onHighlightStarted: () => {
+        options.onEnterSettingsContentStep?.();
+      },
+      onDeselected: () => {
+        options.onExitSettingsContentStep?.();
+      },
+      popover: {
+        title: 'Map unit',
+        description: 'Switch between meters and feet for distances and depths.',
+        side: 'bottom',
+        align: 'center',
+        showButtons: ['next', 'close'],
+      },
+    },
+    {
+      popover: {
+        title: 'Tour complete',
+        description: 'You are ready to explore. Tap Finish to continue.',
+        side: 'over',
+        align: 'center',
+        showButtons: ['next'],
+        nextBtnText: 'Finish',
+        onNextClick: () => {
+          options.onCompletionNext?.();
+        },
+      },
+    },
+  ];
 
   return { stepIds, steps };
 }

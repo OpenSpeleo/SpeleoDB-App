@@ -90,6 +90,8 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
         type="button"
         role="tab"
         aria-selected={onSettings}
+        data-tour="settings-tab"
+        data-testid="settings-tab"
         onClick={() => {
           if (!onSettings) history.push('/settings');
         }}

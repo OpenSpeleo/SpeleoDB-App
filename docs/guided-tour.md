@@ -1,10 +1,10 @@
 # Guided Tour
 
-This document defines the interactive guided tour that teaches users how to use the dashboard features after first login.
+This document defines the interactive guided tour that teaches users how to use the dashboard and Settings after first login.
 
 ## Purpose
 
-The guided tour walks users through the dashboard UI step-by-step, highlighting key features and waiting for the user to perform gestures before advancing. It runs after the onboarding modal is dismissed on first login and can be re-triggered from the Settings page.
+The guided tour walks users through the dashboard and Settings UI step-by-step, highlighting key features and waiting for the user to perform gestures on the two tab steps. It runs after the onboarding modal is dismissed on first login and can be re-triggered from the Settings page.
 
 ## Lifecycle
 
@@ -21,55 +21,53 @@ Choices: react-joyride, @reactour/tour, NextStep, Shepherd.js, intro.js, Onboard
 
 ## Tour flow: 6 steps
 
+The tour has two gesture-driven tab steps (1 and 2) followed by three descriptive Settings steps (3-5) advanced via Next, then completion.
+
 ### Step 1: "Open the project panel"
 
-- **Target**: `[data-tour="menu-toggle"]` (Projects tab in the bottom navigation bar)
+- **Target**: `[data-tour="menu-toggle"]` (Projects tab in the bottom navigation bar).
 - **Popover**: Top side, start-aligned to the Projects button.
-- **Interaction**: Next button hidden. Tour waits for user to tap the button.
+- **Interaction**: Next button hidden. Tour waits for the user to tap the button.
 - **Detection**: Capture-phase click interception on the menu toggle.
-- **Handoff behavior**: On click, the tour consumes the original event, hides popover/arrow/highlight chrome (`tour-step-transition-handoff`), re-emits a synthetic native click to the same button, then continues once panel-open readiness checks pass.
-- **Advance timing**: Uses an initial 600ms settle window before readiness polling begins, then advances as soon as panel-open controls are available.
-- **Stage padding**: Increased to 14px via runtime `setConfig()` to make the cutout more prominent around the button. Resets to 8px on subsequent steps.
-- **Clickthrough guard**: `tour-step-menu-clickthrough` class disables overlay pointer capture and raises the active menu button above the overlay to keep it reliably tappable.
-- **Panel-open guard**: Tour waits for `[data-tour="project-panel"][data-tour-open="true"]` before entering bulk-action steps.
-- **Deferred project check**: This step no longer decides whether project-specific steps are skipped. It advances to bulk-action steps as soon as panel controls are available.
+- **Handoff behavior**: On click, the tour consumes the original event, hides popover/arrow/highlight chrome (`tour-step-transition-handoff`), re-emits a synthetic native click to the same button, then continues once the panel-open readiness check passes.
+- **Advance timing**: Uses an initial 600ms settle window before readiness polling begins, then advances as soon as the panel exposes `[data-tour="project-panel"][data-tour-open="true"]`.
+- **Stage padding**: Increased to 14px via runtime `setConfig()` to make the cutout more prominent. Resets to 8px on subsequent steps.
+- **Clickthrough guard**: `tour-step-tab-clickthrough` class disables overlay pointer capture and raises the active tab button above the overlay so the tap reliably reaches the real tab.
+- **Timeout**: If the panel never reports `data-tour-open="true"` within ~1.2s after the click, jumps to completion.
 
-### Step 2: "Hide all projects"
+### Step 2: "Open Settings"
 
-- **Target**: `[data-tour-action="hide-all"]` (Hide all button)
-- **Popover**: Bottom. Instructs the user to hide all projects.
-- **Interaction**: User clicks `Hide all`.
+- **Target**: `[data-tour="settings-tab"]` (Settings tab in the bottom navigation bar).
+- **Popover**: Top side, end-aligned (Settings is the rightmost tab).
+- **Interaction**: Next button hidden. Tour waits for the user to tap the button.
+- **Handoff behavior**: Same handoff as step 1 — consume + hide chrome + re-emit native click.
+- **Page-route gate**: Both Dashboard and Settings stay mounted via `App.tsx`'s visibility toggle. The advance check requires `window.location.pathname === '/settings'` **and** all three Settings selectors to resolve, otherwise the highlight could land on the hidden Settings DOM while Dashboard is still visible.
+- **Timeout**: If the Settings DOM never appears within ~6s after the click (e.g. the user backed out), the tour jumps to completion.
+- **Clickthrough guard**: Reuses `tour-step-tab-clickthrough` so the same pointer-passthrough rule covers both `[data-tour='menu-toggle']` and `[data-tour='settings-tab']`.
 
-### Step 3: "Show all projects"
+### Step 3: "Color mode"
 
-- **Target**: `[data-tour-action="show-all"]` (Show all button)
-- **Popover**: Bottom. Instructs the user to restore all projects.
-- **Interaction**: User clicks `Show all`.
-- **Deferred skip point**: After click, the tour waits up to 6 seconds for first-project controls (`project-toggle` / `project-name`) to appear before moving to step 4. If targets never appear within that grace period, it jumps to completion.
+- **Target**: `[data-tour="settings-color-mode"]` (the `<IonItem>` row wrapping the color mode `<select>`).
+- **Popover**: Bottom-center. Descriptive text with a Next button.
+- **Interaction**: User taps Next; no gesture detection on the row itself.
 
-### Step 4: "Toggle a project"
+### Step 4: "Show landmarks"
 
-- **Target**: `[data-tour="project-toggle"]` (first project's toggle switch only)
-- **Popover**: Bottom/end. Placed under the project row to avoid clipping and keep arrow alignment on the toggle highlight.
-- **Interaction**: User needs to change the project visibility toggle.
-- **Conditional**: Skipped if no projects are loaded.
+- **Target**: `[data-tour="settings-show-landmarks"]` (the `<IonItem>` row wrapping the landmark toggle).
+- **Popover**: Bottom-center. Descriptive text with a Next button.
+- **Interaction**: User taps Next.
 
-### Step 5: "Center on a project"
+### Step 5: "Map unit"
 
-- **Target**: `[data-tour="project-name"]` (first project's name button only)
-- **Popover**: Bottom. Appears under the highlighted project name to avoid covering the focus target.
-- **Interaction**: User clicks the highlighted first project name.
-- **Handoff behavior**: Tour intercepts the click, hides popover/arrow/highlight chrome (`tour-step-transition-handoff`), re-emits a native click to preserve normal dashboard behavior, and then waits for zoom completion.
-- **Auto-close**: The project panel closes automatically after the user clicks a project name, so the map zoom animation is immediately visible without the panel obscuring it.
-- **Completion gate**: Step does not advance until `Dashboard` dispatches `speleo:project-zoom-complete` (triggered from map movement completion callbacks).
-- **Conditional**: Skipped if no projects are loaded.
+- **Target**: `[data-tour="settings-measurement-unit"]` (the `<IonItem>` row wrapping the unit `<select>`).
+- **Popover**: Bottom-center. Descriptive text with a Next button.
+- **Interaction**: User taps Next.
 
 ### Step 6: "Tour complete"
 
-- **Target**: none (centered popover)
+- **Target**: none (centered popover).
 - **Popover**: Confirms tutorial completion.
 - **Interaction**: User taps `Finish`.
-- **Entry timing**: Shown after step 5 receives `speleo:project-zoom-complete`, or via the runtime skip path when project-step targets never materialize after step 3.
 - **Completion side effect**: Sets `hasCompletedGuidedTour = true`.
 
 ### Completion
@@ -78,8 +76,7 @@ Choices: react-joyride, @reactour/tour, NextStep, Shepherd.js, intro.js, Onboard
 
 ### Separation from app code
 
-The tour module is deliberately decoupled from the React component tree.
-The objective is to keep the onboarding tutorial code as clearly and sharply separated as possible to minimize the likelihood of bugs.
+The tour module is deliberately decoupled from the React component tree. The objective is to keep the onboarding tutorial code as clearly and sharply separated as possible to minimize the likelihood of bugs.
 
 ## CSS theming
 
@@ -94,8 +91,8 @@ The tour popover is styled to match the app's dark slate/purple theme in `src/on
 
 ## Edge cases
 
-- **No projects**: Steps 2-3 still run (bulk controls), then steps 4-5 are skipped if first-project targets do not appear within the step-3 grace period.
-- **Flow construction**: The full 6-step flow is always constructed; project-step skipping is resolved only at runtime transition points.
+- **No projects**: Irrelevant — the tour no longer points at any project row. Steps 3-5 only target Settings.
+- **Settings DOM missing**: Step 2 jumps to completion if the three Settings selectors never resolve (e.g. the user navigated away).
 - **User closes tour early**: Allowed from steps 1-5 and treated as completion for persistence.
 - **Tour re-trigger**: Settings "Show Tutorial" button ignores `hasCompletedGuidedTour` and starts the tutorial from step 1.
 - **Offline mode**: Tour works identically offline (pure DOM/UI, no network dependency).
@@ -105,8 +102,12 @@ The tour popover is styled to match the app's dark slate/purple theme in `src/on
 
 - Step definitions: `src/onboarding/guidedTour/steps.ts`
 - Tour engine: `src/onboarding/guidedTour/engine.ts`
-- Selectors and events: `src/onboarding/guidedTour/selectors.ts`
+- Selectors and `hasSettingsTourTargets()`: `src/onboarding/guidedTour/selectors.ts`
 - Tour CSS: `src/onboarding/guidedTour/tourStyles.css`
+- Tour selector hosts:
+  - `[data-tour="menu-toggle"]`, `[data-tour="settings-tab"]` -- `src/components/AppTabBar.tsx`
+  - `[data-tour="settings-color-mode"]`, `[data-tour="settings-show-landmarks"]`, `[data-tour="settings-measurement-unit"]` -- `src/pages/Settings.tsx`
+  - `[data-tour="project-panel"]`, `data-tour-open` -- `src/components/ProjectPanel.tsx`
 - Tour re-trigger: `src/pages/Settings.tsx` ("Show Tutorial" button)
 
 ## Change checklist
@@ -114,7 +115,7 @@ The tour popover is styled to match the app's dark slate/purple theme in `src/on
 When modifying the guided tour:
 
 1. Verify step definitions in `steps.ts` match this document.
-2. Verify interactive steps (open-panel, hide/show, toggle, center) correctly detect gestures and advance.
+2. Verify the two gesture-driven steps (open-panel, go-to-Settings) correctly detect taps and advance.
 3. Verify the tour auto-starts after onboarding modal dismissal on first login.
 4. Verify the tour does not auto-start on subsequent logins (persistence check).
 5. Verify the Settings "Show Tutorial" button re-triggers the tour.

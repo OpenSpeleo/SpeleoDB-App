@@ -9,7 +9,8 @@ This folder contains product and engineering documentation for core app behavior
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding conventions, and testing expectations.
 - `onboarding-modal.md`: companion onboarding modal design intent, responsive layout behavior, and UX requirements.
-- `project-panel.md`: project panel layout, open/close behavior, zoom-to-project, auto-close UX, and persistence.
+- `project-panel.md`: project panel layout, open/close behavior, zoom-to-project, auto-close UX, country grouping, and persistence.
+- `project-colors.md`: model-driven `project.color` contract, fallback semantics, and downstream consumers.
 - `guided-tour.md`: interactive guided tour flow, driver.js integration, step definitions, and architecture.
 - `dashboard-map-overlays.md`: read-only dashboard overlay endpoints, icon/label mapping, marker detail modal contract, share functionality, and offline cache lifecycle.
 - `settings.md`: Settings page sections (sync stats, map settings, tutorial, account), state ownership, polling lifecycle, and offline behavior.

@@ -6,6 +6,11 @@ import {
   getProjectVisibilityPreferences,
   setProjectVisibilityPreference,
   setProjectVisibilityPreferences,
+  getCountryVisibilityPreferences,
+  setCountryVisibilityPreference,
+  setCountryVisibilityPreferences,
+  getCountryCollapsedPreferences,
+  setCountryCollapsedPreference,
   getHasCompletedGuidedTour,
   setHasCompletedGuidedTour,
   getShowLandmarks,
@@ -174,6 +179,8 @@ describe('PreferencesService', () => {
   describe('clearPreferences', () => {
     it('wipes storage so getPreferences has no auth instance', () => {
       setPreferences({ email: 'x@y.com', token: 't', instance: 'https://x.org' });
+      setCountryVisibilityPreference('FR', false);
+      setCountryCollapsedPreference('FR', true);
       clearPreferences();
       const prefs = getPreferences();
       expect(prefs.email).toBeUndefined();
@@ -183,6 +190,8 @@ describe('PreferencesService', () => {
       expect(getShowLandmarks()).toBe(true);
       expect(getColorMode()).toBe('project');
       expect(getMeasurementUnit()).toBe('meters');
+      expect(getCountryVisibilityPreferences()).toEqual({});
+      expect(getCountryCollapsedPreferences()).toEqual({});
     });
   });
 
@@ -342,6 +351,195 @@ describe('PreferencesService', () => {
       setMeasurementUnit('meters');
       setPreferences({ token: 'tok', instance: 'https://example.org' });
       expect(getMeasurementUnit()).toBe('meters');
+    });
+  });
+
+  describe('country visibility preferences', () => {
+    it('returns empty map when missing', () => {
+      expect(getCountryVisibilityPreferences()).toEqual({});
+    });
+
+    it('persists single country visibility', () => {
+      seedValidAuth();
+      setCountryVisibilityPreference('FR', false);
+      expect(getCountryVisibilityPreferences()).toEqual({ FR: false });
+    });
+
+    it('ignores empty country code', () => {
+      seedValidAuth();
+      setCountryVisibilityPreference('', false);
+      expect(getCountryVisibilityPreferences()).toEqual({});
+    });
+
+    it('bulk update merges and preserves other preferences', () => {
+      setPreferences({
+        email: 'u@example.com',
+        token: 'tok',
+        instance: 'https://example.org',
+      });
+      setCountryVisibilityPreferences({ FR: false, US: true });
+      setCountryVisibilityPreference('CA', false);
+
+      expect(getCountryVisibilityPreferences()).toEqual({
+        FR: false,
+        US: true,
+        CA: false,
+      });
+      expect(getPreferences().email).toBe('u@example.com');
+    });
+
+    it('survives interleaved rapid writes (queue invariant)', async () => {
+      seedValidAuth();
+      await Promise.all([
+        Promise.resolve().then(() => setCountryVisibilityPreference('FR', false)),
+        Promise.resolve().then(() => setProjectVisibilityPreference('p1', true)),
+        Promise.resolve().then(() =>
+          setCountryVisibilityPreferences({ US: true, CA: false }),
+        ),
+      ]);
+
+      expect(getCountryVisibilityPreferences()).toEqual({
+        FR: false,
+        US: true,
+        CA: false,
+      });
+      expect(getProjectVisibilityPreferences()).toEqual({ p1: true });
+    });
+
+    it('drops non-boolean entries when reading from storage', () => {
+      seedValidAuth();
+      const stored = JSON.parse(
+        localStorage.getItem(PREFERENCES.STORAGE_KEY) ?? '{}',
+      );
+      stored.countryVisibility = { FR: false, US: 'maybe', CA: 1, '': true };
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify(stored));
+
+      expect(getCountryVisibilityPreferences()).toEqual({ FR: false });
+    });
+
+    it('preserves country visibility across unrelated partial updates', () => {
+      seedValidAuth();
+      setCountryVisibilityPreference('FR', false);
+      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      expect(getCountryVisibilityPreferences()).toEqual({ FR: false });
+    });
+  });
+
+  describe('country collapsed preferences', () => {
+    it('returns empty map when missing', () => {
+      expect(getCountryCollapsedPreferences()).toEqual({});
+    });
+
+    it('persists single country collapse state', () => {
+      seedValidAuth();
+      setCountryCollapsedPreference('FR', true);
+      expect(getCountryCollapsedPreferences()).toEqual({ FR: true });
+    });
+
+    it('ignores empty country code', () => {
+      seedValidAuth();
+      setCountryCollapsedPreference('', true);
+      expect(getCountryCollapsedPreferences()).toEqual({});
+    });
+
+    it('merges multiple sequential updates and preserves other preferences', () => {
+      setPreferences({
+        email: 'u@example.com',
+        token: 'tok',
+        instance: 'https://example.org',
+      });
+      setCountryCollapsedPreference('FR', true);
+      setCountryCollapsedPreference('US', false);
+
+      expect(getCountryCollapsedPreferences()).toEqual({ FR: true, US: false });
+      expect(getPreferences().email).toBe('u@example.com');
+    });
+
+    it('survives interleaved rapid writes (queue invariant)', async () => {
+      seedValidAuth();
+      await Promise.all([
+        Promise.resolve().then(() => setCountryCollapsedPreference('FR', true)),
+        Promise.resolve().then(() => setCountryVisibilityPreference('FR', false)),
+        Promise.resolve().then(() => setCountryCollapsedPreference('US', true)),
+      ]);
+
+      expect(getCountryCollapsedPreferences()).toEqual({ FR: true, US: true });
+      expect(getCountryVisibilityPreferences()).toEqual({ FR: false });
+    });
+
+    it('preserves country collapse across unrelated partial updates', () => {
+      seedValidAuth();
+      setCountryCollapsedPreference('FR', true);
+      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      expect(getCountryCollapsedPreferences()).toEqual({ FR: true });
+    });
+  });
+
+  describe('lastSyncedAt preferences', () => {
+    it('is undefined when missing', () => {
+      seedValidAuth();
+      expect(getPreferences().lastSyncedAt).toBeUndefined();
+    });
+
+    it('round-trips a finite positive epoch', () => {
+      setPreferences({
+        email: 'u@example.com',
+        token: 'tok',
+        instance: VALID_INSTANCE,
+        lastSyncedAt: 1_710_000_000_000,
+      });
+      expect(getPreferences().lastSyncedAt).toBe(1_710_000_000_000);
+    });
+
+    it('drops non-numeric values from storage', () => {
+      seedValidAuth();
+      const stored = JSON.parse(
+        localStorage.getItem(PREFERENCES.STORAGE_KEY) ?? '{}',
+      );
+      stored.lastSyncedAt = 'yesterday';
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify(stored));
+
+      expect(getPreferences().lastSyncedAt).toBeUndefined();
+    });
+
+    it('drops non-finite or non-positive values from storage', () => {
+      seedValidAuth();
+      const stored = JSON.parse(
+        localStorage.getItem(PREFERENCES.STORAGE_KEY) ?? '{}',
+      );
+      stored.lastSyncedAt = -1;
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify(stored));
+      expect(getPreferences().lastSyncedAt).toBeUndefined();
+
+      stored.lastSyncedAt = 0;
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify(stored));
+      expect(getPreferences().lastSyncedAt).toBeUndefined();
+
+      stored.lastSyncedAt = Number.POSITIVE_INFINITY;
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify(stored));
+      expect(getPreferences().lastSyncedAt).toBeUndefined();
+    });
+
+    it('preserves lastSyncedAt across unrelated partial updates', () => {
+      setPreferences({
+        email: 'u@example.com',
+        token: 'tok',
+        instance: VALID_INSTANCE,
+        lastSyncedAt: 1_710_000_000_000,
+      });
+      setPreferences({ token: 'tok', instance: VALID_INSTANCE });
+      expect(getPreferences().lastSyncedAt).toBe(1_710_000_000_000);
+    });
+
+    it('clearPreferences wipes lastSyncedAt', () => {
+      setPreferences({
+        email: 'u@example.com',
+        token: 'tok',
+        instance: VALID_INSTANCE,
+        lastSyncedAt: 1_710_000_000_000,
+      });
+      clearPreferences();
+      expect(getPreferences().lastSyncedAt).toBeUndefined();
     });
   });
 });

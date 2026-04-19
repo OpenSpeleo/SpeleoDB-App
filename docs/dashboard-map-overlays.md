@@ -251,12 +251,20 @@ Zoom levels and marker sizes are sourced from `MAP_OVERLAYS` in `src/constants.t
 
 ## Project visibility interaction
 
-- Project panel toggles filter **project-linked overlays** only:
+- The dashboard derives `effectiveActiveProjectIds` once per render via a `useMemo` over `sortedProjects`, the per-project preference set (`activeProjectIds`), and the per-country gate (`countryVisibility`). A project is in this set iff its individual toggle is ON **and** its country gate is ON. See `docs/project-panel.md` for the full two-level visibility model.
+- Every map-side consumer reads from `effectiveActiveProjectIds`:
+  - project `<Source>`/`<Layer>` mount/unmount,
+  - project-linked overlay filtering,
+  - depth-domain merge in `useDepthProbe`,
+  - auto-fit-bounds on first load,
+  - dynamic project layer ID lists (`projectPointLayerIds`, `projectGeometryLayerIds`).
+- Project-linked overlay filters use `effectiveActiveProjectIds`:
   - subsurface stations by `properties.project`,
   - exploration leads by `properties.project`,
   - cylinder installs by `properties.project_id`.
 - Landmarks and surface stations are not project-linked and stay independent from project toggles.
-- In depth color mode, toggling project visibility automatically recomputes the depth domain (min/max range) using only visible projects. Depth gauge labels and layer color expressions update immediately.
+- Toggling a country gate cascades through every consumer above. Per-project preferences are not mutated; the panel still shows each project row's toggle in its individual `checked` state, just with muted styling on the dot and name.
+- In depth color mode, toggling either an individual toggle or a country gate automatically recomputes the depth domain (min/max range) using only effectively-visible projects. Depth gauge labels and layer color expressions update immediately.
 
 ## Landmark visibility toggle
 

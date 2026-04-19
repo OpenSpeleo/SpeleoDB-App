@@ -20,10 +20,13 @@ export interface UserPreferences {
   token?: string;
   instance?: string;
   projectVisibility?: Record<string, boolean>;
+  countryVisibility?: Record<string, boolean>;
+  countryCollapsed?: Record<string, boolean>;
   hasCompletedGuidedTour?: boolean;
   showLandmarks?: boolean;
   colorMode?: MapColorMode;
   measurementUnit?: MeasurementUnit;
+  lastSyncedAt?: number;
 }
 
 function clearStoredPreferencesSilently(): void {
@@ -38,20 +41,22 @@ function getStorageKey(): string {
   return PREFERENCES.STORAGE_KEY;
 }
 
-function normalizeProjectVisibility(
-  value: unknown,
-): Record<string, boolean> {
+function normalizeBooleanRecord(value: unknown): Record<string, boolean> {
   if (!value || typeof value !== 'object') return {};
 
   const normalized: Record<string, boolean> = {};
-  for (const [key, visible] of Object.entries(value as Record<string, unknown>)) {
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
     if (!key) continue;
-    if (typeof visible === 'boolean') {
-      normalized[key] = visible;
+    if (typeof val === 'boolean') {
+      normalized[key] = val;
     }
   }
   return normalized;
 }
+
+const normalizeProjectVisibility = normalizeBooleanRecord;
+const normalizeCountryVisibility = normalizeBooleanRecord;
+const normalizeCountryCollapsed = normalizeBooleanRecord;
 
 function normalizeGuidedTourCompletion(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value;
@@ -73,19 +78,32 @@ function normalizeMeasurementUnit(value: unknown): MeasurementUnit | undefined {
   return undefined;
 }
 
+function normalizeLastSyncedAt(value: unknown): number | undefined {
+  if (typeof value !== 'number') return undefined;
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+  return value;
+}
+
+function emptyPreferences(): UserPreferences {
+  return {
+    instance: undefined,
+    projectVisibility: {},
+    countryVisibility: {},
+    countryCollapsed: {},
+    hasCompletedGuidedTour: undefined,
+    showLandmarks: undefined,
+    colorMode: undefined,
+    measurementUnit: undefined,
+    lastSyncedAt: undefined,
+  };
+}
+
 function readRawPreferences(): UserPreferences {
   try {
     const raw = localStorage.getItem(getStorageKey());
     if (!raw) {
       clearStoredPreferencesSilently();
-      return {
-        instance: undefined,
-        projectVisibility: {},
-        hasCompletedGuidedTour: undefined,
-        showLandmarks: undefined,
-        colorMode: undefined,
-        measurementUnit: undefined,
-      };
+      return emptyPreferences();
     }
 
     const parsed = JSON.parse(raw) as UserPreferences;
@@ -95,35 +113,24 @@ function readRawPreferences(): UserPreferences {
       // Corrupted auth preferences are invalid by contract. Clear storage so
       // startup never restores an authenticated session without an instance.
       clearStoredPreferencesSilently();
-      return {
-        instance: undefined,
-        projectVisibility: {},
-        hasCompletedGuidedTour: undefined,
-        showLandmarks: undefined,
-        colorMode: undefined,
-        measurementUnit: undefined,
-      };
+      return emptyPreferences();
     }
     return {
       email: parsed.email,
       token: parsed.token,
       instance: parsed.instance,
       projectVisibility: normalizeProjectVisibility(parsed.projectVisibility),
+      countryVisibility: normalizeCountryVisibility(parsed.countryVisibility),
+      countryCollapsed: normalizeCountryCollapsed(parsed.countryCollapsed),
       hasCompletedGuidedTour: normalizeGuidedTourCompletion(parsed.hasCompletedGuidedTour),
       showLandmarks: normalizeShowLandmarks(parsed.showLandmarks),
       colorMode: normalizeColorMode(parsed.colorMode),
       measurementUnit: normalizeMeasurementUnit(parsed.measurementUnit),
+      lastSyncedAt: normalizeLastSyncedAt(parsed.lastSyncedAt),
     };
   } catch {
     clearStoredPreferencesSilently();
-    return {
-      instance: undefined,
-      projectVisibility: {},
-      hasCompletedGuidedTour: undefined,
-      showLandmarks: undefined,
-      colorMode: undefined,
-      measurementUnit: undefined,
-    };
+    return emptyPreferences();
   }
 }
 
@@ -155,10 +162,13 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
         token: mutated.token,
         instance: mutated.instance,
         projectVisibility: normalizeProjectVisibility(mutated.projectVisibility),
+        countryVisibility: normalizeCountryVisibility(mutated.countryVisibility),
+        countryCollapsed: normalizeCountryCollapsed(mutated.countryCollapsed),
         hasCompletedGuidedTour: normalizeGuidedTourCompletion(mutated.hasCompletedGuidedTour),
         showLandmarks: normalizeShowLandmarks(mutated.showLandmarks),
         colorMode: normalizeColorMode(mutated.colorMode),
         measurementUnit: normalizeMeasurementUnit(mutated.measurementUnit),
+        lastSyncedAt: normalizeLastSyncedAt(mutated.lastSyncedAt),
       };
       writePreferences(next);
     }
@@ -187,6 +197,14 @@ export function setPreferences(prefs: Partial<UserPreferences>): void {
       prefs.projectVisibility === undefined
         ? current.projectVisibility
         : normalizeProjectVisibility(prefs.projectVisibility),
+    countryVisibility:
+      prefs.countryVisibility === undefined
+        ? current.countryVisibility
+        : normalizeCountryVisibility(prefs.countryVisibility),
+    countryCollapsed:
+      prefs.countryCollapsed === undefined
+        ? current.countryCollapsed
+        : normalizeCountryCollapsed(prefs.countryCollapsed),
     hasCompletedGuidedTour:
       prefs.hasCompletedGuidedTour === undefined
         ? current.hasCompletedGuidedTour
@@ -203,6 +221,10 @@ export function setPreferences(prefs: Partial<UserPreferences>): void {
       prefs.measurementUnit === undefined
         ? current.measurementUnit
         : normalizeMeasurementUnit(prefs.measurementUnit),
+    lastSyncedAt:
+      prefs.lastSyncedAt === undefined
+        ? current.lastSyncedAt
+        : normalizeLastSyncedAt(prefs.lastSyncedAt),
   }));
 }
 
@@ -238,6 +260,69 @@ export function setProjectVisibilityPreferences(
     projectVisibility: {
       ...(current.projectVisibility ?? {}),
       ...safeUpdates,
+    },
+  }));
+}
+
+/**
+ * Read persisted country visibility map. Missing keys imply visible (true).
+ *
+ * The country gate is the second factor in the AND that determines whether a
+ * project is shown on the map; the per-project preference is the first.
+ */
+export function getCountryVisibilityPreferences(): Record<string, boolean> {
+  return { ...(getPreferences().countryVisibility ?? {}) };
+}
+
+/**
+ * Persist visibility for one country code.
+ */
+export function setCountryVisibilityPreference(
+  country: string,
+  visible: boolean,
+): void {
+  if (!country) return;
+  setCountryVisibilityPreferences({ [country]: visible });
+}
+
+/**
+ * Persist visibility for multiple countries at once (used by `Show all`).
+ */
+export function setCountryVisibilityPreferences(
+  updates: Record<string, boolean>,
+): void {
+  const safeUpdates = normalizeCountryVisibility(updates);
+  if (Object.keys(safeUpdates).length === 0) return;
+
+  enqueuePreferencesMutation((current) => ({
+    ...current,
+    countryVisibility: {
+      ...(current.countryVisibility ?? {}),
+      ...safeUpdates,
+    },
+  }));
+}
+
+/**
+ * Read persisted country collapsed map. Missing keys imply expanded (false).
+ */
+export function getCountryCollapsedPreferences(): Record<string, boolean> {
+  return { ...(getPreferences().countryCollapsed ?? {}) };
+}
+
+/**
+ * Persist collapsed state for one country code.
+ */
+export function setCountryCollapsedPreference(
+  country: string,
+  collapsed: boolean,
+): void {
+  if (!country) return;
+  enqueuePreferencesMutation((current) => ({
+    ...current,
+    countryCollapsed: {
+      ...(current.countryCollapsed ?? {}),
+      [country]: collapsed,
     },
   }));
 }

@@ -32,25 +32,35 @@ When the user taps a project name to zoom to it, the panel closes automatically 
 - Subtitle: "{N} of {M} visible" showing the count of active layers vs total.
 - Close button: top-right, `aria-label="Close panel"`.
 
+## Header subtitle
+
+The subtitle reads `{N} of {M} visible` where:
+
+- `M` is the total number of projects in the list.
+- `N` counts **effectively visible** projects (individual toggle ON **AND** country gate ON), not just individually-on projects.
+
 ## Bulk actions
 
-Two buttons directly below the header:
+Two buttons directly below the header. Their semantics are intentionally asymmetric:
 
-- **Show all**: activates every project and persists each as `visible: true`.
-- **Hide all**: deactivates every project and persists each as `visible: false`.
-
-Both operate on all projects in the list regardless of which were individually toggled.
+- **Show all**: activates every project (`projectVisibility[id] = true`) **and** re-enables every country gate (`countryVisibility[country] = true`). The country re-enable is required so a user who previously gated off a country can recover with a single tap.
+- **Hide all**: deactivates every project (`projectVisibility[id] = false`) and **leaves country gates untouched**. The AND naturally hides everything; the user's per-country choices survive a "Hide all".
 
 ## Project list
 
-A scrollable list of all projects that have GeoJSON data (projects with `exclude_geojson: true` or no `geojson_file` are filtered out before reaching the panel).
+The project list runs in one of two render modes:
+
+- **Flat list** (back-compat path): used when **no** project in the dataset carries a `country`. Each row renders directly under the bulk actions, alphabetically by name.
+- **Grouped by country**: used as soon as any project has a `country`. See "Country grouping" below.
+
+In both modes, projects with `exclude_geojson: true` or no `geojson_file` are filtered out before reaching the panel.
 
 Each row contains:
 
 ### Color dot
 
-- A small circle showing the project's assigned color from the palette.
-- Filled when active, hollow (border-only) when inactive.
+- A small circle whose color comes from `project.color` (model-driven; see `docs/project-colors.md`). Missing or invalid hex values fall back to the neutral gray defined as `COLORS.FALLBACK` (`#94a3b8`).
+- Filled when **effectively visible** (individual toggle ON AND country gate ON), hollow (border-only) otherwise.
 - `data-testid="project-color-dot-{id}"` for test targeting.
 
 ### Project name (click to zoom)
@@ -58,17 +68,18 @@ Each row contains:
 Tapping the name or the color dot triggers `onZoomToProject(projectId)`, which:
 
 1. Ensures the project layer is visible: activates the project if not already active and persists the visibility preference as `true`.
-2. Closes the panel immediately (auto-close) so the map is unobstructed.
-3. Computes the bounding box from the project's GeoJSON data (with 10% padding).
-4. Calls `map.fitBounds()` with `padding: 60`, `maxZoom: 16`, `duration: 800` (800ms fly animation).
+2. **If the target project's country gate is OFF, force it ON** and persist that change. Without this, the user would tap a row and zoom into nothing because the AND would still hide the project.
+3. Closes the panel immediately (auto-close) so the map is unobstructed.
+4. Computes the bounding box from the project's GeoJSON data (with 10% padding).
+5. Calls `map.fitBounds()` with `padding: 60`, `maxZoom: 16`, `duration: 800` (800ms fly animation).
 
 ### Toggle switch
 
-A native IonToggle to show or hide the project's map layer without zooming. Persists the visibility preference per project. Does **not** close the panel -- the user stays in the panel to continue managing layers.
+A native IonToggle whose `checked` state always reflects the **individual** preference (not the effective visibility). Tapping it persists the per-project preference. Does **not** close the panel — the user stays in the panel to continue managing layers.
 
 ### Overlay effect of project toggles
 
-Project toggle state also filters project-linked dashboard overlays:
+Effective visibility (individual AND country) filters project-linked dashboard overlays:
 
 - Subsurface stations (`properties.project`)
 - Exploration leads (`properties.project`)
@@ -78,6 +89,58 @@ Global overlays that are not project-linked remain unaffected:
 
 - Landmarks
 - Surface stations
+
+## Country grouping
+
+When at least one project carries a `country`, the panel renders one collapsible group per distinct ISO alpha-2 code, sorted alphabetically. Projects whose `country` is empty are grouped under a synthetic `Unknown` bucket displayed without a flag.
+
+### Header layout
+
+Each group header carries (left to right):
+
+- Chevron icon (rotates 90° on collapse).
+- Country flag emoji generated from the ISO code via `src/utils/countryFlag.ts`. Skipped for the `Unknown` bucket.
+- Country code (or `Unknown`).
+- `(N)` count of projects in the group.
+- An `IonToggle` for the **country gate**.
+
+Tapping the header (anywhere except the toggle) toggles collapse. Tapping the toggle invokes `onToggleCountry(country, visible)`. The toggle stops click propagation so it never also collapses the section.
+
+`data-testid` selectors:
+
+- `country-group-{ISO}` on the group `<li>`.
+- `country-collapse-{ISO}` on the header (the click target for collapse).
+- `country-toggle-{ISO}` on the gate toggle.
+
+### Two-level visibility model
+
+A project is **effectively visible** on the map iff both:
+
+1. its individual toggle is ON, **AND**
+2. its country gate is ON.
+
+Defaults: a country is visible unless `countryVisibility[country] === false`; a country is expanded unless `countryCollapsed[country] === true`.
+
+The AND is computed exactly once in `Dashboard.tsx` via the `effectiveActiveProjectIds` memo. Every map-side consumer reads from that set:
+
+- Project `<Source>`/`<Layer>` mount/unmount.
+- Project-linked overlay filtering (`filterOverlayByProjectVisibility`).
+- Depth-domain merge in `useDepthProbe`.
+- Auto-fit-bounds on first load.
+
+The panel itself keeps the **raw** `activeProjectIds` so its individual toggle reflects user intent independent of the gate.
+
+### Toggling a country gate
+
+Toggling a country gate OFF:
+
+- Persists `countryVisibility[country] = false`.
+- Removes every project in that country from the map and from project-linked overlays.
+- In depth color mode, recomputes the merged depth domain from only the remaining effectively-visible projects.
+- **Does not** mutate `projectVisibility`.
+- Mutes the corresponding project rows in the panel (hollow dot, dimmed text), but keeps each row's toggle `checked` state intact.
+
+Toggling a country gate ON: the cascade reverses; projects whose individual toggle is OFF stay hidden; projects whose individual toggle is ON reappear.
 
 ### Tile prefetch status
 
@@ -98,19 +161,28 @@ src/components/AppTabBar.tsx      -- Navigation trigger (Projects tab calls `onP
 
 `ProjectPanel` receives all data and callbacks as props. It does not hold state, perform network calls, or interact with the map directly. All business logic lives in `Dashboard.tsx` handlers:
 
-- `handleZoomToProject` -- activate + auto-close + fitBounds
-- `handleToggleProject` -- toggle layer visibility
-- `handleShowAll` / `handleHideAll` -- bulk visibility changes
+- `handleZoomToProject` -- activate + force-on country gate + auto-close + fitBounds
+- `handleToggleProject` -- toggle individual layer visibility
+- `handleShowAll` / `handleHideAll` -- bulk visibility changes (Show all also re-enables country gates)
+- `handleToggleCountry` -- flip the country gate; cascades through `effectiveActiveProjectIds`
+- `handleToggleCountryCollapsed` -- UI-only collapse persistence
+
+`Dashboard.tsx` also owns the two new local-state maps (`countryVisibility`, `countryCollapsed`) and the `effectiveActiveProjectIds` memo that computes the AND. Country UX state never reaches the controller.
 
 ## Persistence
 
-Project visibility preferences are persisted per-project via `PreferencesService`:
+All preferences live in a single `localStorage` blob managed by `PreferencesService` and serialized through its mutation queue:
 
-- `setProjectVisibilityPreference(projectId, boolean)` -- single project
-- `setProjectVisibilityPreferences(record)` -- bulk (Show All / Hide All)
-- `getProjectVisibilityPreferences()` -- read on dashboard mount to restore state
+- Per-project visibility:
+  - `getProjectVisibilityPreferences()` / `setProjectVisibilityPreference(id, bool)` / `setProjectVisibilityPreferences(record)`.
+- Per-country visibility (the gate; missing key implies visible):
+  - `getCountryVisibilityPreferences()` / `setCountryVisibilityPreference(country, bool)` / `setCountryVisibilityPreferences(record)`.
+- Per-country collapse state (missing key implies expanded):
+  - `getCountryCollapsedPreferences()` / `setCountryCollapsedPreference(country, bool)`.
 
-Preferences are cleared on logout (full preference wipe).
+`Dashboard.tsx` reads all three at mount time via lazy state initializers (`useState(() => getXxxPreferences())`) so storage is touched once per render lifecycle.
+
+`clearPreferences()` wipes the entire blob, so logout cleans up all three maps for free.
 
 ## Testing
 

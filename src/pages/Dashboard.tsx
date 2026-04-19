@@ -26,6 +26,11 @@ import {
   getProjectVisibilityPreferences,
   setProjectVisibilityPreference,
   setProjectVisibilityPreferences,
+  getCountryVisibilityPreferences,
+  setCountryVisibilityPreference,
+  setCountryVisibilityPreferences,
+  getCountryCollapsedPreferences,
+  setCountryCollapsedPreference,
 } from '../services/PreferencesService';
 import ProjectPanel from '../components/ProjectPanel';
 import AppTabBar from '../components/AppTabBar';
@@ -44,7 +49,6 @@ import {
   createDepthColorExpression,
 } from '../utils/depthColoring';
 import { useDepthProbe } from '../hooks/useDepthProbe';
-import { TOUR_EVENTS } from '../onboarding/guidedTour/selectors';
 import {
   INTERACTIVE_OVERLAY_LAYER_IDS,
   formatLatLng,
@@ -442,6 +446,14 @@ const Dashboard: React.FC<DashboardProps> = ({
   // Active projects (which layers are visible)
   const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
 
+  // Country gate (overlays the per-project preference; restored from prefs once on mount).
+  const [countryVisibility, setCountryVisibility] = useState<Record<string, boolean>>(
+    () => getCountryVisibilityPreferences(),
+  );
+  const [countryCollapsed, setCountryCollapsed] = useState<Record<string, boolean>>(
+    () => getCountryCollapsedPreferences(),
+  );
+
   // Loaded GeoJSON keyed by project ID
   const [geoJsonData, setGeoJsonData] = useState<GeoJsonRecord>({});
   const [overlayGeoJsonData, setOverlayGeoJsonData] = useState<MapOverlayGeoJsonRecord>({});
@@ -514,6 +526,21 @@ const Dashboard: React.FC<DashboardProps> = ({
       ),
     [activeProjectIds, geoJsonData],
   );
+  // Effective visibility = individual toggle ON AND country gate ON.
+  // Every map-side consumer (layer mount, overlay filter, depth probe,
+  // fit-bounds, projectPoint/Geometry layer ids) reads from this set.
+  // Only the panel itself keeps the raw `activeProjectIds` so its toggle
+  // reflects user intent independent of country gates.
+  const effectiveActiveProjectIds = useMemo(() => {
+    const next = new Set<string>();
+    for (const project of sortedProjects) {
+      if (!activeProjectIds.has(project.id)) continue;
+      const country = project.country || 'Unknown';
+      if (countryVisibility[country] === false) continue;
+      next.add(project.id);
+    }
+    return next;
+  }, [sortedProjects, activeProjectIds, countryVisibility]);
   const tilePrefetchByProject = useMemo(
     () =>
       Object.fromEntries(
@@ -621,42 +648,42 @@ const Dashboard: React.FC<DashboardProps> = ({
       const filtered = filterOverlayByProjectVisibility(
         overlay.id,
         featureCollection,
-        activeProjectIds,
+        effectiveActiveProjectIds,
       );
       if (filtered.features.length > 0) {
         nextData[overlay.id] = filtered;
       }
     }
     return nextData;
-  }, [activeProjectIds, overlayGeoJsonData]);
+  }, [effectiveActiveProjectIds, overlayGeoJsonData]);
 
   // ---- Auto-fit bounds on first data load -----------------------------------
 
   useEffect(() => {
     if (didFitRef.current) return;
-    if (activeProjectIds.size === 0 || Object.keys(geoJsonData).length === 0) return;
+    if (effectiveActiveProjectIds.size === 0 || Object.keys(geoJsonData).length === 0) return;
 
-    const bounds = computeBounds(geoJsonData, activeProjectIds);
+    const bounds = computeBounds(geoJsonData, effectiveActiveProjectIds);
     if (bounds && mapRef.current) {
       didFitRef.current = true;
       mapRef.current.fitBounds(bounds, { padding: 50, maxZoom: 14, duration: 800 });
     }
-  }, [activeProjectIds, geoJsonData]);
+  }, [effectiveActiveProjectIds, geoJsonData]);
 
   // ---- Handlers -------------------------------------------------------------
 
   const projectPointLayerIds = useMemo(
-    () => [...activeProjectIds].map((id) => `project-${id}-point`),
-    [activeProjectIds],
+    () => [...effectiveActiveProjectIds].map((id) => `project-${id}-point`),
+    [effectiveActiveProjectIds],
   );
   const projectGeometryLayerIds = useMemo(
     () =>
-      [...activeProjectIds].flatMap((id) => [
+      [...effectiveActiveProjectIds].flatMap((id) => [
         `project-${id}-point`,
         `project-${id}-line`,
         `project-${id}-fill`,
       ]),
-    [activeProjectIds],
+    [effectiveActiveProjectIds],
   );
 
   const {
@@ -666,7 +693,13 @@ const Dashboard: React.FC<DashboardProps> = ({
     sampleDepthAtClientPoint,
     handleMapMouseMove,
     handleMapMouseLeave,
-  } = useDepthProbe(mapRef, colorMode, activeProjectIds, geoJsonData, projectGeometryLayerIds);
+  } = useDepthProbe(
+    mapRef,
+    colorMode,
+    effectiveActiveProjectIds,
+    geoJsonData,
+    projectGeometryLayerIds,
+  );
 
   const allInteractiveLayerIds = useMemo(
     () => [...INTERACTIVE_OVERLAY_LAYER_IDS, ...projectPointLayerIds] as readonly string[],
@@ -941,6 +974,20 @@ const Dashboard: React.FC<DashboardProps> = ({
       Object.fromEntries(nextIds.map((projectId) => [projectId, true] as const)),
     );
     setActiveProjectIds(new Set(nextIds));
+
+    // Show all is symmetric with the AND gate: it must also re-enable any
+    // country gate that was previously OFF, otherwise the user can hit
+    // "Show all" and still see nothing.
+    const countries = Array.from(
+      new Set(panelProjects.map((p) => p.country || 'Unknown')),
+    );
+    if (countries.length > 0) {
+      const countryUpdate = Object.fromEntries(
+        countries.map((c) => [c, true] as const),
+      );
+      setCountryVisibilityPreferences(countryUpdate);
+      setCountryVisibility((prev) => ({ ...prev, ...countryUpdate }));
+    }
   }, [panelProjects]);
 
   const handleHideAll = useCallback(() => {
@@ -949,18 +996,28 @@ const Dashboard: React.FC<DashboardProps> = ({
       Object.fromEntries(nextIds.map((projectId) => [projectId, false] as const)),
     );
     setActiveProjectIds(new Set());
+    // Country gates are intentionally left untouched — the AND naturally
+    // hides everything once individual toggles are OFF, and we want the
+    // user's per-country choices to survive a temporary "Hide all".
   }, [panelProjects]);
 
-  const handleZoomToProject = useCallback((projectId: string) => {
-    const emitZoomComplete = () => {
-      document.dispatchEvent(
-        new CustomEvent(TOUR_EVENTS.projectZoomComplete, {
-          detail: { projectId },
-        }),
-      );
-    };
+  const handleToggleCountry = useCallback((country: string, visible: boolean) => {
+    Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+    setCountryVisibility((prev) => ({ ...prev, [country]: visible }));
+    setCountryVisibilityPreference(country, visible);
+  }, []);
 
-    // Step 0: Ensure the project layer is visible on the map
+  const handleToggleCountryCollapsed = useCallback(
+    (country: string, collapsed: boolean) => {
+      // No haptic: collapse is a UI affordance, not a visibility change.
+      setCountryCollapsed((prev) => ({ ...prev, [country]: collapsed }));
+      setCountryCollapsedPreference(country, collapsed);
+    },
+    [],
+  );
+
+  const handleZoomToProject = useCallback((projectId: string) => {
+    // Step 0a: Ensure the project layer is visible on the map.
     setActiveProjectIds((prev) => {
       if (prev.has(projectId)) return prev;
       const next = new Set(prev);
@@ -969,46 +1026,40 @@ const Dashboard: React.FC<DashboardProps> = ({
     });
     setProjectVisibilityPreference(projectId, true);
 
-    // Step 1: Close the panel so the map is unobstructed before animating
+    // Step 0b: If the target project's country gate is OFF, force it ON —
+    // otherwise the AND keeps the project hidden and the zoom flies to an
+    // empty viewport.
+    const project = sortedProjects.find((p) => p.id === projectId);
+    if (project) {
+      const country = project.country || 'Unknown';
+      if (countryVisibility[country] === false) {
+        setCountryVisibility((prev) => ({ ...prev, [country]: true }));
+        setCountryVisibilityPreference(country, true);
+      }
+    }
+
+    // Step 1: Close the panel so the map is unobstructed before animating.
     onProjectPanelChange(false);
 
     // Step 2: Zoom to this project's bounds — read geoJsonData from the
-    // latest state via a functional update trick: we schedule the zoom after
-    // React processes the activation above.
+    // latest state via a functional update trick so we always operate on
+    // the current snapshot.
     setTimeout(() => {
-      // Access the ref-stable map and read geoJsonData at call time
       const map = mapRef.current;
-      if (!map) {
-        emitZoomComplete();
-        return;
-      }
+      if (!map) return;
 
-      // Get the source data directly from the map if available
       setGeoJsonData((current) => {
         const fc = current[projectId];
         if (fc) {
           const bounds = computeBounds(current, new Set([projectId]));
           if (bounds) {
-            let didEmitZoomComplete = false;
-            const emitZoomCompleteOnce = () => {
-              if (didEmitZoomComplete) return;
-              didEmitZoomComplete = true;
-              emitZoomComplete();
-            };
-            const mapInstance = map.getMap() as
-              | { once?: (eventName: 'moveend', listener: () => void) => void }
-              | undefined;
-            mapInstance?.once?.('moveend', emitZoomCompleteOnce);
             map.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 800 });
-            window.setTimeout(emitZoomCompleteOnce, 1200);
-            return current; // no change
           }
         }
-        emitZoomComplete();
-        return current; // no change
+        return current;
       });
     }, 0);
-  }, [onProjectPanelChange]);
+  }, [onProjectPanelChange, sortedProjects, countryVisibility]);
 
   const handleMapLoad = useCallback(() => {
     lockMapOrientation(mapRef.current);
@@ -1117,9 +1168,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                   />
                 </Source>
 
-                {/* GeoJSON layers for each active project */}
+                {/* GeoJSON layers for each effectively-visible project */}
                 {sortedProjects.map((project) => {
-                  if (!activeProjectIds.has(project.id) || !geoJsonData[project.id]) {
+                  if (!effectiveActiveProjectIds.has(project.id) || !geoJsonData[project.id]) {
                     return null;
                   }
                   const color = getProjectColor(project.id, projectColorsById);
@@ -1610,10 +1661,14 @@ const Dashboard: React.FC<DashboardProps> = ({
             geoJsonData={geoJsonData}
             projectColorsById={projectColorsById}
             tilePrefetchByProject={tilePrefetchByProject}
+            countryVisibility={countryVisibility}
+            countryCollapsed={countryCollapsed}
             onToggleProject={handleToggleProject}
             onZoomToProject={handleZoomToProject}
             onShowAll={handleShowAll}
             onHideAll={handleHideAll}
+            onToggleCountry={handleToggleCountry}
+            onToggleCountryCollapsed={handleToggleCountryCollapsed}
             onClose={() => onProjectPanelChange(false)}
             isOpen={isProjectPanelOpen}
           />

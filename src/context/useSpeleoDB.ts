@@ -13,6 +13,7 @@ export interface SpeleoDBContextValue {
   isRetryingConnection: boolean;
   projects: Project[];
   syncStatus: SyncStatus;
+  lastSyncedAt: number | null;
   tilePrefetchJobs: TilePrefetchJobState[];
 }
 

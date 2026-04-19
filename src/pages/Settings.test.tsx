@@ -12,9 +12,11 @@ const mockLogout = vi.fn();
 const mockIsAuthenticated = vi.fn(() => true);
 const mockSyncProjects = vi.fn().mockResolvedValue(undefined);
 
-const { mockTilePrefetchJobs, mockProjects } = vi.hoisted(() => ({
+const { mockTilePrefetchJobs, mockProjects, mockSyncStatus, mockLastSyncedAt } = vi.hoisted(() => ({
   mockTilePrefetchJobs: { current: [] as unknown[] },
   mockProjects: { current: [] as unknown[] },
+  mockSyncStatus: { current: 'idle' as 'idle' | 'syncing' | 'done' | 'error' },
+  mockLastSyncedAt: { current: null as number | null },
 }));
 
 vi.mock('../context/useSpeleoDB', () => ({
@@ -25,7 +27,8 @@ vi.mock('../context/useSpeleoDB', () => ({
       syncProjects: mockSyncProjects,
     },
     projects: mockProjects.current,
-    syncStatus: 'idle',
+    syncStatus: mockSyncStatus.current,
+    lastSyncedAt: mockLastSyncedAt.current,
     tilePrefetchJobs: mockTilePrefetchJobs.current,
   }),
 }));
@@ -174,6 +177,8 @@ describe('Settings page', () => {
     mockGetTotalCacheBytes.mockReset().mockResolvedValue(0);
     mockTilePrefetchJobs.current = [];
     mockProjects.current = [];
+    mockSyncStatus.current = 'idle';
+    mockLastSyncedAt.current = null;
     mockPersistShowLandmarks.mockReset();
     mockPersistColorMode.mockReset();
     mockPersistMeasurementUnit.mockReset();
@@ -464,6 +469,56 @@ describe('Settings page', () => {
     await waitFor(() => {
       expect(mockGetTotalCacheBytes).toHaveBeenCalled();
       expect(mockGetManualTileCount).toHaveBeenCalled();
+    });
+  });
+
+  describe('Last sync row', () => {
+    it('renders "Never" when lastSyncedAt is null', () => {
+      mockLastSyncedAt.current = null;
+      renderSettings();
+      expect(screen.getByTestId('last-sync')).toHaveTextContent('Never');
+    });
+
+    it('renders an absolute locale string when lastSyncedAt is a finite number', () => {
+      const epoch = Date.UTC(2026, 3, 18, 14, 30);
+      mockLastSyncedAt.current = epoch;
+      renderSettings();
+
+      const expected = new Date(epoch).toLocaleString(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      });
+      expect(screen.getByTestId('last-sync')).toHaveTextContent(expected);
+    });
+
+    it('renders the row above "Synced projects" so it is visible at the top of the section', () => {
+      mockLastSyncedAt.current = Date.UTC(2026, 3, 18, 14, 30);
+      renderSettings();
+      const lastSync = screen.getByTestId('last-sync');
+      const syncedProjects = screen.getByTestId('synced-projects');
+      // Both must exist and last-sync must come earlier in the document order.
+      const positionMask = lastSync.compareDocumentPosition(syncedProjects);
+      expect(positionMask & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
+
+  describe('Syncing indicator', () => {
+    it('shows the "Syncing\u2026" label inside the sync button when syncStatus is "syncing"', () => {
+      mockSyncStatus.current = 'syncing';
+      renderSettings();
+      expect(screen.getByTestId('sync-status-label')).toHaveTextContent('Syncing\u2026');
+    });
+
+    it('does not show the "Syncing\u2026" label when sync is idle', () => {
+      mockSyncStatus.current = 'idle';
+      renderSettings();
+      expect(screen.queryByTestId('sync-status-label')).not.toBeInTheDocument();
+    });
+
+    it('disables the sync button while syncing', () => {
+      mockSyncStatus.current = 'syncing';
+      renderSettings();
+      expect(screen.getByTestId('sync-button')).toBeDisabled();
     });
   });
 });

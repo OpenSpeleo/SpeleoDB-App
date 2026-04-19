@@ -80,32 +80,30 @@
   animation: none !important;
 }
 
-/* Keep the real Projects tab button clickable during the open-panel step. */
-.tour-step-menu-clickthrough.driver-active .driver-overlay,
-.tour-step-menu-clickthrough.driver-active .driver-overlay path {
+/* Keep the real tab button clickable during the tab handoff steps
+   (open Projects panel, navigate to Settings). */
+.tour-step-tab-clickthrough.driver-active .driver-overlay,
+.tour-step-tab-clickthrough.driver-active .driver-overlay path {
   pointer-events: none !important;
 }
 
-.tour-step-menu-clickthrough.driver-active
-  [data-tour='menu-toggle'].driver-active-element {
+.tour-step-tab-clickthrough.driver-active
+  [data-tour='menu-toggle'].driver-active-element,
+.tour-step-tab-clickthrough.driver-active
+  [data-tour='settings-tab'].driver-active-element {
   position: relative;
   z-index: 10001 !important;
 }
 
-.tour-step-menu-clickthrough.driver-active
+.tour-step-tab-clickthrough.driver-active
   [data-tour='menu-toggle'].driver-active-element,
-.tour-step-menu-clickthrough.driver-active
-  [data-tour='menu-toggle'].driver-active-element * {
+.tour-step-tab-clickthrough.driver-active
+  [data-tour='menu-toggle'].driver-active-element *,
+.tour-step-tab-clickthrough.driver-active
+  [data-tour='settings-tab'].driver-active-element,
+.tour-step-tab-clickthrough.driver-active
+  [data-tour='settings-tab'].driver-active-element * {
   pointer-events: auto !important;
-}
-
-/* Sequentially expose only the intended bulk-action button. */
-.tour-step-bulk-hide-only.driver-active [data-tour-action='show-all'] {
-  display: none !important;
-}
-
-.tour-step-bulk-show-only.driver-active [data-tour-action='hide-all'] {
-  display: none !important;
 }
 
 /* Briefly hide tour chrome before replaying native clicks. */

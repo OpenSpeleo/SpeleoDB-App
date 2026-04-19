@@ -29,6 +29,7 @@ import {
 import { restartGuidedTourFromHelp } from '../onboarding/guidedTour/engine';
 import { isMapColorMode, DEFAULT_MAP_COLOR_MODE, type MapColorMode } from '../types/mapColorMode';
 import { isMeasurementUnit, DEFAULT_MEASUREMENT_UNIT, type MeasurementUnit } from '../types/measurementUnit';
+import { formatLastSync } from '../utils/formatLastSync';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -67,7 +68,7 @@ const Settings: React.FC<SettingsProps> = ({
 }) => {
   const history = useHistory();
   const location = useLocation();
-  const { controller, projects, syncStatus, tilePrefetchJobs } = useSpeleoDB();
+  const { controller, projects, syncStatus, tilePrefetchJobs, lastSyncedAt } = useSpeleoDB();
 
   const [cacheBytes, setCacheBytes] = useState(0);
   const [manualTileCount, setManualTileCount] = useState(0);
@@ -188,18 +189,28 @@ const Settings: React.FC<SettingsProps> = ({
               onClick={handleSync}
               disabled={syncStatus === 'syncing'}
               data-testid="sync-button"
-              className="ml-auto mr-2 w-8 h-8 flex items-center justify-center rounded-lg
+              className={`ml-auto mr-2 ${syncStatus === 'syncing' ? 'h-8 px-3 inline-flex items-center gap-2' : 'w-8 h-8 flex items-center justify-center'} rounded-lg
                          text-slate-300 hover:text-white hover:bg-slate-700/50
-                         disabled:opacity-50 transition-colors"
-              aria-label="Sync projects"
+                         disabled:opacity-60 disabled:cursor-default transition-colors`}
+              aria-label={syncStatus === 'syncing' ? 'Syncing in progress' : 'Sync projects'}
             >
               {syncStatus === 'syncing' ? (
-                <div className="w-4 h-4 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs" data-testid="sync-status-label">{'Syncing\u2026'}</span>
+                </>
               ) : (
                 <IonIcon icon={syncOutline} className="text-lg" />
               )}
             </button>
           </IonListHeader>
+
+          <IonItem>
+            <IonLabel>Last sync</IonLabel>
+            <span slot="end" className="text-sm text-slate-400" data-testid="last-sync">
+              {formatLastSync(lastSyncedAt)}
+            </span>
+          </IonItem>
 
           <IonItem>
             <IonLabel>Synced projects</IonLabel>
@@ -236,7 +247,7 @@ const Settings: React.FC<SettingsProps> = ({
             <IonLabel>Map Settings</IonLabel>
           </IonListHeader>
 
-          <IonItem>
+          <IonItem data-tour="settings-show-landmarks">
             <IonToggle
               checked={showLandmarks}
               onIonChange={(e) => handleToggleLandmarks(e.detail.checked)}
@@ -245,7 +256,7 @@ const Settings: React.FC<SettingsProps> = ({
               Show landmarks
             </IonToggle>
           </IonItem>
-          <IonItem>
+          <IonItem data-tour="settings-color-mode">
             <IonLabel>Color mode</IonLabel>
             <div slot="end" className="relative">
               <select
@@ -265,7 +276,7 @@ const Settings: React.FC<SettingsProps> = ({
               />
             </div>
           </IonItem>
-          <IonItem>
+          <IonItem data-tour="settings-measurement-unit">
             <IonLabel>Map unit</IonLabel>
             <div slot="end" className="relative">
               <select

@@ -21,6 +21,7 @@ function createProjectFixture(
     name: 'Project',
     description: '',
     country: 'US',
+    color: '#377eb8',
     type: 'COMPASS',
     visibility: 'PRIVATE',
     is_active: true,
@@ -105,11 +106,18 @@ function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBServic
   } as unknown as SpeleoDBService;
 }
 
-function createMockPrefs(initial?: { email?: string; token?: string; instance?: string }): PreferencesPort {
-  let store: { email?: string; token?: string; instance?: string } = initial ?? {};
+type StoredPrefs = {
+  email?: string;
+  token?: string;
+  instance?: string;
+  lastSyncedAt?: number;
+};
+
+function createMockPrefs(initial?: StoredPrefs): PreferencesPort {
+  let store: StoredPrefs = initial ?? {};
   return {
     getPreferences: vi.fn(() => ({ ...store })),
-    setPreferences: vi.fn((p: Partial<{ email?: string; token?: string; instance?: string }>) => {
+    setPreferences: vi.fn((p: Partial<StoredPrefs>) => {
       store = { ...store, ...p };
     }),
     clearPreferences: vi.fn(() => { store = {}; }),
@@ -396,6 +404,148 @@ describe('SpeleoDBController', () => {
       expect(fresh.isAuthenticated()).toBe(false);
       expect(invalidPrefs.clearPreferences).toHaveBeenCalledOnce();
     });
+
+    it('restores lastSyncedAt from preferences', () => {
+      const restoredPrefs = createMockPrefs({
+        email: 'restored@example.com',
+        token: 'saved-token',
+        instance: 'https://www.speleodb.org',
+        lastSyncedAt: 1_710_000_000_000,
+      });
+
+      const fresh = new SpeleoDBController(service, restoredPrefs, cache);
+
+      expect(fresh.lastSyncedAt).toBe(1_710_000_000_000);
+    });
+
+    it('keeps lastSyncedAt null when preferences omit it', () => {
+      const restoredPrefs = createMockPrefs({
+        email: 'restored@example.com',
+        token: 'saved-token',
+        instance: 'https://www.speleodb.org',
+      });
+
+      const fresh = new SpeleoDBController(service, restoredPrefs, cache);
+
+      expect(fresh.lastSyncedAt).toBeNull();
+    });
+  });
+
+  // ---- lastSyncedAt ---------------------------------------------------------
+
+  describe('lastSyncedAt tracking', () => {
+    it('starts at null on a fresh controller', () => {
+      expect(controller.lastSyncedAt).toBeNull();
+    });
+
+    it('updates and persists lastSyncedAt after a successful sync', async () => {
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      const ctrl = new SpeleoDBController(service, withToken, cache);
+
+      const before = Date.now();
+      await ctrl.syncProjects();
+      const after = Date.now();
+
+      expect(ctrl.lastSyncedAt).not.toBeNull();
+      expect(ctrl.lastSyncedAt!).toBeGreaterThanOrEqual(before);
+      expect(ctrl.lastSyncedAt!).toBeLessThanOrEqual(after);
+      expect(withToken.setPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ lastSyncedAt: ctrl.lastSyncedAt }),
+      );
+    });
+
+    it('does not update lastSyncedAt when the sync request throws', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => { throw new Error('Network failure'); }),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      const ctrl = new SpeleoDBController(service, withToken, cache);
+
+      await ctrl.syncProjects();
+
+      expect(ctrl.lastSyncedAt).toBeNull();
+      expect(withToken.setPreferences).not.toHaveBeenCalledWith(
+        expect.objectContaining({ lastSyncedAt: expect.anything() }),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('does not update lastSyncedAt when the server responds with a non-2xx status', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => ({ status: 500, data: {} }) as HttpResponse<Project[]>),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      const ctrl = new SpeleoDBController(service, withToken, cache);
+
+      await ctrl.syncProjects();
+
+      expect(ctrl.lastSyncedAt).toBeNull();
+      expect(withToken.setPreferences).not.toHaveBeenCalledWith(
+        expect.objectContaining({ lastSyncedAt: expect.anything() }),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('resets lastSyncedAt to null on logout', async () => {
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+        lastSyncedAt: 1_710_000_000_000,
+      });
+      const ctrl = new SpeleoDBController(service, withToken, cache);
+      expect(ctrl.lastSyncedAt).toBe(1_710_000_000_000);
+
+      await ctrl.logout();
+
+      expect(ctrl.lastSyncedAt).toBeNull();
+    });
+
+    it('still updates lastSyncedAt in memory when persistence throws', async () => {
+      // Defensive try/catch in recordSuccessfulSync(): even if storage is
+      // unavailable (quota, JSON failure, port misbehavior), the in-memory
+      // timestamp must still reflect the successful sync so the UI updates.
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const failingPrefs: PreferencesPort = {
+        getPreferences: vi.fn(() => ({
+          token: 'tok',
+          instance: 'https://www.speleodb.org',
+        })),
+        setPreferences: vi.fn(({ lastSyncedAt }: { lastSyncedAt?: number }) => {
+          if (typeof lastSyncedAt === 'number') {
+            throw new Error('storage unavailable');
+          }
+        }) as unknown as PreferencesPort['setPreferences'],
+        clearPreferences: vi.fn(),
+      };
+      const ctrl = new SpeleoDBController(service, failingPrefs, cache);
+
+      const before = Date.now();
+      await ctrl.syncProjects();
+      const after = Date.now();
+
+      expect(ctrl.lastSyncedAt).not.toBeNull();
+      expect(ctrl.lastSyncedAt!).toBeGreaterThanOrEqual(before);
+      expect(ctrl.lastSyncedAt!).toBeLessThanOrEqual(after);
+      expect(failingPrefs.setPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ lastSyncedAt: ctrl.lastSyncedAt }),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to persist lastSyncedAt:'),
+        expect.any(Error),
+      );
+      warnSpy.mockRestore();
+    });
   });
 
   // ---- validateSession ------------------------------------------------------
@@ -500,7 +650,7 @@ describe('SpeleoDBController', () => {
         1,
         'https://www.speleodb.org',
         't',
-        3000,
+        10000,
       );
 
       const retried = await ctrl.retryConnection();

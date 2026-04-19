@@ -10,10 +10,12 @@ This document defines the offline cache feature, user-facing offline modal behav
 
 ## Startup auth timeout
 
-- Timeout constant: `NETWORK.STARTUP_AUTH_TIMEOUT_MS = 3000` in `src/constants.ts`.
+- Timeout constant: `NETWORK.STARTUP_AUTH_TIMEOUT_MS = 10000` in `src/constants.ts` (raised from `3000` so spotty mobile networks have time to respond before the app falls back to offline mode).
 - During startup, the app validates the stored token against the backend.
 - If the request times out or fails due to transport/network/server conditions, the app must enter offline mode and keep the local session.
 - Timeout must never trigger logout or cache clearing.
+- While startup validation is in flight, `SpeleoDBProvider` schedules a small `Connecting to SpeleoDB…` floating card (`data-testid="connecting-banner"`) **after a 1s gate**, so fast networks never see it but slow networks get clear visual feedback that the app is still trying. The banner is removed as soon as `validateSession()` resolves (success or failure).
+- The native splash (`launchAutoHide: false`, opaque `#0f172a`) is hidden at the same instant the banner is shown. This is non-negotiable: the splash sits above the React tree and would otherwise hide the banner for the entire timeout window. On fast networks the banner timer is cancelled and the splash hides only via the validation `.finally()` (single hide call). On slow networks the splash hides at ~1s and `.finally()` calls hide again on resolution; both calls are idempotent and any plugin warning is swallowed by `hideSplashScreenSafely`.
 
 ## Offline mode user experience
 

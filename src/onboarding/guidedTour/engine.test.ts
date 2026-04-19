@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   driverOptionsRef,
@@ -109,43 +109,38 @@ import {
   restartGuidedTourFromHelp,
   startGuidedTour,
 } from './engine';
-import { TOUR_BODY_CLASSES, TOUR_EVENTS } from './selectors';
+import { TOUR_BODY_CLASSES } from './selectors';
 
 interface RenderTourTargetsOptions {
-  includeBulkTargets?: boolean;
-  includeProjectTargets?: boolean;
   panelOpen?: boolean;
+  includeSettingsTargets?: boolean;
+  pathname?: '/dashboard' | '/settings';
 }
 
 function renderTourTargets(options: RenderTourTargetsOptions = {}): void {
-  const includeBulkTargets = options.includeBulkTargets ?? true;
-  const includeProjectTargets = options.includeProjectTargets ?? true;
   const panelOpen = options.panelOpen ?? true;
+  const includeSettingsTargets = options.includeSettingsTargets ?? true;
+  const pathname = options.pathname ?? '/dashboard';
 
   document.body.innerHTML = `
     <button data-tour="menu-toggle"></button>
-    <div data-tour="project-panel" data-tour-open="${panelOpen ? 'true' : 'false'}">
+    <button data-tour="settings-tab"></button>
+    <div data-tour="project-panel" data-tour-open="${panelOpen ? 'true' : 'false'}"></div>
     ${
-      includeBulkTargets
+      includeSettingsTargets
         ? `
-      <div data-tour="bulk-actions">
-        <button data-tour-action="hide-all"></button>
-        <button data-tour-action="show-all"></button>
-      </div>
+      <div data-tour="settings-color-mode"></div>
+      <div data-tour="settings-show-landmarks"></div>
+      <div data-tour="settings-measurement-unit"></div>
     `
         : ''
     }
-    ${
-      includeProjectTargets
-        ? `
-      <button data-tour="project-toggle"></button>
-      <button data-tour="project-name" data-tour-action="project-row-zoom"></button>
-      <button data-tour-action="project-row-zoom"></button>
-    `
-        : ''
-    }
-    </div>
   `;
+  window.history.pushState({}, '', pathname);
+}
+
+function setActivePathname(pathname: '/dashboard' | '/settings'): void {
+  window.history.pushState({}, '', pathname);
 }
 
 describe('guided tour engine', () => {
@@ -158,20 +153,25 @@ describe('guided tour engine', () => {
     driverState.config = {};
     document.body.className = '';
     document.body.innerHTML = '';
+    window.history.replaceState({}, '', '/dashboard');
     mockGetHasCompletedGuidedTour.mockReturnValue(false);
     destroyGuidedTour();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('does not start when completion is already persisted', async () => {
     mockGetHasCompletedGuidedTour.mockReturnValue(true);
-    renderTourTargets({ includeProjectTargets: false });
+    renderTourTargets();
 
     await startGuidedTour();
     expect(mockDriverFactory).not.toHaveBeenCalled();
   });
 
   it('starts and marks body active class', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+    renderTourTargets();
 
     await startGuidedTour();
     expect(mockDriverFactory).toHaveBeenCalledOnce();
@@ -181,7 +181,7 @@ describe('guided tour engine', () => {
   });
 
   it('renders a clearly labeled close control on non-completion steps', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+    renderTourTargets();
     await startGuidedTour();
 
     const closeButton = document.createElement('button');
@@ -198,7 +198,6 @@ describe('guided tour engine', () => {
         driver: {} as never,
       } as never,
     );
-    // Re-render should keep a single close button in the same slot.
     driverOptionsRef.current.onPopoverRender?.(
       { closeButton, footerButtons, nextButton } as never,
       {
@@ -218,7 +217,7 @@ describe('guided tour engine', () => {
   });
 
   it('restarts from help by resetting completion and forcing start', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+    renderTourTargets();
 
     await restartGuidedTourFromHelp();
     expect(mockSetHasCompletedGuidedTour).toHaveBeenCalledWith(false);
@@ -226,7 +225,7 @@ describe('guided tour engine', () => {
   });
 
   it('persists completion when user uses explicit close control', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+    renderTourTargets();
     await startGuidedTour();
 
     const activeStep = driverOptionsRef.current.steps[0];
@@ -245,7 +244,7 @@ describe('guided tour engine', () => {
   });
 
   it('does not close or persist when backdrop is clicked', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+    renderTourTargets();
     await startGuidedTour();
 
     driverOptionsRef.current.overlayClickBehavior?.();
@@ -255,7 +254,7 @@ describe('guided tour engine', () => {
   });
 
   it('does not persist completion when tour is programmatically destroyed', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+    renderTourTargets();
     await startGuidedTour();
 
     destroyGuidedTour();
@@ -263,8 +262,8 @@ describe('guided tour engine', () => {
     expect(mockSetHasCompletedGuidedTour).not.toHaveBeenCalled();
   });
 
-  it('advances menu step after tapping menu toggle', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+  it('advances panel-open step after tapping menu toggle', async () => {
+    renderTourTargets();
     await startGuidedTour();
 
     driverState.activeIndex = 0;
@@ -276,7 +275,7 @@ describe('guided tour engine', () => {
   });
 
   it('hides visuals and re-emits menu click during step handoff', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+    renderTourTargets();
     await startGuidedTour();
 
     const menuStep = driverOptionsRef.current.steps[0];
@@ -301,7 +300,7 @@ describe('guided tour engine', () => {
   });
 
   it('waits for project panel open signal before leaving menu step', async () => {
-    renderTourTargets({ includeProjectTargets: false, panelOpen: false });
+    renderTourTargets({ panelOpen: false });
     await startGuidedTour();
 
     driverState.activeIndex = 0;
@@ -316,8 +315,8 @@ describe('guided tour engine', () => {
     expect(driverState.activeIndex).toBe(1);
   });
 
-  it('applies menu-stage framing without repeated layout tracking refresh', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+  it('applies tab-step framing without repeated layout tracking refresh', async () => {
+    renderTourTargets();
     await startGuidedTour();
 
     driverState.activeIndex = 0;
@@ -329,69 +328,44 @@ describe('guided tour engine', () => {
     expect(driverState.config.stagePadding).toBe(14);
   });
 
-  it('does not accumulate additional menu refresh loops over time', async () => {
-    renderTourTargets({ includeProjectTargets: false });
-    await startGuidedTour();
-
-    const menuStep = driverOptionsRef.current.steps[0];
-    driverState.activeIndex = 0;
-    menuStep.onHighlightStarted?.(undefined, menuStep, {} as never);
-
-    vi.advanceTimersByTime(1600);
-    const refreshCallsWhileActive = mockDriverRefresh.mock.calls.length;
-    expect(refreshCallsWhileActive).toBeLessThanOrEqual(3);
-
-    menuStep.onDeselected?.(undefined, menuStep, {} as never);
-    vi.advanceTimersByTime(300);
-    const refreshCallsAfterExitSettled = mockDriverRefresh.mock.calls.length;
-    vi.advanceTimersByTime(800);
-    expect(mockDriverRefresh.mock.calls.length).toBe(refreshCallsAfterExitSettled);
-  });
-
-  it('toggles menu clickthrough class on menu step entry and exit', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+  it('toggles tab clickthrough class on menu step entry and exit', async () => {
+    renderTourTargets();
     await startGuidedTour();
 
     const menuStep = driverOptionsRef.current.steps[0];
     expect(
-      document.body.classList.contains(TOUR_BODY_CLASSES.menuStepClickthrough),
+      document.body.classList.contains(TOUR_BODY_CLASSES.tabClickthrough),
     ).toBe(false);
 
     menuStep.onHighlightStarted?.(undefined, menuStep, {} as never);
     expect(
-      document.body.classList.contains(TOUR_BODY_CLASSES.menuStepClickthrough),
+      document.body.classList.contains(TOUR_BODY_CLASSES.tabClickthrough),
     ).toBe(true);
 
     menuStep.onDeselected?.(undefined, menuStep, {} as never);
     expect(
-      document.body.classList.contains(TOUR_BODY_CLASSES.menuStepClickthrough),
+      document.body.classList.contains(TOUR_BODY_CLASSES.tabClickthrough),
     ).toBe(false);
   });
 
-  it('clears menu clickthrough class when tour is destroyed mid-step', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+  it('clears tab clickthrough class when tour is destroyed mid-step', async () => {
+    renderTourTargets();
     await startGuidedTour();
 
     const menuStep = driverOptionsRef.current.steps[0];
     menuStep.onHighlightStarted?.(undefined, menuStep, {} as never);
     expect(
-      document.body.classList.contains(TOUR_BODY_CLASSES.menuStepClickthrough),
+      document.body.classList.contains(TOUR_BODY_CLASSES.tabClickthrough),
     ).toBe(true);
 
     destroyGuidedTour();
     expect(
-      document.body.classList.contains(TOUR_BODY_CLASSES.menuStepClickthrough),
+      document.body.classList.contains(TOUR_BODY_CLASSES.tabClickthrough),
     ).toBe(false);
-    vi.advanceTimersByTime(300);
-    const refreshCallsAfterDestroySettled = mockDriverRefresh.mock.calls.length;
-    vi.advanceTimersByTime(800);
-    expect(mockDriverRefresh.mock.calls.length).toBe(
-      refreshCallsAfterDestroySettled,
-    );
   });
 
-  it('skips to completion when panel controls never appear after menu tap', async () => {
-    renderTourTargets({ includeBulkTargets: false, includeProjectTargets: false });
+  it('skips to completion when project panel never opens after menu tap', async () => {
+    renderTourTargets({ panelOpen: false });
     await startGuidedTour();
 
     driverState.activeIndex = 0;
@@ -404,197 +378,95 @@ describe('guided tour engine', () => {
     );
   });
 
-  it('defers project-target skip until after show-all step', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+  it('reuses the tab clickthrough class on the settings-tab step', async () => {
+    renderTourTargets();
     await startGuidedTour();
 
-    driverState.activeIndex = 0;
-    const menu = document.querySelector('[data-tour="menu-toggle"]');
-    menu?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const settingsStep = driverOptionsRef.current.steps[1];
+    settingsStep.onHighlightStarted?.(undefined, settingsStep, {} as never);
+    expect(
+      document.body.classList.contains(TOUR_BODY_CLASSES.tabClickthrough),
+    ).toBe(true);
+
+    settingsStep.onDeselected?.(undefined, settingsStep, {} as never);
+    expect(
+      document.body.classList.contains(TOUR_BODY_CLASSES.tabClickthrough),
+    ).toBe(false);
+  });
+
+  it('hides visuals and re-emits settings-tab click during step handoff', async () => {
+    renderTourTargets();
+    await startGuidedTour();
+
+    driverState.activeIndex = 1;
+    const settingsStep = driverOptionsRef.current.steps[1];
+    settingsStep.onHighlightStarted?.(undefined, settingsStep, {} as never);
+
+    const settingsTab = document.querySelector('[data-tour="settings-tab"]');
+    const onSettingsClick = vi.fn();
+    settingsTab?.addEventListener('click', onSettingsClick);
+
+    settingsTab?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    vi.advanceTimersByTime(1);
+
+    expect(document.body.classList.contains(TOUR_BODY_CLASSES.transitionHandoff)).toBe(
+      true,
+    );
+    expect(onSettingsClick).toHaveBeenCalledOnce();
+  });
+
+  it('advances to settingsColorMode once /settings is active and DOM is ready', async () => {
+    renderTourTargets();
+    await startGuidedTour();
+
+    driverState.activeIndex = 1;
+    setActivePathname('/dashboard');
+    const settingsTab = document.querySelector('[data-tour="settings-tab"]');
+    settingsTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
     vi.advanceTimersByTime(700);
     expect(driverState.activeIndex).toBe(1);
 
-    const hideAll = document.querySelector('[data-tour-action="hide-all"]');
-    hideAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    vi.advanceTimersByTime(300);
+    setActivePathname('/settings');
+    vi.advanceTimersByTime(800);
     expect(driverState.activeIndex).toBe(2);
+  });
 
-    const showAll = document.querySelector('[data-tour-action="show-all"]');
-    showAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    vi.advanceTimersByTime(6500);
+  it('skips to completion when settings DOM never appears after settings-tab tap', async () => {
+    renderTourTargets({ includeSettingsTargets: false });
+    await startGuidedTour();
+
+    driverState.activeIndex = 1;
+    setActivePathname('/settings');
+    const settingsTab = document.querySelector('[data-tour="settings-tab"]');
+    settingsTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    vi.advanceTimersByTime(7000);
+
     expect(driverState.activeIndex).toBe(
       driverOptionsRef.current.steps.length - 1,
     );
   });
 
-  it('proceeds to project steps when project targets appear during grace period', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+  it('does not intercept interactions on descriptive settings steps', async () => {
+    renderTourTargets({ pathname: '/settings' });
     await startGuidedTour();
 
-    driverState.activeIndex = 0;
-    const menu = document.querySelector('[data-tour="menu-toggle"]');
-    menu?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    vi.advanceTimersByTime(700);
-    expect(driverState.activeIndex).toBe(1);
-
-    const hideAll = document.querySelector('[data-tour-action="hide-all"]');
-    hideAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    vi.advanceTimersByTime(300);
-    expect(driverState.activeIndex).toBe(2);
-
-    const panel = document.querySelector('[data-tour="project-panel"]');
-    window.setTimeout(() => {
-      if (!panel) return;
-      panel.insertAdjacentHTML(
-        'beforeend',
-        '<button data-tour="project-toggle"></button><button data-tour="project-name" data-tour-action="project-row-zoom"></button>',
+    for (const stepIndex of [2, 3, 4]) {
+      driverState.activeIndex = stepIndex;
+      const stepEl = document.querySelector(
+        driverOptionsRef.current.steps[stepIndex].element,
       );
-    }, 1000);
-
-    const showAll = document.querySelector('[data-tour-action="show-all"]');
-    showAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    vi.advanceTimersByTime(1700);
-    expect(driverState.activeIndex).toBe(3);
-  });
-
-  it('advances through dedicated hide-all then show-all bulk steps', async () => {
-    renderTourTargets();
-    await startGuidedTour();
-
-    driverState.activeIndex = 1;
-
-    const showAll = document.querySelector('[data-tour-action="show-all"]');
-    const hideAll = document.querySelector('[data-tour-action="hide-all"]');
-
-    showAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    vi.advanceTimersByTime(300);
-    expect(mockDriverMoveNext).not.toHaveBeenCalled();
-
-    hideAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    vi.advanceTimersByTime(300);
-    expect(mockDriverMoveNext).toHaveBeenCalledOnce();
-
-    driverState.activeIndex = 2;
-    hideAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    vi.advanceTimersByTime(300);
-    expect(mockDriverMoveNext).toHaveBeenCalledOnce();
-
-    showAll?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    vi.advanceTimersByTime(300);
-    expect(mockDriverMoveNext).toHaveBeenCalledTimes(2);
-  });
-
-  it('toggles bulk-action visibility classes between hide and show steps', async () => {
-    renderTourTargets();
-    await startGuidedTour();
-
-    const hideStep = driverOptionsRef.current.steps[1];
-    const showStep = driverOptionsRef.current.steps[2];
-
-    hideStep.onHighlightStarted?.(undefined, hideStep, {} as never);
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkHideOnly)).toBe(
-      true,
-    );
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkShowOnly)).toBe(
-      false,
-    );
-
-    hideStep.onDeselected?.(undefined, hideStep, {} as never);
-    expect(
-      document.body.classList.contains(TOUR_BODY_CLASSES.bulkHideOnly),
-    ).toBe(false);
-
-    showStep.onHighlightStarted?.(undefined, showStep, {} as never);
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkShowOnly)).toBe(
-      true,
-    );
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkHideOnly)).toBe(
-      false,
-    );
-
-    showStep.onDeselected?.(undefined, showStep, {} as never);
-    expect(
-      document.body.classList.contains(TOUR_BODY_CLASSES.bulkShowOnly),
-    ).toBe(false);
-  });
-
-  it('does not add extra body guard classes during toggle step', async () => {
-    renderTourTargets();
-    await startGuidedTour();
-
-    const toggleStep = driverOptionsRef.current.steps[3];
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkHideOnly)).toBe(false);
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkShowOnly)).toBe(false);
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.menuStepClickthrough)).toBe(false);
-
-    toggleStep.onHighlightStarted?.(undefined, toggleStep, {} as never);
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkHideOnly)).toBe(false);
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkShowOnly)).toBe(false);
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.menuStepClickthrough)).toBe(false);
-
-    toggleStep.onDeselected?.(undefined, toggleStep, {} as never);
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkHideOnly)).toBe(false);
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.bulkShowOnly)).toBe(false);
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.menuStepClickthrough)).toBe(false);
-  });
-
-  it('does not advance on project-row click during toggle step', async () => {
-    renderTourTargets();
-    await startGuidedTour();
-
-    const toggleStep = driverOptionsRef.current.steps[3];
-    driverState.activeIndex = 3;
-    toggleStep.onHighlightStarted?.(undefined, toggleStep, {} as never);
-    const projectName = document.querySelector('[data-tour="project-name"]');
-    const nonTargetProjectName = document.querySelectorAll(
-      '[data-tour-action="project-row-zoom"]',
-    )[1];
-    const onProjectRowClick = vi.fn();
-    const onNonTargetProjectRowClick = vi.fn();
-    projectName?.addEventListener('click', onProjectRowClick);
-    nonTargetProjectName?.addEventListener('click', onNonTargetProjectRowClick);
-    projectName?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    nonTargetProjectName?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    vi.advanceTimersByTime(1000);
+      stepEl?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
+    vi.advanceTimersByTime(1500);
 
     expect(mockDriverMoveNext).not.toHaveBeenCalled();
-    expect(onProjectRowClick).toHaveBeenCalledOnce();
-    expect(onNonTargetProjectRowClick).toHaveBeenCalledOnce();
-  });
-
-  it('waits for zoom-complete event before showing completion step', async () => {
-    renderTourTargets();
-    await startGuidedTour();
-
-    driverState.activeIndex = 4;
-    const centerStep = driverOptionsRef.current.steps[4];
-    centerStep.onHighlightStarted?.(undefined, centerStep, {} as never);
-
-    const projectName = document.querySelector('[data-tour="project-name"]');
-    const onProjectNameClick = vi.fn();
-    projectName?.addEventListener('click', onProjectNameClick);
-
-    projectName?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    vi.advanceTimersByTime(5);
-
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.transitionHandoff)).toBe(
-      true,
-    );
-    expect(onProjectNameClick).toHaveBeenCalledOnce();
-    expect(mockDriverMoveNext).not.toHaveBeenCalled();
-
-    document.dispatchEvent(new CustomEvent(TOUR_EVENTS.projectZoomComplete));
-    vi.advanceTimersByTime(1);
-    expect(mockDriverMoveNext).toHaveBeenCalledOnce();
-
-    centerStep.onDeselected?.(undefined, centerStep, {} as never);
-    expect(document.body.classList.contains(TOUR_BODY_CLASSES.transitionHandoff)).toBe(
-      false,
-    );
   });
 
   it('marks completion and destroys the tour on final next', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+    renderTourTargets();
     await startGuidedTour();
 
     const finalIndex = driverOptionsRef.current.steps.length - 1;
@@ -607,7 +479,7 @@ describe('guided tour engine', () => {
   });
 
   it('is idempotent when start is called while already active', async () => {
-    renderTourTargets({ includeProjectTargets: false });
+    renderTourTargets();
     await startGuidedTour();
     await startGuidedTour();
     expect(mockDriverFactory).toHaveBeenCalledOnce();

@@ -94,10 +94,18 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     () => controller.syncStatus,
   );
 
+  const lastSyncedAt = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.lastSyncedAt,
+  );
+
   const tilePrefetchJobs = useSyncExternalStore(
     (cb) => controller.subscribe(cb),
     () => controller.tilePrefetchJobs,
   );
+
+  // ---- Connecting banner (visible only during slow startup validation) ----
+  const [isStartupValidating, setIsStartupValidating] = React.useState(false);
 
   // ---- Offline modal state (derived + render-time adjustment) --------------
   const [offlineModeAcknowledged, setOfflineModeAcknowledged] = React.useState(false);
@@ -190,6 +198,21 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     if (didValidateRef.current) return;
     didValidateRef.current = true;
 
+    // Show "Connecting..." banner only when validation actually takes a noticeable
+    // time. For fast networks this never fires; for spotty networks it gives the
+    // user clear feedback that the app is trying, not silently failing.
+    //
+    // The native splash (configured with launchAutoHide:false in capacitor.config.ts)
+    // is opaque and stays above the React tree until SplashScreen.hide() runs, so
+    // we MUST hide it here too -- otherwise the banner is rendered behind the
+    // splash and the user just stares at the splash for the full timeout. On fast
+    // networks this timer is cancelled and the splash hides via .finally() as
+    // before.
+    const showBannerTimer = setTimeout(() => {
+      setIsStartupValidating(true);
+      hideSplashScreenSafely('connecting banner shown');
+    }, 1000);
+
     controller.validateSession().then((result) => {
       if (result === 'unauthorized') {
         history.replace('/login');
@@ -203,6 +226,8 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
         history.replace('/login');
       }
     }).finally(() => {
+      clearTimeout(showBannerTimer);
+      setIsStartupValidating(false);
       hideSplashScreenSafely('session validation finished');
     });
   }, [history, location.pathname, controller, hideSplashScreenSafely]);
@@ -242,6 +267,7 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
     isRetryingConnection,
     projects,
     syncStatus,
+    lastSyncedAt,
     tilePrefetchJobs,
   };
 
@@ -436,6 +462,30 @@ export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
           </div>
         </IonContent>
       </IonModal>
+
+      {/* Connecting banner: visible only when startup validation is slow.
+          Lives above other modals so users always see the "trying" state. */}
+      {isStartupValidating && (
+        <div
+          data-testid="connecting-banner"
+          role="status"
+          aria-live="polite"
+          className="fixed left-1/2 -translate-x-1/2 bottom-8 z-[10000]
+                     flex items-center gap-3 px-4 py-2 rounded-full
+                     bg-slate-900/95 border border-slate-700 shadow-lg
+                     pointer-events-none"
+          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 2rem)' }}
+        >
+          <div
+            className="w-4 h-4 border-2 border-slate-300 border-t-transparent
+                       rounded-full animate-spin"
+            aria-hidden="true"
+          />
+          <span className="text-sm text-slate-100">
+            {'Connecting to SpeleoDB\u2026'}
+          </span>
+        </div>
+      )}
     </SpeleoDBContext.Provider>
   );
 }

@@ -20,6 +20,7 @@ const {
   mockRunTileCacheStartupMaintenance,
   mockStartGuidedTour,
   mockDestroyGuidedTour,
+  mockSplashHide,
   authStateSnapshotRef,
   projectsSnapshot,
   tilePrefetchJobsSnapshot,
@@ -44,6 +45,7 @@ const {
     mockRunTileCacheStartupMaintenance: vi.fn(),
     mockStartGuidedTour: vi.fn().mockResolvedValue(undefined),
     mockDestroyGuidedTour: vi.fn(),
+    mockSplashHide: vi.fn().mockResolvedValue(undefined),
     authStateSnapshotRef: {
       current: {
         isAuthenticated: true,
@@ -106,6 +108,12 @@ vi.mock('../services/TileCacheService', () => ({
   runTileCacheStartupMaintenance: mockRunTileCacheStartupMaintenance,
 }));
 
+vi.mock('@capacitor/splash-screen', () => ({
+  SplashScreen: {
+    hide: mockSplashHide,
+  },
+}));
+
 vi.mock('../onboarding/guidedTour/engine', () => ({
   startGuidedTour: mockStartGuidedTour,
   destroyGuidedTour: mockDestroyGuidedTour,
@@ -158,6 +166,10 @@ vi.mock('../controllers/SpeleoDBController', () => {
       return syncStatusRef.current;
     }
 
+    get lastSyncedAt() {
+      return null;
+    }
+
     get tilePrefetchJobs() {
       return tilePrefetchJobsSnapshot;
     }
@@ -182,6 +194,8 @@ describe('SpeleoDBProvider', () => {
     mockIsAuthenticated.mockReturnValue(true);
     mockIsOfflineLockedRef.current = false;
     mockRunTileCacheStartupMaintenance.mockResolvedValue(undefined);
+    mockSplashHide.mockClear();
+    mockSplashHide.mockResolvedValue(undefined);
     authStateSnapshotRef.current = {
       isAuthenticated: true,
       user: { id: 'restored', email: 'user@example.com', name: 'user@example.com' },
@@ -368,6 +382,186 @@ describe('SpeleoDBProvider', () => {
 
     await waitFor(() => {
       expect(mockDestroyGuidedTour).toHaveBeenCalled();
+    });
+  });
+
+  describe('Connecting banner during startup validation', () => {
+    it('does not render the banner when validation resolves quickly (< 1s)', async () => {
+      // Microtasks always beat any setTimeout callback, so a resolved
+      // validation will cancel the 1s gate before it fires. Use shouldAdvanceTime
+      // so waitFor can poll without freezing on the faked clock.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        mockValidateSession.mockResolvedValue('ok');
+        render(
+          <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+            <SpeleoDBProvider>
+              <div>child</div>
+            </SpeleoDBProvider>
+          </Router>,
+        );
+
+        await waitFor(() => {
+          expect(mockValidateSession).toHaveBeenCalledOnce();
+        });
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
+
+        // Explicitly advance past the gate; the banner must remain hidden
+        // because the .finally() cancelled the timer.
+        await act(async () => {
+          vi.advanceTimersByTime(2000);
+        });
+        expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('hides the splash exactly once when validation resolves quickly (.finally path)', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        mockValidateSession.mockResolvedValue('ok');
+        render(
+          <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+            <SpeleoDBProvider>
+              <div>child</div>
+            </SpeleoDBProvider>
+          </Router>,
+        );
+
+        await waitFor(() => {
+          expect(mockValidateSession).toHaveBeenCalledOnce();
+        });
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        // Validation resolved before the 1s gate, so the splash hides only
+        // through the .finally() path -- not through the banner-show path.
+        expect(mockSplashHide).toHaveBeenCalledTimes(1);
+
+        // Advance past the gate; the cancelled timer must not call hide again.
+        await act(async () => {
+          vi.advanceTimersByTime(2000);
+        });
+        expect(mockSplashHide).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('renders the banner when validation is still pending after 1s, then hides it on resolution', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        let resolveValidation: ((r: 'ok' | 'unauthorized' | 'network_error') => void) | null = null;
+        mockValidateSession.mockImplementation(
+          () => new Promise<'ok' | 'unauthorized' | 'network_error'>((resolve) => {
+            resolveValidation = resolve;
+          }),
+        );
+
+        render(
+          <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+            <SpeleoDBProvider>
+              <div>child</div>
+            </SpeleoDBProvider>
+          </Router>,
+        );
+
+        await waitFor(() => {
+          expect(mockValidateSession).toHaveBeenCalledOnce();
+        });
+        expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
+
+        // Advance past the 1s gate without resolving validation.
+        await act(async () => {
+          vi.advanceTimersByTime(1100);
+        });
+
+        expect(screen.getByTestId('connecting-banner')).toBeInTheDocument();
+        expect(screen.getByText(/Connecting to SpeleoDB/i)).toBeInTheDocument();
+
+        // Resolve validation; the banner should disappear.
+        await act(async () => {
+          resolveValidation!('ok');
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('hides the native splash as soon as the connecting banner appears (slow validation)', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        let resolveValidation: ((r: 'ok' | 'unauthorized' | 'network_error') => void) | null = null;
+        mockValidateSession.mockImplementation(
+          () => new Promise<'ok' | 'unauthorized' | 'network_error'>((resolve) => {
+            resolveValidation = resolve;
+          }),
+        );
+
+        render(
+          <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+            <SpeleoDBProvider>
+              <div>child</div>
+            </SpeleoDBProvider>
+          </Router>,
+        );
+
+        await waitFor(() => {
+          expect(mockValidateSession).toHaveBeenCalledOnce();
+        });
+        // Splash must NOT have been hidden yet -- validation is still pending
+        // and the 1s gate has not elapsed.
+        expect(mockSplashHide).not.toHaveBeenCalled();
+
+        // Fire the 1s gate without resolving validation. The banner appears
+        // AND the splash must hide so the banner is actually visible to the
+        // user (the native splash is opaque on iOS/Android).
+        await act(async () => {
+          vi.advanceTimersByTime(1100);
+        });
+
+        expect(screen.getByTestId('connecting-banner')).toBeInTheDocument();
+        expect(mockSplashHide).toHaveBeenCalledTimes(1);
+
+        // When validation finally resolves, the .finally() also calls hide
+        // (idempotent on native, the .catch swallows any "already hidden").
+        await act(async () => {
+          resolveValidation!('ok');
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+        expect(mockSplashHide).toHaveBeenCalledTimes(2);
+        expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not render the banner when there are no stored credentials', async () => {
+      mockGetPreferences.mockReturnValue({});
+      render(
+        <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+          <SpeleoDBProvider>
+            <div>child</div>
+          </SpeleoDBProvider>
+        </Router>,
+      );
+
+      await Promise.resolve();
+      expect(mockValidateSession).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
     });
   });
 });

@@ -7,7 +7,6 @@ import { createMemoryHistory } from 'history';
 import Dashboard from './Dashboard';
 import { MAP } from '../constants';
 import type { Project } from '../types/project';
-import { TOUR_EVENTS } from '../onboarding/guidedTour/selectors';
 
 // jsdom lacks PointerEvent -- polyfill so fireEvent.pointerDown/Up creates
 // events with pointerId/pointerType that the pointer-capture handlers rely on.
@@ -52,7 +51,7 @@ const {
   mapPropsRef,
   mockMapFitBounds,
   mockGetMap,
-  mockMapOnce,
+  mockMapOnce: _mockMapOnce,
   mockDisableTouchRotation,
   mockSetBearing,
   mockSetPitch,
@@ -321,12 +320,22 @@ const {
   mockGetProjectVisibilityPreferences,
   mockSetProjectVisibilityPreference,
   mockSetProjectVisibilityPreferences,
+  mockGetCountryVisibilityPreferences,
+  mockSetCountryVisibilityPreference,
+  mockSetCountryVisibilityPreferences,
+  mockGetCountryCollapsedPreferences,
+  mockSetCountryCollapsedPreference,
   mockGetShowLandmarks,
   mockSetShowLandmarks,
 } = vi.hoisted(() => ({
-  mockGetProjectVisibilityPreferences: vi.fn(() => ({})),
+  mockGetProjectVisibilityPreferences: vi.fn(() => ({}) as Record<string, boolean>),
   mockSetProjectVisibilityPreference: vi.fn(),
   mockSetProjectVisibilityPreferences: vi.fn(),
+  mockGetCountryVisibilityPreferences: vi.fn(() => ({}) as Record<string, boolean>),
+  mockSetCountryVisibilityPreference: vi.fn(),
+  mockSetCountryVisibilityPreferences: vi.fn(),
+  mockGetCountryCollapsedPreferences: vi.fn(() => ({}) as Record<string, boolean>),
+  mockSetCountryCollapsedPreference: vi.fn(),
   mockGetShowLandmarks: vi.fn(() => true),
   mockSetShowLandmarks: vi.fn(),
 }));
@@ -339,6 +348,11 @@ vi.mock('../services/PreferencesService', () => ({
   getProjectVisibilityPreferences: mockGetProjectVisibilityPreferences,
   setProjectVisibilityPreference: mockSetProjectVisibilityPreference,
   setProjectVisibilityPreferences: mockSetProjectVisibilityPreferences,
+  getCountryVisibilityPreferences: mockGetCountryVisibilityPreferences,
+  setCountryVisibilityPreference: mockSetCountryVisibilityPreference,
+  setCountryVisibilityPreferences: mockSetCountryVisibilityPreferences,
+  getCountryCollapsedPreferences: mockGetCountryCollapsedPreferences,
+  setCountryCollapsedPreference: mockSetCountryCollapsedPreference,
   getShowLandmarks: mockGetShowLandmarks,
   setShowLandmarks: mockSetShowLandmarks,
 }));
@@ -373,6 +387,7 @@ vi.mock('../context/useSpeleoDB', () => ({
     isOnline: true,
     isOfflineLocked: mockIsOfflineLocked,
     isRetryingConnection: false,
+    lastSyncedAt: null,
     tilePrefetchJobs: [],
   }),
 }));
@@ -440,6 +455,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     name: 'Test Project',
     description: '',
     country: 'FR',
+    color: '#377eb8',
     type: 'survey',
     visibility: 'public',
     is_active: true,
@@ -597,6 +613,8 @@ describe('Dashboard', () => {
     mockIsOfflineLocked = false;
     mockProjects = [];
     mockGetProjectVisibilityPreferences.mockReturnValue({});
+    mockGetCountryVisibilityPreferences.mockReturnValue({});
+    mockGetCountryCollapsedPreferences.mockReturnValue({});
     mockGetShowLandmarks.mockReturnValue(true);
     mockGetOverlayGeoJSON.mockResolvedValue(null);
     mockMapHasImage.mockReturnValue(false);
@@ -1923,32 +1941,237 @@ describe('Dashboard', () => {
     expect(mockSetProjectVisibilityPreference).toHaveBeenCalledWith('p1', true);
   });
 
-  it('dispatches guided-tour zoom completion after map movement ends', async () => {
-    mockProjects = [makeProject({ id: 'p1', name: 'Zoom Event' })];
-    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
-    mockMapOnce.mockImplementation((eventName: string, listener: () => void) => {
-      if (eventName === 'moveend') listener();
+  describe('country gate', () => {
+    it('hides project layers for a country whose gate is OFF without mutating per-project prefs', async () => {
+      mockProjects = [
+        makeProject({ id: 'p1', name: 'Alpha', country: 'FR' }),
+        makeProject({ id: 'p2', name: 'Bravo', country: 'US' }),
+      ];
+      mockGetProjectGeoJSON.mockImplementation(async (projectId: string) =>
+        pointFeatureCollection(projectId === 'p1' ? 2.3 : -100, 46.6),
+      );
+      mockGetCountryVisibilityPreferences.mockReturnValue({ FR: false });
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(document.querySelector('[data-layer-id="project-p2-line"]')).not.toBeNull();
+      });
+
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).toBeNull();
+      expect(mockSetProjectVisibilityPreference).not.toHaveBeenCalled();
     });
 
-    renderDashboard();
+    it('drops project-linked overlay features when the project country gate is OFF', async () => {
+      mockProjects = [makeProject({ id: 'p1', name: 'Alpha', country: 'FR' })];
+      mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+      mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+        if (overlayId === 'subsurfaceStations') {
+          return overlayPointFeatureCollection({ project: 'p1' });
+        }
+        return null;
+      });
+      mockGetCountryVisibilityPreferences.mockReturnValue({ FR: false });
 
-    const onZoomComplete = vi.fn();
-    document.addEventListener(TOUR_EVENTS.projectZoomComplete, onZoomComplete as EventListener);
+      renderDashboard();
 
-    await waitFor(() => {
-      expect(screen.getByText('Zoom Event')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(mockGetOverlayGeoJSON).toHaveBeenCalledWith('subsurfaceStations');
+      });
+
+      // Project is gated OFF -> the linked station feature is filtered out
+      // and the source/layer never mounts.
+      expect(document.querySelector('[data-layer-id="subsurface-stations-circles"]')).toBeNull();
     });
 
-    await userEvent.click(screen.getByText('Zoom Event'));
+    it('recomputes the depth domain when a country gate is OFF', async () => {
+      mockProjects = [
+        makeProject({ id: 'p1', name: 'Shallow Cave', country: 'FR' }),
+        makeProject({ id: 'p2', name: 'Deep Cave', country: 'US' }),
+      ];
+      mockGetProjectGeoJSON.mockImplementation(async (projectId: string) => {
+        if (projectId === 'p1') return depthFeatureCollection(25);
+        if (projectId === 'p2') return depthFeatureCollection(80);
+        return null;
+      });
+      mockGetCountryVisibilityPreferences.mockReturnValue({ US: false });
 
-    await waitFor(() => {
-      expect(onZoomComplete).toHaveBeenCalledOnce();
+      renderDashboard({ colorMode: 'depth' });
+
+      await waitFor(() => {
+        expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+        expect(screen.getByTestId('depth-gauge')).toBeInTheDocument();
+      });
+
+      expect(document.querySelector('[data-layer-id="project-p2-line"]')).toBeNull();
+      expect(screen.getByTestId('depth-gauge-max')).toHaveTextContent('25 ft');
     });
 
-    document.removeEventListener(
-      TOUR_EVENTS.projectZoomComplete,
-      onZoomComplete as EventListener,
-    );
+    it('persists country visibility when the country toggle is changed', async () => {
+      mockProjects = [makeProject({ id: 'p1', name: 'Alpha', country: 'FR' })];
+      mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('projects-tab')).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByTestId('projects-tab'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('country-toggle-FR')).toBeInTheDocument();
+      });
+
+      const countryToggleInput = screen
+        .getByTestId('country-toggle-FR')
+        .querySelector('input') as HTMLInputElement;
+      await userEvent.click(countryToggleInput);
+
+      expect(mockSetCountryVisibilityPreference).toHaveBeenCalledWith('FR', false);
+
+      await waitFor(() => {
+        expect(document.querySelector('[data-layer-id="project-p1-line"]')).toBeNull();
+      });
+    });
+
+    it('preserves country gate ON when the user keeps individual toggle OFF', async () => {
+      mockProjects = [
+        makeProject({ id: 'p1', name: 'Alpha', country: 'FR' }),
+        makeProject({ id: 'p2', name: 'Bravo', country: 'FR' }),
+      ];
+      mockGetProjectGeoJSON.mockImplementation(async (projectId: string) =>
+        pointFeatureCollection(projectId === 'p1' ? 2.3 : 2.4, 46.6),
+      );
+      mockGetProjectVisibilityPreferences.mockReturnValue({ p1: true, p2: false });
+      // FR gate already ON (default).
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+      });
+
+      expect(document.querySelector('[data-layer-id="project-p2-line"]')).toBeNull();
+    });
+
+    it('persists country collapse state when the country header is tapped', async () => {
+      mockProjects = [makeProject({ id: 'p1', name: 'Alpha', country: 'FR' })];
+      mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('projects-tab')).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByTestId('projects-tab'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('country-collapse-FR')).toBeInTheDocument();
+      });
+
+      await userEvent.click(screen.getByTestId('country-collapse-FR'));
+      expect(mockSetCountryCollapsedPreference).toHaveBeenCalledWith('FR', true);
+    });
+
+    it('Show all enables both individual prefs and country gates', async () => {
+      mockProjects = [
+        makeProject({ id: 'p1', name: 'Alpha', country: 'FR' }),
+        makeProject({ id: 'p2', name: 'Bravo', country: 'US' }),
+      ];
+      mockGetProjectGeoJSON.mockImplementation(async (projectId: string) =>
+        pointFeatureCollection(projectId === 'p1' ? 2.3 : -100, 46.6),
+      );
+      mockGetProjectVisibilityPreferences.mockReturnValue({ p1: false, p2: false });
+      mockGetCountryVisibilityPreferences.mockReturnValue({ FR: false });
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(screen.getByText('Show all')).toBeInTheDocument();
+      });
+
+      await userEvent.click(screen.getByText('Show all'));
+
+      expect(mockSetProjectVisibilityPreferences).toHaveBeenCalledWith({
+        p1: true,
+        p2: true,
+      });
+      expect(mockSetCountryVisibilityPreferences).toHaveBeenCalledWith({
+        FR: true,
+        US: true,
+      });
+    });
+
+    it('Hide all only flips individual prefs and leaves country gates untouched', async () => {
+      mockProjects = [
+        makeProject({ id: 'p1', name: 'Alpha', country: 'FR' }),
+        makeProject({ id: 'p2', name: 'Bravo', country: 'US' }),
+      ];
+      mockGetProjectGeoJSON.mockImplementation(async (projectId: string) =>
+        pointFeatureCollection(projectId === 'p1' ? 2.3 : -100, 46.6),
+      );
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(screen.getByText('Hide all')).toBeInTheDocument();
+      });
+
+      await userEvent.click(screen.getByText('Hide all'));
+
+      expect(mockSetProjectVisibilityPreferences).toHaveBeenCalledWith({
+        p1: false,
+        p2: false,
+      });
+      expect(mockSetCountryVisibilityPreferences).not.toHaveBeenCalled();
+    });
+
+    it('restores country visibility and collapse state on first render', async () => {
+      mockProjects = [makeProject({ id: 'p1', name: 'Alpha', country: 'FR' })];
+      mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+      mockGetCountryVisibilityPreferences.mockReturnValue({ FR: false });
+      mockGetCountryCollapsedPreferences.mockReturnValue({ FR: true });
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('projects-tab')).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByTestId('projects-tab'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('country-toggle-FR')).toBeInTheDocument();
+      });
+
+      const toggleInput = screen
+        .getByTestId('country-toggle-FR')
+        .querySelector('input') as HTMLInputElement;
+      expect(toggleInput.checked).toBe(false);
+      // Collapsed -> the project row is not rendered.
+      expect(screen.queryByText('Alpha')).toBeNull();
+    });
+
+    it('zoom-to-project re-enables the country gate when it is OFF for the target project', async () => {
+      mockProjects = [makeProject({ id: 'p1', name: 'Alpha', country: 'FR' })];
+      mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+      mockGetCountryVisibilityPreferences.mockReturnValue({ FR: false });
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('projects-tab')).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByTestId('projects-tab'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Alpha')).toBeInTheDocument();
+      });
+
+      await userEvent.click(screen.getByText('Alpha'));
+
+      expect(mockSetCountryVisibilityPreference).toHaveBeenCalledWith('FR', true);
+      expect(mockSetProjectVisibilityPreference).toHaveBeenCalledWith('p1', true);
+    });
   });
 
   it('closes the project panel after zooming to a project', async () => {

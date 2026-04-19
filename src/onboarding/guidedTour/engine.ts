@@ -7,11 +7,11 @@ import {
   setHasCompletedGuidedTour,
 } from '../../services/PreferencesService';
 import {
+  SETTINGS_TOUR_PATHNAME,
   TOUR_BODY_CLASSES,
-  TOUR_EVENTS,
   TOUR_SELECTORS,
   eventMatchesSelector,
-  hasProjectTourTargets,
+  hasSettingsTourTargets,
   queryTourElement,
 } from './selectors';
 import {
@@ -31,15 +31,35 @@ let unbindListeners: Array<() => void> = [];
 let pendingMoveTimeout: number | null = null;
 let hasPersistedCompletionForRun = false;
 let shouldPersistCompletionOnDriverDestroyed = false;
-let didObserveCenterProjectTap = false;
-let allowSyntheticMenuClick = false;
-let allowSyntheticProjectClick = false;
+let allowSyntheticTabClick = false;
 
 const GUIDED_TOUR_STAGE_RADIUS_DEFAULT = 8;
-const MENU_STEP_ADVANCE_DELAY_MS = 600;
-const BULK_ACTION_TARGET_GRACE_PERIOD_MS = 1200;
-const PROJECT_TARGET_GRACE_PERIOD_MS = 6000;
-const PROJECT_TARGET_POLL_INTERVAL_MS = 200;
+const TAB_STEP_ADVANCE_DELAY_MS = 600;
+const PROJECT_PANEL_TARGET_GRACE_PERIOD_MS = 1200;
+const SETTINGS_TARGET_GRACE_PERIOD_MS = 6000;
+const TARGET_POLL_INTERVAL_MS = 200;
+
+interface TabHandoffConfig {
+  selector: string;
+  initialDelayMs: number;
+  timeoutMs: number;
+  shouldAdvance: () => boolean;
+}
+
+const TAB_HANDOFFS: Partial<Record<GuidedTourStepId, TabHandoffConfig>> = {
+  openProjectPanel: {
+    selector: TOUR_SELECTORS.menuToggle,
+    initialDelayMs: TAB_STEP_ADVANCE_DELAY_MS,
+    timeoutMs: PROJECT_PANEL_TARGET_GRACE_PERIOD_MS,
+    shouldAdvance: () => isProjectPanelOpen(),
+  },
+  goToSettings: {
+    selector: TOUR_SELECTORS.settingsTab,
+    initialDelayMs: TAB_STEP_ADVANCE_DELAY_MS,
+    timeoutMs: SETTINGS_TARGET_GRACE_PERIOD_MS,
+    shouldAdvance: () => areSettingsTourTargetsReady(),
+  },
+};
 
 function clearPendingMoveTimeout(): void {
   if (pendingMoveTimeout === null) return;
@@ -82,7 +102,7 @@ function resetStagePaddingToDefault(): void {
   );
 }
 
-function setMenuStagePadding(): void {
+function setTabStagePadding(): void {
   setStageFraming(
     GUIDED_TOUR_STAGE_PADDING_MENU,
     GUIDED_TOUR_STAGE_RADIUS_DEFAULT,
@@ -131,11 +151,13 @@ function isProjectPanelOpen(): boolean {
   return panel instanceof HTMLElement && panel.dataset.tourOpen === 'true';
 }
 
-function areBulkActionTargetsReady(): boolean {
-  return Boolean(
-    isProjectPanelOpen() &&
-      queryTourElement(TOUR_SELECTORS.hideAllAction) &&
-      queryTourElement(TOUR_SELECTORS.showAllAction),
+function areSettingsTourTargetsReady(): boolean {
+  // Both Dashboard and Settings stay mounted under App.tsx's visibility
+  // toggle, so DOM presence alone is not enough — the highlight must only
+  // land on the Settings page once the route actually points there.
+  return (
+    window.location.pathname === SETTINGS_TOUR_PATHNAME &&
+    hasSettingsTourTargets()
   );
 }
 
@@ -164,7 +186,7 @@ function pollStepUntil(
     if (Date.now() - startedAt < options.timeoutMs) {
       pendingMoveTimeout = window.setTimeout(
         attemptProgress,
-        PROJECT_TARGET_POLL_INTERVAL_MS,
+        TARGET_POLL_INTERVAL_MS,
       );
       return;
     }
@@ -176,24 +198,6 @@ function pollStepUntil(
     attemptProgress,
     options.initialDelayMs,
   );
-}
-
-function moveNextForStep(stepId: GuidedTourStepId, delayMs = 0): void {
-  if (!activeDriver || !activeDriver.isActive()) return;
-  if (getActiveStepId() !== stepId) return;
-
-  clearPendingMoveTimeout();
-  if (delayMs <= 0) {
-    activeDriver.moveNext();
-    return;
-  }
-
-  pendingMoveTimeout = window.setTimeout(() => {
-    pendingMoveTimeout = null;
-    if (!activeDriver || !activeDriver.isActive()) return;
-    if (getActiveStepId() !== stepId) return;
-    activeDriver.moveNext();
-  }, delayMs);
 }
 
 function moveToStep(stepId: GuidedTourStepId): void {
@@ -230,133 +234,51 @@ function consumeEvent(event: Event): void {
   }
 }
 
-function continueAfterOpenPanelTap(): void {
+function continueAfterTabTap(stepId: GuidedTourStepId, config: TabHandoffConfig): void {
   if (!activeDriver || !activeDriver.isActive()) return;
-  pollStepUntil('openProjectPanel', {
-    initialDelayMs: MENU_STEP_ADVANCE_DELAY_MS,
-    timeoutMs: BULK_ACTION_TARGET_GRACE_PERIOD_MS,
-    shouldAdvance: () => areBulkActionTargetsReady(),
+  pollStepUntil(stepId, {
+    initialDelayMs: config.initialDelayMs,
+    timeoutMs: config.timeoutMs,
+    shouldAdvance: config.shouldAdvance,
     onTimeout: () => {
       moveToStep('completion');
     },
   });
-}
-
-function continueAfterShowAllTap(): void {
-  if (!activeDriver || !activeDriver.isActive()) return;
-  pollStepUntil('showAllProjects', {
-    initialDelayMs: 300,
-    timeoutMs: PROJECT_TARGET_GRACE_PERIOD_MS,
-    shouldAdvance: () => hasProjectTourTargets(),
-    onTimeout: () => {
-      moveToStep('completion');
-    },
-  });
-}
-
-function onProjectZoomCompleteEvent(): void {
-  if (getActiveStepId() !== 'centerProject') return;
-  if (!didObserveCenterProjectTap) return;
-
-  didObserveCenterProjectTap = false;
-  moveNextForStep('centerProject', 0);
 }
 
 function onDocumentClick(event: Event): void {
   const stepId = getActiveStepId();
   if (!stepId) return;
 
-  if (
-    stepId === 'openProjectPanel' &&
-    eventMatchesSelector(event, TOUR_SELECTORS.menuToggle)
-  ) {
-    if (allowSyntheticMenuClick) {
-      allowSyntheticMenuClick = false;
-      return;
+  const handoff = TAB_HANDOFFS[stepId];
+  if (!handoff) return;
+  if (!eventMatchesSelector(event, handoff.selector)) return;
+
+  if (allowSyntheticTabClick) {
+    allowSyntheticTabClick = false;
+    return;
+  }
+
+  consumeEvent(event);
+  hideTourVisualsForActionHandoff();
+  const tabTarget = queryTourElement(handoff.selector);
+  window.setTimeout(() => {
+    if (!activeDriver || !activeDriver.isActive()) return;
+    if (getActiveStepId() !== stepId) return;
+    if (tabTarget) {
+      allowSyntheticTabClick = true;
+      dispatchSyntheticClick(tabTarget);
     }
-
-    consumeEvent(event);
-    hideTourVisualsForActionHandoff();
-    const menuToggle = queryTourElement(TOUR_SELECTORS.menuToggle);
-    window.setTimeout(() => {
-      if (!activeDriver || !activeDriver.isActive()) return;
-      if (getActiveStepId() !== 'openProjectPanel') return;
-      if (menuToggle) {
-        allowSyntheticMenuClick = true;
-        dispatchSyntheticClick(menuToggle);
-      }
-      continueAfterOpenPanelTap();
-    }, 0);
-    return;
-  }
-
-  if (
-    stepId === 'hideAllProjects' &&
-    eventMatchesSelector(event, TOUR_SELECTORS.hideAllAction)
-  ) {
-    moveNextForStep('hideAllProjects', 300);
-    return;
-  }
-
-  if (
-    stepId === 'showAllProjects' &&
-    eventMatchesSelector(event, TOUR_SELECTORS.showAllAction)
-  ) {
-    continueAfterShowAllTap();
-    return;
-  }
-
-  if (
-    stepId === 'toggleProject' &&
-    eventMatchesSelector(event, TOUR_SELECTORS.projectToggle)
-  ) {
-    moveNextForStep('toggleProject', 250);
-    return;
-  }
-
-  if (
-    stepId === 'centerProject' &&
-    eventMatchesSelector(event, TOUR_SELECTORS.projectRowZoomAction)
-  ) {
-    if (allowSyntheticProjectClick) {
-      allowSyntheticProjectClick = false;
-      return;
-    }
-
-    consumeEvent(event);
-    if (!eventMatchesSelector(event, TOUR_SELECTORS.projectName)) return;
-
-    didObserveCenterProjectTap = true;
-    hideTourVisualsForActionHandoff();
-
-    const projectTarget = queryTourElement(TOUR_SELECTORS.projectName);
-    window.setTimeout(() => {
-      if (!activeDriver || !activeDriver.isActive()) return;
-      if (getActiveStepId() !== 'centerProject') return;
-      if (!projectTarget) return;
-      allowSyntheticProjectClick = true;
-      dispatchSyntheticClick(projectTarget);
-    }, 0);
-  }
+    continueAfterTabTap(stepId, handoff);
+  }, 0);
 }
 
 function attachInteractionListeners(): void {
   const onClick = (event: Event) => onDocumentClick(event);
-  const onProjectZoomComplete = () => onProjectZoomCompleteEvent();
 
   document.addEventListener('click', onClick, true);
-  document.addEventListener(
-    TOUR_EVENTS.projectZoomComplete,
-    onProjectZoomComplete,
-    true,
-  );
   unbindListeners.push(() => {
     document.removeEventListener('click', onClick, true);
-    document.removeEventListener(
-      TOUR_EVENTS.projectZoomComplete,
-      onProjectZoomComplete,
-      true,
-    );
   });
 }
 
@@ -370,15 +292,11 @@ function detachInteractionListeners(): void {
 function resetRunState(): void {
   clearPendingMoveTimeout();
   detachInteractionListeners();
-  removeBodyClass(TOUR_BODY_CLASSES.menuStepClickthrough);
-  removeBodyClass(TOUR_BODY_CLASSES.bulkHideOnly);
-  removeBodyClass(TOUR_BODY_CLASSES.bulkShowOnly);
+  removeBodyClass(TOUR_BODY_CLASSES.tabClickthrough);
   removeBodyClass(TOUR_BODY_CLASSES.transitionHandoff);
   removeBodyClass(TOUR_BODY_CLASSES.active);
   activeStepIds = [];
-  didObserveCenterProjectTap = false;
-  allowSyntheticMenuClick = false;
-  allowSyntheticProjectClick = false;
+  allowSyntheticTabClick = false;
   shouldPersistCompletionOnDriverDestroyed = false;
   hasPersistedCompletionForRun = false;
   activeDriver = null;
@@ -421,44 +339,30 @@ export async function startGuidedTour(
   if (!options.force && getHasCompletedGuidedTour()) return;
   if (isGuidedTourActive()) return;
 
-  if (!options.force && getHasCompletedGuidedTour()) return;
-  if (isGuidedTourActive()) return;
-
   destroyGuidedTour();
   addBodyClass(TOUR_BODY_CLASSES.active);
 
+  const enterTabStep = () => {
+    addBodyClass(TOUR_BODY_CLASSES.tabClickthrough);
+    restoreTourVisualsAfterActionHandoff();
+    setTabStagePadding();
+  };
+  const exitTabStep = () => {
+    removeBodyClass(TOUR_BODY_CLASSES.tabClickthrough);
+    restoreTourVisualsAfterActionHandoff();
+    resetStagePaddingToDefault();
+  };
+
   const { steps, stepIds } = buildTourSteps({
-    onEnterMenuStep: () => {
-      addBodyClass(TOUR_BODY_CLASSES.menuStepClickthrough);
-      restoreTourVisualsAfterActionHandoff();
-      setMenuStagePadding();
-    },
-    onExitMenuStep: () => {
-      removeBodyClass(TOUR_BODY_CLASSES.menuStepClickthrough);
+    onEnterMenuStep: enterTabStep,
+    onExitMenuStep: exitTabStep,
+    onEnterSettingsTabStep: enterTabStep,
+    onExitSettingsTabStep: exitTabStep,
+    onEnterSettingsContentStep: () => {
       restoreTourVisualsAfterActionHandoff();
       resetStagePaddingToDefault();
     },
-    onEnterHideAllStep: () => {
-      addBodyClass(TOUR_BODY_CLASSES.bulkHideOnly);
-      resetStagePaddingToDefault();
-    },
-    onExitHideAllStep: () => {
-      removeBodyClass(TOUR_BODY_CLASSES.bulkHideOnly);
-    },
-    onEnterShowAllStep: () => {
-      addBodyClass(TOUR_BODY_CLASSES.bulkShowOnly);
-      resetStagePaddingToDefault();
-    },
-    onExitShowAllStep: () => {
-      removeBodyClass(TOUR_BODY_CLASSES.bulkShowOnly);
-    },
-    onEnterCenterProject: () => {
-      didObserveCenterProjectTap = false;
-      restoreTourVisualsAfterActionHandoff();
-      resetStagePaddingToDefault();
-    },
-    onExitCenterProject: () => {
-      didObserveCenterProjectTap = false;
+    onExitSettingsContentStep: () => {
       restoreTourVisualsAfterActionHandoff();
     },
     onCompletionNext: () => {

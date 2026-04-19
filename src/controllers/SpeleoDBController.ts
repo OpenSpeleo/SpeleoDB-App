@@ -38,8 +38,20 @@ export type SyncStatus = 'idle' | 'syncing' | 'done' | 'error';
 
 /** The slice of PreferencesService the controller needs. */
 export interface PreferencesPort {
-  getPreferences(): { email?: string; token?: string; instance?: string };
-  setPreferences(prefs: Partial<{ email?: string; token?: string; instance?: string }>): void;
+  getPreferences(): {
+    email?: string;
+    token?: string;
+    instance?: string;
+    lastSyncedAt?: number;
+  };
+  setPreferences(
+    prefs: Partial<{
+      email?: string;
+      token?: string;
+      instance?: string;
+      lastSyncedAt?: number;
+    }>,
+  ): void;
   clearPreferences(): void;
 }
 
@@ -76,6 +88,7 @@ export class SpeleoDBController {
   private _isRetryingConnection = false;
   private _projects: Project[] = [];
   private _syncStatus: SyncStatus = 'idle';
+  private _lastSyncedAt: number | null = null;
   private _tilePrefetchJobs: TilePrefetchJobState[] = [];
   private _listeners = new Set<() => void>();
   private tilePrefetch!: TilePrefetchService;
@@ -89,6 +102,7 @@ export class SpeleoDBController {
   private _isRetryingConnectionSnapshot: boolean = this._isRetryingConnection;
   private _projectsSnapshot: Project[] = this._projects;
   private _syncStatusSnapshot: SyncStatus = this._syncStatus;
+  private _lastSyncedAtSnapshot: number | null = this._lastSyncedAt;
   private _tilePrefetchJobsSnapshot: TilePrefetchJobState[] = this._tilePrefetchJobs;
 
   constructor(
@@ -132,6 +146,10 @@ export class SpeleoDBController {
     return this._syncStatusSnapshot;
   }
 
+  get lastSyncedAt(): number | null {
+    return this._lastSyncedAtSnapshot;
+  }
+
   get tilePrefetchJobs(): TilePrefetchJobState[] {
     return this._tilePrefetchJobsSnapshot;
   }
@@ -155,6 +173,7 @@ export class SpeleoDBController {
     this._isRetryingConnectionSnapshot = this._isRetryingConnection;
     this._projectsSnapshot = [...this._projects];
     this._syncStatusSnapshot = this._syncStatus;
+    this._lastSyncedAtSnapshot = this._lastSyncedAt;
     this._tilePrefetchJobsSnapshot = [...this._tilePrefetchJobs];
     this._listeners.forEach((fn) => fn());
   }
@@ -337,6 +356,7 @@ export class SpeleoDBController {
       this._isRetryingConnection = false;
       this._projects = [];
       this._syncStatus = 'idle';
+      this._lastSyncedAt = null;
       this._tilePrefetchJobs = [];
       this.prefs.clearPreferences();
 
@@ -422,6 +442,7 @@ export class SpeleoDBController {
         this._isOnline = true;
         this.setOfflineLocked(false);
         await this.cache.setProjects(freshProjects);
+        this.recordSuccessfulSync();
         this.notify();
 
         // Step 3 -- download geojson files in background (non-blocking)
@@ -638,11 +659,25 @@ export class SpeleoDBController {
           user: { id: 'restored', email, name: email },
           token: prefs.token,
         };
+        if (typeof prefs.lastSyncedAt === 'number' && Number.isFinite(prefs.lastSyncedAt)) {
+          this._lastSyncedAt = prefs.lastSyncedAt;
+        }
         // Update snapshots (no notify -- no listeners registered yet at construct time).
         this._authStateSnapshot = { ...this._authState };
+        this._lastSyncedAtSnapshot = this._lastSyncedAt;
       }
     } catch (error) {
       console.error('Failed to load auth state:', error);
+    }
+  }
+
+  /** Record a successful project sync and persist its timestamp. */
+  private recordSuccessfulSync(): void {
+    this._lastSyncedAt = Date.now();
+    try {
+      this.prefs.setPreferences({ lastSyncedAt: this._lastSyncedAt });
+    } catch (error) {
+      console.warn('Failed to persist lastSyncedAt:', error);
     }
   }
 

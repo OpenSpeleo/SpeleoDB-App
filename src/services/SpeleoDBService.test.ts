@@ -32,6 +32,7 @@ const SAMPLE_PROJECT: Project = {
   name: 'Project 1',
   description: '',
   country: 'US',
+  color: '#377eb8',
   type: 'COMPASS',
   visibility: 'PRIVATE',
   is_active: true,

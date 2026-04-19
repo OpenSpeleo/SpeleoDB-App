@@ -39,6 +39,7 @@ export interface Project {
   name: string;
   description: string;
   country: string;
+  color: string;
   type: string;
   visibility: string;
   is_active: boolean;
