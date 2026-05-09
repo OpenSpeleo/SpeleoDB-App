@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import OverlayMarkerDetailsModal from './OverlayMarkerDetailsModal';
 import type { OverlayMarkerDetails } from '../utils/overlayMarkerDetails';
+import { allowConsoleWarn } from '../test/consoleGuard';
 
 // ==================== Mocks ====================
 
@@ -158,29 +159,23 @@ describe('OverlayMarkerDetailsModal', () => {
   });
 
   it('ignores share cancellation without warning', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockShare.mockRejectedValue(new Error('User cancelled'));
     const user = userEvent.setup();
     render(<OverlayMarkerDetailsModal detail={landmarkDetail} onClose={vi.fn()} />);
 
     await user.click(screen.getByTestId('share-button'));
     expect(mockShare).toHaveBeenCalled();
-    expect(warnSpy).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
   });
 
   it('warns when share fails unexpectedly', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    allowConsoleWarn(
+      '[overlay-share] Failed to share marker details.',
+      expect.any(Error),
+    );
     mockShare.mockRejectedValue(new Error('share bridge unavailable'));
     const user = userEvent.setup();
     render(<OverlayMarkerDetailsModal detail={landmarkDetail} onClose={vi.fn()} />);
 
     await user.click(screen.getByTestId('share-button'));
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      '[overlay-share] Failed to share marker details.',
-      expect.any(Error),
-    );
-    warnSpy.mockRestore();
   });
 });

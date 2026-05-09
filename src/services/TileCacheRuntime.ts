@@ -1,0 +1,51 @@
+type TileCacheServiceModule = typeof import('./TileCacheService')
+
+let tileCacheServicePromise: Promise<TileCacheServiceModule> | null = null
+let pendingOfflineMode = false
+
+async function loadTileCacheService(): Promise<TileCacheServiceModule> {
+  if (!tileCacheServicePromise) {
+    tileCacheServicePromise = import('./TileCacheService')
+      .then((module) => {
+        module.setTileCacheOfflineMode(pendingOfflineMode)
+        return module
+      })
+      .catch((error) => {
+        tileCacheServicePromise = null
+        throw error
+      })
+  }
+
+  return tileCacheServicePromise
+}
+
+export function setTileCacheOfflineModeRuntime(isOffline: boolean): void {
+  pendingOfflineMode = isOffline
+
+  if (!tileCacheServicePromise && !isOffline) {
+    return
+  }
+
+  void loadTileCacheService()
+    .then((module) => {
+      module.setTileCacheOfflineMode(isOffline)
+    })
+    .catch(() => {
+      // The runtime will retry on the next tile-cache operation.
+    })
+}
+
+export async function clearCachedTilesRuntime(): Promise<void> {
+  const module = await loadTileCacheService()
+  await module.clearCachedTiles()
+}
+
+export async function clearPrefetchJobsRuntime(): Promise<void> {
+  const module = await loadTileCacheService()
+  await module.clearPrefetchJobs()
+}
+
+export async function runTileCacheStartupMaintenanceRuntime(): Promise<void> {
+  const module = await loadTileCacheService()
+  await module.runTileCacheStartupMaintenance()
+}

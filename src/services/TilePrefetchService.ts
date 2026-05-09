@@ -10,6 +10,7 @@ import type {
   TilePrefetchRequest,
   TilePrefetchStatus,
 } from '../types/tilePrefetch';
+import { isAbortError, throwIfAborted } from '../utils/abort';
 
 // ==================== Constants ====================
 
@@ -53,6 +54,22 @@ export interface TilePrefetchDependencies {
 }
 
 type JobsListener = (jobs: TilePrefetchJobState[]) => void;
+
+interface PrefetchOperationOptions {
+  signal?: AbortSignal
+}
+
+export interface TilePrefetchServiceLike {
+  subscribe(listener: (jobs: TilePrefetchJobState[]) => void): () => void
+  preload?(): Promise<void>
+  enqueueProjects(
+    projects: TilePrefetchProjectInput[],
+    request: TilePrefetchRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>
+  waitForIdle(): Promise<void>
+  dispose(): void
+}
 
 const defaultDeps: TilePrefetchDependencies = {
   hasCachedTile: defaultHasCachedTile,
@@ -314,7 +331,7 @@ function normalizeErrorMessage(error: unknown): string {
 
 // ==================== Service ====================
 
-export class TilePrefetchService {
+export class TilePrefetchService implements TilePrefetchServiceLike {
   private deps: TilePrefetchDependencies;
   private listeners = new Set<JobsListener>();
   private jobsByProject = new Map<string, TilePrefetchJobState>();
@@ -356,15 +373,19 @@ export class TilePrefetchService {
   async enqueueProjects(
     projects: TilePrefetchProjectInput[],
     request: TilePrefetchRequest,
+    options: PrefetchOperationOptions = {},
   ): Promise<void> {
     await this.readyPromise;
+    throwIfAborted(options.signal)
     if (this.destroyed || projects.length === 0) return;
 
     for (const project of projects) {
+      throwIfAborted(options.signal)
       if (this.destroyed) return;
-      await this.enqueueProject(project, request);
+      await this.enqueueProject(project, request, options);
     }
 
+    throwIfAborted(options.signal)
     this.notify();
     this.startProcessing();
   }
@@ -393,7 +414,9 @@ export class TilePrefetchService {
   private async enqueueProject(
     project: TilePrefetchProjectInput,
     request: TilePrefetchRequest,
+    options: PrefetchOperationOptions = {},
   ): Promise<void> {
+    throwIfAborted(options.signal)
     const existing = this.jobsByProject.get(project.projectId);
     if (
       existing &&
@@ -417,7 +440,8 @@ export class TilePrefetchService {
     let completedTiles = 0;
 
     for (const url of uniqueUrls) {
-      const cached = await this.checkTileCache(url);
+      throwIfAborted(options.signal)
+      const cached = await this.checkTileCache(url, options.signal);
       if (cached) {
         completedTiles += 1;
       } else {
@@ -430,9 +454,10 @@ export class TilePrefetchService {
     job.completedTiles = completedTiles;
     job.estimatedBytes = estimatedBytes;
     job.status = completedTiles >= uniqueUrls.length ? 'done' : 'queued';
-    await this.upsertJob(job);
+    await this.upsertJob(job, options.signal);
 
     for (const url of uncachedUrls) {
+      throwIfAborted(options.signal)
       this.queueUrl(url, project.projectId, project.commitId);
     }
   }
@@ -636,28 +661,36 @@ export class TilePrefetchService {
     await Promise.all(writes);
   }
 
-  private async checkTileCache(url: string): Promise<boolean> {
+  private async checkTileCache(url: string, signal?: AbortSignal): Promise<boolean> {
+    throwIfAborted(signal)
     if (this.destroyed) return false;
     const known = this.cachePresence.get(url);
     if (known !== undefined) return known;
     const cached = await this.deps.hasCachedTile(url);
+    throwIfAborted(signal)
     if (this.destroyed) return false;
     this.cachePresence.set(url, cached);
     return cached;
   }
 
-  private async upsertJob(job: TilePrefetchJobState): Promise<void> {
+  private async upsertJob(job: TilePrefetchJobState, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal)
     if (this.destroyed) return;
     job.updatedAt = this.deps.now();
     this.jobsByProject.set(job.projectId, job);
-    await this.persistJob(job);
+    await this.persistJob(job, signal);
   }
 
-  private async persistJob(job: TilePrefetchJobState): Promise<void> {
+  private async persistJob(job: TilePrefetchJobState, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal)
     if (this.destroyed) return;
     try {
       await this.deps.setPrefetchJob(job);
-    } catch {
+      throwIfAborted(signal)
+    } catch (error) {
+      if (isAbortError(error) || signal?.aborted) {
+        throwIfAborted(signal)
+      }
       // Progress persistence is best-effort; runtime state still updates.
     }
   }

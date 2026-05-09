@@ -39,8 +39,8 @@ describe('App', () => {
     expect(baseElement).toBeDefined();
   });
 
-  it('shows login page by default when not authenticated', () => {
+  it('shows login page by default when not authenticated', async () => {
     render(<App />);
-    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
   });
 });

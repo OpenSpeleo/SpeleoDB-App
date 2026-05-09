@@ -1,25 +1,41 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { createMemoryHistory } from 'history';
 import App from './App';
+
+const { historyRef } = vi.hoisted(() => ({
+  historyRef: { current: null as ReturnType<typeof createMemoryHistory> | null },
+}));
 
 vi.mock('@ionic/react', () => ({
   IonApp: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   setupIonicReact: () => undefined,
 }));
 
-vi.mock('@ionic/react-router', () => ({
-  IonReactRouter: ({ children }: { children?: React.ReactNode }) => (
-    <MemoryRouter initialEntries={[window.location.pathname]}>
-      {children}
-    </MemoryRouter>
-  ),
-}));
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return {
+    ...actual,
+    BrowserRouter: ({ children }: { children?: React.ReactNode }) => (
+      <actual.Router history={historyRef.current!}>
+        {children}
+      </actual.Router>
+    ),
+  };
+});
 
 vi.mock('./context/SpeleoDBProvider', () => ({
   SpeleoDBProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock('./context/SpeleoDBStoreProvider', () => ({
+  SpeleoDBStoreProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock('./context/SpeleoDBStartupUi', () => ({
+  SpeleoDBStartupUi: () => null,
 }));
 
 vi.mock('./services/PreferencesService', () => ({
@@ -101,37 +117,30 @@ vi.mock('./pages/Settings', () => ({
 
 describe('App shared state wiring', () => {
   beforeEach(() => {
-    window.history.pushState({}, '', '/settings');
+    historyRef.current = createMemoryHistory({ initialEntries: ['/settings'] });
   });
 
   it('propagates settings changes to dashboard state', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    const dashboard = screen.getByTestId('mock-dashboard');
-    expect(dashboard).toHaveAttribute('data-show-landmarks', 'true');
-    expect(dashboard).toHaveAttribute('data-color-mode', 'project');
-    expect(dashboard).toHaveAttribute('data-measurement-unit', 'meters');
-    expect(dashboard).toHaveAttribute('data-panel-open', 'false');
+    await screen.findByTestId('mock-settings');
 
     await user.click(screen.getByTestId('settings-hide-landmarks'));
-    await waitFor(() => {
-      expect(screen.getByTestId('mock-dashboard')).toHaveAttribute('data-show-landmarks', 'false');
-    });
-
     await user.click(screen.getByTestId('settings-enable-depth-mode'));
-    await waitFor(() => {
-      expect(screen.getByTestId('mock-dashboard')).toHaveAttribute('data-color-mode', 'depth');
-    });
-
     await user.click(screen.getByTestId('settings-enable-feet'));
-    await waitFor(() => {
-      expect(screen.getByTestId('mock-dashboard')).toHaveAttribute('data-measurement-unit', 'feet');
+    await user.click(screen.getByTestId('settings-open-panel'));
+
+    act(() => {
+      historyRef.current!.push('/dashboard');
     });
 
-    await user.click(screen.getByTestId('settings-open-panel'));
+    const dashboard = await screen.findByTestId('mock-dashboard');
     await waitFor(() => {
-      expect(screen.getByTestId('mock-dashboard')).toHaveAttribute('data-panel-open', 'true');
+      expect(dashboard).toHaveAttribute('data-show-landmarks', 'false');
+      expect(dashboard).toHaveAttribute('data-color-mode', 'depth');
+      expect(dashboard).toHaveAttribute('data-measurement-unit', 'feet');
+      expect(dashboard).toHaveAttribute('data-panel-open', 'true');
     });
   });
 });

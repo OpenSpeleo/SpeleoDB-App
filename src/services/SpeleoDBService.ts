@@ -12,6 +12,11 @@ import type { HttpClient, HttpResponse } from './HttpClient';
 import type { AuthTokenResponse } from '../types';
 import type { Project } from '../types/project';
 
+export interface ServiceRequestOptions {
+  signal?: AbortSignal
+  timeoutMs?: number
+}
+
 export class SpeleoDBService {
   constructor(private http: HttpClient) {}
 
@@ -47,7 +52,7 @@ export class SpeleoDBService {
   async validateToken(
     instance: string,
     token: string,
-    timeoutMs?: number,
+    options: ServiceRequestOptions = {},
   ): Promise<HttpResponse<unknown>> {
     const baseUrl = getInstanceBaseUrl(instance);
     const url = baseUrl + API.AUTH_TOKEN_ENDPOINT;
@@ -56,7 +61,8 @@ export class SpeleoDBService {
       url,
       method: 'GET',
       headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
-      timeoutMs,
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
     });
   }
 
@@ -70,11 +76,13 @@ export class SpeleoDBService {
   async getProjectsGeoJSON(
     instance: string,
     token: string,
+    options: ServiceRequestOptions = {},
   ): Promise<HttpResponse<Project[] | unknown>> {
     return this.getAuthorized<Project[]>(
       instance,
       token,
       API.PROJECTS_GEOJSON_ENDPOINT,
+      options,
     );
   }
 
@@ -84,11 +92,13 @@ export class SpeleoDBService {
   async getLandmarksGeoJSON(
     instance: string,
     token: string,
+    options: ServiceRequestOptions = {},
   ): Promise<HttpResponse<GeoJSON.FeatureCollection | unknown>> {
     return this.getAuthorized<GeoJSON.FeatureCollection>(
       instance,
       token,
       API.LANDMARKS_GEOJSON_ENDPOINT,
+      options,
     );
   }
 
@@ -98,11 +108,13 @@ export class SpeleoDBService {
   async getSubsurfaceStationsGeoJSON(
     instance: string,
     token: string,
+    options: ServiceRequestOptions = {},
   ): Promise<HttpResponse<GeoJSON.FeatureCollection | unknown>> {
     return this.getAuthorized<GeoJSON.FeatureCollection>(
       instance,
       token,
       API.SUBSURFACE_STATIONS_GEOJSON_ENDPOINT,
+      options,
     );
   }
 
@@ -112,11 +124,13 @@ export class SpeleoDBService {
   async getSurfaceStationsGeoJSON(
     instance: string,
     token: string,
+    options: ServiceRequestOptions = {},
   ): Promise<HttpResponse<GeoJSON.FeatureCollection | unknown>> {
     return this.getAuthorized<GeoJSON.FeatureCollection>(
       instance,
       token,
       API.SURFACE_STATIONS_GEOJSON_ENDPOINT,
+      options,
     );
   }
 
@@ -126,11 +140,13 @@ export class SpeleoDBService {
   async getExplorationLeadsGeoJSON(
     instance: string,
     token: string,
+    options: ServiceRequestOptions = {},
   ): Promise<HttpResponse<GeoJSON.FeatureCollection | unknown>> {
     return this.getAuthorized<GeoJSON.FeatureCollection>(
       instance,
       token,
       API.EXPLORATION_LEADS_GEOJSON_ENDPOINT,
+      options,
     );
   }
 
@@ -140,11 +156,13 @@ export class SpeleoDBService {
   async getCylinderInstallsGeoJSON(
     instance: string,
     token: string,
+    options: ServiceRequestOptions = {},
   ): Promise<HttpResponse<GeoJSON.FeatureCollection | unknown>> {
     return this.getAuthorized<GeoJSON.FeatureCollection>(
       instance,
       token,
       API.CYLINDER_INSTALLS_GEOJSON_ENDPOINT,
+      options,
     );
   }
 
@@ -154,14 +172,15 @@ export class SpeleoDBService {
    * Used to download pre-signed CloudFront geojson files. No auth header
    * is needed because the URL itself carries the signature.
    */
-  async downloadJSON<T = unknown>(url: string): Promise<HttpResponse<T>> {
-    return this.http.request<T>({ url, method: 'GET' });
+  async downloadJSON<T = unknown>(url: string, options: ServiceRequestOptions = {}): Promise<HttpResponse<T>> {
+    return this.http.request<T>({ url, method: 'GET', signal: options.signal });
   }
 
   private async getAuthorized<T>(
     instance: string,
     token: string,
     endpoint: string,
+    options: ServiceRequestOptions = {},
   ): Promise<HttpResponse<T | unknown>> {
     const baseUrl = getInstanceBaseUrl(instance);
     const url = baseUrl + endpoint;
@@ -170,6 +189,8 @@ export class SpeleoDBService {
       url,
       method: 'GET',
       headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
     });
   }
 }

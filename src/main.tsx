@@ -1,8 +1,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Capacitor } from '@capacitor/core';
-import * as SentryReact from '@sentry/react';
 import App from './App';
+import { AppErrorBoundary } from './monitoring/AppErrorBoundary';
 import { initSentry } from './monitoring/sentry';
 
 /**
@@ -49,9 +49,9 @@ const container = document.getElementById('root');
 const root = createRoot(container!);
 root.render(
   <React.StrictMode>
-    <SentryReact.ErrorBoundary fallback={<div>Something went wrong.</div>}>
+    <AppErrorBoundary fallback={<div>Something went wrong.</div>}>
       <App />
-    </SentryReact.ErrorBoundary>
+    </AppErrorBoundary>
   </React.StrictMode>
 );
 

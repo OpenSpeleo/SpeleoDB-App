@@ -491,8 +491,9 @@ const Dashboard: React.FC<DashboardProps> = ({
       didSyncRef.current = true;
       let cancelled = false;
       controller.syncProjects()
-        .then(() => {
+        .then((result) => {
           if (cancelled) return;
+          if (result.status === 'aborted') return;
           setLoadTrigger((n) => n + 1);
         })
         .finally(() => {

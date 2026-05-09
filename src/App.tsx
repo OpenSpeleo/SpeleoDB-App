@@ -1,16 +1,8 @@
-import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
-import { IonApp, setupIonicReact } from '@ionic/react';
-import { IonReactRouter } from '@ionic/react-router';
+import { Suspense, lazy, useEffect } from 'react';
+import { BrowserRouter, useLocation } from 'react-router-dom';
 
 import { App as CapApp } from '@capacitor/app';
-import { SpeleoDBProvider } from './context/SpeleoDBProvider';
-import { getColorMode, getMeasurementUnit, getShowLandmarks } from './services/PreferencesService';
-
-/* Pages */
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import Settings from './pages/Settings';
+import { SpeleoDBStoreProvider } from './context/SpeleoDBStoreProvider';
 
 /* Core CSS required for Ionic components to work properly */
 import '@ionic/react/css/core.css';
@@ -42,66 +34,29 @@ import './theme/variables.css';
 /* Custom TailwindCSS styles */
 import './index.css';
 
-setupIonicReact({
-  mode: 'ios',
-});
+const Login = lazy(() => import('./pages/Login'))
+const AuthenticatedAppShell = lazy(() => import('./AuthenticatedAppShell'))
 
 /**
- * Renders the login page for unauthenticated routes, or keeps
- * Dashboard + Settings both mounted (hiding the inactive one)
- * so map state survives tab switches.
+ * Renders the login route directly and lazy-loads the authenticated
+ * shell only for dashboard/settings paths.
  */
 const AppRoutes: React.FC = () => {
-  const location = useLocation();
-  const path = location.pathname;
-  const isDashboard = path === '/dashboard';
-  const isSettings = path === '/settings';
-  const isAuthenticated = isDashboard || isSettings;
-  const [isProjectPanelOpen, setIsProjectPanelOpen] = useState(false);
-  const [showLandmarks, setShowLandmarks] = useState(() => getShowLandmarks());
-  const [colorMode, setColorMode] = useState(() => getColorMode());
-  const [measurementUnit, setMeasurementUnit] = useState(() => getMeasurementUnit());
+  const path = useLocation().pathname;
+  const isAuthenticatedRoute = path === '/dashboard' || path === '/settings';
 
-  if (path === '/login') {
-    return <Login />;
-  }
-
-  if (!isAuthenticated) {
-    return <Login />;
+  if (!isAuthenticatedRoute) {
+    return (
+      <Suspense fallback={null}>
+        <Login />
+      </Suspense>
+    );
   }
 
   return (
-    <>
-      <div style={{
-        position: 'fixed', inset: 0,
-        visibility: isDashboard ? 'visible' : 'hidden',
-        pointerEvents: isDashboard ? 'auto' : 'none',
-      }}>
-        <Dashboard
-          isProjectPanelOpen={isProjectPanelOpen}
-          onProjectPanelChange={setIsProjectPanelOpen}
-          showLandmarks={showLandmarks}
-          colorMode={colorMode}
-          measurementUnit={measurementUnit}
-        />
-      </div>
-      <div style={{
-        position: 'fixed', inset: 0,
-        visibility: isSettings ? 'visible' : 'hidden',
-        pointerEvents: isSettings ? 'auto' : 'none',
-      }}>
-        <Settings
-          showLandmarks={showLandmarks}
-          onShowLandmarksChange={setShowLandmarks}
-          colorMode={colorMode}
-          onColorModeChange={setColorMode}
-          measurementUnit={measurementUnit}
-          onMeasurementUnitChange={setMeasurementUnit}
-          isProjectPanelOpen={isProjectPanelOpen}
-          onProjectPanelChange={setIsProjectPanelOpen}
-        />
-      </div>
-    </>
+    <Suspense fallback={null}>
+      <AuthenticatedAppShell />
+    </Suspense>
   );
 };
 
@@ -114,13 +69,11 @@ const App: React.FC = () => {
   }, []);
 
   return (
-    <IonApp>
-      <IonReactRouter>
-        <SpeleoDBProvider>
-          <AppRoutes />
-        </SpeleoDBProvider>
-      </IonReactRouter>
-    </IonApp>
+    <BrowserRouter>
+      <SpeleoDBStoreProvider>
+        <AppRoutes />
+      </SpeleoDBStoreProvider>
+    </BrowserRouter>
   );
 };
 

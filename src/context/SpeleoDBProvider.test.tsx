@@ -8,7 +8,6 @@ import { SpeleoDBProvider } from './SpeleoDBProvider';
 
 const {
   mockValidateSession,
-  mockRetryConnection,
   mockLogout,
   mockStoreSubscribers,
   emitStoreUpdate,
@@ -17,6 +16,7 @@ const {
   mockGetPreferences,
   mockSetPreferences,
   mockClearPreferences,
+  mockPreloadTilePrefetch,
   mockRunTileCacheStartupMaintenance,
   mockStartGuidedTour,
   mockDestroyGuidedTour,
@@ -29,7 +29,6 @@ const {
   const storeSubscribers = new Set<() => void>();
   return {
     mockValidateSession: vi.fn(),
-    mockRetryConnection: vi.fn(),
     mockLogout: vi.fn(),
     mockStoreSubscribers: storeSubscribers,
     emitStoreUpdate: () => {
@@ -42,6 +41,7 @@ const {
     mockGetPreferences: vi.fn(),
     mockSetPreferences: vi.fn(),
     mockClearPreferences: vi.fn(),
+    mockPreloadTilePrefetch: vi.fn().mockResolvedValue(undefined),
     mockRunTileCacheStartupMaintenance: vi.fn(),
     mockStartGuidedTour: vi.fn().mockResolvedValue(undefined),
     mockDestroyGuidedTour: vi.fn(),
@@ -104,8 +104,8 @@ vi.mock('@ionic/react', () => ({
   ),
 }));
 
-vi.mock('../services/TileCacheService', () => ({
-  runTileCacheStartupMaintenance: mockRunTileCacheStartupMaintenance,
+vi.mock('../services/TileCacheRuntime', () => ({
+  runTileCacheStartupMaintenanceRuntime: mockRunTileCacheStartupMaintenance,
 }));
 
 vi.mock('@capacitor/splash-screen', () => ({
@@ -114,7 +114,7 @@ vi.mock('@capacitor/splash-screen', () => ({
   },
 }));
 
-vi.mock('../onboarding/guidedTour/engine', () => ({
+vi.mock('../onboarding/guidedTour/runtime', () => ({
   startGuidedTour: mockStartGuidedTour,
   destroyGuidedTour: mockDestroyGuidedTour,
 }));
@@ -128,8 +128,8 @@ vi.mock('../services/PreferencesService', () => ({
 vi.mock('../controllers/SpeleoDBController', () => {
   class SpeleoDBController {
     validateSession = mockValidateSession;
-    retryConnection = mockRetryConnection;
     logout = mockLogout;
+    preloadTilePrefetch = mockPreloadTilePrefetch;
 
     subscribe(listener: () => void): () => void {
       mockStoreSubscribers.add(listener);
@@ -152,10 +152,6 @@ vi.mock('../controllers/SpeleoDBController', () => {
 
     get isOfflineLocked() {
       return mockIsOfflineLockedRef.current;
-    }
-
-    get isRetryingConnection() {
-      return false;
     }
 
     get projects() {
@@ -189,7 +185,6 @@ describe('SpeleoDBProvider', () => {
       instance: 'https://www.speleodb.org',
     });
     mockValidateSession.mockResolvedValue('ok');
-    mockRetryConnection.mockResolvedValue('ok');
     mockLogout.mockResolvedValue(undefined);
     mockIsAuthenticated.mockReturnValue(true);
     mockIsOfflineLockedRef.current = false;
@@ -386,6 +381,11 @@ describe('SpeleoDBProvider', () => {
   });
 
   describe('Connecting banner during startup validation', () => {
+    async function flushPendingWork() {
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+
     it('does not render the banner when validation resolves quickly (< 1s)', async () => {
       // Microtasks always beat any setTimeout callback, so a resolved
       // validation will cancel the 1s gate before it fires. Use shouldAdvanceTime
@@ -405,8 +405,7 @@ describe('SpeleoDBProvider', () => {
           expect(mockValidateSession).toHaveBeenCalledOnce();
         });
         await act(async () => {
-          await Promise.resolve();
-          await Promise.resolve();
+          await flushPendingWork();
         });
 
         expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
@@ -438,8 +437,7 @@ describe('SpeleoDBProvider', () => {
           expect(mockValidateSession).toHaveBeenCalledOnce();
         });
         await act(async () => {
-          await Promise.resolve();
-          await Promise.resolve();
+          await flushPendingWork();
         });
 
         // Validation resolved before the 1s gate, so the splash hides only
@@ -485,13 +483,12 @@ describe('SpeleoDBProvider', () => {
         });
 
         expect(screen.getByTestId('connecting-banner')).toBeInTheDocument();
-        expect(screen.getByText(/Connecting to SpeleoDB/i)).toBeInTheDocument();
+        expect(screen.getByText('Connecting to SpeleoDB…')).toBeInTheDocument();
 
         // Resolve validation; the banner should disappear.
         await act(async () => {
           resolveValidation!('ok');
-          await Promise.resolve();
-          await Promise.resolve();
+          await flushPendingWork();
         });
 
         expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
@@ -539,14 +536,174 @@ describe('SpeleoDBProvider', () => {
         // (idempotent on native, the .catch swallows any "already hidden").
         await act(async () => {
           resolveValidation!('ok');
-          await Promise.resolve();
-          await Promise.resolve();
+          await flushPendingWork();
         });
         expect(mockSplashHide).toHaveBeenCalledTimes(2);
         expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('hands off from connecting banner to offline modal without showing both at once', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        let resolveValidation: ((r: 'ok' | 'unauthorized' | 'network_error') => void) | null = null;
+        mockValidateSession.mockImplementation(
+          () => new Promise<'ok' | 'unauthorized' | 'network_error'>((resolve) => {
+            resolveValidation = resolve;
+          }),
+        );
+
+        render(
+          <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+            <SpeleoDBProvider>
+              <div>child</div>
+            </SpeleoDBProvider>
+          </Router>,
+        );
+
+        await waitFor(() => {
+          expect(mockValidateSession).toHaveBeenCalledOnce();
+        });
+
+        await act(async () => {
+          vi.advanceTimersByTime(1100);
+        });
+
+        expect(screen.getByTestId('connecting-banner')).toBeInTheDocument();
+        expect(screen.queryByText('Offline mode')).not.toBeInTheDocument();
+
+        await act(async () => {
+          mockIsOfflineLockedRef.current = true;
+          emitStoreUpdate();
+          resolveValidation!('network_error');
+          await flushPendingWork();
+        });
+
+        expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
+        expect(screen.getByText('Offline mode')).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('cleans up the delayed banner timer on unmount', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        let resolveValidation: ((r: 'ok' | 'unauthorized' | 'network_error') => void) | null = null;
+        mockValidateSession.mockImplementation(
+          () => new Promise<'ok' | 'unauthorized' | 'network_error'>((resolve) => {
+            resolveValidation = resolve;
+          }),
+        );
+
+        const { unmount } = render(
+          <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+            <SpeleoDBProvider>
+              <div>child</div>
+            </SpeleoDBProvider>
+          </Router>,
+        );
+
+        await waitFor(() => {
+          expect(mockValidateSession).toHaveBeenCalledOnce();
+        });
+
+        unmount();
+
+        await act(async () => {
+          vi.advanceTimersByTime(2000);
+        });
+
+        expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
+        expect(mockSplashHide).not.toHaveBeenCalled();
+
+        await act(async () => {
+          resolveValidation!('ok');
+          await flushPendingWork();
+        });
+
+        expect(mockSplashHide).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not resurrect the banner or offline modal after logout during pending startup validation', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        let resolveValidation: ((r: 'ok' | 'unauthorized' | 'network_error') => void) | null = null;
+        mockValidateSession.mockImplementation(
+          () => new Promise<'ok' | 'unauthorized' | 'network_error'>((resolve) => {
+            resolveValidation = resolve;
+          }),
+        );
+
+        render(
+          <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+            <SpeleoDBProvider>
+              <div>child</div>
+            </SpeleoDBProvider>
+          </Router>,
+        );
+
+        await waitFor(() => {
+          expect(mockValidateSession).toHaveBeenCalledOnce();
+        });
+
+        await act(async () => {
+          authStateSnapshotRef.current = {
+            isAuthenticated: false,
+            user: null,
+            token: null,
+          };
+          mockIsAuthenticated.mockReturnValue(false);
+          mockIsOfflineLockedRef.current = true;
+          emitStoreUpdate();
+        });
+
+        await act(async () => {
+          vi.advanceTimersByTime(2000);
+        });
+
+        expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
+        expect(screen.queryByText('Offline mode')).not.toBeInTheDocument();
+
+        await act(async () => {
+          resolveValidation!('network_error');
+          await flushPendingWork();
+        });
+
+        expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
+        expect(screen.queryByText('Offline mode')).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('still validates startup when stored prefs include only token and instance', async () => {
+      mockGetPreferences.mockReturnValue({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      authStateSnapshotRef.current = {
+        isAuthenticated: true,
+        user: { id: 'restored', email: '', name: '' },
+        token: 'tok',
+      };
+
+      render(
+        <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+          <SpeleoDBProvider>
+            <div>child</div>
+          </SpeleoDBProvider>
+        </Router>,
+      );
+
+      await waitFor(() => {
+        expect(mockValidateSession).toHaveBeenCalledOnce();
+      });
     });
 
     it('does not render the banner when there are no stored credentials', async () => {

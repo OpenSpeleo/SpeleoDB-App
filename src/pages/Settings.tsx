@@ -26,7 +26,7 @@ import {
   setMeasurementUnit as persistMeasurementUnit,
   setShowLandmarks as persistShowLandmarks,
 } from '../services/PreferencesService';
-import { restartGuidedTourFromHelp } from '../onboarding/guidedTour/engine';
+import { restartGuidedTourFromHelp } from '../onboarding/guidedTour/runtime';
 import { isMapColorMode, DEFAULT_MAP_COLOR_MODE, type MapColorMode } from '../types/mapColorMode';
 import { isMeasurementUnit, DEFAULT_MEASUREMENT_UNIT, type MeasurementUnit } from '../types/measurementUnit';
 import { formatLastSync } from '../utils/formatLastSync';
@@ -162,15 +162,26 @@ const Settings: React.FC<SettingsProps> = ({
     [projects],
   );
 
-  let prefetchTotal = 0;
-  let prefetchDone = 0;
-  for (const job of tilePrefetchJobs) {
-    prefetchTotal += job.totalTiles;
-    prefetchDone += job.completedTiles + job.failedTiles;
-  }
-  const syncTotalTiles = prefetchTotal + manualTileCount;
-  const syncProcessedTiles = prefetchDone + manualTileCount;
-  const syncPct = syncTotalTiles > 0 ? Math.floor((syncProcessedTiles / syncTotalTiles) * 100) : 0;
+  const {
+    syncPct,
+    syncProcessedTiles,
+    syncTotalTiles,
+  } = useMemo(() => {
+    let prefetchTotal = 0;
+    let prefetchDone = 0;
+    for (const job of tilePrefetchJobs) {
+      prefetchTotal += job.totalTiles;
+      prefetchDone += job.completedTiles + job.failedTiles;
+    }
+
+    const totalTiles = prefetchTotal + manualTileCount;
+    const processedTiles = prefetchDone + manualTileCount;
+    return {
+      syncTotalTiles: totalTiles,
+      syncProcessedTiles: processedTiles,
+      syncPct: totalTiles > 0 ? Math.floor((processedTiles / totalTiles) * 100) : 0,
+    };
+  }, [manualTileCount, tilePrefetchJobs]);
 
   return (
     <IonPage>

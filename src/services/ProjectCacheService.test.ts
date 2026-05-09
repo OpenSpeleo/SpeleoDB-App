@@ -61,4 +61,13 @@ describe('ProjectCacheService overlay cache', () => {
 
     expect(await cache.getOverlayGeoJSON('explorationLeads')).toBeNull();
   });
+
+  it('throws AbortError instead of swallowing cancelled writes', async () => {
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await expect(
+      cache.setProjects([], { signal: abortController.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
 });

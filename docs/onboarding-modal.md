@@ -89,18 +89,19 @@ Standard Tailwind defaults (no custom config):
 ## Dismissal behavior
 
 - `backdropDismiss={false}` -- user must tap the CTA.
-- `canDismiss` is gated by local state (`allowCompanionInfoModalDismiss`). The CTA sets this to `true` and closes the modal in the same handler.
-- State is managed in `SpeleoDBProvider` as presentation-only local state, consistent with the architecture guidelines.
+- `canDismiss` is gated by startup UI coordinator state (`allowCompanionInfoModalDismiss`). The CTA sets this to `true` and closes the modal in the same handler.
+- State is managed in `useStartupUiCoordinator` and rendered by `SpeleoDBProvider`, consistent with the architecture guidelines.
 
 ## State ownership
 
-- Modal visibility state lives in `SpeleoDBProvider` (local React state).
+- Modal visibility state lives in `src/context/useStartupUiCoordinator.ts` (reducer-backed UI state).
 - The open/close trigger depends on `authState.isAuthenticated` transitioning from `false` to `true` and the route being `/dashboard`.
 - This is presentation-only state and does not belong in the controller.
 
 ## Source code
 
-- Modal JSX and state: `src/context/SpeleoDBProvider.tsx`
+- Modal JSX: `src/context/SpeleoDBProvider.tsx`
+- Startup UI coordinator state: `src/context/useStartupUiCoordinator.ts`
 - Modal CSS override: `src/theme/variables.css` (`ion-modal.onboarding-modal`)
 - Logo asset: `src/assets/media/logo.png`
 

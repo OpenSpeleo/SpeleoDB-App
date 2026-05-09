@@ -13,11 +13,12 @@ import { HTTP_STATUS, MAP, MAP_OVERLAYS, NETWORK } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import {
-  clearCachedTiles,
-  clearPrefetchJobs,
-  setTileCacheOfflineMode,
-} from '../services/TileCacheService';
-import { TilePrefetchService } from '../services/TilePrefetchService';
+  clearCachedTilesRuntime,
+  clearPrefetchJobsRuntime,
+  setTileCacheOfflineModeRuntime,
+} from '../services/TileCacheRuntime';
+import { LazyTilePrefetchService } from '../services/LazyTilePrefetchService';
+import type { TilePrefetchServiceLike } from '../services/TilePrefetchService';
 import type {
   AuthResponse,
   AuthState,
@@ -29,6 +30,16 @@ import type { Project } from '../types/project';
 import type { MapOverlayId } from '../types/mapOverlay';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
+import { CancellationContext } from './CancellationContext';
+import { isAbortError } from '../utils/abort';
+import type {
+  CacheLoadPhaseResult,
+  GeoJSONSyncPhaseResult,
+  OverlaySyncPhaseResult,
+  ProjectRefreshPhaseResult,
+  SyncProjectsResult,
+  TilePrefetchPhaseResult,
+} from '../types/sync';
 
 // ==================== Sync status ====================
 
@@ -85,21 +96,24 @@ export class SpeleoDBController {
   private _authState: AuthState = { isAuthenticated: false, user: null, token: null };
   private _isOnline = false;
   private _isOfflineLocked = false;
-  private _isRetryingConnection = false;
   private _projects: Project[] = [];
   private _syncStatus: SyncStatus = 'idle';
   private _lastSyncedAt: number | null = null;
   private _tilePrefetchJobs: TilePrefetchJobState[] = [];
   private _listeners = new Set<() => void>();
-  private tilePrefetch!: TilePrefetchService;
+  private tilePrefetch!: TilePrefetchServiceLike;
   private tilePrefetchUnsubscribe: (() => void) | null = null;
   private _isPurgingLocalData = false;
+  private _asyncGeneration = 0;
+  private _nextRunId = 1;
+  private activeValidationContext: CancellationContext | null = null;
+  private activeSyncContext: CancellationContext | null = null;
+  private _trackedOperations = new Set<Promise<unknown>>();
 
   // Snapshot references for useSyncExternalStore (identity-stable between notifies)
   private _authStateSnapshot: AuthState = this._authState;
   private _isOnlineSnapshot: boolean = this._isOnline;
   private _isOfflineLockedSnapshot: boolean = this._isOfflineLocked;
-  private _isRetryingConnectionSnapshot: boolean = this._isRetryingConnection;
   private _projectsSnapshot: Project[] = this._projects;
   private _syncStatusSnapshot: SyncStatus = this._syncStatus;
   private _lastSyncedAtSnapshot: number | null = this._lastSyncedAt;
@@ -109,7 +123,7 @@ export class SpeleoDBController {
     private service: SpeleoDBService,
     private prefs: PreferencesPort,
     private cache: ProjectCacheService,
-    tilePrefetch?: TilePrefetchService,
+    tilePrefetch?: TilePrefetchServiceLike,
   ) {
     this.attachTilePrefetch(tilePrefetch ?? this.createTilePrefetchService());
     this.restoreSession();
@@ -128,10 +142,6 @@ export class SpeleoDBController {
 
   get isOfflineLocked(): boolean {
     return this._isOfflineLockedSnapshot;
-  }
-
-  get isRetryingConnection(): boolean {
-    return this._isRetryingConnectionSnapshot;
   }
 
   get currentUser(): User | null {
@@ -170,7 +180,6 @@ export class SpeleoDBController {
     this._authStateSnapshot = { ...this._authState };
     this._isOnlineSnapshot = this._isOnline;
     this._isOfflineLockedSnapshot = this._isOfflineLocked;
-    this._isRetryingConnectionSnapshot = this._isRetryingConnection;
     this._projectsSnapshot = [...this._projects];
     this._syncStatusSnapshot = this._syncStatus;
     this._lastSyncedAtSnapshot = this._lastSyncedAt;
@@ -178,7 +187,66 @@ export class SpeleoDBController {
     this._listeners.forEach((fn) => fn());
   }
 
-  private attachTilePrefetch(service: TilePrefetchService): void {
+  private invalidateAsyncOperations(): void {
+    this._asyncGeneration += 1;
+    this.activeValidationContext?.abort('Async operations invalidated');
+    this.activeSyncContext?.abort('Async operations invalidated');
+  }
+
+  private captureAsyncGeneration(): number {
+    return this._asyncGeneration;
+  }
+
+  private isAsyncGenerationCurrent(generation: number): boolean {
+    return generation === this._asyncGeneration;
+  }
+
+  private staleSessionResult(): 'ok' | 'unauthorized' {
+    return this._authState.isAuthenticated ? 'ok' : 'unauthorized';
+  }
+
+  private nextRunId(): number {
+    const runId = this._nextRunId;
+    this._nextRunId += 1;
+    return runId;
+  }
+
+  private beginValidationContext(): CancellationContext {
+    this.activeValidationContext?.abort('Session validation superseded');
+    const context = new CancellationContext(this.nextRunId(), 'Session validation');
+    this.activeValidationContext = context;
+    return context;
+  }
+
+  private beginSyncContext(): CancellationContext {
+    this.activeSyncContext?.abort('Project sync superseded');
+    const context = new CancellationContext(this.nextRunId(), 'Project sync');
+    this.activeSyncContext = context;
+    return context;
+  }
+
+  private isValidationContextCurrent(context: CancellationContext): boolean {
+    return this.activeValidationContext === context;
+  }
+
+  private isSyncContextCurrent(context: CancellationContext): boolean {
+    return this.activeSyncContext === context;
+  }
+
+  private trackOperation<T>(promise: Promise<T>): Promise<T> {
+    const tracked = promise.finally(() => {
+      this._trackedOperations.delete(tracked);
+    });
+    this._trackedOperations.add(tracked);
+    return tracked;
+  }
+
+  private async waitForTrackedOperations(): Promise<void> {
+    if (this._trackedOperations.size === 0) return;
+    await Promise.allSettled([...this._trackedOperations]);
+  }
+
+  private attachTilePrefetch(service: TilePrefetchServiceLike): void {
     this.tilePrefetch = service;
     this.tilePrefetchUnsubscribe = this.tilePrefetch.subscribe((jobs) => {
       this._tilePrefetchJobs = jobs;
@@ -186,15 +254,19 @@ export class SpeleoDBController {
     });
   }
 
-  private createTilePrefetchService(): TilePrefetchService {
-    return new TilePrefetchService({
+  private createTilePrefetchService(): TilePrefetchServiceLike {
+    return new LazyTilePrefetchService({
       isOnline: () => this.hasNetworkAccess(),
     });
   }
 
   private setOfflineLocked(locked: boolean): void {
     this._isOfflineLocked = locked;
-    setTileCacheOfflineMode(locked);
+    setTileCacheOfflineModeRuntime(locked);
+  }
+
+  async preloadTilePrefetch(): Promise<void> {
+    await this.tilePrefetch.preload?.();
   }
 
   // ---- Actions --------------------------------------------------------------
@@ -225,6 +297,7 @@ export class SpeleoDBController {
             ? response.data.user
             : email;
           const user: User = { id: 'auth', email: userEmail, name: userEmail };
+          this.invalidateAsyncOperations();
           this._authState = { isAuthenticated: true, user, token: response.data.token };
           this._isOnline = true;
           this.prefs.setPreferences({ email: userEmail, token: response.data.token, instance: instance.trim() });
@@ -269,20 +342,9 @@ export class SpeleoDBController {
     return this.validateSessionAgainstServer();
   }
 
-  async retryConnection(): Promise<'ok' | 'unauthorized' | 'network_error'> {
-    if (this._isRetryingConnection) return 'network_error';
-
-    this._isRetryingConnection = true;
-    this.notify();
-    try {
-      return await this.validateSessionAgainstServer();
-    } finally {
-      this._isRetryingConnection = false;
-      this.notify();
-    }
-  }
-
   private async validateSessionAgainstServer(): Promise<'ok' | 'unauthorized' | 'network_error'> {
+    const validationGeneration = this.captureAsyncGeneration();
+    const context = this.beginValidationContext();
     const prefs = this.prefs.getPreferences();
     const token = prefs.token;
     const instance = prefs.instance?.trim();
@@ -297,8 +359,19 @@ export class SpeleoDBController {
       const response = await this.service.validateToken(
         instance,
         token,
-        NETWORK.STARTUP_AUTH_TIMEOUT_MS,
+        {
+          timeoutMs: NETWORK.STARTUP_AUTH_TIMEOUT_MS,
+          signal: context.signal,
+        },
       );
+
+      context.throwIfAborted();
+      if (
+        !this.isAsyncGenerationCurrent(validationGeneration) ||
+        !this.isValidationContextCurrent(context)
+      ) {
+        return this.staleSessionResult();
+      }
 
       if (isSuccessfulStatus(response.status)) {
         this._isOnline = true;
@@ -316,12 +389,23 @@ export class SpeleoDBController {
       this.setOfflineLocked(true);
       this.notify();
       return 'network_error';
-    } catch {
+    } catch (error) {
+      if (
+        isAbortError(error) ||
+        !this.isAsyncGenerationCurrent(validationGeneration) ||
+        !this.isValidationContextCurrent(context)
+      ) {
+        return this.staleSessionResult();
+      }
       // Timeout or transport errors must never trigger logout.
       this._isOnline = false;
       this.setOfflineLocked(true);
       this.notify();
       return 'network_error';
+    } finally {
+      if (this.activeValidationContext === context) {
+        this.activeValidationContext = null;
+      }
     }
   }
 
@@ -336,6 +420,7 @@ export class SpeleoDBController {
   private async purgeAllLocalUserData(): Promise<void> {
     if (this._isPurgingLocalData) return;
     this._isPurgingLocalData = true;
+    this.invalidateAsyncOperations();
     try {
       const prefetchAtPurgeStart = this.tilePrefetch;
 
@@ -353,7 +438,6 @@ export class SpeleoDBController {
       this._authState = { isAuthenticated: false, user: null, token: null };
       this._isOnline = false;
       this.setOfflineLocked(false);
-      this._isRetryingConnection = false;
       this._projects = [];
       this._syncStatus = 'idle';
       this._lastSyncedAt = null;
@@ -376,10 +460,12 @@ export class SpeleoDBController {
 
       this.notify();
 
+      await this.waitForTrackedOperations();
+
       const cleanupResults = await Promise.allSettled([
         this.cache.clearAll(),
-        clearCachedTiles(),
-        clearPrefetchJobs(),
+        clearCachedTilesRuntime(),
+        clearPrefetchJobsRuntime(),
       ]);
       for (const result of cleanupResults) {
         if (result.status === 'rejected') {
@@ -403,74 +489,125 @@ export class SpeleoDBController {
    * 2. If online, fetch the fresh list from the API, cache it, then
    *    download any new/changed geojson files in the background.
    */
-  async syncProjects(): Promise<void> {
-    // Step 1 -- serve from cache instantly
-    try {
-      const cached = await this.cache.getProjects();
-      if (cached && cached.length > 0) {
-        this._projects = cached;
-        this.notify();
-      }
-    } catch (error) {
-      console.warn('Failed to load cached projects:', error);
-    }
+  async syncProjects(): Promise<SyncProjectsResult> {
+    return this.trackOperation((async () => {
+      const context = this.beginSyncContext();
+      const result = this.createSyncProjectsResult(context.runId);
 
-    // Step 2 -- fetch fresh data if online
-    if (!this.hasNetworkAccess()) {
-      // Already showing cached data (if any); nothing more to do offline.
-      if (this._projects.length === 0) {
-        this._syncStatus = 'error';
-      }
-      this.notify();
-      return;
-    }
+      try {
+        result.phases.cacheLoad = await this.loadCachedProjectsPhase(context);
 
-    const prefs = this.prefs.getPreferences();
-    const token = prefs.token;
-    const instance = prefs.instance?.trim();
-    if (!token || !instance) return;
+        if (!this.hasNetworkAccess()) {
+          result.phases.projectRefresh = {
+            phase: 'project_refresh',
+            status: 'skipped',
+            reason: 'offline_locked',
+            projectCount: 0,
+            httpStatus: null,
+            cacheWriteSucceeded: false,
+            preservedCachedProjects: this._projects.length > 0,
+          };
+          result.phases.geojsonSync = this.createSkippedGeoJSONPhase('offline_locked');
+          result.phases.overlaySync = this.createSkippedOverlaySyncPhase('offline_locked');
+          result.phases.tilePrefetch = this.createSkippedTilePrefetchPhase('offline_locked');
 
-    this._syncStatus = 'syncing';
-    this.notify();
+          const finalStatus = this.deriveSyncCompletionStatus(result.phases.projectRefresh);
+          if (this.isSyncContextCurrent(context)) {
+            this._syncStatus = finalStatus;
+            this.notify();
+          }
+          result.status = finalStatus;
+          return result;
+        }
 
-    try {
-      const response = await this.service.getProjectsGeoJSON(instance, token);
+        const credentials = this.getSyncCredentials();
+        if (!credentials) {
+          result.phases.projectRefresh = {
+            phase: 'project_refresh',
+            status: 'skipped',
+            reason: 'missing_credentials',
+            projectCount: 0,
+            httpStatus: null,
+            cacheWriteSucceeded: false,
+            preservedCachedProjects: this._projects.length > 0,
+          };
+          result.phases.geojsonSync = this.createSkippedGeoJSONPhase('missing_credentials');
+          result.phases.overlaySync = this.createSkippedOverlaySyncPhase('missing_credentials');
+          result.phases.tilePrefetch = this.createSkippedTilePrefetchPhase('missing_credentials');
 
-      if (isSuccessfulStatus(response.status) && Array.isArray(response.data)) {
-        const freshProjects = response.data;
-        this._projects = freshProjects;
-        this._isOnline = true;
-        this.setOfflineLocked(false);
-        await this.cache.setProjects(freshProjects);
-        this.recordSuccessfulSync();
-        this.notify();
+          const finalStatus = this.deriveSyncCompletionStatus(result.phases.projectRefresh);
+          if (this.isSyncContextCurrent(context)) {
+            this._syncStatus = finalStatus;
+            this.notify();
+          }
+          result.status = finalStatus;
+          return result;
+        }
 
-        // Step 3 -- download geojson files in background (non-blocking)
-        await this.downloadGeoJSONFiles(freshProjects);
+        if (this.isSyncContextCurrent(context)) {
+          this._syncStatus = 'syncing';
+          this.notify();
+        }
 
-        // Step 4 -- sync read-only map overlays for offline icon rendering.
-        await this.syncMapOverlays(instance, token);
-
-        // Step 5 -- start aggressive tile prefetch in background for offline mode.
-        void this.scheduleTilePrefetch(freshProjects);
-
-        this._syncStatus = 'done';
-      } else {
-        // Non-2xx, malformed body, or both: do not overwrite cache, do not run
-        // overlay/prefetch side-effects, and surface 'error' only when there is
-        // nothing cached to fall back to. A 4xx during data fetch never triggers
-        // logout -- only validateSession does (see docs/offline-mode.md).
-        console.warn(
-          `syncProjects: refresh skipped (status=${response.status}); preserving cached projects.`,
+        const refreshOutcome = await this.refreshProjectsPhase(
+          context,
+          credentials.instance,
+          credentials.token,
         );
-        this._syncStatus = this._projects.length > 0 ? 'done' : 'error';
-      }
-    } catch (error) {
-      console.warn('syncProjects: API fetch failed:', error);
-      this._syncStatus = this._projects.length > 0 ? 'done' : 'error';
-    }
+        result.phases.projectRefresh = refreshOutcome.phase;
 
-    this.notify();
+        if (refreshOutcome.projects) {
+          result.phases.geojsonSync = await this.syncGeoJSONPhase(
+            context,
+            refreshOutcome.projects,
+          );
+          result.phases.overlaySync = await this.syncMapOverlaysPhase(
+            context,
+            credentials.instance,
+            credentials.token,
+          );
+          result.phases.tilePrefetch = await this.scheduleTilePrefetchPhase(
+            context,
+            refreshOutcome.projects,
+          );
+        } else {
+          result.phases.geojsonSync = this.createSkippedGeoJSONPhase(
+            result.phases.projectRefresh.reason,
+          );
+          result.phases.overlaySync = this.createSkippedOverlaySyncPhase(
+            result.phases.projectRefresh.reason,
+          );
+          result.phases.tilePrefetch = this.createSkippedTilePrefetchPhase(
+            result.phases.projectRefresh.reason,
+          );
+        }
+
+        const finalStatus = this.deriveSyncCompletionStatus(result.phases.projectRefresh);
+        if (this.isSyncContextCurrent(context)) {
+          this._syncStatus = finalStatus;
+          this.notify();
+        }
+        result.status = finalStatus;
+        return result;
+      } catch (error) {
+        if (isAbortError(error) || !this.isSyncContextCurrent(context)) {
+          return this.finalizeAbortedSyncResult(result);
+        }
+
+        console.warn('syncProjects: unexpected sync failure:', error);
+        const finalStatus = this.deriveSyncCompletionStatus(result.phases.projectRefresh);
+        if (this.isSyncContextCurrent(context)) {
+          this._syncStatus = finalStatus;
+          this.notify();
+        }
+        result.status = finalStatus;
+        return result;
+      } finally {
+        if (this.activeSyncContext === context) {
+          this.activeSyncContext = null;
+        }
+      }
+    })());
   }
 
   /**
@@ -493,40 +630,339 @@ export class SpeleoDBController {
    *
    * Uses a simple worker-pool to limit concurrency to 3 parallel downloads.
    */
-  private async downloadGeoJSONFiles(projects: Project[]): Promise<void> {
-    if (!this.hasNetworkAccess()) return;
+  private createSyncProjectsResult(runId: number): SyncProjectsResult {
+    return {
+      runId,
+      status: 'done',
+      phases: {
+        cacheLoad: {
+          phase: 'cache_load',
+          status: 'skipped',
+          reason: 'no_cached_projects',
+          cachedProjectCount: 0,
+        },
+        projectRefresh: {
+          phase: 'project_refresh',
+          status: 'skipped',
+          reason: 'missing_credentials',
+          projectCount: 0,
+          httpStatus: null,
+          cacheWriteSucceeded: false,
+          preservedCachedProjects: false,
+        },
+        geojsonSync: this.createSkippedGeoJSONPhase('no_geojson_candidates'),
+        overlaySync: this.createSkippedOverlaySyncPhase('no_overlay_sync_needed'),
+        tilePrefetch: this.createSkippedTilePrefetchPhase('no_prefetch_candidates'),
+      },
+    };
+  }
+
+  private createSkippedGeoJSONPhase(reason: GeoJSONSyncPhaseResult['reason']): GeoJSONSyncPhaseResult {
+    return {
+      phase: 'geojson_sync',
+      status: reason === 'aborted' ? 'aborted' : 'skipped',
+      reason,
+      eligibleProjectCount: 0,
+      downloadedProjectCount: 0,
+      skippedProjectCount: 0,
+      failedProjectCount: 0,
+    };
+  }
+
+  private createSkippedOverlaySyncPhase(
+    reason: OverlaySyncPhaseResult['reason'],
+  ): OverlaySyncPhaseResult {
+    return {
+      phase: 'overlay_sync',
+      status: reason === 'aborted' ? 'aborted' : 'skipped',
+      reason,
+      attemptedOverlayCount: 0,
+      syncedOverlayCount: 0,
+      failedOverlayCount: 0,
+    };
+  }
+
+  private createSkippedTilePrefetchPhase(
+    reason: TilePrefetchPhaseResult['reason'],
+  ): TilePrefetchPhaseResult {
+    return {
+      phase: 'tile_prefetch',
+      status: reason === 'aborted' ? 'aborted' : 'skipped',
+      reason,
+      eligibleProjectCount: 0,
+      scheduledProjectCount: 0,
+      failedProjectCount: 0,
+    };
+  }
+
+  private finalizeAbortedSyncResult(result: SyncProjectsResult): SyncProjectsResult {
+    if (result.phases.projectRefresh.status === 'skipped') {
+      result.phases.projectRefresh = {
+        phase: 'project_refresh',
+        status: 'aborted',
+        reason: 'aborted',
+        projectCount: 0,
+        httpStatus: null,
+        cacheWriteSucceeded: false,
+        preservedCachedProjects: this._projects.length > 0,
+      };
+    }
+    if (result.phases.geojsonSync.status === 'skipped') {
+      result.phases.geojsonSync = this.createSkippedGeoJSONPhase('aborted');
+    }
+    if (result.phases.overlaySync.status === 'skipped') {
+      result.phases.overlaySync = this.createSkippedOverlaySyncPhase('aborted');
+    }
+    if (result.phases.tilePrefetch.status === 'skipped') {
+      result.phases.tilePrefetch = this.createSkippedTilePrefetchPhase('aborted');
+    }
+    result.status = 'aborted';
+    return result;
+  }
+
+  private deriveSyncCompletionStatus(
+    projectRefreshPhase: ProjectRefreshPhaseResult,
+  ): 'done' | 'error' {
+    if (
+      projectRefreshPhase.status === 'applied' ||
+      (projectRefreshPhase.status === 'failed' &&
+        projectRefreshPhase.reason === 'project_list_cache_write_failed')
+    ) {
+      return 'done';
+    }
+
+    return this._projects.length > 0 ? 'done' : 'error';
+  }
+
+  private getSyncCredentials(): { token: string; instance: string } | null {
+    const prefs = this.prefs.getPreferences();
+    const token = prefs.token;
+    const instance = prefs.instance?.trim();
+    if (!token || !instance) {
+      return null;
+    }
+
+    return { token, instance };
+  }
+
+  private async loadCachedProjectsPhase(
+    context: CancellationContext,
+  ): Promise<CacheLoadPhaseResult> {
+    try {
+      const cached = await this.cache.getProjects({ signal: context.signal });
+      context.throwIfAborted();
+
+      if (cached === null) {
+        return {
+          phase: 'cache_load',
+          status: 'skipped',
+          reason: 'no_cached_projects',
+          cachedProjectCount: 0,
+        };
+      }
+
+      this._projects = cached;
+      this.notify();
+      return {
+        phase: 'cache_load',
+        status: 'applied',
+        reason: 'cached_projects_loaded',
+        cachedProjectCount: cached.length,
+      };
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+
+      console.warn('Failed to load cached projects:', error);
+      return {
+        phase: 'cache_load',
+        status: 'failed',
+        reason: 'cache_load_failed',
+        cachedProjectCount: 0,
+      };
+    }
+  }
+
+  private async refreshProjectsPhase(
+    context: CancellationContext,
+    instance: string,
+    token: string,
+  ): Promise<{ phase: ProjectRefreshPhaseResult; projects: Project[] | null }> {
+    try {
+      const response = await this.service.getProjectsGeoJSON(
+        instance,
+        token,
+        { signal: context.signal },
+      );
+      context.throwIfAborted();
+
+      if (!isSuccessfulStatus(response.status)) {
+        console.warn(
+          `syncProjects: refresh skipped (status=${response.status}); preserving cached projects.`,
+        );
+        return {
+          phase: {
+            phase: 'project_refresh',
+            status: 'failed',
+            reason: 'project_refresh_rejected',
+            projectCount: 0,
+            httpStatus: response.status,
+            cacheWriteSucceeded: false,
+            preservedCachedProjects: this._projects.length > 0,
+          },
+          projects: null,
+        };
+      }
+
+      if (!Array.isArray(response.data)) {
+        console.warn(
+          `syncProjects: refresh skipped (status=${response.status}); preserving cached projects.`,
+        );
+        return {
+          phase: {
+            phase: 'project_refresh',
+            status: 'failed',
+            reason: 'project_refresh_malformed',
+            projectCount: 0,
+            httpStatus: response.status,
+            cacheWriteSucceeded: false,
+            preservedCachedProjects: this._projects.length > 0,
+          },
+          projects: null,
+        };
+      }
+
+      const freshProjects = response.data;
+      this._projects = freshProjects;
+      this._isOnline = true;
+      this.setOfflineLocked(false);
+      const cacheWriteSucceeded = await this.cache.setProjects(
+        freshProjects,
+        { signal: context.signal },
+      );
+      context.throwIfAborted();
+      if (cacheWriteSucceeded) {
+        this.recordSuccessfulSync();
+      }
+      this.notify();
+
+      return {
+        phase: {
+          phase: 'project_refresh',
+          status: cacheWriteSucceeded ? 'applied' : 'failed',
+          reason: cacheWriteSucceeded
+            ? 'project_list_refreshed'
+            : 'project_list_cache_write_failed',
+          projectCount: freshProjects.length,
+          httpStatus: response.status,
+          cacheWriteSucceeded,
+          preservedCachedProjects: false,
+        },
+        projects: freshProjects,
+      };
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+
+      console.warn('syncProjects: API fetch failed:', error);
+      return {
+        phase: {
+          phase: 'project_refresh',
+          status: 'failed',
+          reason: 'project_refresh_rejected',
+          projectCount: 0,
+          httpStatus: null,
+          cacheWriteSucceeded: false,
+          preservedCachedProjects: this._projects.length > 0,
+        },
+        projects: null,
+      };
+    }
+  }
+
+  /**
+   * Download geojson files for all eligible projects, skipping those whose
+   * cached version already matches the latest commit.
+   *
+   * Uses a simple worker-pool to limit concurrency to 3 parallel downloads.
+   */
+  private async syncGeoJSONPhase(
+    context: CancellationContext,
+    projects: Project[],
+  ): Promise<GeoJSONSyncPhaseResult> {
+    if (!this.hasNetworkAccess()) {
+      return this.createSkippedGeoJSONPhase('offline_locked');
+    }
 
     const eligible = projects.filter(
       (p) => p.geojson_file && !p.exclude_geojson,
     );
-    if (eligible.length === 0) return;
+    if (eligible.length === 0) {
+      return this.createSkippedGeoJSONPhase('no_geojson_candidates');
+    }
 
-    // Shared mutable queue consumed by the workers.
+    let downloadedProjectCount = 0;
+    let skippedProjectCount = 0;
+    let failedProjectCount = 0;
+
     const queue = [...eligible];
-
     const worker = async (): Promise<void> => {
       while (queue.length > 0) {
+        context.throwIfAborted();
         if (!this.hasNetworkAccess()) return;
-        const project = queue.shift()!;
-        try {
-          const cachedCommit = await this.cache.getCachedCommitId(project.id);
-          if (cachedCommit === project.latest_commit.id) continue; // already up to date
 
-          if (!this.hasNetworkAccess()) return;
-          const res = await this.service.downloadJSON(project.geojson_file!);
-          if (!isSuccessfulStatus(res.status)) {
-            console.warn(`Skipping geojson cache for project ${project.id}: status ${res.status}`);
+        const project = queue.shift();
+        if (!project) return;
+
+        try {
+          const cachedCommit = await this.cache.getCachedCommitId(
+            project.id,
+            { signal: context.signal },
+          );
+          context.throwIfAborted();
+          if (cachedCommit === project.latest_commit.id) {
+            skippedProjectCount += 1;
             continue;
           }
 
-          const normalized = normalizeGeoJSON(res.data);
+          const response = await this.service.downloadJSON(
+            project.geojson_file!,
+            { signal: context.signal },
+          );
+          context.throwIfAborted();
+          if (!isSuccessfulStatus(response.status)) {
+            failedProjectCount += 1;
+            console.warn(`Skipping geojson cache for project ${project.id}: status ${response.status}`);
+            continue;
+          }
+
+          const normalized = normalizeGeoJSON(response.data);
           if (!normalized) {
+            failedProjectCount += 1;
             console.warn(`Skipping geojson cache for project ${project.id}: malformed payload`);
             continue;
           }
 
-          await this.cache.setGeoJSON(project.id, normalized, project.latest_commit.id);
+          const didCacheGeoJSON = await this.cache.setGeoJSON(
+            project.id,
+            normalized,
+            project.latest_commit.id,
+            { signal: context.signal },
+          );
+          context.throwIfAborted();
+          if (didCacheGeoJSON) {
+            downloadedProjectCount += 1;
+          } else {
+            failedProjectCount += 1;
+          }
         } catch (error) {
+          if (isAbortError(error)) {
+            throw error;
+          }
+
+          failedProjectCount += 1;
           console.warn(`Failed to cache geojson for project ${project.id}:`, error);
         }
       }
@@ -534,55 +970,110 @@ export class SpeleoDBController {
 
     const concurrency = Math.min(3, eligible.length);
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+    return {
+      phase: 'geojson_sync',
+      status: failedProjectCount > 0 ? 'failed' : 'applied',
+      reason: failedProjectCount > 0 ? 'geojson_sync_partial_failure' : 'geojson_synced',
+      eligibleProjectCount: eligible.length,
+      downloadedProjectCount,
+      skippedProjectCount,
+      failedProjectCount,
+    };
   }
 
   /**
    * Sync shared map overlays so read-only icons remain available offline.
    */
-  private async syncMapOverlays(instance: string, token: string): Promise<void> {
-    if (!this.hasNetworkAccess()) return;
+  private async syncMapOverlaysPhase(
+    context: CancellationContext,
+    instance: string,
+    token: string,
+  ): Promise<OverlaySyncPhaseResult> {
+    if (!this.hasNetworkAccess()) {
+      return this.createSkippedOverlaySyncPhase('offline_locked');
+    }
+
+    let syncedOverlayCount = 0;
+    let failedOverlayCount = 0;
 
     await Promise.all(MAP_OVERLAYS.map(async (overlay) => {
+      context.throwIfAborted();
       if (!this.hasNetworkAccess()) return;
 
       try {
-        const response = await this.fetchOverlayGeoJSON(overlay.id, instance, token);
-        if (isSuccessfulStatus(response.status)) {
-          const normalized = normalizeGeoJSON(response.data);
-          if (!normalized) {
-            console.warn(`Overlay sync skipped for ${overlay.id}: malformed 2xx payload`);
-            return;
-          }
+        const response = await this.fetchOverlayGeoJSON(
+          overlay.id,
+          instance,
+          token,
+          context,
+        );
+        context.throwIfAborted();
 
-          await this.cache.setOverlayGeoJSON(overlay.id, normalized);
+        if (!isSuccessfulStatus(response.status)) {
+          failedOverlayCount += 1;
+          console.warn(
+            `Overlay sync skipped for ${overlay.id}: status ${response.status}`,
+          );
           return;
         }
 
-        console.warn(
-          `Overlay sync skipped for ${overlay.id}: status ${response.status}`,
+        const normalized = normalizeGeoJSON(response.data);
+        if (!normalized) {
+          failedOverlayCount += 1;
+          console.warn(`Overlay sync skipped for ${overlay.id}: malformed 2xx payload`);
+          return;
+        }
+
+        const didCacheOverlay = await this.cache.setOverlayGeoJSON(
+          overlay.id,
+          normalized,
+          { signal: context.signal },
         );
+        context.throwIfAborted();
+
+        if (didCacheOverlay) {
+          syncedOverlayCount += 1;
+        } else {
+          failedOverlayCount += 1;
+        }
       } catch (error) {
+        if (isAbortError(error)) {
+          throw error;
+        }
+
+        failedOverlayCount += 1;
         console.warn(`Failed to sync overlay ${overlay.id}:`, error);
       }
     }));
+
+    return {
+      phase: 'overlay_sync',
+      status: failedOverlayCount > 0 ? 'failed' : 'applied',
+      reason: failedOverlayCount > 0 ? 'overlay_sync_partial_failure' : 'overlays_synced',
+      attemptedOverlayCount: MAP_OVERLAYS.length,
+      syncedOverlayCount,
+      failedOverlayCount,
+    };
   }
 
   private fetchOverlayGeoJSON(
     overlayId: MapOverlayId,
     instance: string,
     token: string,
+    context: CancellationContext,
   ): ReturnType<SpeleoDBService['getLandmarksGeoJSON']> {
     switch (overlayId) {
       case 'landmarks':
-        return this.service.getLandmarksGeoJSON(instance, token);
+        return this.service.getLandmarksGeoJSON(instance, token, { signal: context.signal });
       case 'subsurfaceStations':
-        return this.service.getSubsurfaceStationsGeoJSON(instance, token);
+        return this.service.getSubsurfaceStationsGeoJSON(instance, token, { signal: context.signal });
       case 'surfaceStations':
-        return this.service.getSurfaceStationsGeoJSON(instance, token);
+        return this.service.getSurfaceStationsGeoJSON(instance, token, { signal: context.signal });
       case 'explorationLeads':
-        return this.service.getExplorationLeadsGeoJSON(instance, token);
+        return this.service.getExplorationLeadsGeoJSON(instance, token, { signal: context.signal });
       case 'cylinderInstalls':
-        return this.service.getCylinderInstallsGeoJSON(instance, token);
+        return this.service.getCylinderInstallsGeoJSON(instance, token, { signal: context.signal });
       default: {
         const exhaustiveCheck: never = overlayId;
         throw new Error(`Unsupported overlay id: ${exhaustiveCheck}`);
@@ -594,21 +1085,31 @@ export class SpeleoDBController {
    * Build and enqueue tile prefetch jobs for every project with cached GeoJSON.
    * Uses bbox+50m and zoom levels 0..18 so map imagery is available offline.
    */
-  private async scheduleTilePrefetch(projects: Project[]): Promise<void> {
-    if (!this.hasNetworkAccess()) return;
+  private async scheduleTilePrefetchPhase(
+    context: CancellationContext,
+    projects: Project[],
+  ): Promise<TilePrefetchPhaseResult> {
+    if (!this.hasNetworkAccess()) {
+      return this.createSkippedTilePrefetchPhase('offline_locked');
+    }
 
     const eligible = projects.filter((p) => p.geojson_file && !p.exclude_geojson);
-    if (eligible.length === 0) return;
+    if (eligible.length === 0) {
+      return this.createSkippedTilePrefetchPhase('no_prefetch_candidates');
+    }
 
     const inputs: Array<{
       projectId: string;
       commitId: string;
       geojson: GeoJSON.FeatureCollection;
     }> = [];
+    let failedProjectCount = 0;
 
     for (const project of eligible) {
       try {
-        const raw = await this.cache.getGeoJSON(project.id);
+        context.throwIfAborted();
+        const raw = await this.cache.getGeoJSON(project.id, { signal: context.signal });
+        context.throwIfAborted();
         const normalized = normalizeGeoJSON(raw);
         if (!normalized || normalized.features.length === 0) continue;
         inputs.push({
@@ -617,11 +1118,25 @@ export class SpeleoDBController {
           geojson: normalized,
         });
       } catch (error) {
+        if (isAbortError(error)) {
+          throw error;
+        }
+
+        failedProjectCount += 1;
         console.warn(`Failed preparing map prefetch for project ${project.id}:`, error);
       }
     }
 
-    if (inputs.length === 0) return;
+    if (inputs.length === 0) {
+      return {
+        phase: 'tile_prefetch',
+        status: failedProjectCount > 0 ? 'failed' : 'skipped',
+        reason: failedProjectCount > 0 ? 'tile_prefetch_failed' : 'no_prefetch_candidates',
+        eligibleProjectCount: eligible.length,
+        scheduledProjectCount: 0,
+        failedProjectCount,
+      };
+    }
 
     try {
       await this.tilePrefetch.enqueueProjects(inputs, {
@@ -629,9 +1144,33 @@ export class SpeleoDBController {
         minZoom: 0,
         maxZoom: 18,
         padMeters: 50,
+      }, {
+        signal: context.signal,
       });
+      context.throwIfAborted();
+
+      return {
+        phase: 'tile_prefetch',
+        status: failedProjectCount > 0 ? 'failed' : 'applied',
+        reason: failedProjectCount > 0 ? 'tile_prefetch_failed' : 'tile_prefetch_scheduled',
+        eligibleProjectCount: eligible.length,
+        scheduledProjectCount: inputs.length,
+        failedProjectCount,
+      };
     } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+
       console.warn('Map prefetch scheduling failed:', error);
+      return {
+        phase: 'tile_prefetch',
+        status: 'failed',
+        reason: 'tile_prefetch_failed',
+        eligibleProjectCount: eligible.length,
+        scheduledProjectCount: inputs.length,
+        failedProjectCount: failedProjectCount + inputs.length,
+      };
     }
   }
 
@@ -659,7 +1198,11 @@ export class SpeleoDBController {
           user: { id: 'restored', email, name: email },
           token: prefs.token,
         };
-        if (typeof prefs.lastSyncedAt === 'number' && Number.isFinite(prefs.lastSyncedAt)) {
+        if (
+          typeof prefs.lastSyncedAt === 'number' &&
+          Number.isFinite(prefs.lastSyncedAt) &&
+          prefs.lastSyncedAt > 0
+        ) {
           this._lastSyncedAt = prefs.lastSyncedAt;
         }
         // Update snapshots (no notify -- no listeners registered yet at construct time).
@@ -671,7 +1214,7 @@ export class SpeleoDBController {
     }
   }
 
-  /** Record a successful project sync and persist its timestamp. */
+  /** Record a successful project-list refresh and persist its timestamp. */
   private recordSuccessfulSync(): void {
     this._lastSyncedAt = Date.now();
     try {
@@ -688,6 +1231,7 @@ export class SpeleoDBController {
 
     if (localUser && localUser.password === password) {
       const token = this.generateOfflineToken();
+      this.invalidateAsyncOperations();
       this._authState = { isAuthenticated: true, user: localUser.user, token };
       this.prefs.setPreferences({
         email: localUser.user.email,

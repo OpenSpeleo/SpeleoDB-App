@@ -14,17 +14,17 @@ Displays live sync statistics and a manual sync trigger.
 
 | Row | Value source | Update frequency |
 |---|---|---|
-| Last sync | `lastSyncedAt` from `useSpeleoDB()`, formatted via `formatLastSync()` (device-locale absolute date + time, or `Never`) | Reactive (controller notify after every successful sync) |
+| Last sync | `lastSyncedAt` from `useSpeleoDB()`, formatted via `formatLastSync()` (device-locale absolute date + time, or `Never`) | Reactive (controller notify after every successful project-list refresh) |
 | Synced projects | `projects` from `useSpeleoDB()`, filtered to those with GeoJSON | Reactive (context update) |
 | Cache size | `getTotalCacheBytes()` from `TileCacheRepository` | Polled every 3 s while on `/settings` |
 | Sync progress | Computed from `tilePrefetchJobs` + manual tile count | Reactive + polled |
 | Tiles synced | Same as sync progress, formatted as `processed / total` | Reactive + polled |
 
-The **Sync button** (circular arrow icon in the section header) calls `controller.syncProjects()`. It does not attempt offline reconnect (`retryConnection()`). Errors from `syncProjects()` are caught and swallowed; cache stats are refreshed afterward regardless.
+The **Sync button** (circular arrow icon in the section header) calls `controller.syncProjects()`. It does not attempt offline reconnect. `syncProjects()` now returns a structured phase result (cache load, project refresh, GeoJSON sync, overlay sync, tile-prefetch scheduling), but the Settings page still treats sync as a fire-and-refresh action: errors are caught and swallowed, and cache stats are refreshed afterward regardless.
 
 While `syncStatus === 'syncing'`, the sync button widens to display an inline spinner plus a `Syncing…` label (`data-testid="sync-status-label"`). The button is also disabled in this state to prevent double-submission.
 
-`Last sync` is set by `SpeleoDBController.syncProjects()` only after the projects payload is successfully fetched and persisted. Timeouts, transport errors, and non-2xx responses do **not** advance the timestamp. The value is persisted via `PreferencesService.setPreferences({ lastSyncedAt })` and restored on the next app launch via `restoreSession()`. It resets to `null` on logout.
+`Last sync` is set by `SpeleoDBController.syncProjects()` only after the project-list refresh succeeds and the refreshed list is persisted via `cache.setProjects()`. The timestamp therefore reflects a successful project refresh phase, not completion of the later GeoJSON / overlay / tile-prefetch phases. Timeouts, transport errors, and non-2xx responses do **not** advance the timestamp. The value is persisted via `PreferencesService.setPreferences({ lastSyncedAt })`, restored on the next app launch via `restoreSession()`, and reset to `null` on logout.
 
 Manual tile count and cache byte totals are read from IndexedDB via cursor-based iteration to avoid loading the full metadata store into memory.
 
@@ -36,7 +36,7 @@ Manual tile count and cache byte totals are read from IndexedDB via cursor-based
 
 ### Tutorial
 
-- **Show Tutorial** button: closes the project panel (if open), navigates to `/dashboard`, and restarts the guided tour from step 1 via `restartGuidedTourFromHelp()`. Ignores `hasCompletedGuidedTour`.
+- **Show Tutorial** button: closes the project panel (if open), navigates to `/dashboard`, and restarts the guided tour from step 1 via the lazy runtime loader `restartGuidedTourFromHelp()`. Ignores `hasCompletedGuidedTour`.
 
 ### Account
 
@@ -60,7 +60,7 @@ The 3-second polling interval for cache stats activates only when `location.path
 ## Offline behavior
 
 - The sync button calls `syncProjects()` which respects the controller's offline lock. When offline-locked, the sync is effectively a no-op (cached data is already present).
-- The Settings page does not attempt `retryConnection()`. Reconnect is limited to app relaunch per the networking contract.
+- The Settings page does not attempt reconnect. Reconnect is limited to app relaunch per the networking contract.
 
 ## Source code
 
@@ -71,7 +71,8 @@ The 3-second polling interval for cache stats activates only when `location.path
 - Color mode persistence: `src/services/PreferencesService.ts`
 - Measurement unit persistence: `src/services/PreferencesService.ts`
 - Last sync timestamp: tracked in `SpeleoDBController._lastSyncedAt`, persisted via `PreferencesService.setPreferences({ lastSyncedAt })`, formatted by `src/utils/formatLastSync.ts`.
-- Tour re-trigger: `src/onboarding/guidedTour/engine.ts`
+- Tour runtime loader: `src/onboarding/guidedTour/runtime.ts`
+- Guided tour engine: `src/onboarding/guidedTour/engine.ts`
 - Tests: `src/pages/Settings.test.tsx`, `src/utils/formatLastSync.test.ts`
 
 ## Change checklist

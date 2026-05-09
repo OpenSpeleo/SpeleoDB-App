@@ -10,7 +10,6 @@ export interface SpeleoDBContextValue {
   authState: AuthState;
   isOnline: boolean;
   isOfflineLocked: boolean;
-  isRetryingConnection: boolean;
   projects: Project[];
   syncStatus: SyncStatus;
   lastSyncedAt: number | null;

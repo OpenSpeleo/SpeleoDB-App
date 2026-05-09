@@ -20,14 +20,16 @@ Only one action may attempt to return online from offline mode:
 
 1. Close and reopen the app (startup validation flow).
 
-If this action does not occur, app remains in offline behavior even if device connectivity changes. The Settings page sync button calls `syncProjects()` but does not attempt offline reconnect.
+If this action does not occur, app remains in offline behavior even if device connectivity changes. The Settings page sync button calls `syncProjects()` only and never performs an in-process reconnect.
 
 ## Startup connectivity feedback
 
 - Startup validation uses `NETWORK.STARTUP_AUTH_TIMEOUT_MS` (10s) so spotty networks get a fair attempt before falling back to offline.
-- When validation is still pending after a 1s gate, `SpeleoDBProvider` renders a small `Connecting to SpeleoDB…` banner (`data-testid="connecting-banner"`). This is purely visual feedback; it does not change networking state, retry, or trigger any side effects.
+- When validation is still pending after a 1s gate, the startup UI coordinator (`src/context/useStartupUiCoordinator.ts`) renders a small `Connecting to SpeleoDB…` banner (`data-testid="connecting-banner"`). This is purely visual feedback; it does not change networking state, retry, or trigger any side effects.
 - The banner is removed when validation resolves. On a fast network it never appears.
-- **The native splash must hide the moment the banner appears.** Capacitor's splash is configured `launchAutoHide: false` with an opaque background, so it sits above React until `SplashScreen.hide()` runs. If the splash is left up until validation resolves, the banner is rendered behind it and the user sees nothing for the full timeout — defeating the purpose of the feature. `SpeleoDBProvider` therefore calls `hideSplashScreenSafely('connecting banner shown')` from inside the 1s gate's setTimeout callback, in addition to the existing call in the validation `.finally()`. Both calls are idempotent at the plugin level.
+- **The native splash must hide the moment the banner appears.** Capacitor's splash is configured `launchAutoHide: false` with an opaque background, so it sits above React until `SplashScreen.hide()` runs. If the splash is left up until validation resolves, the banner is rendered behind it and the user sees nothing for the full timeout — defeating the purpose of the feature. The startup UI coordinator therefore calls `hideSplashScreenSafely('connecting banner shown')` from inside the 1s gate's setTimeout callback, in addition to the existing call in the validation `.finally()`. Both calls are idempotent at the plugin level.
+- The offline modal is gated until startup validation finishes, so the banner and offline modal never overlap.
+- Logout or unmount clears the delayed banner timer. The controller aborts the in-flight validation context and the startup UI coordinator drops the stale completion, so old startup work cannot re-open prompts after logout.
 
 ## Offline modal contract
 
@@ -46,6 +48,7 @@ If this action does not occur, app remains in offline behavior even if device co
 
 - `4xx` from auth validation means token/session is invalid and must trigger logout + local purge.
 - Network errors, timeouts, and non-`4xx` failures must preserve session and local cache.
+- Logout invalidates and cancels in-flight startup/sync work before cache purge, so stale validation or sync completions cannot re-lock offline mode or repopulate cache after logout.
 
 ## API contract (v2)
 
@@ -62,8 +65,9 @@ Implementation notes:
 
 - `SpeleoDBService` returns `HttpResponse<T>` where `T` is the raw v2 payload (no wrapper).
 - `SpeleoDBController.login` treats any `2xx` auth response with a token body as success; malformed `2xx` auth payloads fall back to normal error handling instead of creating a partial session.
-- `SpeleoDBController.syncProjects` treats only `2xx + Project[]` as the project-list success path. `2xx + []` is a valid empty refresh and replaces stale cached projects; non-array `2xx` payloads are malformed and are treated like failed refreshes. Failed refreshes preserve cache, skip overlay/prefetch side-effects, and set `syncStatus` to `'error'` only when no cached projects are available, otherwise `'done'`. A 4xx during data fetch never triggers logout — only `validateSession` does.
+- `SpeleoDBController.syncProjects` is split into explicit phases: cache load, project-list refresh, project GeoJSON sync, overlay sync, and tile-prefetch scheduling. It treats only `2xx + Project[]` as the project-list success path. `2xx + []` is a valid empty refresh and replaces stale cached projects; non-array `2xx` payloads are malformed and are treated like failed refreshes. Failed refreshes preserve cache, skip later phase side-effects, and set `syncStatus` to `'error'` only when no cached projects are available, otherwise `'done'`. A 4xx during data fetch never triggers logout — only `validateSession` does.
 - Background GeoJSON cache writes validate the downloaded body before persisting it. Non-`2xx` or malformed GeoJSON payloads are skipped so stale cache is preserved instead of being overwritten with garbage.
+- Service/cache IO now accepts cancellation signals from controller-owned run contexts. Web `fetch` aborts transport immediately; native requests are best-effort at the transport level but still must not publish stale state or cache writes after abort/logout.
 - Login error parsing in `SpeleoDBController.login` reads `detail` / `message` / `errors.non_field_errors` directly off `response.data` (already v2-shaped).
 - Endpoint URLs and the v2 base path live in `src/constants.ts` (`API.BASE_PATH = '/api/v2'`).
 

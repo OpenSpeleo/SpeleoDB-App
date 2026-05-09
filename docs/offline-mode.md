@@ -14,8 +14,11 @@ This document defines the offline cache feature, user-facing offline modal behav
 - During startup, the app validates the stored token against the backend.
 - If the request times out or fails due to transport/network/server conditions, the app must enter offline mode and keep the local session.
 - Timeout must never trigger logout or cache clearing.
-- While startup validation is in flight, `SpeleoDBProvider` schedules a small `Connecting to SpeleoDB…` floating card (`data-testid="connecting-banner"`) **after a 1s gate**, so fast networks never see it but slow networks get clear visual feedback that the app is still trying. The banner is removed as soon as `validateSession()` resolves (success or failure).
+- Startup validation is attempted once per app launch when persisted preferences contain a `token` and `instance`. `email` is not part of the gate.
+- While startup validation is in flight, the startup UI coordinator (`src/context/useStartupUiCoordinator.ts`, rendered by `SpeleoDBProvider`) schedules a small `Connecting to SpeleoDB…` floating card (`data-testid="connecting-banner"`) **after a 1s gate**, so fast networks never see it but slow networks get clear visual feedback that the app is still trying. The banner is removed as soon as `validateSession()` resolves (success or failure).
 - The native splash (`launchAutoHide: false`, opaque `#0f172a`) is hidden at the same instant the banner is shown. This is non-negotiable: the splash sits above the React tree and would otherwise hide the banner for the entire timeout window. On fast networks the banner timer is cancelled and the splash hides only via the validation `.finally()` (single hide call). On slow networks the splash hides at ~1s and `.finally()` calls hide again on resolution; both calls are idempotent and any plugin warning is swallowed by `hideSplashScreenSafely`.
+- The offline modal is suppressed while startup validation is still pending, so users see either the `Connecting to SpeleoDB…` card or the offline modal, never both at once.
+- If logout or unmount happens while startup validation is still pending, the delayed banner timer is cleared and the controller cancels the in-flight validation context so stale completions cannot mutate startup/offline UI.
 
 ## Offline mode user experience
 
@@ -55,7 +58,7 @@ This action must run a tentative reconnect flow and resolve to exactly one outco
 - Dashboard map overlays (landmarks, stations, exploration leads, cylinder installs) are read from cached GeoJSON when offline.
 - Outbound network requests should be skipped for normal offline operation paths.
 - Explicit reconnect attempts are limited to the app relaunch recovery path above.
-- The Settings page sync button calls `syncProjects()` but does not attempt offline reconnect (`retryConnection()`).
+- The Settings page sync button calls `syncProjects()` only. It does not attempt offline reconnect.
 - The app does not use passive `online`/`offline` browser listeners. Connectivity changes alone do not trigger reconnect or modal state changes.
 
 ## Logout and data purge
@@ -65,7 +68,8 @@ In offline mode flows, local data must only be purged on authentication-invalid 
 
 ## Source code map
 
-- Startup provider orchestration: `src/context/SpeleoDBProvider.tsx`
+- Startup UI coordination: `src/context/useStartupUiCoordinator.ts`
+- React provider bridge: `src/context/SpeleoDBProvider.tsx`
 - Auth decision logic: `src/controllers/SpeleoDBController.ts`
 - Timeout/transport behavior: `src/services/HttpClient.ts`
 - Auth API call: `src/services/SpeleoDBService.ts`

@@ -10,6 +10,7 @@ import { API, NETWORK } from '../constants';
 import { getPreferences } from './PreferencesService';
 import { getInstanceBaseUrl } from '../utils/url';
 import { getAppleMarketingModelOrIdentifier } from '../utils/appleDeviceModelMap';
+import { createAbortError, throwIfAborted } from '../utils/abort';
 
 // ==================== Public types ====================
 
@@ -23,6 +24,8 @@ export interface HttpRequest {
   formData?: FormData;
   /** Per-request timeout; defaults to NETWORK.REQUEST_TIMEOUT_MS. */
   timeoutMs?: number;
+  /** Optional caller-owned cancellation. */
+  signal?: AbortSignal;
 }
 
 export interface HttpResponse<T = unknown> {
@@ -200,24 +203,65 @@ export class HttpClient {
   // ---- Native (CapacitorHttp) -------------------------------------------------
 
   private async nativeRequest<T>(req: HttpRequest, timeout: number): Promise<HttpResponse<T>> {
+    throwIfAborted(req.signal);
     const nativeHeaders = await buildNativeHeaders(req.url, req.headers);
-    const response = await CapacitorHttp.request({
-      url: req.url,
-      method: req.method,
-      headers: nativeHeaders,
-      data: req.data,
-      connectTimeout: timeout,
-      readTimeout: timeout,
-    });
+    const response = await this.awaitWithAbort(
+      CapacitorHttp.request({
+        url: req.url,
+        method: req.method,
+        headers: nativeHeaders,
+        data: req.data,
+        connectTimeout: timeout,
+        readTimeout: timeout,
+      }),
+      req.signal,
+    );
 
     return { status: response.status, data: response.data as T };
+  }
+
+  private async awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (!signal) {
+      return promise;
+    }
+
+    throwIfAborted(signal);
+
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => {
+        reject(createAbortError());
+      };
+
+      signal.addEventListener('abort', onAbort, { once: true });
+
+      promise.then(
+        (value) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(value);
+        },
+        (error) => {
+          signal.removeEventListener('abort', onAbort);
+          reject(error);
+        },
+      );
+    });
   }
 
   // ---- Web (fetch) ------------------------------------------------------------
 
   private async webRequest<T>(req: HttpRequest, timeout: number): Promise<HttpResponse<T>> {
+    throwIfAborted(req.signal);
+
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const timeoutId = setTimeout(
+      () => controller.abort(createAbortError(`Request timed out after ${timeout}ms`)),
+      timeout,
+    );
+    const onAbort = () => controller.abort(req.signal?.reason ?? createAbortError());
+
+    if (req.signal) {
+      req.signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     try {
       const init: RequestInit = {
@@ -241,7 +285,6 @@ export class HttpClient {
       }
 
       const response = await fetch(req.url, init);
-      clearTimeout(timeoutId);
 
       // Parse JSON body (swallow parse errors to return raw status).
       let data: T;
@@ -252,9 +295,9 @@ export class HttpClient {
       }
 
       return { status: response.status, data };
-    } catch (error) {
+    } finally {
       clearTimeout(timeoutId);
-      throw error;
+      req.signal?.removeEventListener('abort', onAbort);
     }
   }
 }

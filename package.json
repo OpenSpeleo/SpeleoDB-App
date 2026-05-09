@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "bundle:report": "npm run build && node ./scripts/report-bundle-stats.mjs",
     "build:native:ios:assets": "node scripts/build-native-assets.mjs ios",
     "build:native:android:assets": "node scripts/build-native-assets.mjs android",
     "preview": "vite preview",
-    "test.unit": "vitest",
+    "test.unit": "bash ./scripts/run-vitest.sh",
     "lint": "eslint",
     "postinstall": "node scripts/patch-sentry-capacitor-package.mjs"
   },

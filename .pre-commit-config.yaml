@@ -31,7 +31,7 @@ repos:
         # free. Integration tests live in src/tests/*.integration.test.ts and
         # run in CI / via `npm run test.unit -- --run`.
         name: vitest run (unit only)
-        entry: npx vitest run --exclude **/*.integration.test.ts --exclude **/*.integration.test.tsx
+        entry: npm run test.unit -- --run --exclude **/*.integration.test.ts --exclude **/*.integration.test.tsx
         language: system
         pass_filenames: false
         always_run: true

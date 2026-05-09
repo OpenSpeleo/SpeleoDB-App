@@ -1,5 +1,11 @@
 import '@testing-library/jest-dom/vitest';
 import 'fake-indexeddb/auto';
+import { afterEach } from 'vitest';
+import {
+  assertConsoleGuardState,
+  installConsoleGuards,
+  resetConsoleGuardState,
+} from './test/consoleGuard';
 
 // @stencil/core (used by @ionic/core) probes adoptedStyleSheets at import time
 // and during component lifecycle. jsdom does not implement it, so we shim it on
@@ -23,7 +29,9 @@ window.matchMedia = window.matchMedia || function() {
   };
 };
 
-// Ensure localStorage is available and has all methods (jsdom/vitest)
+// Install a deterministic in-memory localStorage implementation for tests.
+// Node 25 exposes a host getter that can emit process warnings before jsdom has
+// a usable backing store, so do not probe the host implementation first.
 const storage: Record<string, string> = {};
 const localStorageStub = {
   getItem(key: string) {
@@ -45,6 +53,15 @@ const localStorageStub = {
     return null;
   },
 };
-if (typeof globalThis.localStorage === 'undefined' || typeof globalThis.localStorage.removeItem !== 'function') {
-  Object.defineProperty(globalThis, 'localStorage', { value: localStorageStub, configurable: true, writable: true });
-}
+Object.defineProperty(globalThis, 'localStorage', {
+  value: localStorageStub,
+  configurable: true,
+  writable: true,
+});
+
+installConsoleGuards();
+resetConsoleGuardState();
+
+afterEach(() => {
+  assertConsoleGuardState();
+});

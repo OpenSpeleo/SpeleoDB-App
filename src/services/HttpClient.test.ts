@@ -174,6 +174,32 @@ describe('HttpClient (web transport)', () => {
 
     vi.useRealTimers();
   });
+
+  it('aborts when the caller signal is cancelled', async () => {
+    const abortController = new AbortController();
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+          });
+        }),
+    );
+
+    const promise = client.request({
+      url: 'https://cancelled.test',
+      method: 'GET',
+      signal: abortController.signal,
+    });
+
+    const resultPromise = promise.catch((e) => e);
+    abortController.abort();
+    const error = await resultPromise;
+
+    expect(error).toBeInstanceOf(DOMException);
+    expect((error as DOMException).name).toBe('AbortError');
+  });
 });
 
 describe('HttpClient (native transport)', () => {

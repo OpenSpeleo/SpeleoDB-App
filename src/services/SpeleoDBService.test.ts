@@ -125,8 +125,18 @@ describe('SpeleoDBService', () => {
     });
 
     it('forwards the optional timeoutMs to the transport', async () => {
-      await service.validateToken(INSTANCE, TOKEN, 1234);
+      await service.validateToken(INSTANCE, TOKEN, { timeoutMs: 1234 });
       expect(http.calls[0].timeoutMs).toBe(1234);
+    });
+
+    it('forwards the optional AbortSignal to the transport', async () => {
+      const abortController = new AbortController();
+
+      await service.validateToken(INSTANCE, TOKEN, {
+        signal: abortController.signal,
+      });
+
+      expect(http.calls[0].signal).toBe(abortController.signal);
     });
 
     it('returns the flat 4xx error body verbatim (no envelope unwrapping)', async () => {
@@ -138,6 +148,16 @@ describe('SpeleoDBService', () => {
 
       expect(res.status).toBe(401);
       expect(res.data).toEqual(body);
+    });
+
+    it('forwards cancellation to the transport', async () => {
+      const abortController = new AbortController();
+
+      await service.getProjectsGeoJSON(INSTANCE, TOKEN, {
+        signal: abortController.signal,
+      });
+
+      expect(http.calls[0].signal).toBe(abortController.signal);
     });
   });
 

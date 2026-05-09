@@ -7,6 +7,7 @@ import { createMemoryHistory } from 'history';
 import Dashboard from './Dashboard';
 import { MAP } from '../constants';
 import type { Project } from '../types/project';
+import { allowConsoleWarn } from '../test/consoleGuard';
 
 // jsdom lacks PointerEvent -- polyfill so fireEvent.pointerDown/Up creates
 // events with pointerId/pointerType that the pointer-capture handlers rely on.
@@ -362,8 +363,7 @@ vi.mock('../onboarding/guidedTour/engine', () => ({
 }));
 
 // Mock SpeleoDBProvider
-const mockSyncProjects = vi.fn().mockResolvedValue(undefined);
-const mockRetryConnection = vi.fn().mockResolvedValue('ok');
+const mockSyncProjects = vi.fn().mockResolvedValue({ status: 'done' });
 const mockGetProjectGeoJSON = vi.fn().mockResolvedValue(null);
 const mockGetOverlayGeoJSON = vi.fn().mockResolvedValue(null);
 const mockLogout = vi.fn();
@@ -372,7 +372,6 @@ let mockIsOfflineLocked = false;
 let mockProjects: Project[] = [];
 const mockController = {
   syncProjects: mockSyncProjects,
-  retryConnection: mockRetryConnection,
   getProjectGeoJSON: mockGetProjectGeoJSON,
   getOverlayGeoJSON: mockGetOverlayGeoJSON,
   logout: mockLogout,
@@ -386,7 +385,6 @@ vi.mock('../context/useSpeleoDB', () => ({
     syncStatus: 'idle' as const,
     isOnline: true,
     isOfflineLocked: mockIsOfflineLocked,
-    isRetryingConnection: false,
     lastSyncedAt: null,
     tilePrefetchJobs: [],
   }),
@@ -1060,7 +1058,14 @@ describe('Dashboard', () => {
   });
 
   it('uses fallback non-icon layers for exploration leads and cylinders when icons fail to load', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    allowConsoleWarn(
+      expect.stringContaining('Failed to load map icon exploration-lead-icon'),
+      expect.any(Error),
+    );
+    allowConsoleWarn(
+      expect.stringContaining('Failed to load map icon cylinder-icon'),
+      expect.any(Error),
+    );
     mockProjects = [makeProject({ id: 'p1', name: 'Fallback Project' })];
     mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
     mockMapLoadImage.mockImplementation((url: string, callback: (error: Error | null, image?: unknown) => void) => {
@@ -1094,14 +1099,6 @@ describe('Dashboard', () => {
       expect(explorationLayer?.dataset.layerIcon).toBe('');
       expect(cylinderLayer?.dataset.layerIcon).toBe('');
     });
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to load map icon exploration-lead-icon'),
-      expect.any(Error),
-    );
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to load map icon cylinder-icon'),
-      expect.any(Error),
-    );
   });
 
   it('opens marker details modal when tapping an exploration lead icon marker', async () => {

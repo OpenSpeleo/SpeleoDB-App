@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import Settings from './Settings';
+import { formatLastSync } from '../utils/formatLastSync';
 
 // ==================== Mocks ====================
 
@@ -61,7 +62,7 @@ vi.mock('../services/PreferencesService', () => ({
 }));
 
 
-vi.mock('../onboarding/guidedTour/engine', () => ({
+vi.mock('../onboarding/guidedTour/runtime', () => ({
   restartGuidedTourFromHelp: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -158,12 +159,21 @@ function renderSettings(
       />
     );
   };
-  render(
+  const renderResult = render(
     <Router history={history}>
       <Harness />
     </Router>,
   );
-  return history;
+  return {
+    history,
+    rerender: () => {
+      renderResult.rerender(
+        <Router history={history}>
+          <Harness />
+        </Router>,
+      );
+    },
+  };
 }
 
 // ==================== Tests ====================
@@ -247,7 +257,6 @@ describe('Settings page', () => {
   });
 
   it('keeps sync total stable while prefetch progresses on settings page', async () => {
-    const user = userEvent.setup();
     mockGetTotalCacheBytes
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(1);
@@ -263,16 +272,21 @@ describe('Settings page', () => {
       },
     ];
 
-    renderSettings();
+    const { rerender } = renderSettings();
 
     await waitFor(() => {
       expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,600 / 2,100');
     });
 
-    const [job] = mockTilePrefetchJobs.current as Array<{ completedTiles: number }>;
-    job.completedTiles = 1500;
-
-    await user.click(screen.getByTestId('sync-button'));
+    mockTilePrefetchJobs.current = [
+      {
+        projectId: 'p1', commitId: 'c1', status: 'downloading',
+        zoomMin: 10, zoomMax: 14, padMeters: 500,
+        totalTiles: 2000, completedTiles: 1500, failedTiles: 100,
+        bytesDownloaded: 500_000, estimatedBytes: 1_000_000, updatedAt: Date.now(),
+      },
+    ];
+    rerender();
 
     await waitFor(() => {
       expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,700 / 2,100');
@@ -283,7 +297,7 @@ describe('Settings page', () => {
     mockGetManualTileCount.mockResolvedValue(42);
     mockGetTotalCacheBytes.mockResolvedValue(1024);
 
-    const history = renderSettings(true, '/dashboard');
+    const { history } = renderSettings(true, '/dashboard');
 
     expect(mockGetManualTileCount).not.toHaveBeenCalled();
     expect(mockGetTotalCacheBytes).not.toHaveBeenCalled();
@@ -398,7 +412,7 @@ describe('Settings page', () => {
 
   it('clicking "Show Tutorial" navigates to /dashboard', async () => {
     const user = userEvent.setup();
-    const history = renderSettings();
+    const { history } = renderSettings();
 
     await user.click(screen.getByTestId('show-tutorial-button'));
     expect(history.location.pathname).toBe('/dashboard');
@@ -421,7 +435,7 @@ describe('Settings page', () => {
 
   it('confirming logout calls controller.logout', async () => {
     const user = userEvent.setup();
-    const history = renderSettings();
+    const { history } = renderSettings();
 
     const signOutItem = screen.getByTestId('sign-out-button');
     await user.click(signOutItem);
@@ -479,16 +493,16 @@ describe('Settings page', () => {
       expect(screen.getByTestId('last-sync')).toHaveTextContent('Never');
     });
 
-    it('renders an absolute locale string when lastSyncedAt is a finite number', () => {
+    it('updates when lastSyncedAt changes after the page is already rendered', () => {
       const epoch = Date.UTC(2026, 3, 18, 14, 30);
-      mockLastSyncedAt.current = epoch;
-      renderSettings();
+      mockLastSyncedAt.current = null;
+      const { rerender } = renderSettings();
+      expect(screen.getByTestId('last-sync')).toHaveTextContent('Never');
 
-      const expected = new Date(epoch).toLocaleString(undefined, {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      });
-      expect(screen.getByTestId('last-sync')).toHaveTextContent(expected);
+      mockLastSyncedAt.current = epoch;
+      rerender();
+
+      expect(screen.getByTestId('last-sync')).toHaveTextContent(formatLastSync(epoch));
     });
 
     it('renders the row above "Synced projects" so it is visible at the top of the section', () => {

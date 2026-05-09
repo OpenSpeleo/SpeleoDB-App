@@ -57,7 +57,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx vitest run --reporter=verbose --coverage
+      - run: npm run test.unit -- --run --reporter=verbose --coverage
       - uses: actions/upload-artifact@v7
         if: always()
         with:

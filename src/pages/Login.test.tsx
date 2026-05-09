@@ -23,12 +23,10 @@ vi.mock('../context/useSpeleoDB', () => ({
   useSpeleoDB: () => ({
     controller: {
       login: mockLogin,
-      retryConnection: vi.fn(),
     },
     authState: { isAuthenticated: false, user: null, token: null },
     isOnline: true,
     isOfflineLocked: false,
-    isRetryingConnection: false,
     projects: [],
     syncStatus: 'idle',
     lastSyncedAt: null,

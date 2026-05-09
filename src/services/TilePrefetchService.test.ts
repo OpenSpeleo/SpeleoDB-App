@@ -206,6 +206,29 @@ describe('TilePrefetchService queue behavior', () => {
     expect(service.getSnapshot().length).toBe(0);
   });
 
+  it('throws AbortError when enqueueing is cancelled before work begins', async () => {
+    const { deps, fetchAndCacheTile } = createDeps();
+    const service = new TilePrefetchService(deps);
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await expect(
+      service.enqueueProjects(
+        [{ projectId: 'p1', commitId: 'c1', geojson: pointFeatureCollection(2.3, 46.6) }],
+        {
+          tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
+          minZoom: 0,
+          maxZoom: 0,
+          padMeters: 50,
+        },
+        { signal: abortController.signal },
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(service.getSnapshot()).toEqual([]);
+    expect(fetchAndCacheTile).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
   it('ignores stale queued tiles when a project is re-enqueued with a new commit', async () => {
     const firstDownload = createDeferred<number>();
     let fetchCalls = 0;
