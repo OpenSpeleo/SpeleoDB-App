@@ -186,3 +186,7 @@ ios-log: ## Stream logs from the booted simulator
 generate-assets:
 	npm install @capacitor/assets --save-dev
 	npx capacitor-assets generate --iconBackgroundColor "#0f182a"
+
+update:
+	npx --yes npm-check-updates -u --peer
+	npm install
