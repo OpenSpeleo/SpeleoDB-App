@@ -8,6 +8,18 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/*
+ * Tailwind preflight applies `padding: 0` to all elements (*), which loads
+ * after Ionic CSS and wins over shadow-DOM :host padding on custom elements.
+ */
+@layer base {
+  ion-list-header {
+    padding-inline-start: calc(var(--ion-safe-area-left, 0px) + 16px);
+    padding-inline-end: var(--ion-safe-area-right, 0px);
+    padding-bottom: 0.625rem;
+  }
+}
+
 /* Custom scrollbar for webkit browsers */
 @layer components {
   ::-webkit-scrollbar {
@@ -26,4 +38,42 @@ body {
   ::-webkit-scrollbar-thumb:hover {
     background-color: var(--color-slate-500);
   }
+}
+
+/*
+ * Unlayered app chrome — must sit outside @layer so it wins over Tailwind v4
+ * preflight (`* { padding: 0; border-radius: 0 }`), which otherwise flattens
+ * native buttons and strips rounded corners.
+ */
+.app-tab-bar {
+  padding-top: 0.5rem;
+}
+
+.app-tab-bar__tab {
+  padding-bottom: 0.375rem;
+}
+
+/* Standard action button — matches Settings modal buttons (px-4 py-3 rounded-xl) */
+.app-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.25;
+  border-radius: 0.75rem;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+/* Narrow panels (project bulk actions): slightly smaller label, same shape */
+.app-btn--compact {
+  min-height: 2.5rem;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
 }

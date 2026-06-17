@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { SpeleoDBStoreProvider } from './SpeleoDBStoreProvider'
-import { SpeleoDBStartupUi } from './SpeleoDBStartupUi'
+import { SpeleoDBStartupGate } from './SpeleoDBStartupGate'
 
 interface SpeleoDBProviderProps {
   children: ReactNode
@@ -10,7 +10,7 @@ interface SpeleoDBProviderProps {
 export function SpeleoDBProvider({ children }: SpeleoDBProviderProps) {
   return (
     <SpeleoDBStoreProvider>
-      <SpeleoDBStartupUi />
+      <SpeleoDBStartupGate />
       {children}
     </SpeleoDBStoreProvider>
   )

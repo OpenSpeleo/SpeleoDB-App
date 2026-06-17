@@ -372,7 +372,7 @@ const Settings: React.FC<SettingsProps> = ({
                   type="button"
                   disabled={isLoggingOut}
                   onClick={() => setShowLogoutConfirmModal(false)}
-                  className="px-4 py-3 rounded-xl bg-slate-800/70 text-slate-200 hover:bg-slate-700/70 disabled:opacity-50 transition-colors"
+                  className="app-btn bg-slate-800/70 text-slate-200 hover:bg-slate-700/70 disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -380,7 +380,7 @@ const Settings: React.FC<SettingsProps> = ({
                   type="button"
                   disabled={isLoggingOut}
                   onClick={handleConfirmLogout}
-                  className="px-4 py-3 rounded-xl bg-red-600 text-white hover:bg-red-500 disabled:opacity-50 transition-colors"
+                  className="app-btn bg-red-600 text-white hover:bg-red-500 disabled:opacity-50"
                 >
                   {isLoggingOut ? 'Clearing data\u2026' : 'Wipe local data & Sign Out'}
                 </button>

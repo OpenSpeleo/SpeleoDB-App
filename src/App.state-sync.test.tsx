@@ -34,8 +34,8 @@ vi.mock('./context/SpeleoDBStoreProvider', () => ({
   SpeleoDBStoreProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('./context/SpeleoDBStartupUi', () => ({
-  SpeleoDBStartupUi: () => null,
+vi.mock('./context/SpeleoDBStartupGate', () => ({
+  SpeleoDBStartupGate: () => null,
 }));
 
 vi.mock('./services/PreferencesService', () => ({

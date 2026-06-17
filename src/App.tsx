@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, useLocation } from 'react-router-dom';
 
 import { App as CapApp } from '@capacitor/app';
-import { SpeleoDBStoreProvider } from './context/SpeleoDBStoreProvider';
+import { SpeleoDBProvider } from './context/SpeleoDBProvider';
 
 /* Core CSS required for Ionic components to work properly */
 import '@ionic/react/css/core.css';
@@ -70,9 +70,9 @@ const App: React.FC = () => {
 
   return (
     <BrowserRouter>
-      <SpeleoDBStoreProvider>
+      <SpeleoDBProvider>
         <AppRoutes />
-      </SpeleoDBStoreProvider>
+      </SpeleoDBProvider>
     </BrowserRouter>
   );
 };

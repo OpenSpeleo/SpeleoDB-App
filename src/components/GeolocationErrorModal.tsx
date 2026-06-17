@@ -74,7 +74,7 @@ const GeolocationErrorModal: React.FC<GeolocationErrorModalProps> = ({ error, on
           <button
             type="button"
             onClick={onDismiss}
-            className="w-full px-4 py-3 rounded-xl bg-slate-800/70 text-slate-200 hover:bg-slate-700/70 transition-colors"
+            className="app-btn w-full bg-slate-800/70 text-slate-200 hover:bg-slate-700/70"
           >
             OK
           </button>

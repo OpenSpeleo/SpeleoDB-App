@@ -24,6 +24,7 @@ If this action does not occur, app remains in offline behavior even if device co
 
 ## Startup connectivity feedback
 
+- `SpeleoDBStartupGate` must mount at the app root via `SpeleoDBProvider`, not inside lazy authenticated routes. Cold start loads `/` or `/login` before the dashboard shell exists; if startup UI only lived in `AuthenticatedAppShell`, `SplashScreen.hide()` and the stored-session redirect to `/dashboard` would never run. The gate keeps splash dismissal and validation in the main graph; heavier Ionic modals load lazily from `SpeleoDBStartupModals`.
 - Startup validation uses `NETWORK.STARTUP_AUTH_TIMEOUT_MS` (10s) so spotty networks get a fair attempt before falling back to offline.
 - When validation is still pending after a 1s gate, the startup UI coordinator (`src/context/useStartupUiCoordinator.ts`) renders a small `Connecting to SpeleoDB…` banner (`data-testid="connecting-banner"`). This is purely visual feedback; it does not change networking state, retry, or trigger any side effects.
 - The banner is removed when validation resolves. On a fast network it never appears.

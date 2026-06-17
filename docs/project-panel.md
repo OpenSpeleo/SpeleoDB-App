@@ -41,7 +41,7 @@ The subtitle reads `{N} of {M} visible` where:
 
 ## Bulk actions
 
-Two buttons directly below the header. Their semantics are intentionally asymmetric:
+Two action buttons directly below the header using `.app-btn.app-btn--compact` (same shape as Settings modal buttons, slightly smaller label for the narrow panel). **Show all** uses the purple primary fill and **Hide all** uses a slate secondary style. The header, bulk row, and scrollable list use `shrink-0` / `min-h-0` so long project lists cannot compress the action buttons. Their semantics are intentionally asymmetric:
 
 - **Show all**: activates every project (`projectVisibility[id] = true`) **and** re-enables every country gate (`countryVisibility[country] = true`). The country re-enable is required so a user who previously gated off a country can recover with a single tap.
 - **Hide all**: deactivates every project (`projectVisibility[id] = false`) and **leaves country gates untouched**. The AND naturally hides everything; the user's per-country choices survive a "Hide all".

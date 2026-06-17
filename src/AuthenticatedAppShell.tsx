@@ -2,7 +2,6 @@ import { Suspense, lazy, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { IonApp, setupIonicReact } from '@ionic/react'
 
-import { SpeleoDBStartupUi } from './context/SpeleoDBStartupUi'
 import {
   getColorMode,
   getMeasurementUnit,
@@ -77,7 +76,6 @@ function AuthenticatedRoutes(): ReactNode {
 export default function AuthenticatedAppShell(): ReactNode {
   return (
     <IonApp>
-      <SpeleoDBStartupUi />
       <AuthenticatedRoutes />
     </IonApp>
   )

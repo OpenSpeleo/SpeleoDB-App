@@ -44,7 +44,7 @@ interface UseStartupUiCoordinatorOptions {
   hideSplashScreenSafely: (reason: string) => void
 }
 
-interface StartupUiCoordinatorResult {
+export interface StartupUiCoordinatorResult {
   showConnectingBanner: boolean
   showOfflineModal: boolean
   showCompanionInfoModal: boolean

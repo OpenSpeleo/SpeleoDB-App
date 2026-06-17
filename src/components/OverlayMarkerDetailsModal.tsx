@@ -203,7 +203,7 @@ const OverlayMarkerDetailsModal: React.FC<OverlayMarkerDetailsModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-3 rounded-xl bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors"
+              className="app-btn bg-slate-700 text-slate-200 hover:bg-slate-600"
             >
               Close
             </button>
@@ -212,7 +212,7 @@ const OverlayMarkerDetailsModal: React.FC<OverlayMarkerDetailsModalProps> = ({
                 type="button"
                 onClick={handleShare}
                 data-testid="share-button"
-                className="px-4 py-3 rounded-xl bg-purple-600/80 text-white hover:bg-purple-500/80 transition-colors flex items-center justify-center gap-2"
+                className="app-btn bg-purple-600/80 text-white hover:bg-purple-500/80 gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

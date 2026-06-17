@@ -30,7 +30,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
     <div
       data-testid="app-tab-bar"
       role="tablist"
-      className="flex border-t border-slate-700/50 bg-slate-900/95 backdrop-blur-md pt-1"
+      className="app-tab-bar flex border-t border-slate-700/50 bg-slate-900/95 backdrop-blur-md"
       style={{ paddingBottom: 'var(--safe-area-inset-bottom, env(safe-area-inset-bottom))' }}
     >
       {/* Projects */}
@@ -50,7 +50,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
             openProjectPanel();
           }
         }}
-        className={`flex-1 flex flex-col items-center justify-center gap-1 py-2 transition-colors ${
+        className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
           isProjectsActive
             ? 'text-purple-400'
             : 'text-slate-400 active:text-slate-200'
@@ -73,7 +73,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
           }
           if (isProjectPanelOpen) closeProjectPanel();
         }}
-        className={`flex-1 flex flex-col items-center justify-center gap-1 py-2 transition-colors ${
+        className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
           isMapActive
             ? 'text-purple-400'
             : 'text-slate-400 active:text-slate-200'
@@ -95,7 +95,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
         onClick={() => {
           if (!onSettings) history.push('/settings');
         }}
-        className={`flex-1 flex flex-col items-center justify-center gap-1 py-2 transition-colors ${
+        className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
           onSettings
             ? 'text-purple-400'
             : 'text-slate-400 active:text-slate-200'

@@ -305,56 +305,62 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
         data-testid="project-panel"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
-          <div>
+        <div className="shrink-0 border-b border-slate-700/50 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-slate-100">Projects</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {effectiveActiveCount} of {totalCount} visible
-            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400
+                         hover:bg-slate-700/50 hover:text-slate-100 transition-colors"
+              aria-label="Close panel"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400
-                       hover:text-slate-100 hover:bg-slate-700/50 transition-colors"
-            aria-label="Close panel"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
+          <p className="mt-0.5 text-xs text-slate-400">
+            {effectiveActiveCount} of {totalCount} visible
+          </p>
         </div>
 
         {/* Bulk actions */}
         <div
-          className="flex gap-2 px-4 py-2.5 border-b border-slate-700/50"
+          className="shrink-0 border-b border-slate-700/50 px-4 py-2"
           data-tour="bulk-actions"
         >
-          <button
-            onClick={onShowAll}
-            className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg
-                       bg-slate-700/50 text-slate-300 hover:bg-slate-600/50
-                       hover:text-slate-100 transition-colors"
-          >
-            Show all
-          </button>
-          <button
-            onClick={onHideAll}
-            className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg
-                       bg-slate-700/50 text-slate-300 hover:bg-slate-600/50
-                       hover:text-slate-100 transition-colors"
-          >
-            Hide all
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={onShowAll}
+              aria-label="Show all projects"
+              className="app-btn app-btn--compact bg-purple-600/90 text-white hover:bg-purple-500/90
+                         active:bg-purple-600 touch-manipulation"
+            >
+              Show all
+            </button>
+            <button
+              type="button"
+              onClick={onHideAll}
+              aria-label="Hide all projects"
+              className="app-btn app-btn--compact bg-slate-700/60 text-slate-100 border border-slate-600/50
+                         hover:bg-slate-600/70 hover:text-white active:bg-slate-700
+                         touch-manipulation"
+            >
+              Hide all
+            </button>
+          </div>
         </div>
 
         {/* Project list */}
         <div
-          className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain"
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain"
           data-testid="project-panel-list"
         >
           {projects.length === 0 ? (
