@@ -14,6 +14,7 @@ const mockIsAuthenticated = vi.fn(() => true);
 const mockSyncProjects = vi.fn().mockResolvedValue(undefined);
 const mockRequestStorageConsentPrompt = vi.fn();
 const mockRevokeTileCacheOverLimit = vi.fn();
+const mockSetLayerOfflineSync = vi.fn().mockResolvedValue(undefined);
 
 const {
   mockTilePrefetchJobs,
@@ -22,6 +23,7 @@ const {
   mockLastSyncedAt,
   mockIsTileCacheOverLimit,
   mockIsTileCacheOverLimitApproved,
+  mockIsOfflineLocked,
 } = vi.hoisted(() => ({
   mockTilePrefetchJobs: { current: [] as unknown[] },
   mockProjects: { current: [] as unknown[] },
@@ -29,6 +31,7 @@ const {
   mockLastSyncedAt: { current: null as number | null },
   mockIsTileCacheOverLimit: { current: false },
   mockIsTileCacheOverLimitApproved: { current: false },
+  mockIsOfflineLocked: { current: false },
 }));
 
 vi.mock('../context/useSpeleoDB', () => ({
@@ -39,6 +42,7 @@ vi.mock('../context/useSpeleoDB', () => ({
       syncProjects: mockSyncProjects,
       requestStorageConsentPrompt: mockRequestStorageConsentPrompt,
       revokeTileCacheOverLimit: mockRevokeTileCacheOverLimit,
+      setLayerOfflineSync: mockSetLayerOfflineSync,
     },
     projects: mockProjects.current,
     syncStatus: mockSyncStatus.current,
@@ -46,6 +50,7 @@ vi.mock('../context/useSpeleoDB', () => ({
     tilePrefetchJobs: mockTilePrefetchJobs.current,
     isTileCacheOverLimit: mockIsTileCacheOverLimit.current,
     isTileCacheOverLimitApproved: mockIsTileCacheOverLimitApproved.current,
+    isOfflineLocked: mockIsOfflineLocked.current,
   }),
 }));
 
@@ -119,16 +124,18 @@ vi.mock('@ionic/react', () => ({
   IonNote: ({ children, ...rest }: { children?: React.ReactNode } & Record<string, unknown>) => (
     <span data-testid={rest['data-testid'] as string}>{children}</span>
   ),
-  IonToggle: ({ checked, onIonChange, children, ...rest }: {
+  IonToggle: ({ checked, onIonChange, children, disabled, ...rest }: {
     checked?: boolean;
     onIonChange?: (e: { detail: { checked: boolean } }) => void;
     children?: React.ReactNode;
+    disabled?: boolean;
   } & Record<string, unknown>) => (
     <label>
       <input
         data-testid={rest['data-testid'] as string ?? 'ion-toggle'}
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(e) => onIonChange?.({ detail: { checked: e.target.checked } })}
       />
       {children}
@@ -162,6 +169,7 @@ function renderSettings(
     const [measurementUnit, setMeasurementUnit] = React.useState(initialMeasurementUnit);
     const [isProjectPanelOpen, setIsProjectPanelOpen] = React.useState(false);
     const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = React.useState(false);
+    const [layerOfflineSync, setLayerOfflineSync] = React.useState<Record<string, boolean>>({});
     return (
       <Settings
         showLandmarks={showLandmarks}
@@ -170,6 +178,8 @@ function renderSettings(
         onColorModeChange={setColorMode}
         measurementUnit={measurementUnit}
         onMeasurementUnitChange={setMeasurementUnit}
+        layerOfflineSync={layerOfflineSync}
+        onLayerOfflineSyncChange={setLayerOfflineSync}
         isProjectPanelOpen={isProjectPanelOpen}
         onProjectPanelChange={setIsProjectPanelOpen}
         isLandmarkPanelOpen={isLandmarkPanelOpen}
@@ -214,6 +224,8 @@ describe('Settings page', () => {
     mockPersistShowLandmarks.mockReset();
     mockPersistColorMode.mockReset();
     mockPersistMeasurementUnit.mockReset();
+    mockSetLayerOfflineSync.mockReset().mockResolvedValue(undefined);
+    mockIsOfflineLocked.current = false;
   });
 
   it('renders settings header', () => {
@@ -610,6 +622,68 @@ describe('Settings page', () => {
 
       await user.click(screen.getByTestId('storage-revoke'));
       expect(mockRevokeTileCacheOverLimit).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('Layers section', () => {
+    it('renders a row per layer with the satellite toggle forced on + disabled', () => {
+      renderSettings();
+
+      const satToggle = screen.getByTestId('layer-toggle-esri-satellite') as HTMLInputElement;
+      expect(satToggle).toBeChecked();
+      expect(satToggle).toBeDisabled();
+
+      const hillToggle = screen.getByTestId('layer-toggle-esri-world-hillshade') as HTMLInputElement;
+      expect(hillToggle).not.toBeChecked();
+      expect(hillToggle).not.toBeDisabled();
+
+      expect(screen.getByTestId('layer-row-esri-world-hillshade-dark')).toBeInTheDocument();
+    });
+
+    it('toggling an extra layer calls controller.setLayerOfflineSync', async () => {
+      const user = userEvent.setup();
+      renderSettings();
+
+      await user.click(screen.getByTestId('layer-toggle-esri-world-hillshade'));
+
+      expect(mockSetLayerOfflineSync).toHaveBeenCalledWith('esri-world-hillshade', true);
+    });
+
+    it('disables extra-layer toggles while offline-locked', () => {
+      mockIsOfflineLocked.current = true;
+      renderSettings();
+
+      // Extra layers cannot be synced offline, so their toggles are locked.
+      expect(screen.getByTestId('layer-toggle-esri-world-hillshade')).toBeDisabled();
+      expect(screen.getByTestId('layer-toggle-esri-world-hillshade-dark')).toBeDisabled();
+      expect(screen.getByTestId('layer-sync-status-esri-world-hillshade')).toHaveTextContent(
+        'unavailable offline',
+      );
+      // Satellite stays forced-on + disabled regardless.
+      expect(screen.getByTestId('layer-toggle-esri-satellite')).toBeDisabled();
+    });
+
+    it('shows per-layer sync percentage from prefetch jobs grouped by layer', () => {
+      mockTilePrefetchJobs.current = [
+        {
+          layerId: 'esri-satellite', projectId: 'p1', commitId: 'c1', status: 'downloading',
+          zoomMin: 0, zoomMax: 18, padMeters: 50,
+          totalTiles: 100, completedTiles: 50, failedTiles: 0,
+          bytesDownloaded: 0, estimatedBytes: 0, updatedAt: 1,
+        },
+        {
+          layerId: 'esri-world-hillshade', projectId: 'p1', commitId: 'c1', status: 'done',
+          zoomMin: 0, zoomMax: 16, padMeters: 50,
+          totalTiles: 10, completedTiles: 10, failedTiles: 0,
+          bytesDownloaded: 0, estimatedBytes: 0, updatedAt: 1,
+        },
+      ];
+      renderSettings();
+
+      expect(screen.getByTestId('layer-sync-status-esri-satellite')).toHaveTextContent('50%');
+      expect(screen.getByTestId('layer-sync-status-esri-world-hillshade')).toHaveTextContent(
+        'Offline sync off',
+      );
     });
   });
 });

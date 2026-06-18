@@ -1,10 +1,13 @@
 import {
+  deletePrefetchJobsByLayer as defaultDeletePrefetchJobsByLayer,
   fetchAndCachePinnedTile as defaultFetchAndCachePinnedTile,
   getAllPrefetchJobs as defaultGetAllPrefetchJobs,
   hasCachedTile as defaultHasCachedTile,
   setPrefetchJob as defaultSetPrefetchJob,
 } from './TileCacheService';
+import { DEFAULT_MAP_LAYER_ID } from '../constants';
 import type {
+  TilePrefetchEnqueueOptions,
   TilePrefetchJobState,
   TilePrefetchProjectInput,
   TilePrefetchRequest,
@@ -12,6 +15,8 @@ import type {
   TilePrefetchTileUrlsInput,
 } from '../types/tilePrefetch';
 import { isAbortError, throwIfAborted } from '../utils/abort';
+import { getMapLayerById } from './MapLayersService';
+import { prefetchJobKey } from './tileCache/TileCacheRepository';
 import { buildTileUrlsForFeatureCollection } from './tilePrefetchPlanner';
 
 // Re-export the geometry/URL collectors from their dedicated planner module so
@@ -33,7 +38,8 @@ const RETRY_DELAYS_MS = [500, 1_500, 3_500];
 
 interface QueueEntry {
   url: string;
-  projectCommits: Map<string, string>;
+  /** Map of composite job key (`${layerId}::${targetId}`) -> commit id. */
+  jobCommits: Map<string, string>;
 }
 
 interface JobMeta {
@@ -47,6 +53,7 @@ export interface TilePrefetchDependencies {
   fetchAndCacheTile: (url: string) => Promise<number>;
   getAllPrefetchJobs: () => Promise<TilePrefetchJobState[]>;
   setPrefetchJob: (job: TilePrefetchJobState) => Promise<void>;
+  deletePrefetchJobsByLayer: (layerId: string) => Promise<void>;
   isOnline: () => boolean;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
@@ -54,9 +61,7 @@ export interface TilePrefetchDependencies {
 
 type JobsListener = (jobs: TilePrefetchJobState[]) => void;
 
-interface PrefetchOperationOptions {
-  signal?: AbortSignal
-}
+type PrefetchOperationOptions = TilePrefetchEnqueueOptions;
 
 export interface TilePrefetchServiceLike {
   subscribe(listener: (jobs: TilePrefetchJobState[]) => void): () => void
@@ -64,12 +69,13 @@ export interface TilePrefetchServiceLike {
   enqueueProjects(
     projects: TilePrefetchProjectInput[],
     request: TilePrefetchRequest,
-    options?: { signal?: AbortSignal },
+    options?: TilePrefetchEnqueueOptions,
   ): Promise<void>
   enqueueTileUrls(
     target: TilePrefetchTileUrlsInput,
-    options?: { signal?: AbortSignal },
+    options?: TilePrefetchEnqueueOptions,
   ): Promise<void>
+  removeLayer(layerId: string): Promise<void>
   resumeBlockedJobs(): void
   waitForIdle(): Promise<void>
   dispose(): void
@@ -80,6 +86,7 @@ const defaultDeps: TilePrefetchDependencies = {
   fetchAndCacheTile: (url: string) => defaultFetchAndCachePinnedTile(url),
   getAllPrefetchJobs: defaultGetAllPrefetchJobs,
   setPrefetchJob: defaultSetPrefetchJob,
+  deletePrefetchJobsByLayer: defaultDeletePrefetchJobsByLayer,
   // Runtime should inject the app-level network gate.
   isOnline: () => true,
   now: () => Date.now(),
@@ -110,7 +117,9 @@ function isTileCacheCapacityError(error: unknown): boolean {
 export class TilePrefetchService implements TilePrefetchServiceLike {
   private deps: TilePrefetchDependencies;
   private listeners = new Set<JobsListener>();
-  private jobsByProject = new Map<string, TilePrefetchJobState>();
+  // Keyed by composite job key (`${layerId}::${targetId}`) so the same target
+  // (project / landmarks) can have independent jobs per tile layer.
+  private jobsByKey = new Map<string, TilePrefetchJobState>();
   private cachePresence = new Map<string, boolean>();
   private queue: QueueEntry[] = [];
   private queueByUrl = new Map<string, QueueEntry>();
@@ -132,9 +141,13 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     this.queue = [];
     this.queueByUrl.clear();
     this.cachePresence.clear();
-    this.jobsByProject.clear();
+    this.jobsByKey.clear();
     this.notify();
     this.listeners.clear();
+  }
+
+  private keyForJob(job: TilePrefetchJobState): string {
+    return prefetchJobKey(job.layerId, job.projectId);
   }
 
   subscribe(listener: JobsListener): () => void {
@@ -158,10 +171,11 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     throwIfAborted(options.signal)
     if (this.destroyed || projects.length === 0) return;
 
+    const layerId = options.layerId ?? DEFAULT_MAP_LAYER_ID;
     for (const project of projects) {
       throwIfAborted(options.signal)
       if (this.destroyed) return;
-      await this.enqueueProject(project, request, options);
+      await this.enqueueProject(layerId, project, request, options);
     }
 
     throwIfAborted(options.signal)
@@ -182,7 +196,9 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     throwIfAborted(options.signal)
     if (this.destroyed) return;
 
+    const layerId = options.layerId ?? DEFAULT_MAP_LAYER_ID;
     await this.enqueueJobWithUrls(
+      layerId,
       target.id,
       target.commitId,
       {
@@ -199,6 +215,64 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     this.startProcessing();
   }
 
+  /**
+   * Remove all in-memory + persisted jobs for a layer and drop its queued
+   * tiles. Used when a layer's offline sync is turned off. A tile shared with
+   * another still-enabled layer is impossible here (URLs are per-layer), so
+   * pruning by job key is sufficient.
+   */
+  async removeLayer(layerId: string): Promise<void> {
+    await this.readyPromise;
+    if (this.destroyed) return;
+
+    const removedKeys = new Set<string>();
+    for (const [key, job] of this.jobsByKey) {
+      if (job.layerId === layerId) {
+        this.jobsByKey.delete(key);
+        removedKeys.add(key);
+      }
+    }
+
+    if (removedKeys.size > 0) {
+      const remaining: QueueEntry[] = [];
+      for (const entry of this.queue) {
+        for (const key of removedKeys) {
+          entry.jobCommits.delete(key);
+        }
+        if (entry.jobCommits.size > 0) {
+          remaining.push(entry);
+        } else {
+          this.queueByUrl.delete(entry.url);
+        }
+      }
+      this.queue = remaining;
+    }
+
+    // Drop the in-memory cache-presence hints for this layer's tiles. The
+    // controller evicts the layer's tiles from IndexedDB when sync is turned
+    // off, so leaving stale `true` entries here would make a same-session
+    // re-enable treat every tile as already cached (job auto-"done", zero
+    // downloads, blank offline map). Prune by the layer's tile-URL prefix.
+    const layer = getMapLayerById(layerId);
+    const prefix = layer?.tileUrlTemplate.split('{z}')[0];
+    if (prefix) {
+      for (const url of this.cachePresence.keys()) {
+        if (url.startsWith(prefix)) this.cachePresence.delete(url);
+      }
+    } else {
+      // Unknown layer id: fall back to a full clear (correctness over speed;
+      // entries are cheaply rebuilt from IndexedDB on the next enqueue).
+      this.cachePresence.clear();
+    }
+
+    try {
+      await this.deps.deletePrefetchJobsByLayer(layerId);
+    } catch {
+      // Persistence cleanup is best-effort; in-memory state is authoritative.
+    }
+    this.notify();
+  }
+
   async waitForIdle(): Promise<void> {
     await this.readyPromise;
     while (this.runningPromise) {
@@ -212,7 +286,7 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
       const jobs = await this.deps.getAllPrefetchJobs();
       if (this.destroyed) return;
       for (const job of jobs) {
-        this.jobsByProject.set(job.projectId, job);
+        this.jobsByKey.set(this.keyForJob(job), job);
       }
       this.notify();
     } catch {
@@ -221,12 +295,14 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
   }
 
   private async enqueueProject(
+    layerId: string,
     project: TilePrefetchProjectInput,
     request: TilePrefetchRequest,
     options: PrefetchOperationOptions = {},
   ): Promise<void> {
     const urls = buildTileUrlsForFeatureCollection(project.geojson, request);
     await this.enqueueJobWithUrls(
+      layerId,
       project.projectId,
       project.commitId,
       {
@@ -245,6 +321,7 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
    * already-cached tiles, persists the job, and queues the uncached URLs.
    */
   private async enqueueJobWithUrls(
+    layerId: string,
     id: string,
     commitId: string,
     meta: JobMeta,
@@ -252,7 +329,8 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     options: PrefetchOperationOptions = {},
   ): Promise<void> {
     throwIfAborted(options.signal)
-    const existing = this.jobsByProject.get(id);
+    const jobKey = prefetchJobKey(layerId, id);
+    const existing = this.jobsByKey.get(jobKey);
     if (existing && existing.commitId === commitId && existing.status === 'done') {
       return;
     }
@@ -260,7 +338,7 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     const uniqueUrls = Array.from(new Set(urls));
 
     if (uniqueUrls.length === 0) {
-      const doneJob = this.buildBaseJob(id, commitId, meta, 0);
+      const doneJob = this.buildBaseJob(layerId, id, commitId, meta, 0);
       doneJob.status = 'done';
       await this.upsertJob(doneJob);
       return;
@@ -280,7 +358,7 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     }
 
     const estimatedBytes = uncachedUrls.length * DEFAULT_ESTIMATED_TILE_BYTES;
-    const job = this.buildBaseJob(id, commitId, meta, uniqueUrls.length);
+    const job = this.buildBaseJob(layerId, id, commitId, meta, uniqueUrls.length);
     job.completedTiles = completedTiles;
     job.estimatedBytes = estimatedBytes;
     job.status = completedTiles >= uniqueUrls.length ? 'done' : 'queued';
@@ -288,17 +366,19 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
 
     for (const url of uncachedUrls) {
       throwIfAborted(options.signal)
-      this.queueUrl(url, id, commitId);
+      this.queueUrl(url, jobKey, commitId);
     }
   }
 
   private buildBaseJob(
+    layerId: string,
     id: string,
     commitId: string,
     meta: JobMeta,
     totalTiles: number,
   ): TilePrefetchJobState {
     return {
+      layerId,
       projectId: id,
       commitId,
       status: 'queued',
@@ -314,16 +394,16 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     };
   }
 
-  private queueUrl(url: string, projectId: string, commitId: string): void {
+  private queueUrl(url: string, jobKey: string, commitId: string): void {
     const entry = this.queueByUrl.get(url);
     if (entry) {
-      entry.projectCommits.set(projectId, commitId);
+      entry.jobCommits.set(jobKey, commitId);
       return;
     }
 
     const nextEntry: QueueEntry = {
       url,
-      projectCommits: new Map([[projectId, commitId]]),
+      jobCommits: new Map([[jobKey, commitId]]),
     };
     this.queueByUrl.set(url, nextEntry);
     this.queue.push(nextEntry);
@@ -353,45 +433,45 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
       if (!entry) continue;
       this.queueByUrl.delete(entry.url);
       if (this.destroyed) return;
-      const downloadingProjects = this.resolveActiveProjectIds(entry.projectCommits);
-      if (downloadingProjects.size === 0) continue;
-      await this.markProjectsStatus(downloadingProjects, 'downloading');
+      const downloadingJobs = this.resolveActiveJobKeys(entry.jobCommits);
+      if (downloadingJobs.size === 0) continue;
+      await this.markJobsStatus(downloadingJobs, 'downloading');
 
       const result = await this.downloadWithRetry(entry.url);
       if (this.destroyed) return;
-      const completionProjects = this.resolveActiveProjectIds(entry.projectCommits);
-      if (completionProjects.size === 0) {
+      const completionJobs = this.resolveActiveJobKeys(entry.jobCommits);
+      if (completionJobs.size === 0) {
         this.notify();
         continue;
       }
       if (result.success) {
         this.cachePresence.set(entry.url, true);
-        await this.applySuccess(completionProjects, result.bytes);
+        await this.applySuccess(completionJobs, result.bytes);
       } else if (result.capacityBlocked) {
         // The write would exceed the cache cap and pinned tiles cannot be
         // evicted. Preserve this tile + the rest of the queue, flag the jobs,
         // and halt so we don't hammer writes that will all fail identically.
         this.requeueFront(entry);
         this.storageBlocked = true;
-        await this.markJobsBlockedByStorage(completionProjects);
+        await this.markJobsBlockedByStorage(completionJobs);
         this.notify();
         return;
       } else {
-        await this.applyFailure(completionProjects, result.message);
+        await this.applyFailure(completionJobs, result.message);
       }
       this.notify();
     }
   }
 
-  private resolveActiveProjectIds(projectCommits: Map<string, string>): Set<string> {
-    const activeProjectIds = new Set<string>();
-    for (const [projectId, commitId] of projectCommits) {
-      const current = this.jobsByProject.get(projectId);
+  private resolveActiveJobKeys(jobCommits: Map<string, string>): Set<string> {
+    const activeJobKeys = new Set<string>();
+    for (const [jobKey, commitId] of jobCommits) {
+      const current = this.jobsByKey.get(jobKey);
       if (!current) continue;
       if (current.commitId !== commitId) continue;
-      activeProjectIds.add(projectId);
+      activeJobKeys.add(jobKey);
     }
-    return activeProjectIds;
+    return activeJobKeys;
   }
 
   private async downloadWithRetry(
@@ -437,16 +517,16 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     return { success: false, message: 'Tile prefetch exhausted retries' };
   }
 
-  private async applySuccess(projectIds: Set<string>, bytes: number): Promise<void> {
+  private async applySuccess(jobKeys: Set<string>, bytes: number): Promise<void> {
     if (this.destroyed) return;
-    const bytesPerProject = projectIds.size > 0 ? Math.floor(bytes / projectIds.size) : bytes;
+    const bytesPerJob = jobKeys.size > 0 ? Math.floor(bytes / jobKeys.size) : bytes;
     const writes: Promise<void>[] = [];
-    for (const projectId of projectIds) {
-      const current = this.jobsByProject.get(projectId);
+    for (const jobKey of jobKeys) {
+      const current = this.jobsByKey.get(jobKey);
       if (!current) continue;
 
       current.completedTiles += 1;
-      current.bytesDownloaded += bytesPerProject;
+      current.bytesDownloaded += bytesPerJob;
       current.message = undefined;
       current.blockedByStorage = false;
       current.updatedAt = this.deps.now();
@@ -456,11 +536,11 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     await Promise.all(writes);
   }
 
-  private async applyFailure(projectIds: Set<string>, message: string): Promise<void> {
+  private async applyFailure(jobKeys: Set<string>, message: string): Promise<void> {
     if (this.destroyed) return;
     const writes: Promise<void>[] = [];
-    for (const projectId of projectIds) {
-      const current = this.jobsByProject.get(projectId);
+    for (const jobKey of jobKeys) {
+      const current = this.jobsByKey.get(jobKey);
       if (!current) continue;
 
       current.failedTiles += 1;
@@ -493,11 +573,11 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     this.queue.unshift(entry);
   }
 
-  private async markJobsBlockedByStorage(projectIds: Set<string>): Promise<void> {
+  private async markJobsBlockedByStorage(jobKeys: Set<string>): Promise<void> {
     if (this.destroyed) return;
     const writes: Promise<void>[] = [];
-    for (const projectId of projectIds) {
-      const current = this.jobsByProject.get(projectId);
+    for (const jobKey of jobKeys) {
+      const current = this.jobsByKey.get(jobKey);
       if (!current) continue;
       if (current.status === 'done') continue;
       current.blockedByStorage = true;
@@ -516,7 +596,7 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
   resumeBlockedJobs(): void {
     if (this.destroyed) return;
     this.storageBlocked = false;
-    for (const job of this.jobsByProject.values()) {
+    for (const job of this.jobsByKey.values()) {
       if (!job.blockedByStorage) continue;
       job.blockedByStorage = false;
       if (job.status === 'paused') job.status = 'queued';
@@ -530,7 +610,7 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
   private async pausePendingJobs(): Promise<void> {
     if (this.destroyed) return;
     const writes: Promise<void>[] = [];
-    for (const job of this.jobsByProject.values()) {
+    for (const job of this.jobsByKey.values()) {
       if (job.status === 'queued' || job.status === 'downloading') {
         job.status = 'paused';
         job.updatedAt = this.deps.now();
@@ -541,11 +621,11 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     this.notify();
   }
 
-  private async markProjectsStatus(projectIds: Set<string>, status: TilePrefetchStatus): Promise<void> {
+  private async markJobsStatus(jobKeys: Set<string>, status: TilePrefetchStatus): Promise<void> {
     if (this.destroyed) return;
     const writes: Promise<void>[] = [];
-    for (const projectId of projectIds) {
-      const current = this.jobsByProject.get(projectId);
+    for (const jobKey of jobKeys) {
+      const current = this.jobsByKey.get(jobKey);
       if (!current) continue;
       if (current.status === 'done' || current.status === 'error') continue;
       current.status = status;
@@ -571,7 +651,7 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     throwIfAborted(signal)
     if (this.destroyed) return;
     job.updatedAt = this.deps.now();
-    this.jobsByProject.set(job.projectId, job);
+    this.jobsByKey.set(this.keyForJob(job), job);
     await this.persistJob(job, signal);
   }
 
@@ -590,8 +670,8 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
   }
 
   private snapshot(): TilePrefetchJobState[] {
-    return [...this.jobsByProject.values()].sort((a, b) =>
-      a.projectId.localeCompare(b.projectId),
+    return [...this.jobsByKey.values()].sort((a, b) =>
+      this.keyForJob(a).localeCompare(this.keyForJob(b)),
     );
   }
 

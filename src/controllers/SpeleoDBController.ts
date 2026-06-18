@@ -9,15 +9,24 @@
  * re-render via useSyncExternalStore.
  */
 
-import { HTTP_STATUS, MAP_OVERLAYS, NETWORK, TILE_PREFETCH } from '../constants';
+import {
+  DEFAULT_MAP_LAYER_ID,
+  HTTP_STATUS,
+  MAP_LAYERS,
+  MAP_OVERLAYS,
+  NETWORK,
+  TILE_PREFETCH,
+} from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import {
   clearCachedTilesRuntime,
   clearPrefetchJobsRuntime,
+  evictLayerTilesRuntime,
   setTileCacheOfflineModeRuntime,
   setTileCacheOverLimitApprovedRuntime,
 } from '../services/TileCacheRuntime';
+import { getMapLayerById } from '../services/MapLayersService';
 import { LazyTilePrefetchService } from '../services/LazyTilePrefetchService';
 import type { TilePrefetchServiceLike } from '../services/TilePrefetchService';
 import {
@@ -25,6 +34,7 @@ import {
   computeTilePrefetchSignature,
   extractPointCoordinates,
 } from '../services/tilePrefetchPlanner';
+import type { MapLayerDefinition } from '../types/mapLayer';
 import type {
   AuthResponse,
   AuthState,
@@ -34,7 +44,11 @@ import type {
 } from '../types';
 import type { Project } from '../types/project';
 import type { MapOverlayId } from '../types/mapOverlay';
-import type { TilePrefetchJobState } from '../types/tilePrefetch';
+import type {
+  TilePrefetchJobState,
+  TilePrefetchProjectInput,
+  TilePrefetchRequest,
+} from '../types/tilePrefetch';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { CancellationContext } from './CancellationContext';
 import { isAbortError } from '../utils/abort';
@@ -51,6 +65,13 @@ import type {
 
 export type SyncStatus = 'idle' | 'syncing' | 'done' | 'error';
 
+/** Per-project prefetch inputs built once and reused across layers. */
+interface BuiltProjectInputs {
+  inputs: TilePrefetchProjectInput[];
+  eligibleCount: number;
+  failedCount: number;
+}
+
 // ==================== Preferences interface (for DI) ====================
 
 /** The slice of PreferencesService the controller needs. */
@@ -62,6 +83,8 @@ export interface PreferencesPort {
     lastSyncedAt?: number;
     tileCacheOverLimitApproved?: boolean;
     tileCacheOverLimitPromptAcknowledged?: boolean;
+    selectedMapLayerId?: string;
+    layerOfflineSync?: Record<string, boolean>;
   };
   setPreferences(
     prefs: Partial<{
@@ -71,6 +94,8 @@ export interface PreferencesPort {
       lastSyncedAt?: number;
       tileCacheOverLimitApproved?: boolean;
       tileCacheOverLimitPromptAcknowledged?: boolean;
+      selectedMapLayerId?: string;
+      layerOfflineSync?: Record<string, boolean>;
     }>,
   ): void;
   clearPreferences(): void;
@@ -124,6 +149,10 @@ export class SpeleoDBController {
   private _nextRunId = 1;
   private activeValidationContext: CancellationContext | null = null;
   private activeSyncContext: CancellationContext | null = null;
+  // Best-effort, fire-and-forget layer prefetches (Settings toggle) run on their
+  // own contexts. Tracked here so logout/teardown aborts them like the sync and
+  // validation contexts (otherwise an enable-then-logout race leaks async work).
+  private activeLayerPrefetchContexts = new Set<CancellationContext>();
   private _trackedOperations = new Set<Promise<unknown>>();
 
   // Snapshot references for useSyncExternalStore (identity-stable between notifies)
@@ -251,6 +280,10 @@ export class SpeleoDBController {
     this._asyncGeneration += 1;
     this.activeValidationContext?.abort('Async operations invalidated');
     this.activeSyncContext?.abort('Async operations invalidated');
+    for (const context of this.activeLayerPrefetchContexts) {
+      context.abort('Async operations invalidated');
+    }
+    this.activeLayerPrefetchContexts.clear();
   }
 
   private captureAsyncGeneration(): number {
@@ -426,6 +459,79 @@ export class SpeleoDBController {
     this.persistTileCacheOverLimitConsent();
     setTileCacheOverLimitApprovedRuntime(false);
     this.notify();
+  }
+
+  /**
+   * Enable/disable offline sync for a tile layer (Settings "Layers" section).
+   *
+   * Forced layers (satellite) are immutable. Enabling while online starts the
+   * layer's prefetch immediately (satellite remains prioritized because it is
+   * always scheduled first during a full sync; a manual enable enqueues only the
+   * one layer). Disabling removes the layer's prefetch jobs and evicts its
+   * cached tiles to reclaim space.
+   */
+  async setLayerOfflineSync(layerId: string, enabled: boolean): Promise<void> {
+    const layer = getMapLayerById(layerId);
+    if (!layer || layer.forcedOffline) return;
+
+    const current = this.prefs.getPreferences().layerOfflineSync ?? {};
+    // Persist (and reconcile data) unconditionally: even when the stored flag
+    // already matches, enabling re-schedules and disabling re-cleans, so the
+    // operation stays idempotent without a special-case early return.
+    this.prefs.setPreferences({
+      layerOfflineSync: { ...current, [layerId]: enabled },
+    });
+    this.notify();
+
+    if (enabled) {
+      if (!this.hasNetworkAccess()) return;
+      await this.scheduleSingleLayerPrefetch(layer);
+    } else {
+      await this.removeLayerOfflineData(layer);
+    }
+  }
+
+  /** Layers (excluding the forced satellite layer) currently opted in to sync. */
+  private getEnabledExtraLayers(): MapLayerDefinition[] {
+    const sync = this.prefs.getPreferences().layerOfflineSync ?? {};
+    return MAP_LAYERS.filter((layer) => !layer.forcedOffline && sync[layer.id] === true);
+  }
+
+  /**
+   * Schedule prefetch for a single layer using the already-cached project
+   * GeoJSON + landmarks. Best-effort and gated by the active network state.
+   */
+  private async scheduleSingleLayerPrefetch(layer: MapLayerDefinition): Promise<void> {
+    const context = new CancellationContext(this.nextRunId(), 'Layer prefetch');
+    this.activeLayerPrefetchContexts.add(context);
+    try {
+      const landmarkPoints = await this.loadLandmarkPrefetchPoints(context);
+      await this.enqueueLayerLandmarks(context, layer, landmarkPoints);
+      const built = await this.buildProjectPrefetchInputs(context, this._projects);
+      await this.enqueueLayerProjects(context, layer, built);
+    } catch (error) {
+      if (isAbortError(error)) return;
+      console.warn(`Failed scheduling prefetch for layer ${layer.id}:`, error);
+    } finally {
+      this.activeLayerPrefetchContexts.delete(context);
+    }
+  }
+
+  /** Remove a disabled layer's prefetch jobs and evict its cached tiles. */
+  private async removeLayerOfflineData(layer: MapLayerDefinition): Promise<void> {
+    try {
+      await this.tilePrefetch.removeLayer(layer.id);
+    } catch (error) {
+      console.warn(`Failed removing prefetch jobs for layer ${layer.id}:`, error);
+    }
+    try {
+      const prefix = layer.tileUrlTemplate.split('{z}')[0];
+      if (prefix) {
+        await evictLayerTilesRuntime([prefix]);
+      }
+    } catch (error) {
+      console.warn(`Failed evicting tiles for layer ${layer.id}:`, error);
+    }
   }
 
   // ---- Actions --------------------------------------------------------------
@@ -1257,37 +1363,88 @@ export class SpeleoDBController {
       return this.createSkippedTilePrefetchPhase('offline_locked');
     }
 
-    const landmarkTileCount = await this.scheduleLandmarkTilePrefetch(context);
-    const projectResult = await this.scheduleProjectTilePrefetch(context, projects);
+    const satellite = getMapLayerById(DEFAULT_MAP_LAYER_ID) ?? MAP_LAYERS[0];
+    const landmarkPoints = await this.loadLandmarkPrefetchPoints(context);
+    const built = await this.buildProjectPrefetchInputs(context, projects);
+
+    // Satellite is always scheduled first so its tiles download with priority.
+    // The satellite project result is the canonical tile-prefetch phase result
+    // (project sync percentage tracks satellite only).
+    const satelliteLandmarkCount = await this.enqueueLayerLandmarks(
+      context,
+      satellite,
+      landmarkPoints,
+    );
+    const projectResult = await this.enqueueLayerProjects(context, satellite, built);
+
+    // Extra opted-in layers are scheduled afterwards. Because the prefetch queue
+    // is FIFO, satellite tiles are always downloaded before extra-layer tiles.
+    // Extra-layer scheduling is best-effort and does not affect the phase
+    // contract returned to the sync caller.
+    for (const layer of this.getEnabledExtraLayers()) {
+      context.throwIfAborted();
+      await this.enqueueLayerLandmarks(context, layer, landmarkPoints);
+      await this.enqueueLayerProjects(context, layer, built);
+    }
 
     return {
       ...projectResult,
-      landmarkTileCount,
-      landmarkScheduled: landmarkTileCount > 0,
+      landmarkTileCount: satelliteLandmarkCount,
+      landmarkScheduled: satelliteLandmarkCount > 0,
     };
   }
 
   /**
-   * Schedule a single combined "landmarks" tile prefetch job from the cached
-   * landmarks GeoJSON. Best-effort: failures are logged and do not fail the
-   * surrounding sync phase. Returns the number of tiles scheduled (0 when there
-   * are no landmarks or the build fails). Uses parity zoom/pad with projects via
-   * a per-point box union so a globally-scattered set never spans the planet.
+   * Build a per-layer prefetch request from a base request (project or
+   * landmark): keeps the base zoom range + pad but swaps in the layer's tile
+   * URL template and clamps the max zoom to the layer's native max zoom.
    */
-  private async scheduleLandmarkTilePrefetch(
+  private buildLayerPrefetchRequest(
+    layer: MapLayerDefinition,
+    base: TilePrefetchRequest,
+  ): TilePrefetchRequest {
+    return {
+      tileUrlTemplate: layer.tileUrlTemplate,
+      minZoom: base.minZoom,
+      maxZoom: Math.min(base.maxZoom, layer.maxZoom),
+      padMeters: base.padMeters,
+    };
+  }
+
+  /** Load landmark prefetch points from cached overlay GeoJSON ([] when none). */
+  private async loadLandmarkPrefetchPoints(
     context: CancellationContext,
-  ): Promise<number> {
+  ): Promise<Array<[number, number]>> {
     try {
       context.throwIfAborted();
       const raw = await this.cache.getOverlayGeoJSON('landmarks');
       context.throwIfAborted();
       const normalized = normalizeGeoJSON(raw);
-      if (!normalized) return 0;
+      if (!normalized) return [];
+      return extractPointCoordinates(normalized);
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+      console.warn('Loading landmark prefetch points failed:', error);
+      return [];
+    }
+  }
 
-      const points = extractPointCoordinates(normalized);
-      if (points.length === 0) return 0;
-
-      const tileUrls = buildTileUrlsForPoints(points, TILE_PREFETCH.LANDMARK_REQUEST);
+  /**
+   * Enqueue the combined "landmarks" job for a layer from precomputed points.
+   * Best-effort: failures are logged and do not fail the surrounding sync.
+   * Returns the number of (deduped) tiles scheduled (0 when there are none).
+   */
+  private async enqueueLayerLandmarks(
+    context: CancellationContext,
+    layer: MapLayerDefinition,
+    points: Array<[number, number]>,
+  ): Promise<number> {
+    if (points.length === 0) return 0;
+    try {
+      const request = this.buildLayerPrefetchRequest(layer, TILE_PREFETCH.LANDMARK_REQUEST);
+      const tileUrls = buildTileUrlsForPoints(points, request);
       if (tileUrls.length === 0) return 0;
 
       await this.tilePrefetch.enqueueTileUrls(
@@ -1295,11 +1452,11 @@ export class SpeleoDBController {
           id: TILE_PREFETCH.LANDMARK_TARGET_ID,
           commitId: computeTilePrefetchSignature(points),
           tileUrls,
-          zoomMin: TILE_PREFETCH.LANDMARK_REQUEST.minZoom,
-          zoomMax: TILE_PREFETCH.LANDMARK_REQUEST.maxZoom,
-          padMeters: TILE_PREFETCH.LANDMARK_REQUEST.padMeters,
+          zoomMin: request.minZoom,
+          zoomMax: request.maxZoom,
+          padMeters: request.padMeters,
         },
-        { signal: context.signal },
+        { signal: context.signal, layerId: layer.id },
       );
       context.throwIfAborted();
 
@@ -1308,26 +1465,19 @@ export class SpeleoDBController {
       if (isAbortError(error)) {
         throw error;
       }
-      console.warn('Landmark map prefetch scheduling failed:', error);
+      console.warn(`Landmark map prefetch scheduling failed for layer ${layer.id}:`, error);
       return 0;
     }
   }
 
-  private async scheduleProjectTilePrefetch(
+  /** Read + normalize each eligible project's GeoJSON once (reused per layer). */
+  private async buildProjectPrefetchInputs(
     context: CancellationContext,
     projects: Project[],
-  ): Promise<TilePrefetchPhaseResult> {
+  ): Promise<BuiltProjectInputs> {
     const eligible = projects.filter((p) => p.geojson_file && !p.exclude_geojson);
-    if (eligible.length === 0) {
-      return this.createSkippedTilePrefetchPhase('no_prefetch_candidates');
-    }
-
-    const inputs: Array<{
-      projectId: string;
-      commitId: string;
-      geojson: GeoJSON.FeatureCollection;
-    }> = [];
-    let failedProjectCount = 0;
+    const inputs: TilePrefetchProjectInput[] = [];
+    let failedCount = 0;
 
     for (const project of eligible) {
       try {
@@ -1346,49 +1496,65 @@ export class SpeleoDBController {
           throw error;
         }
 
-        failedProjectCount += 1;
+        failedCount += 1;
         console.warn(`Failed preparing map prefetch for project ${project.id}:`, error);
       }
+    }
+
+    return { inputs, eligibleCount: eligible.length, failedCount };
+  }
+
+  /** Enqueue project prefetch jobs for a layer and build its phase result. */
+  private async enqueueLayerProjects(
+    context: CancellationContext,
+    layer: MapLayerDefinition,
+    built: BuiltProjectInputs,
+  ): Promise<TilePrefetchPhaseResult> {
+    const { inputs, eligibleCount, failedCount } = built;
+    if (eligibleCount === 0) {
+      return this.createSkippedTilePrefetchPhase('no_prefetch_candidates');
     }
 
     if (inputs.length === 0) {
       return {
         phase: 'tile_prefetch',
-        status: failedProjectCount > 0 ? 'failed' : 'skipped',
-        reason: failedProjectCount > 0 ? 'tile_prefetch_failed' : 'no_prefetch_candidates',
-        eligibleProjectCount: eligible.length,
+        status: failedCount > 0 ? 'failed' : 'skipped',
+        reason: failedCount > 0 ? 'tile_prefetch_failed' : 'no_prefetch_candidates',
+        eligibleProjectCount: eligibleCount,
         scheduledProjectCount: 0,
-        failedProjectCount,
+        failedProjectCount: failedCount,
       };
     }
 
     try {
-      await this.tilePrefetch.enqueueProjects(inputs, TILE_PREFETCH.PROJECT_REQUEST, {
+      const request = this.buildLayerPrefetchRequest(layer, TILE_PREFETCH.PROJECT_REQUEST);
+      await this.tilePrefetch.enqueueProjects(inputs, request, {
         signal: context.signal,
+        layerId: layer.id,
       });
       context.throwIfAborted();
 
       return {
         phase: 'tile_prefetch',
-        status: failedProjectCount > 0 ? 'failed' : 'applied',
-        reason: failedProjectCount > 0 ? 'tile_prefetch_failed' : 'tile_prefetch_scheduled',
-        eligibleProjectCount: eligible.length,
+        status: failedCount > 0 ? 'failed' : 'applied',
+        reason: failedCount > 0 ? 'tile_prefetch_failed' : 'tile_prefetch_scheduled',
+        eligibleProjectCount: eligibleCount,
         scheduledProjectCount: inputs.length,
-        failedProjectCount,
+        failedProjectCount: failedCount,
       };
     } catch (error) {
       if (isAbortError(error)) {
         throw error;
       }
 
-      console.warn('Map prefetch scheduling failed:', error);
+      console.warn(`Map prefetch scheduling failed for layer ${layer.id}:`, error);
       return {
         phase: 'tile_prefetch',
         status: 'failed',
         reason: 'tile_prefetch_failed',
-        eligibleProjectCount: eligible.length,
+        eligibleProjectCount: eligibleCount,
         scheduledProjectCount: inputs.length,
-        failedProjectCount: failedProjectCount + inputs.length,
+        failedProjectCount: failedCount + inputs.length,
       };
     }
   }

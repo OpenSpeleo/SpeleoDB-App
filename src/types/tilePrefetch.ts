@@ -6,6 +6,9 @@ export type TilePrefetchStatus =
   | 'error';
 
 export interface TilePrefetchJobState {
+  /** Tile layer this job belongs to (e.g. `esri-satellite`). */
+  layerId: string;
+  /** Target id within the layer: a project id or `landmarks`. */
   projectId: string;
   commitId: string;
   status: TilePrefetchStatus;
@@ -45,6 +48,13 @@ export interface TilePrefetchTileUrlsInput {
   zoomMin: number;
   zoomMax: number;
   padMeters: number;
+}
+
+/** Options shared by enqueue operations, including the target tile layer. */
+export interface TilePrefetchEnqueueOptions {
+  signal?: AbortSignal;
+  /** Tile layer id; defaults to the satellite layer when omitted. */
+  layerId?: string;
 }
 
 export interface TilePrefetchRequest {

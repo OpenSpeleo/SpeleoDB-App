@@ -6,6 +6,11 @@ import {
 } from './TilePrefetchService';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import type { TilePrefetchDependencies } from './TilePrefetchService';
+import { MAP_LAYERS } from '../constants';
+
+const HILLSHADE_TEMPLATE = MAP_LAYERS.find(
+  (l) => l.id === 'esri-world-hillshade',
+)!.tileUrlTemplate;
 
 function pointFeatureCollection(lng: number, lat: number): GeoJSON.FeatureCollection {
   return {
@@ -514,6 +519,108 @@ describe('TilePrefetchService queue behavior', () => {
     expect(job?.blockedByStorage).toBe(false);
     expect(job?.status).toBe('done');
     expect(job?.completedTiles).toBe(2);
+    service.dispose();
+  });
+
+  it('namespaces jobs per layer for the same target id', async () => {
+    const { deps } = createDeps();
+    const service = new TilePrefetchService(deps);
+    const geojson = pointFeatureCollection(2.3, 46.6);
+    const baseRequest = {
+      tileUrlTemplate: 'https://sat.example.com/{z}/{y}/{x}.png',
+      minZoom: 0,
+      maxZoom: 0,
+      padMeters: 50,
+    };
+
+    await service.enqueueProjects([{ projectId: 'p1', commitId: 'c1', geojson }], baseRequest, {
+      layerId: 'esri-satellite',
+    });
+    await service.enqueueProjects(
+      [{ projectId: 'p1', commitId: 'c1', geojson }],
+      { ...baseRequest, tileUrlTemplate: 'https://hill.example.com/{z}/{y}/{x}.png' },
+      { layerId: 'esri-world-hillshade' },
+    );
+    await service.waitForIdle();
+
+    const snapshot = service.getSnapshot();
+    expect(snapshot).toHaveLength(2);
+    expect(snapshot.map((j) => j.layerId).sort()).toEqual([
+      'esri-satellite',
+      'esri-world-hillshade',
+    ]);
+    expect(snapshot.every((j) => j.projectId === 'p1')).toBe(true);
+    service.dispose();
+  });
+
+  it('removeLayer drops a layer\'s jobs and persists the deletion', async () => {
+    const deletePrefetchJobsByLayer = vi.fn(async () => {});
+    const { deps } = createDeps({ deletePrefetchJobsByLayer });
+    const service = new TilePrefetchService(deps);
+    const geojson = pointFeatureCollection(2.3, 46.6);
+    const request = {
+      tileUrlTemplate: 'https://sat.example.com/{z}/{y}/{x}.png',
+      minZoom: 0,
+      maxZoom: 0,
+      padMeters: 50,
+    };
+
+    await service.enqueueProjects([{ projectId: 'p1', commitId: 'c1', geojson }], request, {
+      layerId: 'esri-satellite',
+    });
+    await service.enqueueProjects(
+      [{ projectId: 'p1', commitId: 'c1', geojson }],
+      { ...request, tileUrlTemplate: 'https://hill.example.com/{z}/{y}/{x}.png' },
+      { layerId: 'esri-world-hillshade' },
+    );
+    await service.waitForIdle();
+    expect(service.getSnapshot()).toHaveLength(2);
+
+    await service.removeLayer('esri-world-hillshade');
+
+    expect(deletePrefetchJobsByLayer).toHaveBeenCalledWith('esri-world-hillshade');
+    const snapshot = service.getSnapshot();
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0].layerId).toBe('esri-satellite');
+    service.dispose();
+  });
+
+  it('removeLayer clears cache-presence so a re-enable re-downloads the tiles', async () => {
+    // Regression: disabling a layer evicts its tiles from IndexedDB, but the
+    // in-memory cache-presence map must also be pruned. Otherwise a same-session
+    // re-enable treats every tile as cached -> job auto-"done" with zero
+    // downloads -> blank offline map while progress shows 100%.
+    const { deps, fetchAndCacheTile } = createDeps();
+    const service = new TilePrefetchService(deps);
+    const geojson = pointFeatureCollection(2.3, 46.6);
+    // Use the real hillshade template so removeLayer's prefix prune matches.
+    const request = {
+      tileUrlTemplate: HILLSHADE_TEMPLATE,
+      minZoom: 0,
+      maxZoom: 0,
+      padMeters: 50,
+    };
+
+    await service.enqueueProjects([{ projectId: 'p1', commitId: 'c1', geojson }], request, {
+      layerId: 'esri-world-hillshade',
+    });
+    await service.waitForIdle();
+    const firstDownloadCount = fetchAndCacheTile.mock.calls.length;
+    expect(firstDownloadCount).toBeGreaterThan(0);
+
+    await service.removeLayer('esri-world-hillshade');
+
+    // Re-enable the same target/commit. Because cache-presence was pruned, the
+    // tiles must be queued and downloaded again (not short-circuited as done).
+    await service.enqueueProjects([{ projectId: 'p1', commitId: 'c1', geojson }], request, {
+      layerId: 'esri-world-hillshade',
+    });
+    await service.waitForIdle();
+
+    expect(fetchAndCacheTile.mock.calls.length).toBe(firstDownloadCount * 2);
+    const job = service.getSnapshot().find((j) => j.layerId === 'esri-world-hillshade');
+    expect(job?.status).toBe('done');
+    expect(job?.completedTiles).toBe(job?.totalTiles);
     service.dispose();
   });
 });

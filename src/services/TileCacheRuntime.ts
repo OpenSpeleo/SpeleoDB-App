@@ -63,6 +63,11 @@ export async function clearPrefetchJobsRuntime(): Promise<void> {
   await module.clearPrefetchJobs()
 }
 
+export async function evictLayerTilesRuntime(prefixes: string[]): Promise<void> {
+  const module = await loadTileCacheService()
+  await module.evictLayerTiles(prefixes)
+}
+
 export async function runTileCacheStartupMaintenanceRuntime(): Promise<void> {
   const module = await loadTileCacheService()
   await module.runTileCacheStartupMaintenance()

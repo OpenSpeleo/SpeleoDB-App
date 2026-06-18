@@ -8,6 +8,8 @@ Reached via the **Settings** tab in the bottom tab bar (`AppTabBar`). The tab ba
 
 ## Sections
 
+Every row uses a consistent, roomy vertical rhythm. The `IonContent` carries a `settings-content` class and `src/index.css` sets `--min-height` on `.settings-content ion-item` with the top/bottom paddings zeroed, so all rows across all sections share the same spacing without per-item overrides. The vertical slack comes solely from `--min-height`, so Ionic's native center alignment (`:host { align-items: center }`) distributes it evenly above/below the content — rows are never top-heavy. Custom top/bottom paddings are deliberately `0`: when the content is taller than the padded box they push it down and look top-heavy.
+
 ### Synchronization
 
 Displays live sync statistics and a manual sync trigger.
@@ -34,6 +36,16 @@ Manual tile count and cache byte totals are read from IndexedDB via cursor-based
 - **Color mode** selector: `By Project` / `By Depth`. `By Project` uses the standard project color palette; `By Depth` enables depth-based coloring and the dashboard depth gauge. Persisted in `UserPreferences.colorMode` via `PreferencesService`. Default: `project`. Changes propagate to Dashboard in real time via shared React state in `App.tsx`.
 - **Map unit** selector: `Meters` / `Feet`. Controls display units for both distance scale and depth gauge values. Base values remain feet-based internally and are converted for display when metric mode is active. Persisted in `UserPreferences.measurementUnit` via `PreferencesService`. Default: `meters`. Changes propagate to Dashboard in real time via shared React state in `App.tsx`.
 
+### Map Layers
+
+Lists every map tile layer (`MAP_LAYERS`) with an offline-sync toggle and a per-layer sync percentage. The layer name renders in white with a smaller muted subtitle. Label lines use `<span class="block">` rather than `<p>`: Ionic ships an unlayered `ion-label p { color; font-size; margin }` rule that would otherwise override Tailwind's color/size and add asymmetric top margin. See `docs/map-layers.md` for the full feature.
+
+- The satellite layer toggle is forced ON and disabled (satellite is always synced).
+- Other layers (ESRI Hillshade light/dark) are opt-in. Toggling calls `controller.setLayerOfflineSync(layerId, enabled)`, which persists the opt-in, and either immediately schedules that layer's prefetch (when enabling while online) or removes its jobs + evicts its tiles (when disabling).
+- Extra-layer toggles are disabled while the app is offline-locked (`isOfflineLocked`): enabling needs the network to prefetch and disabling reconciles cached tiles, so neither is allowed offline. Such rows show "Offline sync off (unavailable offline)".
+- Per-layer percentage is derived via `useMemo` from `tilePrefetchJobs` grouped by `layerId`. Runtime-cached (manual) tiles are excluded from per-layer math.
+- `layerOfflineSync` is shared state owned by `AuthenticatedAppShell` and passed to both Dashboard (for offline selection gating) and Settings.
+
 ### Tutorial
 
 - **Show Tutorial** button: closes the project panel (if open), navigates to `/dashboard`, and restarts the guided tour from step 1 via the lazy runtime loader `restartGuidedTourFromHelp()`. Ignores `hasCompletedGuidedTour`.
@@ -50,6 +62,7 @@ Manual tile count and cache byte totals are read from IndexedDB via cursor-based
 - `showLandmarks`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
 - `colorMode`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
 - `measurementUnit`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
+- `selectedMapLayerId` / `layerOfflineSync`: shared state owned by `AuthenticatedAppShell`, passed to Dashboard + Settings; persisted via `PreferencesService`. Layer offline-sync side effects (prefetch enqueue / cleanup) are owned by `SpeleoDBController`.
 - `isProjectPanelOpen`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
 - Logout modal: local state (`showLogoutConfirmModal`, `isLoggingOut`).
 

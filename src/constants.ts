@@ -4,6 +4,7 @@
  */
 
 import type { MapOverlayDefinition, ProjectLayerConfig } from './types/mapOverlay';
+import type { MapLayerDefinition } from './types/mapLayer';
 
 // ==================== API ENDPOINTS ====================
 const BASE_PATH = '/api/v2';
@@ -62,6 +63,14 @@ export const MAP = {
   // Tile URL template used for proactive offline prefetch jobs.
   TILE_URL_TEMPLATE:
     'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  // Known "missing data" tile fingerprints. When a downloaded raster tile's
+  // SHA-256 matches one of these, the provider returned a placeholder
+  // ("no data") tile rather than real imagery, so we treat it as a 404 and do
+  // not cache it. Copied from the website map viewer
+  // (DEFAULTS.MAP.MISSING_TILE_SHA256_HASHES). See docs/map-layers.md.
+  MISSING_TILE_SHA256_HASHES: [
+    '9eafd300d61393184a4abc1d458564cfd1cd9b6f9c4e9c74687045c0a0e5b858',
+  ] as readonly string[],
   DEFAULT_CENTER: [2.3, 46.6] as [number, number], // France center
   DEFAULT_ZOOM: 5,
   NORTH_UP_ORIENTATION: {
@@ -87,6 +96,54 @@ export const MAP = {
   // triggers at region scale.
   MARKER_INTERACTION_MIN_ZOOM: 15,
 } as const;
+
+// ==================== MAP TILE LAYERS ====================
+// Centralized, single-source-of-truth layer definitions for the layer switcher
+// and offline sync. Mirrors the website's MAP_SOURCES (ESRI only; Mapbox is
+// intentionally dropped because the app has no Mapbox token). The first entry
+// is the forced/default satellite layer; see docs/map-layers.md.
+export const MAP_LAYERS: readonly MapLayerDefinition[] = [
+  {
+    id: 'esri-satellite',
+    label: 'ESRI - Satellite',
+    tileUrlTemplate: MAP.TILE_URL_TEMPLATE,
+    tileSize: 256,
+    maxZoom: 18,
+    attribution: 'Sources: Esri, USGS, NOAA',
+    forcedOffline: true,
+    isDefault: true,
+  },
+  {
+    id: 'esri-world-hillshade',
+    label: 'ESRI - World Hillshade',
+    tileUrlTemplate:
+      'https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}',
+    tileSize: 256,
+    // The World_Hillshade cache exposes 24 LODs (0-23). Match satellite's z18
+    // so offline prefetch depth + display sharpness reach parity with the
+    // satellite layer (z16 left the layer heavily overzoomed/sparse when zoomed
+    // in around projects/landmarks). Coverage is full-res only in select areas
+    // above ~z16, but the service still returns valid tiles, so this never 404s.
+    maxZoom: 18,
+    attribution: 'Sources: Esri, USGS, NOAA',
+    forcedOffline: false,
+    isDefault: false,
+  },
+  {
+    id: 'esri-world-hillshade-dark',
+    label: 'ESRI - World Hillshade Dark',
+    tileUrlTemplate:
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade_Dark/MapServer/tile/{z}/{y}/{x}',
+    tileSize: 256,
+    // See esri-world-hillshade: matched to satellite's z18 for offline parity.
+    maxZoom: 18,
+    attribution: 'Sources: Esri, USGS, NOAA',
+    forcedOffline: false,
+    isDefault: false,
+  },
+] as const;
+
+export const DEFAULT_MAP_LAYER_ID = 'esri-satellite';
 
 // ==================== TILE PREFETCH ====================
 // Offline satellite tile pre-caching policy. Each "request" describes the zoom

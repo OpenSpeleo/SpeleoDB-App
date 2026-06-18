@@ -19,7 +19,7 @@ import { chevronDownOutline, syncOutline, warningOutline } from 'ionicons/icons'
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 import { useSpeleoDB } from '../context/useSpeleoDB';
-import { MAP } from '../constants';
+import { MAP, MAP_LAYERS } from '../constants';
 import { getManualTileCount, getTotalCacheBytes } from '../services/tileCache/TileCacheRepository';
 import AppTabBar from '../components/AppTabBar';
 import {
@@ -55,6 +55,8 @@ interface SettingsProps {
   onColorModeChange: (mode: MapColorMode) => void;
   measurementUnit: MeasurementUnit;
   onMeasurementUnitChange: (unit: MeasurementUnit) => void;
+  layerOfflineSync: Record<string, boolean>;
+  onLayerOfflineSyncChange: (next: Record<string, boolean>) => void;
   isProjectPanelOpen: boolean;
   onProjectPanelChange: (open: boolean) => void;
   isLandmarkPanelOpen: boolean;
@@ -68,6 +70,8 @@ const Settings: React.FC<SettingsProps> = ({
   onColorModeChange,
   measurementUnit,
   onMeasurementUnitChange,
+  layerOfflineSync,
+  onLayerOfflineSyncChange,
   isProjectPanelOpen,
   onProjectPanelChange,
   isLandmarkPanelOpen,
@@ -83,6 +87,7 @@ const Settings: React.FC<SettingsProps> = ({
     lastSyncedAt,
     isTileCacheOverLimit,
     isTileCacheOverLimitApproved,
+    isOfflineLocked,
   } = useSpeleoDB();
 
   const [cacheBytes, setCacheBytes] = useState(0);
@@ -127,6 +132,15 @@ const Settings: React.FC<SettingsProps> = ({
     getTotalCacheBytes().then(setCacheBytes).catch(() => {});
     getManualTileCount().then(setManualTileCount).catch(() => {});
   }, [controller]);
+
+  const handleToggleLayerSync = useCallback(
+    (layerId: string, enabled: boolean) => {
+      onLayerOfflineSyncChange({ ...layerOfflineSync, [layerId]: enabled });
+      void controller.setLayerOfflineSync(layerId, enabled);
+      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+    },
+    [controller, layerOfflineSync, onLayerOfflineSyncChange],
+  );
 
   const handleSelectColorMode = useCallback(
     (value: string) => {
@@ -198,6 +212,24 @@ const Settings: React.FC<SettingsProps> = ({
     };
   }, [manualTileCount, tilePrefetchJobs]);
 
+  // Per-layer sync percentage from prefetch jobs (pinned tiles), grouped by
+  // layer. Runtime-cached (manual) tiles are excluded here since they cannot be
+  // reliably attributed to a single layer.
+  const layerSyncPctById = useMemo(() => {
+    const totals = new Map<string, { total: number; processed: number }>();
+    for (const job of tilePrefetchJobs) {
+      const entry = totals.get(job.layerId) ?? { total: 0, processed: 0 };
+      entry.total += job.totalTiles;
+      entry.processed += job.completedTiles + job.failedTiles;
+      totals.set(job.layerId, entry);
+    }
+    const result: Record<string, number> = {};
+    for (const [layerId, { total, processed }] of totals) {
+      result[layerId] = total > 0 ? Math.floor((processed / total) * 100) : 0;
+    }
+    return result;
+  }, [tilePrefetchJobs]);
+
   return (
     <IonPage>
       <IonHeader>
@@ -206,7 +238,7 @@ const Settings: React.FC<SettingsProps> = ({
         </IonToolbar>
       </IonHeader>
 
-      <IonContent>
+      <IonContent className="settings-content">
         {/* Synchronization Status */}
         <IonList inset>
           <IonListHeader>
@@ -359,6 +391,48 @@ const Settings: React.FC<SettingsProps> = ({
               />
             </div>
           </IonItem>
+        </IonList>
+
+        {/* Map Layers */}
+        <IonList inset>
+          <IonListHeader>
+            <IonLabel>Map Layers (offline sync)</IonLabel>
+          </IonListHeader>
+
+          {MAP_LAYERS.map((layer) => {
+            const isEnabled = layer.forcedOffline || layerOfflineSync[layer.id] === true;
+            const pct = layerSyncPctById[layer.id] ?? 0;
+            // Toggling an extra layer requires network (enabling schedules a
+            // prefetch; both states reconcile cached tiles), so lock it while
+            // offline. The forced satellite layer is always disabled anyway.
+            const toggleDisabled = layer.forcedOffline || isOfflineLocked;
+            const statusText = isEnabled
+              ? `Offline sync ${pct}%${layer.forcedOffline ? ' (always on)' : ''}`
+              : isOfflineLocked
+                ? 'Offline sync off (unavailable offline)'
+                : 'Offline sync off';
+            return (
+              <IonItem key={layer.id} data-testid={`layer-row-${layer.id}`}>
+                <IonLabel className="ion-text-wrap">
+                  <span className="block text-sm font-medium text-white">{layer.label}</span>
+                  <span
+                    className="block text-[11px] text-slate-400 mt-0.5"
+                    data-testid={`layer-sync-status-${layer.id}`}
+                  >
+                    {statusText}
+                  </span>
+                </IonLabel>
+                <IonToggle
+                  slot="end"
+                  checked={isEnabled}
+                  disabled={toggleDisabled}
+                  onIonChange={(e) => handleToggleLayerSync(layer.id, e.detail.checked)}
+                  data-testid={`layer-toggle-${layer.id}`}
+                  aria-label={`Offline sync ${layer.label}`}
+                />
+              </IonItem>
+            );
+          })}
         </IonList>
 
         {/* Tutorial */}

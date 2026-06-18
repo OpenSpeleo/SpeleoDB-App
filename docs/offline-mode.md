@@ -92,6 +92,12 @@ During `syncProjects()`, after project/overlay GeoJSON is cached, `SpeleoDBContr
 - The landmark job's `commitId` is a stable signature of the landmark coordinates (`computeTilePrefetchSignature`), so an unchanged set is idempotent (skipped) and an edited set re-prefetches.
 - Landmark prefetch is gated by the same offline lock as project prefetch and is independent of project eligibility (it runs even when there are no eligible projects).
 
+### Multi-layer prefetch (satellite first)
+
+Prefetch is now per tile layer (see `docs/map-layers.md`). Satellite is forced ON and always scheduled first (landmark + project jobs), followed by any extra layers (ESRI hillshade) the user has opted in to via Settings > Layers. The prefetch queue is FIFO, so satellite tiles always download before extra-layer tiles. Prefetch jobs are namespaced by layer (`${layerId}::${targetId}`), but tiles are still keyed by full URL (which uniquely encodes layer + z/x/y), so existing satellite tiles survive the `v3 -> v4` IndexedDB migration with zero loss. The tile-prefetch sync-phase result and the project panel progress reflect the satellite layer only; extra-layer scheduling is best-effort. Disabling a layer's offline sync removes its jobs and evicts its tiles to reclaim space.
+
+A magic-hash check treats provider "no data" placeholder tiles (matched by SHA-256 against `MAP.MISSING_TILE_SHA256_HASHES`) as missing: they are never cached and render as 404, both at runtime and during prefetch.
+
 ### Tile cache cap and user-approved overflow
 
 All prefetched tiles are pinned and share a single 500 MB cap (`MAP.TILE_CACHE_MAX_BYTES`). Pinned tiles are not evictable, so a large (e.g. global landmark) set can reach the cap. Rather than silently failing, the cache raises `TileCacheCapacityError`, `TilePrefetchService` marks the job `blockedByStorage` and halts the queue, and the controller surfaces a **one-time, persistent** consent prompt:
@@ -110,6 +116,9 @@ All prefetched tiles are pinned and share a single 500 MB cap (`MAP.TILE_CACHE_M
   - `src/services/ProjectCacheService.test.ts`
   - `src/services/TileCacheService.test.ts`
   - `src/services/TilePrefetchService.test.ts`
+  - `src/services/MapLayersService.test.ts`
+  - `src/services/tileCache/TileCacheRepository.test.ts`
+  - `src/components/map/MapLayerControl.test.tsx`
 
 ## Change checklist (offline/auth)
 

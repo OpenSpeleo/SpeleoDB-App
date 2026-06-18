@@ -6,12 +6,26 @@ import type {
 } from '../../types/tileCache';
 
 export const TILE_DB_NAME = 'speleo_tiles';
-export const TILE_DB_VERSION = 3;
+export const TILE_DB_VERSION = 4;
 export const TILE_STORE = 'tiles';
 export const PREFETCH_JOB_STORE = 'prefetch_jobs';
 export const TILE_METADATA_STORE = 'tile_metadata';
 export const TILE_STATS_STORE = 'tile_cache_stats';
 const TILE_STATS_KEY = 'global';
+
+// Layer id assigned to pre-multi-layer prefetch jobs during the v3 -> v4
+// migration. Must match the satellite layer id in constants/MAP_LAYERS.
+const LEGACY_SATELLITE_LAYER_ID = 'esri-satellite';
+
+/**
+ * Composite IndexedDB key for a prefetch job. Tiles are stored per full URL
+ * (which already encodes layer + z/x/y), but a job covers a target (project or
+ * `landmarks`) for one layer, so the job key namespaces by layer to keep
+ * satellite and extra-layer jobs for the same target distinct.
+ */
+export function prefetchJobKey(layerId: string, targetId: string): string {
+  return `${layerId}::${targetId}`;
+}
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -135,6 +149,35 @@ export async function openTileDB(): Promise<IDBDatabase> {
           cursor.continue();
         };
       }
+
+      // v3 -> v4 migration: namespace existing prefetch jobs by layer. Legacy
+      // jobs predate multi-layer support, so they are satellite jobs. Tiles are
+      // URL-keyed and untouched (zero tile loss); only job keys change.
+      if (oldVersion < 4) {
+        const jobStore = tx.objectStore(PREFETCH_JOB_STORE);
+        const pending: Array<{ oldKey: IDBValidKey; job: TilePrefetchJobState }> = [];
+        const jobCursorReq = jobStore.openCursor();
+        jobCursorReq.onsuccess = () => {
+          const cursor = jobCursorReq.result;
+          if (!cursor) {
+            for (const { oldKey, job } of pending) {
+              const layerId = job.layerId || LEGACY_SATELLITE_LAYER_ID;
+              job.layerId = layerId;
+              const newKey = prefetchJobKey(layerId, job.projectId);
+              if (newKey !== oldKey) {
+                jobStore.delete(oldKey);
+              }
+              jobStore.put(job, newKey);
+            }
+            return;
+          }
+          pending.push({
+            oldKey: cursor.primaryKey,
+            job: cursor.value as TilePrefetchJobState,
+          });
+          cursor.continue();
+        };
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -216,12 +259,15 @@ export async function upsertTile(
   const metadataStore = tx.objectStore(TILE_METADATA_STORE);
   const statsStore = tx.objectStore(TILE_STATS_STORE);
 
-  const previousMetadata = (await requestToPromise(
-    metadataStore.get(url),
-  )) as TileMetadataRecord | null;
+  // IDB `get` resolves to `undefined` (not `null`) for a missing key, so
+  // normalize: a bare `!== null` check would otherwise treat a brand-new tile
+  // as pre-existing and skip the `tileCount` increment, leaving the stats store
+  // perpetually reporting 0 tiles.
+  const previousMetadata =
+    ((await requestToPromise(metadataStore.get(url))) as TileMetadataRecord | null) ?? null;
   const previousTile = previousMetadata
     ? null
-    : ((await requestToPromise(tileStore.get(url))) as ArrayBuffer | null);
+    : (((await requestToPromise(tileStore.get(url))) as ArrayBuffer | null) ?? null);
 
   const previousSizeBytes =
     previousMetadata?.sizeBytes ?? previousTile?.byteLength ?? 0;
@@ -423,12 +469,13 @@ export async function getTotalCacheBytes(): Promise<number> {
 }
 
 export async function getPrefetchJob(
-  projectId: string,
+  layerId: string,
+  targetId: string,
 ): Promise<TilePrefetchJobState | null> {
   try {
     const db = await openTileDB();
     const tx = db.transaction(PREFETCH_JOB_STORE, 'readonly');
-    const req = tx.objectStore(PREFETCH_JOB_STORE).get(projectId);
+    const req = tx.objectStore(PREFETCH_JOB_STORE).get(prefetchJobKey(layerId, targetId));
     return (await requestToPromise(req)) ?? null;
   } catch {
     return null;
@@ -449,7 +496,9 @@ export async function getAllPrefetchJobs(): Promise<TilePrefetchJobState[]> {
 export async function setPrefetchJob(job: TilePrefetchJobState): Promise<void> {
   const db = await openTileDB();
   const tx = db.transaction(PREFETCH_JOB_STORE, 'readwrite');
-  await requestToPromise(tx.objectStore(PREFETCH_JOB_STORE).put(job, job.projectId));
+  await requestToPromise(
+    tx.objectStore(PREFETCH_JOB_STORE).put(job, prefetchJobKey(job.layerId, job.projectId)),
+  );
   await transactionDone(tx);
 }
 
@@ -458,4 +507,62 @@ export async function clearPrefetchJobs(): Promise<void> {
   const tx = db.transaction(PREFETCH_JOB_STORE, 'readwrite');
   await requestToPromise(tx.objectStore(PREFETCH_JOB_STORE).clear());
   await transactionDone(tx);
+}
+
+/**
+ * Delete every prefetch job belonging to a layer. Used when a layer's offline
+ * sync is turned off so its progress no longer shows and is not resumed.
+ */
+export async function deletePrefetchJobsByLayer(layerId: string): Promise<void> {
+  const db = await openTileDB();
+  const tx = db.transaction(PREFETCH_JOB_STORE, 'readwrite');
+  const store = tx.objectStore(PREFETCH_JOB_STORE);
+  await new Promise<void>((resolve, reject) => {
+    const req = store.openCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) {
+        resolve();
+        return;
+      }
+      if ((cursor.value as TilePrefetchJobState).layerId === layerId) {
+        cursor.delete();
+      }
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error);
+  });
+  await transactionDone(tx);
+}
+
+/**
+ * Evict all cached tiles whose URL starts with any of the given prefixes,
+ * including pinned (auto-prefetched) tiles. Used to reclaim space when a
+ * layer's offline sync is turned off. Returns the eviction result.
+ */
+export async function deleteTilesByUrlPrefixes(
+  prefixes: string[],
+  now = Date.now(),
+): Promise<TileCacheEvictionResult> {
+  if (prefixes.length === 0) {
+    return { evictedTileCount: 0, freedBytes: 0 };
+  }
+  const candidates = await listTilesByUrlPrefixes(prefixes);
+  return deleteTilesByMetadata(candidates, now);
+}
+
+async function listTilesByUrlPrefixes(
+  prefixes: string[],
+): Promise<TileMetadataRecord[]> {
+  try {
+    const db = await openTileDB();
+    const tx = db.transaction(TILE_METADATA_STORE, 'readonly');
+    const store = tx.objectStore(TILE_METADATA_STORE);
+    const all = ((await requestToPromise(store.getAll())) as TileMetadataRecord[]) ?? [];
+    return all.filter((metadata) =>
+      prefixes.some((prefix) => metadata.url.startsWith(prefix)),
+    );
+  } catch {
+    return [];
+  }
 }

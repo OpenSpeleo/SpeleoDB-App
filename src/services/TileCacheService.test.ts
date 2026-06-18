@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock maplibre-gl before importing the module under test
 vi.mock('maplibre-gl', () => ({
@@ -13,10 +13,12 @@ import {
   clearCachedTiles,
   registerTileCacheProtocol,
   getCachedStyle,
+  getCachedLayerStyle,
   fetchAndCachePinnedTile,
   runTileCacheStartupMaintenance,
   setTileCacheOfflineMode,
 } from './TileCacheService';
+import { MAP } from '../constants';
 import {
   __clearTileCacheRepositoryForTests,
   getTile,
@@ -198,6 +200,98 @@ describe('TileCacheService', () => {
 
       expect(await getTile(tileUrl)).toBeNull();
       expect(await getTileMetadata(tileUrl)).toBeNull();
+    });
+  });
+
+  describe('getCachedLayerStyle', () => {
+    it('builds a raster style for the layer with cached-https tile URLs', async () => {
+      const style = await getCachedLayerStyle('esri-satellite');
+      const sources = style.sources as Record<string, { tiles: string[] }>;
+      const tiles = sources['esri-satellite'].tiles;
+      expect(tiles[0].startsWith('cached-https://')).toBe(true);
+      expect(tiles[0]).toContain('World_Imagery');
+    });
+
+    it('falls back to the satellite layer for an unknown id', async () => {
+      const style = await getCachedLayerStyle('bogus-layer');
+      expect(Object.keys(style.sources as object)).toEqual(['esri-satellite']);
+    });
+  });
+
+  describe('magic-hash missing-tile detection', () => {
+    const MAGIC_HASH = MAP.MISSING_TILE_SHA256_HASHES[0];
+    const TILE_URL =
+      'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/5/1/2';
+    let originalCrypto: Crypto;
+
+    function hexToArrayBuffer(hex: string): ArrayBuffer {
+      const bytes = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < bytes.length; i += 1) {
+        bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+      }
+      return bytes.buffer;
+    }
+
+    function installDigest(hex: string): void {
+      Object.defineProperty(globalThis, 'crypto', {
+        value: { subtle: { digest: vi.fn().mockResolvedValue(hexToArrayBuffer(hex)) } },
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    beforeEach(() => {
+      originalCrypto = globalThis.crypto;
+    });
+
+    afterEach(() => {
+      Object.defineProperty(globalThis, 'crypto', {
+        value: originalCrypto,
+        configurable: true,
+        writable: true,
+      });
+    });
+
+    it('prefetch: a magic-hash tile is treated as missing (0 bytes, not stored)', async () => {
+      installDigest(MAGIC_HASH);
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
+      });
+
+      const bytes = await fetchAndCachePinnedTile(TILE_URL);
+
+      expect(bytes).toBe(0);
+      expect(await getTile(TILE_URL)).toBeNull();
+      expect(await getTileMetadata(TILE_URL)).toBeNull();
+    });
+
+    it('prefetch: a non-matching tile is cached normally', async () => {
+      installDigest('00'.repeat(32));
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
+      });
+
+      const bytes = await fetchAndCachePinnedTile(TILE_URL);
+
+      expect(bytes).toBe(3);
+      expect(await getTile(TILE_URL)).not.toBeNull();
+    });
+
+    it('does not hash non-tile URLs (caches them even if digest would match)', async () => {
+      installDigest(MAGIC_HASH);
+      const nonTileUrl = 'https://fonts.example.com/glyphs/0-255.pbf';
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([7, 7]).buffer),
+      });
+
+      const bytes = await fetchAndCachePinnedTile(nonTileUrl);
+
+      // isLayerTileUrl is false, so the hash check is skipped and the tile cached.
+      expect(bytes).toBe(2);
+      expect(await getTile(nonTileUrl)).not.toBeNull();
     });
   });
 });

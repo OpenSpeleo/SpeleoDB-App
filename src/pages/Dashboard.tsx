@@ -20,10 +20,13 @@ import { Geolocation } from '@capacitor/geolocation';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 import { useSpeleoDB } from '../context/useSpeleoDB';
-import { COLORS, MAP, MAP_OVERLAYS, PROJECT_LAYERS } from '../constants';
+import { COLORS, DEFAULT_MAP_LAYER_ID, MAP, MAP_LAYERS, MAP_OVERLAYS, PROJECT_LAYERS } from '../constants';
 import type { MapOverlayGeoJsonRecord, MapOverlayId, MapOverlaySizes } from '../types/mapOverlay';
-import { registerTileCacheProtocol, getCachedStyle } from '../services/TileCacheService';
+import type { MapLayerId } from '../types/mapLayer';
+import { registerTileCacheProtocol, getCachedLayerStyle } from '../services/TileCacheService';
+import MapLayerControl from '../components/map/MapLayerControl';
 import {
+  setSelectedMapLayerId as persistSelectedMapLayerId,
   getProjectVisibilityPreferences,
   setProjectVisibilityPreference,
   setProjectVisibilityPreferences,
@@ -451,6 +454,9 @@ interface DashboardProps {
   showLandmarks: boolean;
   colorMode: MapColorMode;
   measurementUnit: MeasurementUnit;
+  selectedMapLayerId: MapLayerId;
+  onSelectedMapLayerIdChange: (layerId: MapLayerId) => void;
+  layerOfflineSync: Record<string, boolean>;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({
@@ -461,9 +467,12 @@ const Dashboard: React.FC<DashboardProps> = ({
   showLandmarks,
   colorMode,
   measurementUnit,
+  selectedMapLayerId,
+  onSelectedMapLayerIdChange,
+  layerOfflineSync,
 }) => {
   const history = useHistory();
-  const { controller, projects, tilePrefetchJobs } = useSpeleoDB();
+  const { controller, projects, tilePrefetchJobs, isOfflineLocked } = useSpeleoDB();
   const didSyncRef = useRef(false);
   const didFitRef = useRef(false);
   const mapRef = useRef<MapRef>(null);
@@ -522,10 +531,26 @@ const Dashboard: React.FC<DashboardProps> = ({
   // ---- Load map style -------------------------------------------------------
 
   useEffect(() => {
-    getCachedStyle(MAP.STYLE_URL)
-      .then(setMapStyle)
+    let cancelled = false;
+    getCachedLayerStyle(selectedMapLayerId)
+      .then((style) => {
+        if (!cancelled) setMapStyle(style);
+      })
       .catch((err) => console.error('Failed to load map style:', err));
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMapLayerId]);
+
+  const handleSelectMapLayer = useCallback(
+    (layerId: string) => {
+      const nextLayerId = (MAP_LAYERS.find((layer) => layer.id === layerId)?.id ??
+        DEFAULT_MAP_LAYER_ID) as MapLayerId;
+      persistSelectedMapLayerId(nextLayerId);
+      onSelectedMapLayerIdChange(nextLayerId);
+    },
+    [onSelectedMapLayerIdChange],
+  );
 
   // ---- Sync projects on mount -----------------------------------------------
 
@@ -585,10 +610,14 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
     return next;
   }, [sortedProjects, activeProjectIds, countryVisibility]);
+  // Project panel progress reflects the satellite layer only (extra layers have
+  // their own per-layer progress in Settings).
   const tilePrefetchByProject = useMemo(
     () =>
       Object.fromEntries(
-        tilePrefetchJobs.map((job) => [job.projectId, job] as const),
+        tilePrefetchJobs
+          .filter((job) => job.layerId === DEFAULT_MAP_LAYER_ID)
+          .map((job) => [job.projectId, job] as const),
       ),
     [tilePrefetchJobs],
   );
@@ -1734,15 +1763,6 @@ const Dashboard: React.FC<DashboardProps> = ({
               </div>
             )}
 
-            {/* ---- Esri attribution (inside map touch surface so bottom-2 is above tab bar) ---- */}
-            <div
-              className="absolute bottom-2 right-2 z-10 px-1.5 py-0.5
-                         text-[10px] text-white/80 hover:text-white
-                         bg-slate-700/70 rounded backdrop-blur-sm
-                         no-underline transition-colors pointer-events-auto"
-            >
-              Powered by Esri
-            </div>
           </div>
 
           {/* ---- My Location FAB ---- */}
@@ -1768,6 +1788,20 @@ const Dashboard: React.FC<DashboardProps> = ({
               </svg>
             )}
           </button>
+
+          {/* ---- Map Layer switcher (under My Location FAB) ---- */}
+          <div
+            className="absolute right-3 z-10"
+            style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 64px)' }}
+          >
+            <MapLayerControl
+              layers={MAP_LAYERS}
+              selectedLayerId={selectedMapLayerId}
+              isOfflineLocked={isOfflineLocked}
+              layerOfflineSync={layerOfflineSync}
+              onSelectLayer={handleSelectMapLayer}
+            />
+          </div>
 
           {/* ---- Project panel ---- */}
           <ProjectPanel

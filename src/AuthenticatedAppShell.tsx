@@ -4,7 +4,9 @@ import { IonApp, setupIonicReact } from '@ionic/react'
 
 import {
   getColorMode,
+  getLayerOfflineSyncPreferences,
   getMeasurementUnit,
+  getSelectedMapLayerId,
   getShowLandmarks,
 } from './services/PreferencesService'
 
@@ -24,6 +26,10 @@ function AuthenticatedRoutes(): ReactNode {
   const [showLandmarks, setShowLandmarks] = useState(() => getShowLandmarks())
   const [colorMode, setColorMode] = useState(() => getColorMode())
   const [measurementUnit, setMeasurementUnit] = useState(() => getMeasurementUnit())
+  const [selectedMapLayerId, setSelectedMapLayerId] = useState(() => getSelectedMapLayerId())
+  const [layerOfflineSync, setLayerOfflineSync] = useState(() =>
+    getLayerOfflineSyncPreferences(),
+  )
 
   // The project and landmark panels share the same left-edge slot, so opening
   // one closes the other (they are mutually exclusive).
@@ -56,6 +62,9 @@ function AuthenticatedRoutes(): ReactNode {
             showLandmarks={showLandmarks}
             colorMode={colorMode}
             measurementUnit={measurementUnit}
+            selectedMapLayerId={selectedMapLayerId}
+            onSelectedMapLayerIdChange={setSelectedMapLayerId}
+            layerOfflineSync={layerOfflineSync}
           />
         </Suspense>
       </div>
@@ -75,6 +84,8 @@ function AuthenticatedRoutes(): ReactNode {
             onColorModeChange={setColorMode}
             measurementUnit={measurementUnit}
             onMeasurementUnitChange={setMeasurementUnit}
+            layerOfflineSync={layerOfflineSync}
+            onLayerOfflineSyncChange={setLayerOfflineSync}
             isProjectPanelOpen={isProjectPanelOpen}
             onProjectPanelChange={handleProjectPanelChange}
             isLandmarkPanelOpen={isLandmarkPanelOpen}

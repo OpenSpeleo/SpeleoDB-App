@@ -20,6 +20,7 @@ This folder contains product and engineering documentation for core app behavior
 - `android-safe-area.md`: why `env(safe-area-inset-bottom)` fails on Android, the `initAndroidSafeArea()` fallback, and which components consume the CSS variable.
 - `external-links.md`: why `target="_blank"` fails on Android in Capacitor, the `openExternalUrl()` contract, and the rule that all external links must use it.
 - `deep-linking.md`: custom URL scheme (`speleodb://`), Universal Links / App Links setup, server `.well-known/` files, and fallback behavior.
+- `map-layers.md`: changeable map tile layers (ESRI satellite + hillshade), the layer switcher, per-layer offline sync + prioritized prefetch, magic-hash missing-tile detection, offline gating, and storage-cap interaction.
 
 ## Maintainer note
 

@@ -3,7 +3,8 @@
  * Single localStorage key; can be swapped for @capacitor/preferences later.
  */
 
-import { PREFERENCES } from '../constants';
+import { DEFAULT_MAP_LAYER_ID, MAP_LAYERS, PREFERENCES } from '../constants';
+import { isMapLayerId, type MapLayerId } from '../types/mapLayer';
 import {
   DEFAULT_MAP_COLOR_MODE,
   isMapColorMode,
@@ -28,6 +29,14 @@ export interface UserPreferences {
   showLandmarks?: boolean;
   colorMode?: MapColorMode;
   measurementUnit?: MeasurementUnit;
+  /** Currently selected map tile layer id. */
+  selectedMapLayerId?: MapLayerId;
+  /**
+   * Per-layer offline sync opt-in. Missing keys imply OFF for non-forced
+   * layers; the forced (satellite) layer is always treated as ON regardless of
+   * the stored value.
+   */
+  layerOfflineSync?: Record<string, boolean>;
   lastSyncedAt?: number;
   /** True when the user has approved letting tile prefetch exceed the cache cap. */
   tileCacheOverLimitApproved?: boolean;
@@ -94,6 +103,13 @@ function normalizeMeasurementUnit(value: unknown): MeasurementUnit | undefined {
   return undefined;
 }
 
+function normalizeSelectedMapLayerId(value: unknown): MapLayerId | undefined {
+  if (isMapLayerId(value)) return value;
+  return undefined;
+}
+
+const normalizeLayerOfflineSync = normalizeBooleanRecord;
+
 function normalizeLastSyncedAt(value: unknown): number | undefined {
   if (typeof value !== 'number') return undefined;
   if (!Number.isFinite(value) || value <= 0) return undefined;
@@ -112,6 +128,8 @@ function emptyPreferences(): UserPreferences {
     showLandmarks: undefined,
     colorMode: undefined,
     measurementUnit: undefined,
+    selectedMapLayerId: undefined,
+    layerOfflineSync: {},
     lastSyncedAt: undefined,
     tileCacheOverLimitApproved: undefined,
     tileCacheOverLimitPromptAcknowledged: undefined,
@@ -152,6 +170,8 @@ function readRawPreferences(): UserPreferences {
       showLandmarks: normalizeShowLandmarks(parsed.showLandmarks),
       colorMode: normalizeColorMode(parsed.colorMode),
       measurementUnit: normalizeMeasurementUnit(parsed.measurementUnit),
+      selectedMapLayerId: normalizeSelectedMapLayerId(parsed.selectedMapLayerId),
+      layerOfflineSync: normalizeLayerOfflineSync(parsed.layerOfflineSync),
       lastSyncedAt: normalizeLastSyncedAt(parsed.lastSyncedAt),
       tileCacheOverLimitApproved: normalizeOptionalBoolean(parsed.tileCacheOverLimitApproved),
       tileCacheOverLimitPromptAcknowledged: normalizeOptionalBoolean(
@@ -204,6 +224,8 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
         showLandmarks: normalizeShowLandmarks(mutated.showLandmarks),
         colorMode: normalizeColorMode(mutated.colorMode),
         measurementUnit: normalizeMeasurementUnit(mutated.measurementUnit),
+        selectedMapLayerId: normalizeSelectedMapLayerId(mutated.selectedMapLayerId),
+        layerOfflineSync: normalizeLayerOfflineSync(mutated.layerOfflineSync),
         lastSyncedAt: normalizeLastSyncedAt(mutated.lastSyncedAt),
         tileCacheOverLimitApproved: normalizeOptionalBoolean(mutated.tileCacheOverLimitApproved),
         tileCacheOverLimitPromptAcknowledged: normalizeOptionalBoolean(
@@ -269,6 +291,14 @@ export function setPreferences(prefs: Partial<UserPreferences>): void {
       prefs.measurementUnit === undefined
         ? current.measurementUnit
         : normalizeMeasurementUnit(prefs.measurementUnit),
+    selectedMapLayerId:
+      prefs.selectedMapLayerId === undefined
+        ? current.selectedMapLayerId
+        : normalizeSelectedMapLayerId(prefs.selectedMapLayerId),
+    layerOfflineSync:
+      prefs.layerOfflineSync === undefined
+        ? current.layerOfflineSync
+        : normalizeLayerOfflineSync(prefs.layerOfflineSync),
     lastSyncedAt:
       prefs.lastSyncedAt === undefined
         ? current.lastSyncedAt
@@ -529,6 +559,54 @@ export function getMeasurementUnit(): MeasurementUnit {
  */
 export function setMeasurementUnit(unit: MeasurementUnit): void {
   setPreferences({ measurementUnit: unit });
+}
+
+/**
+ * Read the selected map tile layer id. Defaults to the satellite layer.
+ */
+export function getSelectedMapLayerId(): MapLayerId {
+  return getPreferences().selectedMapLayerId ?? DEFAULT_MAP_LAYER_ID;
+}
+
+/**
+ * Persist the selected map tile layer id.
+ */
+export function setSelectedMapLayerId(layerId: MapLayerId): void {
+  setPreferences({ selectedMapLayerId: layerId });
+}
+
+/**
+ * Read the full per-layer offline sync map (raw stored values, no forcing).
+ */
+export function getLayerOfflineSyncPreferences(): Record<string, boolean> {
+  return { ...(getPreferences().layerOfflineSync ?? {}) };
+}
+
+/**
+ * True when a layer's tiles should be synced for offline use. Forced layers
+ * (satellite) are always enabled; other layers default to OFF until opted in.
+ */
+export function isLayerOfflineSyncEnabled(layerId: string): boolean {
+  const layer = MAP_LAYERS.find((entry) => entry.id === layerId);
+  if (layer?.forcedOffline) return true;
+  return getPreferences().layerOfflineSync?.[layerId] === true;
+}
+
+/**
+ * Persist offline sync opt-in for a single layer. Forced layers are ignored
+ * (they are always enabled).
+ */
+export function setLayerOfflineSyncPreference(layerId: string, enabled: boolean): void {
+  if (!layerId) return;
+  const layer = MAP_LAYERS.find((entry) => entry.id === layerId);
+  if (layer?.forcedOffline) return;
+  enqueuePreferencesMutation((current) => ({
+    ...current,
+    layerOfflineSync: {
+      ...(current.layerOfflineSync ?? {}),
+      [layerId]: enabled,
+    },
+  }));
 }
 
 /**

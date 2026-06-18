@@ -1,4 +1,5 @@
 import type {
+  TilePrefetchEnqueueOptions,
   TilePrefetchJobState,
   TilePrefetchProjectInput,
   TilePrefetchRequest,
@@ -16,6 +17,7 @@ const NOOP_TILE_PREFETCH_SERVICE: TilePrefetchServiceLike = {
   subscribe: () => () => {},
   enqueueProjects: async () => {},
   enqueueTileUrls: async () => {},
+  removeLayer: async () => {},
   resumeBlockedJobs: () => {},
   waitForIdle: async () => {},
   dispose: () => {},
@@ -50,7 +52,7 @@ export class LazyTilePrefetchService implements TilePrefetchServiceLike {
   async enqueueProjects(
     projects: TilePrefetchProjectInput[],
     request: TilePrefetchRequest,
-    options: { signal?: AbortSignal } = {},
+    options: TilePrefetchEnqueueOptions = {},
   ): Promise<void> {
     if (this.disposed || projects.length === 0) return
     const service = await this.loadService()
@@ -60,12 +62,21 @@ export class LazyTilePrefetchService implements TilePrefetchServiceLike {
 
   async enqueueTileUrls(
     target: TilePrefetchTileUrlsInput,
-    options: { signal?: AbortSignal } = {},
+    options: TilePrefetchEnqueueOptions = {},
   ): Promise<void> {
     if (this.disposed || target.tileUrls.length === 0) return
     const service = await this.loadService()
     if (this.disposed) return
     await service.enqueueTileUrls(target, options)
+  }
+
+  async removeLayer(layerId: string): Promise<void> {
+    if (this.disposed) return
+    // Only meaningful once the underlying service exists; if it has never been
+    // loaded there are no in-memory jobs, but persisted jobs may still exist.
+    const service = await this.loadService()
+    if (this.disposed) return
+    await service.removeLayer(layerId)
   }
 
   resumeBlockedJobs(): void {

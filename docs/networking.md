@@ -42,6 +42,7 @@ If this action does not occur, app remains in offline behavior even if device co
 
 - During offline lock, normal data/map fetch paths should skip outbound network and use cache.
 - This includes dashboard project GeoJSON and read-only overlay GeoJSON (landmarks, stations, exploration leads, cylinder installs).
+- Map tile-layer selection is gated offline: only the forced satellite layer and layers the user has synced for offline use are selectable while offline-locked (others have no cached tiles). See `docs/map-layers.md`.
 - Reconnect attempts are explicit and limited to the app relaunch trigger above.
 - Transport errors/timeouts remain non-destructive (no logout, no cache purge).
 

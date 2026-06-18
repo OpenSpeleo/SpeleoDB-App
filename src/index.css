@@ -45,6 +45,40 @@ body {
  * preflight (`* { padding: 0; border-radius: 0 }`), which otherwise flattens
  * native buttons and strips rounded corners.
  */
+/*
+ * Settings rows: give every ion-item in the Settings page more vertical
+ * breathing room. Set the custom properties directly on the ion-item host so
+ * they win over Ionic's :host defaults (inheritance alone would not override
+ * a host-local default). See docs/settings.md.
+ */
+.settings-content ion-item {
+  --min-height: 52px;
+  --padding-top: 0px;
+  --padding-bottom: 0px;
+  --inner-padding-top: 0px;
+  --inner-padding-bottom: 0px;
+}
+
+/*
+ * Vertically center every row's content. The vertical rhythm comes solely from
+ * --min-height with zero top/bottom padding, so Ionic's native center alignment
+ * (`:host { align-items: center }`, inherited by .item-native / .item-inner)
+ * distributes the slack evenly above and below — no top-heavy rows. Custom
+ * top/bottom paddings are intentionally 0 because, when the content is taller
+ * than the padded box, they push content down and look top-heavy. These rules
+ * are unlayered so they win over Ionic; the explicit centering + zeroed label
+ * margins are belt-and-suspenders.
+ */
+.settings-content ion-item::part(native) {
+  align-items: center;
+}
+
+.settings-content ion-item ion-label {
+  margin-top: 0;
+  margin-bottom: 0;
+  align-self: center;
+}
+
 .app-tab-bar {
   padding-top: 0.5rem;
 }

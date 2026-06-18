@@ -42,6 +42,8 @@ vi.mock('./services/PreferencesService', () => ({
   getShowLandmarks: () => true,
   getColorMode: () => 'project',
   getMeasurementUnit: () => 'meters',
+  getSelectedMapLayerId: () => 'esri-satellite',
+  getLayerOfflineSyncPreferences: () => ({}),
 }));
 
 vi.mock('./pages/Login', () => ({

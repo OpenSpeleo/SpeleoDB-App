@@ -28,9 +28,14 @@ import {
   setColorMode,
   getMeasurementUnit,
   setMeasurementUnit,
+  getSelectedMapLayerId,
+  setSelectedMapLayerId,
+  getLayerOfflineSyncPreferences,
+  isLayerOfflineSyncEnabled,
+  setLayerOfflineSyncPreference,
   type UserPreferences,
 } from './PreferencesService';
-import { PREFERENCES } from '../constants';
+import { DEFAULT_MAP_LAYER_ID, PREFERENCES } from '../constants';
 
 describe('PreferencesService', () => {
   const VALID_INSTANCE = 'https://example.org';
@@ -665,6 +670,62 @@ describe('PreferencesService', () => {
       clearPreferences();
       expect(getTileCacheOverLimitApproved()).toBe(false);
       expect(getTileCacheOverLimitPromptAcknowledged()).toBe(false);
+    });
+  });
+
+  describe('map tile layer preferences', () => {
+    it('defaults the selected layer to satellite', () => {
+      expect(getSelectedMapLayerId()).toBe(DEFAULT_MAP_LAYER_ID);
+    });
+
+    it('round-trips a valid selected layer and ignores invalid ones', () => {
+      seedValidAuth();
+      setSelectedMapLayerId('esri-world-hillshade');
+      expect(getSelectedMapLayerId()).toBe('esri-world-hillshade');
+
+      const stored = JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY) ?? '{}');
+      stored.selectedMapLayerId = 'not-a-layer';
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify(stored));
+      expect(getSelectedMapLayerId()).toBe(DEFAULT_MAP_LAYER_ID);
+    });
+
+    it('treats the forced satellite layer as always enabled', () => {
+      seedValidAuth();
+      expect(isLayerOfflineSyncEnabled('esri-satellite')).toBe(true);
+      // Attempting to disable the forced layer is ignored.
+      setLayerOfflineSyncPreference('esri-satellite', false);
+      expect(isLayerOfflineSyncEnabled('esri-satellite')).toBe(true);
+    });
+
+    it('defaults extra layers to off and round-trips opt-in', () => {
+      seedValidAuth();
+      expect(isLayerOfflineSyncEnabled('esri-world-hillshade')).toBe(false);
+
+      setLayerOfflineSyncPreference('esri-world-hillshade', true);
+      expect(isLayerOfflineSyncEnabled('esri-world-hillshade')).toBe(true);
+      expect(getLayerOfflineSyncPreferences()).toEqual({ 'esri-world-hillshade': true });
+
+      setLayerOfflineSyncPreference('esri-world-hillshade', false);
+      expect(isLayerOfflineSyncEnabled('esri-world-hillshade')).toBe(false);
+    });
+
+    it('does not clobber other layer opt-ins when toggling one', () => {
+      seedValidAuth();
+      setLayerOfflineSyncPreference('esri-world-hillshade', true);
+      setLayerOfflineSyncPreference('esri-world-hillshade-dark', true);
+      expect(getLayerOfflineSyncPreferences()).toEqual({
+        'esri-world-hillshade': true,
+        'esri-world-hillshade-dark': true,
+      });
+    });
+
+    it('clearPreferences wipes layer preferences', () => {
+      seedValidAuth();
+      setSelectedMapLayerId('esri-world-hillshade');
+      setLayerOfflineSyncPreference('esri-world-hillshade', true);
+      clearPreferences();
+      expect(getSelectedMapLayerId()).toBe(DEFAULT_MAP_LAYER_ID);
+      expect(getLayerOfflineSyncPreferences()).toEqual({});
     });
   });
 });

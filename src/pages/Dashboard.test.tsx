@@ -325,6 +325,11 @@ vi.mock('../services/TileCacheService', () => ({
     sources: {},
     layers: [],
   }),
+  getCachedLayerStyle: vi.fn().mockResolvedValue({
+    version: 8,
+    sources: {},
+    layers: [],
+  }),
 }));
 
 const {
@@ -343,6 +348,7 @@ const {
   mockSetLandmarkCollectionCollapsedPreference,
   mockGetShowLandmarks,
   mockSetShowLandmarks,
+  mockSetSelectedMapLayerId,
 } = vi.hoisted(() => ({
   mockGetProjectVisibilityPreferences: vi.fn(() => ({}) as Record<string, boolean>),
   mockSetProjectVisibilityPreference: vi.fn(),
@@ -359,6 +365,7 @@ const {
   mockSetLandmarkCollectionCollapsedPreference: vi.fn(),
   mockGetShowLandmarks: vi.fn(() => true),
   mockSetShowLandmarks: vi.fn(),
+  mockSetSelectedMapLayerId: vi.fn(),
 }));
 
 const { mockRestartGuidedTourFromHelp } = vi.hoisted(() => ({
@@ -381,6 +388,7 @@ vi.mock('../services/PreferencesService', () => ({
   setLandmarkCollectionCollapsedPreference: mockSetLandmarkCollectionCollapsedPreference,
   getShowLandmarks: mockGetShowLandmarks,
   setShowLandmarks: mockSetShowLandmarks,
+  setSelectedMapLayerId: mockSetSelectedMapLayerId,
 }));
 
 vi.mock('../onboarding/guidedTour/engine', () => ({
@@ -421,15 +429,20 @@ function renderDashboard(options?: {
   showLandmarks?: boolean;
   colorMode?: 'project' | 'depth';
   measurementUnit?: 'feet' | 'meters';
+  selectedMapLayerId?: 'esri-satellite' | 'esri-world-hillshade' | 'esri-world-hillshade-dark';
+  layerOfflineSync?: Record<string, boolean>;
 }) {
   const history = createMemoryHistory({ initialEntries: ['/dashboard'] });
   const initialShowLandmarks = options?.showLandmarks ?? mockGetShowLandmarks();
   const initialColorMode = options?.colorMode ?? 'project';
   const initialMeasurementUnit = options?.measurementUnit ?? 'feet';
+  const initialLayerId = options?.selectedMapLayerId ?? 'esri-satellite';
+  const initialLayerOfflineSync = options?.layerOfflineSync ?? {};
   const Harness: React.FC = () => {
     const [isProjectPanelOpen, setIsProjectPanelOpen] = React.useState(false);
     const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = React.useState(false);
     const [showLandmarks] = React.useState(initialShowLandmarks);
+    const [selectedMapLayerId, setSelectedMapLayerId] = React.useState(initialLayerId);
     return (
       <Dashboard
         isProjectPanelOpen={isProjectPanelOpen}
@@ -439,6 +452,9 @@ function renderDashboard(options?: {
         showLandmarks={showLandmarks}
         colorMode={initialColorMode}
         measurementUnit={initialMeasurementUnit}
+        selectedMapLayerId={selectedMapLayerId}
+        onSelectedMapLayerIdChange={setSelectedMapLayerId}
+        layerOfflineSync={initialLayerOfflineSync}
       />
     );
   };
@@ -2356,6 +2372,41 @@ describe('Dashboard -- My Location button', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Go to my location')).toBeInTheDocument();
     });
+  });
+});
+
+describe('Dashboard -- Map layer switcher', () => {
+  beforeEach(() => {
+    mockIsOfflineLocked = false;
+    mockSetSelectedMapLayerId.mockReset();
+  });
+
+  it('renders the map layer FAB', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(screen.getByTestId('map-layer-button')).toBeInTheDocument();
+    });
+  });
+
+  it('persists the selected layer when switching', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await user.click(await screen.findByTestId('map-layer-button'));
+    await user.click(screen.getByTestId('map-layer-option-esri-world-hillshade'));
+
+    expect(mockSetSelectedMapLayerId).toHaveBeenCalledWith('esri-world-hillshade');
+  });
+
+  it('disables un-synced layers while offline-locked', async () => {
+    mockIsOfflineLocked = true;
+    const user = userEvent.setup();
+    renderDashboard({ selectedMapLayerId: 'esri-satellite', layerOfflineSync: {} });
+
+    await user.click(await screen.findByTestId('map-layer-button'));
+
+    expect(screen.getByTestId('map-layer-option-esri-world-hillshade')).toBeDisabled();
+    expect(screen.getByTestId('map-layer-option-esri-satellite')).not.toBeDisabled();
   });
 });
 

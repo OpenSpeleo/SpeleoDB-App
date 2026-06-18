@@ -114,6 +114,8 @@ type StoredPrefs = {
   lastSyncedAt?: number;
   tileCacheOverLimitApproved?: boolean;
   tileCacheOverLimitPromptAcknowledged?: boolean;
+  selectedMapLayerId?: string;
+  layerOfflineSync?: Record<string, boolean>;
 };
 
 function createMockPrefs(initial?: StoredPrefs): PreferencesPort {
@@ -146,6 +148,7 @@ function createMockTilePrefetch(
   return {
     enqueueProjects: vi.fn(async () => {}),
     enqueueTileUrls: vi.fn(async () => {}),
+    removeLayer: vi.fn(async () => {}),
     resumeBlockedJobs: vi.fn(),
     subscribe: vi.fn((listener: (jobs: TilePrefetchJobState[]) => void) => {
       listener([]);
@@ -167,6 +170,7 @@ function createControllableTilePrefetch() {
   const service = {
     enqueueProjects: vi.fn(async () => {}),
     enqueueTileUrls: vi.fn(async () => {}),
+    removeLayer: vi.fn(async () => {}),
     resumeBlockedJobs,
     subscribe: vi.fn((listener: (jobs: TilePrefetchJobState[]) => void) => {
       listenerRef = listener;
@@ -185,6 +189,7 @@ function createControllableTilePrefetch() {
 
 function blockedLandmarkJob(): TilePrefetchJobState {
   return {
+    layerId: 'esri-satellite',
     projectId: 'landmarks',
     commitId: 'sig-1',
     status: 'paused',
@@ -426,6 +431,7 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       listener([{
+        layerId: 'esri-satellite',
         projectId: 'p1',
         commitId: 'c1',
         status: 'queued',
@@ -1114,6 +1120,188 @@ describe('SpeleoDBController', () => {
       const first = enqueueTileUrls.mock.calls.at(0) as unknown as [{ commitId: string }];
       const second = enqueueTileUrls.mock.calls.at(1) as unknown as [{ commitId: string }];
       expect(first[0].commitId).toBe(second[0].commitId);
+    });
+
+    it('schedules satellite first, then enabled extra layers at their max zoom', async () => {
+      const enqueueProjects = vi.fn(async () => {});
+      const mockTilePrefetch = {
+        enqueueProjects,
+        enqueueTileUrls: vi.fn(async () => {}),
+        removeLayer: vi.fn(async () => {}),
+        subscribe: vi.fn(() => () => {}),
+      } as unknown as TilePrefetchService;
+
+      cache.getGeoJSON = vi.fn(async () => ({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } }],
+      }));
+
+      prefs.setPreferences({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+        layerOfflineSync: { 'esri-world-hillshade': true },
+      });
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+
+      await controller.syncProjects();
+      await Promise.resolve();
+
+      const calls = enqueueProjects.mock.calls as unknown as Array<
+        [unknown, { maxZoom: number; tileUrlTemplate: string }, { layerId?: string } | undefined]
+      >;
+      const layerIds = calls.map((c) => c[2]?.layerId);
+      expect(layerIds[0]).toBe('esri-satellite');
+      expect(layerIds).toContain('esri-world-hillshade');
+
+      const hillCall = calls.find((c) => c[2]?.layerId === 'esri-world-hillshade');
+      expect(hillCall).toBeDefined();
+      const request = hillCall![1];
+      // Hillshade matches satellite's z18 for offline parity.
+      expect(request.maxZoom).toBe(18);
+      expect(request.tileUrlTemplate).toContain('World_Hillshade');
+    });
+
+    it('schedules only satellite when no extra layers are enabled', async () => {
+      const enqueueProjects = vi.fn(async () => {});
+      const mockTilePrefetch = {
+        enqueueProjects,
+        enqueueTileUrls: vi.fn(async () => {}),
+        removeLayer: vi.fn(async () => {}),
+        subscribe: vi.fn(() => () => {}),
+      } as unknown as TilePrefetchService;
+
+      cache.getGeoJSON = vi.fn(async () => ({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } }],
+      }));
+
+      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+
+      await controller.syncProjects();
+      await Promise.resolve();
+
+      const calls = enqueueProjects.mock.calls as unknown as Array<
+        [unknown, unknown, { layerId?: string } | undefined]
+      >;
+      const layerIds = calls.map((c) => c[2]?.layerId);
+      expect(layerIds).toEqual(['esri-satellite']);
+    });
+
+    it('setLayerOfflineSync(true) persists opt-in and schedules that layer', async () => {
+      const enqueueProjects = vi.fn(async () => {});
+      const mockTilePrefetch = {
+        enqueueProjects,
+        enqueueTileUrls: vi.fn(async () => {}),
+        removeLayer: vi.fn(async () => {}),
+        subscribe: vi.fn(() => () => {}),
+      } as unknown as TilePrefetchService;
+
+      cache.getGeoJSON = vi.fn(async () => ({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } }],
+      }));
+
+      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+      await controller.syncProjects();
+      enqueueProjects.mockClear();
+
+      await controller.setLayerOfflineSync('esri-world-hillshade', true);
+
+      expect(prefs.getPreferences().layerOfflineSync?.['esri-world-hillshade']).toBe(true);
+      const calls = enqueueProjects.mock.calls as unknown as Array<
+        [unknown, unknown, { layerId?: string } | undefined]
+      >;
+      const hillCall = calls.find((c) => c[2]?.layerId === 'esri-world-hillshade');
+      expect(hillCall).toBeDefined();
+    });
+
+    it('setLayerOfflineSync(false) removes jobs and evicts the layer tiles', async () => {
+      const removeLayer = vi.fn(async () => {});
+      const mockTilePrefetch = {
+        enqueueProjects: vi.fn(async () => {}),
+        enqueueTileUrls: vi.fn(async () => {}),
+        removeLayer,
+        subscribe: vi.fn(() => () => {}),
+      } as unknown as TilePrefetchService;
+
+      prefs.setPreferences({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+        layerOfflineSync: { 'esri-world-hillshade': true },
+      });
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+
+      const hillTileUrl =
+        'https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer/tile/5/1/2';
+      await upsertTile(hillTileUrl, new Uint8Array([1, 2, 3]).buffer, {
+        pinnedByAutoPrefetch: true,
+      });
+      expect(await getTile(hillTileUrl)).not.toBeNull();
+
+      await controller.setLayerOfflineSync('esri-world-hillshade', false);
+
+      expect(prefs.getPreferences().layerOfflineSync?.['esri-world-hillshade']).toBe(false);
+      expect(removeLayer).toHaveBeenCalledWith('esri-world-hillshade');
+      expect(await getTile(hillTileUrl)).toBeNull();
+    });
+
+    it('setLayerOfflineSync ignores the forced satellite layer', async () => {
+      const removeLayer = vi.fn(async () => {});
+      const enqueueProjects = vi.fn(async () => {});
+      const mockTilePrefetch = {
+        enqueueProjects,
+        enqueueTileUrls: vi.fn(async () => {}),
+        removeLayer,
+        subscribe: vi.fn(() => () => {}),
+      } as unknown as TilePrefetchService;
+
+      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+
+      await controller.setLayerOfflineSync('esri-satellite', false);
+
+      expect(removeLayer).not.toHaveBeenCalled();
+      expect(enqueueProjects).not.toHaveBeenCalled();
+      expect(prefs.getPreferences().layerOfflineSync?.['esri-satellite']).toBeUndefined();
+    });
+
+    it('aborts an in-flight layer prefetch when the user logs out', async () => {
+      const enqueueProjects = vi.fn(async () => {});
+      const enqueueTileUrls = vi.fn(async () => {});
+      const mockTilePrefetch = createMockTilePrefetch({ enqueueProjects, enqueueTileUrls });
+
+      cache.getGeoJSON = vi.fn(async () => ({
+        type: 'FeatureCollection',
+        features: [
+          { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } },
+        ],
+      }));
+
+      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+      await controller.syncProjects();
+      enqueueProjects.mockClear();
+      enqueueTileUrls.mockClear();
+
+      // Now hang the *layer* prefetch at the landmark-load step so we can log
+      // out while it is in flight (sync above used the default null overlay).
+      const deferred = createDeferred<GeoJSON.FeatureCollection | null>();
+      cache.getOverlayGeoJSON = vi.fn(() => deferred.promise);
+
+      const pending = controller.setLayerOfflineSync('esri-world-hillshade', true);
+      await flushPromises(3);
+
+      // Logging out must abort the layer-prefetch context (not just the sync /
+      // validation contexts), so the in-flight prefetch bails before enqueueing.
+      await controller.logout();
+
+      deferred.resolve(null);
+      await pending;
+
+      expect(enqueueTileUrls).not.toHaveBeenCalled();
+      expect(enqueueProjects).not.toHaveBeenCalled();
     });
 
     it('does not call network project sync while offline lock is active', async () => {

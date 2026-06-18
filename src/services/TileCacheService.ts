@@ -13,11 +13,15 @@
 
 import maplibregl from 'maplibre-gl';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker.js?url';
+import { MAP } from '../constants';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
+import { buildLayerStyle, isLayerTileUrl } from './MapLayersService';
 import { TileCacheMaintenanceService } from './tileCache/TileCacheMaintenanceService';
 import {
   clearCachedTiles as clearCachedTilesFromStore,
   clearPrefetchJobs as clearPrefetchJobsFromStore,
+  deletePrefetchJobsByLayer as deletePrefetchJobsByLayerFromStore,
+  deleteTilesByUrlPrefixes as deleteTilesByUrlPrefixesFromStore,
   getAllPrefetchJobs as getAllPrefetchJobsFromStore,
   getPrefetchJob as getPrefetchJobFromStore,
   getTile,
@@ -50,6 +54,55 @@ function isAbortError(error: unknown): boolean {
     'name' in error &&
     (error as { name?: string }).name === 'AbortError',
   );
+}
+
+/**
+ * Raised when a downloaded raster tile matches a known "missing data" SHA-256
+ * fingerprint. The tile is treated as a 404: it is never cached and the runtime
+ * request fails so maplibre renders nothing instead of the placeholder image.
+ */
+export class MissingTileError extends Error {
+  constructor(url: string) {
+    super(`Tile matched known missing-data hash: ${url}`);
+    this.name = 'MissingTileError';
+  }
+}
+
+export function isMissingTileError(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    'name' in error &&
+    (error as { name?: string }).name === 'MissingTileError',
+  );
+}
+
+function hexFromArrayBuffer(buffer: ArrayBuffer): string {
+  let hex = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.length; i += 1) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+/**
+ * True when `data` is a known provider "no data" placeholder tile, detected by
+ * SHA-256 fingerprint. Cheap-guarded: skips entirely when no hashes are
+ * configured, when the URL is not a configured raster tile, or when
+ * `crypto.subtle` is unavailable.
+ */
+async function isMissingDataTile(url: string, data: ArrayBuffer): Promise<boolean> {
+  if (MAP.MISSING_TILE_SHA256_HASHES.length === 0) return false;
+  if (!isLayerTileUrl(url)) return false;
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return false;
+  try {
+    const digest = await subtle.digest('SHA-256', data);
+    return MAP.MISSING_TILE_SHA256_HASHES.includes(hexFromArrayBuffer(digest));
+  } catch {
+    return false;
+  }
 }
 
 function hasUsableNetwork(): boolean {
@@ -118,6 +171,11 @@ export async function fetchAndCacheTile(
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.arrayBuffer();
+  // Known missing-data tile: count as processed but never store it. Returning 0
+  // bytes lets the prefetch queue mark the tile done without retrying.
+  if (await isMissingDataTile(url, data)) {
+    return 0;
+  }
   await upsertTileStrict(url, data, pinnedByAutoPrefetch);
   return data.byteLength;
 }
@@ -131,9 +189,10 @@ export async function fetchAndCachePinnedTile(
 }
 
 export async function getPrefetchJob(
-  projectId: string,
+  layerId: string,
+  targetId: string,
 ): Promise<TilePrefetchJobState | null> {
-  return getPrefetchJobFromStore(projectId);
+  return getPrefetchJobFromStore(layerId, targetId);
 }
 
 export async function getAllPrefetchJobs(): Promise<TilePrefetchJobState[]> {
@@ -146,6 +205,18 @@ export async function setPrefetchJob(job: TilePrefetchJobState): Promise<void> {
 
 export async function clearPrefetchJobs(): Promise<void> {
   await clearPrefetchJobsFromStore();
+}
+
+export async function deletePrefetchJobsByLayer(layerId: string): Promise<void> {
+  await deletePrefetchJobsByLayerFromStore(layerId);
+}
+
+/**
+ * Evict all cached tiles whose URL begins with any of the supplied prefixes
+ * (used to reclaim space when a layer's offline sync is turned off).
+ */
+export async function evictLayerTiles(prefixes: string[]): Promise<void> {
+  await deleteTilesByUrlPrefixesFromStore(prefixes);
 }
 
 export async function clearCachedTiles(): Promise<void> {
@@ -178,12 +249,19 @@ async function fetchWithCache(url: string, signal?: AbortSignal): Promise<ArrayB
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.arrayBuffer();
 
+    // Known missing-data tile: do not cache and do not fall back to cache.
+    // Propagate so maplibre renders nothing (treated as 404) for this tile.
+    if (await isMissingDataTile(url, data)) {
+      throw new MissingTileError(url);
+    }
+
     // Cache in background (don't await -- non-blocking)
     void upsertTileBestEffort(url, data, false);
 
     return data;
   } catch (error) {
     if (isAbortError(error)) throw error;
+    if (isMissingTileError(error)) throw error;
 
     // Network failed -- try cache
     const cached = await getTile(url);
@@ -253,6 +331,18 @@ export async function getCachedStyle(
   }
 
   return rewriteUrls(styleJson);
+}
+
+/**
+ * Build the maplibre style for a given layer from the bundled layer config and
+ * rewrite its tile URLs to `cached-https://` so all tile requests flow through
+ * the offline cache (and the magic-hash missing-tile check). The style itself
+ * is bundled, so this resolves offline without any network or cached document.
+ */
+export async function getCachedLayerStyle(
+  layerId: string,
+): Promise<Record<string, unknown>> {
+  return rewriteUrls(buildLayerStyle(layerId));
 }
 
 /**
