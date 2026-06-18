@@ -72,6 +72,8 @@ export interface LandmarkDetails {
   name: string;
   description: string;
   gpsCoordinate: string;
+  collectionName: string;
+  isPersonalCollection: boolean;
 }
 
 export interface ProjectPointDetails {
@@ -255,12 +257,23 @@ function parseSurfaceStation(feature: InteractiveOverlayFeature): SurfaceStation
 
 function parseLandmark(feature: InteractiveOverlayFeature): LandmarkDetails {
   const properties = feature.properties ?? {};
+  const isPersonalCollection =
+    properties.is_personal_collection === true
+    || properties.collection_type === 'PERSONAL';
+  const collectionName = normalizeStringProperty(properties.collection_name);
   return {
     type: 'landmark',
     id: getFeatureId(feature),
     name: normalizeStringProperty(properties.name),
     description: normalizeStringProperty(properties.description),
     gpsCoordinate: formatGpsCoordinate(feature.geometry),
+    collectionName:
+      collectionName !== 'N/A'
+        ? collectionName
+        : isPersonalCollection
+          ? 'Personal Landmarks'
+          : 'N/A',
+    isPersonalCollection,
   };
 }
 

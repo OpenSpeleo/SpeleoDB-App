@@ -14,6 +14,12 @@ export interface SpeleoDBContextValue {
   syncStatus: SyncStatus;
   lastSyncedAt: number | null;
   tilePrefetchJobs: TilePrefetchJobState[];
+  /** Storage-consent modal should be open (one-time auto prompt or manual re-trigger). */
+  storageConsentRequired: boolean;
+  /** Prefetch stalled at the cache cap and overflow not yet approved. */
+  isTileCacheOverLimit: boolean;
+  /** User approved letting prefetch exceed the cache cap. */
+  isTileCacheOverLimitApproved: boolean;
 }
 
 export const SpeleoDBContext = createContext<SpeleoDBContextValue | null>(null);

@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { IonButton, IonContent, IonModal } from '@ionic/react'
 
 import logoPng from '../assets/media/logo.png'
+import { MAP } from '../constants'
 import { runTileCacheStartupMaintenanceRuntime } from '../services/TileCacheRuntime'
 import type { StartupUiCoordinatorResult } from './useStartupUiCoordinator'
 import { useSpeleoDB } from './useSpeleoDB'
@@ -9,6 +10,8 @@ import { useSpeleoDB } from './useSpeleoDB'
 interface SpeleoDBStartupModalsProps {
   startupUi: StartupUiCoordinatorResult
 }
+
+const TILE_CACHE_CAP_MB = Math.round(MAP.TILE_CACHE_MAX_BYTES / (1024 * 1024))
 
 export function SpeleoDBStartupModals({
   startupUi,
@@ -172,6 +175,69 @@ export function SpeleoDBStartupModals({
             </div>
             <IonButton expand="block" onClick={startupUi.acknowledgeOfflineMode}>
               Go Offline
+            </IonButton>
+          </div>
+        </IonContent>
+      </IonModal>
+
+      <IonModal
+        isOpen={startupUi.showStorageConsentModal}
+        // A genuine dismissal (button, gesture, or controlled isOpen close after
+        // a user choice) marks the prompt acknowledged so it never auto-reappears.
+        // But when the modal is closed only because a higher-priority modal
+        // (offline/companion) took the slot, we must NOT acknowledge -- otherwise
+        // the user is silently opted out of the one-time popup. It re-shows once
+        // the gate clears.
+        // NOTE: do NOT set canDismiss={false} -- that also blocks the controlled
+        // close, leaving the modal permanently stuck open.
+        onDidDismiss={() => {
+          if (!startupUi.storageConsentSuppressedByGate) {
+            controller.acknowledgeStoragePrompt()
+          }
+        }}
+        backdropDismiss={false}
+        data-testid="storage-consent-modal"
+      >
+        <IonContent className="ion-padding">
+          <div className="flex flex-col h-full justify-center max-w-sm mx-auto text-center">
+            <div className="mb-6">
+              <span className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-amber-500/20 text-amber-400 mb-4">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 7v10a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H6a2 2 0 00-2 2z"
+                  />
+                </svg>
+              </span>
+              <h2 className="text-xl font-semibold text-slate-100 mb-2">More storage needed</h2>
+              <p className="text-slate-400 text-sm">
+                Caching your projects and landmarks for offline use needs more than{' '}
+                {TILE_CACHE_CAP_MB} MB of device storage.
+              </p>
+              <p className="text-slate-500 text-xs mt-3">
+                Allow SpeleoDB to use additional storage to finish caching maps, or keep the
+                {` ${TILE_CACHE_CAP_MB} MB`} limit. You can change this later in Settings.
+              </p>
+            </div>
+            <IonButton
+              expand="block"
+              color="warning"
+              data-testid="storage-consent-allow"
+              onClick={() => controller.approveTileCacheOverLimit()}
+            >
+              Allow more storage
+            </IonButton>
+            <IonButton
+              expand="block"
+              fill="outline"
+              color="medium"
+              className="mt-3"
+              data-testid="storage-consent-decline"
+              onClick={() => controller.acknowledgeStoragePrompt()}
+            >
+              Not now
             </IonButton>
           </div>
         </IonContent>

@@ -31,8 +31,12 @@ import {
 
 const STYLE_CACHE_KEY = '__style_json__';
 let tileCacheOfflineMode = false;
+// When true, pinned prefetch writes may exceed the 500 MB cap. Driven solely by
+// explicit, persisted user consent (see SpeleoDBController + PreferencesService).
+let tileCacheOverLimitApproved = false;
 const tileCacheMaintenance = new TileCacheMaintenanceService({
   isOnline: () => !tileCacheOfflineMode,
+  allowOverLimit: () => tileCacheOverLimitApproved,
 });
 
 // Use explicit worker URL instead of inline/blob worker bootstrap.
@@ -54,6 +58,18 @@ function hasUsableNetwork(): boolean {
 
 export function setTileCacheOfflineMode(isOffline: boolean): void {
   tileCacheOfflineMode = isOffline;
+}
+
+/**
+ * Allow (or disallow) pinned prefetch writes to exceed the tile-cache cap.
+ * Only ever set true after explicit user approval.
+ */
+export function setTileCacheOverLimitApproved(approved: boolean): void {
+  tileCacheOverLimitApproved = approved;
+}
+
+export function isTileCacheOverLimitApproved(): boolean {
+  return tileCacheOverLimitApproved;
 }
 
 // ==================== Public prefetch helpers ====================

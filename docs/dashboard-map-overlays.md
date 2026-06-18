@@ -61,7 +61,7 @@ Project GeoJSON drawing order is pinned below marker-oriented layers:
 
 - Landmarks:
   - symbol marker `▼`,
-  - blue color (`#3b82f6`),
+  - color driven by the landmark's collection (`properties.collection_color`), fallback `COLORS.FALLBACK` (`#94a3b8`); halo flips to dark slate `#0f172a` when the collection color is white so the marker stays visible (mirrors the web map viewer). See `docs/landmark-collections.md`.
   - marker min zoom `12`,
   - label layer (`name`) from zoom `14`.
 - Surface stations:
@@ -160,6 +160,7 @@ Dashboard opens a single reusable read-only modal (`OverlayMarkerDetailsModal`) 
 - **Landmark** (title: "Landmark"):
   - Name (`properties.name`)
   - Description (`properties.description`)
+  - Collection (`properties.collection_name`, with a "Private" badge when `properties.is_personal_collection` is true / `collection_type === 'PERSONAL'`)
   - GPS coordinate (extracted from feature geometry as `lat, lng`)
 - **Project entry point** (title: "Project Entry Point"):
   - Project name (resolved from `Project.name` via layer ID, not from GeoJSON properties)
@@ -268,18 +269,20 @@ Zoom levels and marker sizes are sourced from `MAP_OVERLAYS` in `src/constants.t
 
 ## Landmark visibility toggle
 
-The Settings page includes a "Show landmarks" toggle under the "Map Settings" section. This toggle controls whether landmark marker and label layers are rendered on the map.
+The Settings page includes a "Show landmarks" toggle under the "Map Settings" section. This is the **global master gate**: when off, no landmark layers render regardless of per-collection state.
 
 - Persisted in `UserPreferences.showLandmarks` via `PreferencesService`.
 - Default: `true` (landmarks shown when preference is missing or undefined).
 - Settings communicates the toggle state to Dashboard in real time via shared React state in `App.tsx` since both pages stay mounted simultaneously.
 - Implementation: `src/pages/Settings.tsx`, `src/pages/Dashboard.tsx`, `src/services/PreferencesService.ts`.
 
+Finer-grained, **per-collection** visibility (plus the Landmarks tab/panel that hosts those toggles) is documented in `docs/landmark-collections.md`. The map draws a landmark only when the global toggle is on **and** its collection is not toggled off.
+
 ## Share functionality
 
 The marker detail modal includes a native Share button (via `@capacitor/share`) for a subset of marker types:
 
-- **Landmark**: shares name, description, and GPS coordinate.
+- **Landmark**: shares name, collection (with `(Private)` suffix for personal collections), and GPS coordinate.
 - **Surface station**: shares name and GPS coordinate.
 - **Project entry point** (star): shares project name, name, and GPS coordinate.
 - **Map point** (long press): shares GPS coordinate.

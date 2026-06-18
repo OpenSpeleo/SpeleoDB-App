@@ -186,7 +186,13 @@ describe('overlayMarkerDetails utilities', () => {
       expect(parseOverlayMarkerDetails({
         id: 'feature-lm',
         layer: { id: 'landmarks-layer' },
-        properties: { id: 'lm-1', name: 'Big Entrance', description: 'Main cave entrance' },
+        properties: {
+          id: 'lm-1',
+          name: 'Big Entrance',
+          description: 'Main cave entrance',
+          collection_name: 'Shared Survey',
+          is_personal_collection: false,
+        },
         geometry: { type: 'Point', coordinates: [2.3, 46.6] },
       })).toEqual({
         type: 'landmark',
@@ -194,6 +200,24 @@ describe('overlayMarkerDetails utilities', () => {
         name: 'Big Entrance',
         description: 'Main cave entrance',
         gpsCoordinate: '46.6, 2.3',
+        collectionName: 'Shared Survey',
+        isPersonalCollection: false,
+      });
+    });
+
+    it('flags personal collections and defaults their name', () => {
+      expect(parseOverlayMarkerDetails({
+        layer: { id: 'landmarks-layer' },
+        properties: { id: 'lm-3', name: 'Camp', collection_type: 'PERSONAL' },
+        geometry: { type: 'Point', coordinates: [2.3, 46.6] },
+      })).toEqual({
+        type: 'landmark',
+        id: 'lm-3',
+        name: 'Camp',
+        description: 'N/A',
+        gpsCoordinate: '46.6, 2.3',
+        collectionName: 'Personal Landmarks',
+        isPersonalCollection: true,
       });
     });
 
@@ -207,6 +231,8 @@ describe('overlayMarkerDetails utilities', () => {
         name: 'N/A',
         description: 'N/A',
         gpsCoordinate: 'N/A',
+        collectionName: 'N/A',
+        isPersonalCollection: false,
       });
     });
 

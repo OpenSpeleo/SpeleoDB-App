@@ -11,10 +11,19 @@ import {
   setCountryVisibilityPreferences,
   getCountryCollapsedPreferences,
   setCountryCollapsedPreference,
+  getLandmarkCollectionVisibilityPreferences,
+  setLandmarkCollectionVisibilityPreference,
+  setLandmarkCollectionVisibilityPreferences,
+  getLandmarkCollectionCollapsedPreferences,
+  setLandmarkCollectionCollapsedPreference,
   getHasCompletedGuidedTour,
   setHasCompletedGuidedTour,
   getShowLandmarks,
   setShowLandmarks,
+  getTileCacheOverLimitApproved,
+  setTileCacheOverLimitApproved,
+  getTileCacheOverLimitPromptAcknowledged,
+  setTileCacheOverLimitPromptAcknowledged,
   getColorMode,
   setColorMode,
   getMeasurementUnit,
@@ -475,6 +484,67 @@ describe('PreferencesService', () => {
     });
   });
 
+  describe('landmark collection visibility preferences', () => {
+    it('returns empty map when missing (default-visible semantics)', () => {
+      expect(getLandmarkCollectionVisibilityPreferences()).toEqual({});
+    });
+
+    it('persists single collection visibility', () => {
+      seedValidAuth();
+      setLandmarkCollectionVisibilityPreference('col-1', false);
+      expect(getLandmarkCollectionVisibilityPreferences()).toEqual({ 'col-1': false });
+    });
+
+    it('ignores empty collection id', () => {
+      seedValidAuth();
+      setLandmarkCollectionVisibilityPreference('', false);
+      expect(getLandmarkCollectionVisibilityPreferences()).toEqual({});
+    });
+
+    it('persists multiple collections at once (bulk show/hide all)', () => {
+      seedValidAuth();
+      setLandmarkCollectionVisibilityPreferences({ 'col-1': false, 'col-2': true });
+      expect(getLandmarkCollectionVisibilityPreferences()).toEqual({
+        'col-1': false,
+        'col-2': true,
+      });
+    });
+
+    it('drops non-boolean values when persisting in bulk', () => {
+      seedValidAuth();
+      setLandmarkCollectionVisibilityPreferences({
+        'col-1': false,
+        'col-2': 'nope' as unknown as boolean,
+      });
+      expect(getLandmarkCollectionVisibilityPreferences()).toEqual({ 'col-1': false });
+    });
+
+    it('preserves collection visibility across unrelated partial updates', () => {
+      seedValidAuth();
+      setLandmarkCollectionVisibilityPreference('col-1', false);
+      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      expect(getLandmarkCollectionVisibilityPreferences()).toEqual({ 'col-1': false });
+    });
+  });
+
+  describe('landmark collection collapsed preferences', () => {
+    it('returns empty map when missing', () => {
+      expect(getLandmarkCollectionCollapsedPreferences()).toEqual({});
+    });
+
+    it('persists single collection collapse state', () => {
+      seedValidAuth();
+      setLandmarkCollectionCollapsedPreference('col-1', true);
+      expect(getLandmarkCollectionCollapsedPreferences()).toEqual({ 'col-1': true });
+    });
+
+    it('ignores empty collection id', () => {
+      seedValidAuth();
+      setLandmarkCollectionCollapsedPreference('', true);
+      expect(getLandmarkCollectionCollapsedPreferences()).toEqual({});
+    });
+  });
+
   describe('lastSyncedAt preferences', () => {
     it('is undefined when missing', () => {
       seedValidAuth();
@@ -540,6 +610,61 @@ describe('PreferencesService', () => {
       });
       clearPreferences();
       expect(getPreferences().lastSyncedAt).toBeUndefined();
+    });
+  });
+
+  describe('tile-cache overflow consent preferences', () => {
+    it('defaults both flags to false when missing', () => {
+      seedValidAuth();
+      expect(getTileCacheOverLimitApproved()).toBe(false);
+      expect(getTileCacheOverLimitPromptAcknowledged()).toBe(false);
+    });
+
+    it('round-trips the approved flag', () => {
+      seedValidAuth();
+      setTileCacheOverLimitApproved(true);
+      expect(getTileCacheOverLimitApproved()).toBe(true);
+      setTileCacheOverLimitApproved(false);
+      expect(getTileCacheOverLimitApproved()).toBe(false);
+    });
+
+    it('round-trips the acknowledged flag', () => {
+      seedValidAuth();
+      setTileCacheOverLimitPromptAcknowledged(true);
+      expect(getTileCacheOverLimitPromptAcknowledged()).toBe(true);
+    });
+
+    it('updating one flag does not clobber the other', () => {
+      seedValidAuth();
+      setTileCacheOverLimitPromptAcknowledged(true);
+      setTileCacheOverLimitApproved(true);
+      expect(getTileCacheOverLimitPromptAcknowledged()).toBe(true);
+      expect(getTileCacheOverLimitApproved()).toBe(true);
+
+      setTileCacheOverLimitApproved(false);
+      expect(getTileCacheOverLimitApproved()).toBe(false);
+      // Acknowledged survives an approval toggle (revoke keeps it set).
+      expect(getTileCacheOverLimitPromptAcknowledged()).toBe(true);
+    });
+
+    it('drops non-boolean stored values', () => {
+      seedValidAuth();
+      const stored = JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY) ?? '{}');
+      stored.tileCacheOverLimitApproved = 'yes';
+      stored.tileCacheOverLimitPromptAcknowledged = 1;
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify(stored));
+
+      expect(getTileCacheOverLimitApproved()).toBe(false);
+      expect(getTileCacheOverLimitPromptAcknowledged()).toBe(false);
+    });
+
+    it('clearPreferences wipes both flags', () => {
+      seedValidAuth();
+      setTileCacheOverLimitApproved(true);
+      setTileCacheOverLimitPromptAcknowledged(true);
+      clearPreferences();
+      expect(getTileCacheOverLimitApproved()).toBe(false);
+      expect(getTileCacheOverLimitPromptAcknowledged()).toBe(false);
     });
   });
 });

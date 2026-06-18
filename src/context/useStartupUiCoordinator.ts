@@ -42,12 +42,21 @@ interface UseStartupUiCoordinatorOptions {
     instance?: string
   }
   hideSplashScreenSafely: (reason: string) => void
+  storageConsentRequired?: boolean
 }
 
 export interface StartupUiCoordinatorResult {
   showConnectingBanner: boolean
   showOfflineModal: boolean
   showCompanionInfoModal: boolean
+  showStorageConsentModal: boolean
+  /**
+   * True when storage consent is still required but the modal is being hidden
+   * solely because a higher-priority modal (offline/companion) holds the slot.
+   * A dismissal in this window must NOT acknowledge the prompt, or the user is
+   * silently opted out of the one-time auto popup forever.
+   */
+  storageConsentSuppressedByGate: boolean
   allowOfflineModalDismiss: boolean
   allowCompanionInfoModalDismiss: boolean
   acknowledgeOfflineMode: () => void
@@ -156,6 +165,7 @@ export function useStartupUiCoordinator({
   location,
   getPreferences,
   hideSplashScreenSafely,
+  storageConsentRequired = false,
 }: UseStartupUiCoordinatorOptions): StartupUiCoordinatorResult {
   const initialPathnameRef = useRef(location.pathname)
   const mountedRef = useRef(true)
@@ -298,6 +308,21 @@ export function useStartupUiCoordinator({
     !state.offlineModeAcknowledged &&
     !state.isStartupValidationPending
 
+  // The storage-consent prompt composes with the other startup modals: never
+  // shown at the same time as the offline or companion-info modals.
+  const showStorageConsentModal =
+    authState.isAuthenticated &&
+    storageConsentRequired &&
+    !showOfflineModal &&
+    !state.showCompanionInfoModal
+
+  // The consent is still wanted, but a higher-priority modal currently occupies
+  // the slot. Distinguishes a gating-driven close from a genuine user dismissal.
+  const storageConsentSuppressedByGate =
+    authState.isAuthenticated &&
+    storageConsentRequired &&
+    (showOfflineModal || state.showCompanionInfoModal)
+
   const acknowledgeOfflineMode = useCallback(() => {
     dispatch({ type: 'acknowledge_offline_mode' })
   }, [])
@@ -328,6 +353,8 @@ export function useStartupUiCoordinator({
     showConnectingBanner: state.showConnectingBanner,
     showOfflineModal,
     showCompanionInfoModal: state.showCompanionInfoModal,
+    showStorageConsentModal,
+    storageConsentSuppressedByGate,
     allowOfflineModalDismiss: state.allowOfflineModalDismiss,
     allowCompanionInfoModalDismiss: state.allowCompanionInfoModalDismiss,
     acknowledgeOfflineMode,

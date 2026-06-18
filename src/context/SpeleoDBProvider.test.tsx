@@ -64,6 +64,7 @@ const {
 });
 
 vi.mock('@ionic/react', () => ({
+  setupIonicReact: () => {},
   IonModal: ({
     children,
     isOpen,

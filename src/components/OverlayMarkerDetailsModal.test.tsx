@@ -37,6 +37,18 @@ const landmarkDetail: OverlayMarkerDetails = {
   name: 'Blue Spring',
   description: 'Natural spring',
   gpsCoordinate: '46.6000, 2.3000',
+  collectionName: 'Shared Survey',
+  isPersonalCollection: false,
+};
+
+const personalLandmarkDetail: OverlayMarkerDetails = {
+  type: 'landmark',
+  id: 'lm-2',
+  name: 'Camp',
+  description: 'My waypoint',
+  gpsCoordinate: '46.6100, 2.3100',
+  collectionName: 'Personal Landmarks',
+  isPersonalCollection: true,
 };
 
 const mapLongPressDetail: OverlayMarkerDetails = {
@@ -113,6 +125,30 @@ describe('OverlayMarkerDetailsModal', () => {
     expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('Blue Spring');
     expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent('Natural spring');
     expect(screen.getByTestId('overlay-marker-gps')).toHaveTextContent('46.6000, 2.3000');
+  });
+
+  it('renders landmark collection without a private badge for shared collections', () => {
+    render(<OverlayMarkerDetailsModal detail={landmarkDetail} onClose={vi.fn()} />);
+    expect(screen.getByTestId('overlay-marker-collection')).toHaveTextContent('Shared Survey');
+    expect(screen.queryByTestId('overlay-marker-collection-private')).not.toBeInTheDocument();
+  });
+
+  it('renders a private badge for personal landmark collections', () => {
+    render(<OverlayMarkerDetailsModal detail={personalLandmarkDetail} onClose={vi.fn()} />);
+    expect(screen.getByTestId('overlay-marker-collection')).toHaveTextContent('Personal Landmarks');
+    expect(screen.getByTestId('overlay-marker-collection-private')).toBeInTheDocument();
+  });
+
+  it('includes the collection in landmark share text', async () => {
+    const user = userEvent.setup();
+    render(<OverlayMarkerDetailsModal detail={personalLandmarkDetail} onClose={vi.fn()} />);
+
+    await user.click(screen.getByTestId('share-button'));
+
+    expect(mockShare).toHaveBeenCalledWith({
+      title: 'Landmark',
+      text: expect.stringContaining('Personal Landmarks (Private)'),
+    });
   });
 
   it('renders cylinder install fields', () => {

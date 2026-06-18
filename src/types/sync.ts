@@ -62,6 +62,10 @@ export interface TilePrefetchPhaseResult extends SyncPhaseResult<'tile_prefetch'
   eligibleProjectCount: number
   scheduledProjectCount: number
   failedProjectCount: number
+  /** Number of (deduped) satellite tiles scheduled for the combined landmarks job. */
+  landmarkTileCount?: number
+  /** True when a landmarks tile prefetch job was scheduled this sync. */
+  landmarkScheduled?: boolean
 }
 
 export interface SyncProjectsResult {

@@ -2,6 +2,7 @@ import type {
   TilePrefetchJobState,
   TilePrefetchProjectInput,
   TilePrefetchRequest,
+  TilePrefetchTileUrlsInput,
 } from '../types/tilePrefetch'
 import type { TilePrefetchServiceLike } from './TilePrefetchService'
 
@@ -14,6 +15,8 @@ type JobsListener = (jobs: TilePrefetchJobState[]) => void
 const NOOP_TILE_PREFETCH_SERVICE: TilePrefetchServiceLike = {
   subscribe: () => () => {},
   enqueueProjects: async () => {},
+  enqueueTileUrls: async () => {},
+  resumeBlockedJobs: () => {},
   waitForIdle: async () => {},
   dispose: () => {},
 }
@@ -53,6 +56,22 @@ export class LazyTilePrefetchService implements TilePrefetchServiceLike {
     const service = await this.loadService()
     if (this.disposed) return
     await service.enqueueProjects(projects, request, options)
+  }
+
+  async enqueueTileUrls(
+    target: TilePrefetchTileUrlsInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    if (this.disposed || target.tileUrls.length === 0) return
+    const service = await this.loadService()
+    if (this.disposed) return
+    await service.enqueueTileUrls(target, options)
+  }
+
+  resumeBlockedJobs(): void {
+    // Only meaningful once the underlying service (and its in-memory queue)
+    // exists; nothing to resume otherwise.
+    this.service?.resumeBlockedJobs()
   }
 
   async waitForIdle(): Promise<void> {

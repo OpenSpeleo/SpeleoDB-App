@@ -63,6 +63,21 @@ export function SpeleoDBStoreProvider({ children }: SpeleoDBStoreProviderProps) 
     () => controller.tilePrefetchJobs,
   )
 
+  const storageConsentRequired = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.storageConsentRequired,
+  )
+
+  const isTileCacheOverLimit = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.isTileCacheOverLimit,
+  )
+
+  const isTileCacheOverLimitApproved = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.isTileCacheOverLimitApproved,
+  )
+
   const value: SpeleoDBContextValue = {
     controller,
     authState,
@@ -72,6 +87,9 @@ export function SpeleoDBStoreProvider({ children }: SpeleoDBStoreProviderProps) 
     syncStatus,
     lastSyncedAt,
     tilePrefetchJobs,
+    storageConsentRequired,
+    isTileCacheOverLimit,
+    isTileCacheOverLimitApproved,
   }
 
   return (

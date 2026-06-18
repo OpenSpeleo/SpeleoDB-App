@@ -15,11 +15,12 @@ import {
 import Map, { Layer, Source } from 'react-map-gl/maplibre';
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
 import type { LngLatBoundsLike, Map as MaplibreMap } from 'maplibre-gl';
+import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { Geolocation } from '@capacitor/geolocation';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 import { useSpeleoDB } from '../context/useSpeleoDB';
-import { MAP, MAP_OVERLAYS, PROJECT_LAYERS } from '../constants';
+import { COLORS, MAP, MAP_OVERLAYS, PROJECT_LAYERS } from '../constants';
 import type { MapOverlayGeoJsonRecord, MapOverlayId, MapOverlaySizes } from '../types/mapOverlay';
 import { registerTileCacheProtocol, getCachedStyle } from '../services/TileCacheService';
 import {
@@ -31,9 +32,19 @@ import {
   setCountryVisibilityPreferences,
   getCountryCollapsedPreferences,
   setCountryCollapsedPreference,
+  getLandmarkCollectionVisibilityPreferences,
+  setLandmarkCollectionVisibilityPreference,
+  setLandmarkCollectionVisibilityPreferences,
+  getLandmarkCollectionCollapsedPreferences,
+  setLandmarkCollectionCollapsedPreference,
 } from '../services/PreferencesService';
 import ProjectPanel from '../components/ProjectPanel';
+import LandmarkPanel from '../components/LandmarkPanel';
 import AppTabBar from '../components/AppTabBar';
+import {
+  buildLandmarkCollectionGroups,
+  type LandmarkListItem,
+} from '../utils/landmarkCollections';
 import GeolocationErrorModal from '../components/GeolocationErrorModal';
 import DistanceScale from '../components/map/DistanceScale';
 import DepthGauge from '../components/map/DepthGauge';
@@ -66,6 +77,25 @@ import biologyIcon from '../assets/media/map-icons/fish-icon.png';
 import geologyIcon from '../assets/media/map-icons/rock-icon.png';
 import explorationLeadIcon from '../assets/media/map-icons/exploration-lead-icon.png';
 import cylinderIcon from '../assets/media/map-icons/cylinder-orange-icon.png';
+
+// Color landmark markers/labels by their collection color (mirrors the web map
+// viewer). Falls back to the neutral palette color when a feature has no valid
+// collection color. The halo flips to a dark slate when the marker itself is
+// white so it stays visible against bright tiles.
+const LANDMARK_COLLECTION_COLOR_EXPRESSION = [
+  'coalesce',
+  ['get', 'collection_color'],
+  COLORS.FALLBACK,
+] as ExpressionSpecification;
+
+const LANDMARK_COLLECTION_HALO_EXPRESSION = [
+  'case',
+  // Case-insensitive + null-safe: a white marker (any hex casing) gets a dark
+  // halo so labels stay visible against bright tiles.
+  ['==', ['downcase', ['coalesce', ['get', 'collection_color'], '']], '#ffffff'],
+  '#0f172a',
+  '#ffffff',
+] as ExpressionSpecification;
 
 // ==================== GeoJSON type alias ====================
 
@@ -416,6 +446,8 @@ registerTileCacheProtocol();
 interface DashboardProps {
   isProjectPanelOpen: boolean;
   onProjectPanelChange: (open: boolean) => void;
+  isLandmarkPanelOpen: boolean;
+  onLandmarkPanelChange: (open: boolean) => void;
   showLandmarks: boolean;
   colorMode: MapColorMode;
   measurementUnit: MeasurementUnit;
@@ -424,6 +456,8 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({
   isProjectPanelOpen,
   onProjectPanelChange,
+  isLandmarkPanelOpen,
+  onLandmarkPanelChange,
   showLandmarks,
   colorMode,
   measurementUnit,
@@ -453,6 +487,15 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [countryCollapsed, setCountryCollapsed] = useState<Record<string, boolean>>(
     () => getCountryCollapsedPreferences(),
   );
+
+  // Per-landmark-collection visibility + collapse (restored from prefs once on
+  // mount). Missing keys imply visible / expanded.
+  const [landmarkCollectionVisibility, setLandmarkCollectionVisibility] = useState<
+    Record<string, boolean>
+  >(() => getLandmarkCollectionVisibilityPreferences());
+  const [landmarkCollectionCollapsed, setLandmarkCollectionCollapsed] = useState<
+    Record<string, boolean>
+  >(() => getLandmarkCollectionCollapsedPreferences());
 
   // Loaded GeoJSON keyed by project ID
   const [geoJsonData, setGeoJsonData] = useState<GeoJsonRecord>({});
@@ -657,6 +700,26 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
     return nextData;
   }, [effectiveActiveProjectIds, overlayGeoJsonData]);
+
+  // Landmark collection groups for the panel, derived entirely from the cached
+  // landmarks GeoJSON (fully offline -- no extra endpoint).
+  const landmarkCollectionGroups = useMemo(
+    () => buildLandmarkCollectionGroups(overlayGeoJsonData.landmarks ?? null),
+    [overlayGeoJsonData],
+  );
+
+  // Landmarks actually drawn on the map: only those whose collection is visible
+  // (missing key implies visible). The whole layer is additionally gated behind
+  // the global `showLandmarks` master toggle at render time.
+  const visibleLandmarksGeoJSON = useMemo(() => {
+    const featureCollection = visibleOverlayGeoJsonData.landmarks;
+    if (!featureCollection) return undefined;
+    const features = featureCollection.features.filter((feature) => {
+      const collectionId = String(feature.properties?.collection ?? '') || '__personal__';
+      return landmarkCollectionVisibility[collectionId] !== false;
+    });
+    return { ...featureCollection, features };
+  }, [visibleOverlayGeoJsonData, landmarkCollectionVisibility]);
 
   // ---- Auto-fit bounds on first data load -----------------------------------
 
@@ -1114,6 +1177,57 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
   }, []);
 
+  const handleToggleLandmarkCollection = useCallback(
+    (collectionId: string, visible: boolean) => {
+      setLandmarkCollectionVisibility((prev) => ({ ...prev, [collectionId]: visible }));
+      setLandmarkCollectionVisibilityPreference(collectionId, visible);
+    },
+    [],
+  );
+
+  const handleToggleLandmarkCollectionCollapsed = useCallback(
+    (collectionId: string, collapsed: boolean) => {
+      setLandmarkCollectionCollapsed((prev) => ({ ...prev, [collectionId]: collapsed }));
+      setLandmarkCollectionCollapsedPreference(collectionId, collapsed);
+    },
+    [],
+  );
+
+  const handleLandmarkShowAll = useCallback(() => {
+    const updates: Record<string, boolean> = {};
+    for (const group of landmarkCollectionGroups) updates[group.id] = true;
+    if (Object.keys(updates).length === 0) return;
+    setLandmarkCollectionVisibility((prev) => ({ ...prev, ...updates }));
+    setLandmarkCollectionVisibilityPreferences(updates);
+  }, [landmarkCollectionGroups]);
+
+  const handleLandmarkHideAll = useCallback(() => {
+    const updates: Record<string, boolean> = {};
+    for (const group of landmarkCollectionGroups) updates[group.id] = false;
+    if (Object.keys(updates).length === 0) return;
+    setLandmarkCollectionVisibility((prev) => ({ ...prev, ...updates }));
+    setLandmarkCollectionVisibilityPreferences(updates);
+  }, [landmarkCollectionGroups]);
+
+  const handleLocateLandmark = useCallback(
+    (landmark: LandmarkListItem) => {
+      // Close the panel so the map is unobstructed before animating.
+      onLandmarkPanelChange(false);
+      const map = mapRef.current;
+      if (map) {
+        (map.getMap() as MaplibreMap).flyTo({
+          center: [landmark.longitude, landmark.latitude],
+          zoom: 16,
+          duration: 1000,
+        });
+      }
+      // NOTE: intentionally do NOT open the details modal here. The landmark
+      // details modal is only reachable by physically tapping the marker on
+      // the map; a panel-row tap just flies to the landmark.
+    },
+    [onLandmarkPanelChange],
+  );
+
   const handleDismissOverlayMarkerDetailsModal = useCallback(() => {
     setSelectedOverlayMarkerDetail(null);
   }, []);
@@ -1254,11 +1368,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                   );
                 })}
 
-                {showLandmarks && visibleOverlayGeoJsonData.landmarks && (
+                {showLandmarks && visibleLandmarksGeoJSON && (
                   <Source
                     id="landmarks-source"
                     type="geojson"
-                    data={visibleOverlayGeoJsonData.landmarks}
+                    data={visibleLandmarksGeoJSON}
                   >
                     <Layer
                       id="landmarks-layer"
@@ -1272,8 +1386,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                         'text-ignore-placement': true,
                       }}
                       paint={{
-                        'text-color': '#3b82f6',
-                        'text-halo-color': '#ffffff',
+                        'text-color': LANDMARK_COLLECTION_COLOR_EXPRESSION,
+                        'text-halo-color': LANDMARK_COLLECTION_HALO_EXPRESSION,
                         'text-halo-width': 2,
                         'text-halo-blur': 0.5,
                       }}
@@ -1292,8 +1406,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                         'text-ignore-placement': false,
                       }}
                       paint={{
-                        'text-color': '#3b82f6',
-                        'text-halo-color': '#ffffff',
+                        'text-color': LANDMARK_COLLECTION_COLOR_EXPRESSION,
+                        'text-halo-color': LANDMARK_COLLECTION_HALO_EXPRESSION,
                         'text-halo-width': 1.5,
                       }}
                     />
@@ -1674,6 +1788,20 @@ const Dashboard: React.FC<DashboardProps> = ({
             isOpen={isProjectPanelOpen}
           />
 
+          {/* ---- Landmark panel ---- */}
+          <LandmarkPanel
+            groups={landmarkCollectionGroups}
+            collectionVisibility={landmarkCollectionVisibility}
+            collectionCollapsed={landmarkCollectionCollapsed}
+            onToggleCollection={handleToggleLandmarkCollection}
+            onToggleCollectionCollapsed={handleToggleLandmarkCollectionCollapsed}
+            onLocateLandmark={handleLocateLandmark}
+            onShowAll={handleLandmarkShowAll}
+            onHideAll={handleLandmarkHideAll}
+            onClose={() => onLandmarkPanelChange(false)}
+            isOpen={isLandmarkPanelOpen}
+          />
+
           <OverlayMarkerDetailsModal
             detail={selectedOverlayMarkerDetail}
             onClose={handleDismissOverlayMarkerDetailsModal}
@@ -1694,6 +1822,8 @@ const Dashboard: React.FC<DashboardProps> = ({
           <AppTabBar
             isProjectPanelOpen={isProjectPanelOpen}
             onProjectPanelChange={onProjectPanelChange}
+            isLandmarkPanelOpen={isLandmarkPanelOpen}
+            onLandmarkPanelChange={onLandmarkPanelChange}
           />
         </div>
       </IonContent>

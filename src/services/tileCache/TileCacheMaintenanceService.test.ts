@@ -119,4 +119,55 @@ describe('TileCacheMaintenanceService', () => {
     expect(stats.totalBytes).toBe(120);
     expect(stats.pinnedTileCount).toBe(2);
   });
+
+  it('permits overflow instead of throwing when allowOverLimit is approved', async () => {
+    await upsertTile('tile-a', createBuffer(60), {
+      pinnedByAutoPrefetch: true,
+      now: 100,
+    });
+    await upsertTile('tile-b', createBuffer(60), {
+      pinnedByAutoPrefetch: true,
+      now: 200,
+    });
+
+    const service = new TileCacheMaintenanceService({
+      isOnline: () => true,
+      now: () => 300,
+      maxCacheBytes: 100,
+      allowOverLimit: () => true,
+    });
+
+    // The pinned tiles cannot be evicted, but approval allows the write through.
+    const result = await service.ensureCapacityBeforeWrite('tile-c', 10);
+    expect(result.evictedTileCount).toBe(0);
+    expect(result.freedBytes).toBe(0);
+
+    const stats = await getTileCacheStats();
+    expect(stats.totalBytes).toBe(120);
+  });
+
+  it('still evicts unpinned tiles opportunistically even when overflow is approved', async () => {
+    await upsertTile('tile-old', createBuffer(40), {
+      pinnedByAutoPrefetch: false,
+      now: 100,
+    });
+    await upsertTile('tile-pinned', createBuffer(70), {
+      pinnedByAutoPrefetch: true,
+      now: 200,
+    });
+
+    const service = new TileCacheMaintenanceService({
+      isOnline: () => true,
+      now: () => 300,
+      maxCacheBytes: 100,
+      allowOverLimit: () => true,
+    });
+
+    // 110 existing + 30 incoming = 140, must free 40; the only unpinned tile is
+    // reclaimed and the write proceeds without throwing.
+    const result = await service.ensureCapacityBeforeWrite('tile-new', 30);
+    expect(result.evictedTileCount).toBe(1);
+    expect(await getTile('tile-old')).toBeNull();
+    expect(await getTile('tile-pinned')).not.toBeNull();
+  });
 });

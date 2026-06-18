@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
@@ -64,6 +64,7 @@ const {
   mockMapGetZoom,
   mockQueryRenderedFeatures,
   mockMapUnproject,
+  mockMapFlyTo,
 } = vi.hoisted(() => {
   const mapPropsRef = { current: null as Record<string, unknown> | null };
   const mockMapFitBounds = vi.fn();
@@ -96,6 +97,7 @@ const {
     lng: 2.3 + point.x * 0.001,
     lat: 46.6 + point.y * 0.001,
   }));
+  const mockMapFlyTo = vi.fn();
   const mockGetMap = vi.fn(() => ({
     once: mockMapOnce,
     touchZoomRotate: { disableRotation: mockDisableTouchRotation },
@@ -109,6 +111,7 @@ const {
     getZoom: mockMapGetZoom,
     queryRenderedFeatures: mockQueryRenderedFeatures,
     unproject: mockMapUnproject,
+    flyTo: mockMapFlyTo,
   }));
 
   return {
@@ -127,6 +130,7 @@ const {
     mockMapGetZoom,
     mockQueryRenderedFeatures,
     mockMapUnproject,
+    mockMapFlyTo,
   };
 });
 
@@ -273,12 +277,16 @@ vi.mock('react-map-gl/maplibre', () => {
       const lineColor = paint?.['line-color'];
       const fillColor = paint?.['fill-color'];
       const circleColor = paint?.['circle-color'];
+      const textColor = paint?.['text-color'];
       const layerColor = [lineColor, fillColor, circleColor].find(
         (value): value is string => typeof value === 'string',
       ) ?? '';
       const layerColorExpression = [lineColor, fillColor, circleColor].find(
         (value) => value !== undefined && typeof value !== 'string',
       );
+      const textColorValue = typeof textColor === 'string' ? textColor : '';
+      const textColorExpression =
+        textColor !== undefined && typeof textColor !== 'string' ? textColor : undefined;
       const iconImage = typeof layout?.['icon-image'] === 'string'
         ? layout['icon-image']
         : '';
@@ -295,6 +303,8 @@ vi.mock('react-map-gl/maplibre', () => {
           data-layer-id={id}
           data-layer-color={layerColor}
           data-layer-color-expression={layerColorExpression ? JSON.stringify(layerColorExpression) : ''}
+          data-layer-text-color={textColorValue}
+          data-layer-text-color-expression={textColorExpression ? JSON.stringify(textColorExpression) : ''}
           data-layer-filter={layerFilter}
           data-layer-icon={iconImage}
           data-layer-text={layerText}
@@ -326,6 +336,11 @@ const {
   mockSetCountryVisibilityPreferences,
   mockGetCountryCollapsedPreferences,
   mockSetCountryCollapsedPreference,
+  mockGetLandmarkCollectionVisibilityPreferences,
+  mockSetLandmarkCollectionVisibilityPreference,
+  mockSetLandmarkCollectionVisibilityPreferences,
+  mockGetLandmarkCollectionCollapsedPreferences,
+  mockSetLandmarkCollectionCollapsedPreference,
   mockGetShowLandmarks,
   mockSetShowLandmarks,
 } = vi.hoisted(() => ({
@@ -337,6 +352,11 @@ const {
   mockSetCountryVisibilityPreferences: vi.fn(),
   mockGetCountryCollapsedPreferences: vi.fn(() => ({}) as Record<string, boolean>),
   mockSetCountryCollapsedPreference: vi.fn(),
+  mockGetLandmarkCollectionVisibilityPreferences: vi.fn(() => ({}) as Record<string, boolean>),
+  mockSetLandmarkCollectionVisibilityPreference: vi.fn(),
+  mockSetLandmarkCollectionVisibilityPreferences: vi.fn(),
+  mockGetLandmarkCollectionCollapsedPreferences: vi.fn(() => ({}) as Record<string, boolean>),
+  mockSetLandmarkCollectionCollapsedPreference: vi.fn(),
   mockGetShowLandmarks: vi.fn(() => true),
   mockSetShowLandmarks: vi.fn(),
 }));
@@ -354,6 +374,11 @@ vi.mock('../services/PreferencesService', () => ({
   setCountryVisibilityPreferences: mockSetCountryVisibilityPreferences,
   getCountryCollapsedPreferences: mockGetCountryCollapsedPreferences,
   setCountryCollapsedPreference: mockSetCountryCollapsedPreference,
+  getLandmarkCollectionVisibilityPreferences: mockGetLandmarkCollectionVisibilityPreferences,
+  setLandmarkCollectionVisibilityPreference: mockSetLandmarkCollectionVisibilityPreference,
+  setLandmarkCollectionVisibilityPreferences: mockSetLandmarkCollectionVisibilityPreferences,
+  getLandmarkCollectionCollapsedPreferences: mockGetLandmarkCollectionCollapsedPreferences,
+  setLandmarkCollectionCollapsedPreference: mockSetLandmarkCollectionCollapsedPreference,
   getShowLandmarks: mockGetShowLandmarks,
   setShowLandmarks: mockSetShowLandmarks,
 }));
@@ -403,11 +428,14 @@ function renderDashboard(options?: {
   const initialMeasurementUnit = options?.measurementUnit ?? 'feet';
   const Harness: React.FC = () => {
     const [isProjectPanelOpen, setIsProjectPanelOpen] = React.useState(false);
+    const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = React.useState(false);
     const [showLandmarks] = React.useState(initialShowLandmarks);
     return (
       <Dashboard
         isProjectPanelOpen={isProjectPanelOpen}
         onProjectPanelChange={setIsProjectPanelOpen}
+        isLandmarkPanelOpen={isLandmarkPanelOpen}
+        onLandmarkPanelChange={setIsLandmarkPanelOpen}
         showLandmarks={showLandmarks}
         colorMode={initialColorMode}
         measurementUnit={initialMeasurementUnit}
@@ -1426,7 +1454,13 @@ describe('Dashboard', () => {
     mockQueryRenderedFeatures.mockReturnValueOnce([
       {
         layer: { id: 'landmarks-layer' },
-        properties: { id: 'lm-1', name: 'Big Entrance', description: 'Main entrance' },
+        properties: {
+          id: 'lm-1',
+          name: 'Big Entrance',
+          description: 'Main entrance',
+          collection_name: 'Shared Survey',
+          is_personal_collection: false,
+        },
         geometry: { type: 'Point', coordinates: [2.3, 46.6] },
       },
     ]);
@@ -1436,7 +1470,51 @@ describe('Dashboard', () => {
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('Big Entrance');
     expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent('Main entrance');
+    expect(screen.getByTestId('overlay-marker-collection')).toHaveTextContent('Shared Survey');
     expect(screen.getByTestId('overlay-marker-gps')).toHaveTextContent('46.6, 2.3');
+  });
+
+  it('colors landmark markers by their collection color', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Landmark Color Project' })];
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'landmarks') return overlayPointFeatureCollection();
+      return null;
+    });
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+    });
+
+    const layer = document.querySelector('[data-layer-id="landmarks-layer"]');
+    const expression = JSON.parse(
+      layer?.getAttribute('data-layer-text-color-expression') ?? 'null',
+    );
+    // Collection-driven color (mirrors the web map viewer), not a hardcoded hex.
+    expect(layer?.getAttribute('data-layer-text-color')).toBe('');
+    expect(expression).toEqual(['coalesce', ['get', 'collection_color'], '#94a3b8']);
+  });
+
+  it('flies to a landmark from the panel without opening the details modal', async () => {
+    mockMapFlyTo.mockClear();
+    mockProjects = [makeProject({ id: 'p1', name: 'Landmark Locate Project' })];
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
+      if (overlayId === 'landmarks') {
+        return overlayPointFeatureCollection({ id: 'lm-1', name: 'Big Entrance' });
+      }
+      return null;
+    });
+
+    renderDashboard();
+
+    const row = await screen.findByTestId('landmark-row-lm-1');
+    await userEvent.click(row);
+
+    expect(mockMapFlyTo).toHaveBeenCalledWith(
+      expect.objectContaining({ center: [2.3, 46.6] }),
+    );
+    expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
   });
 
   it('opens marker details modal when tapping a surface station marker', async () => {
@@ -1904,17 +1982,18 @@ describe('Dashboard', () => {
 
     renderDashboard();
 
+    const projectPanel = () => within(screen.getByTestId('project-panel'));
     await waitFor(() => {
-      expect(screen.getByText('Show all')).toBeInTheDocument();
+      expect(projectPanel().getByText('Show all')).toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByText('Show all'));
+    await userEvent.click(projectPanel().getByText('Show all'));
     expect(mockSetProjectVisibilityPreferences).toHaveBeenCalledWith({
       p1: true,
       p2: true,
     });
 
-    await userEvent.click(screen.getByText('Hide all'));
+    await userEvent.click(projectPanel().getByText('Hide all'));
     expect(mockSetProjectVisibilityPreferences).toHaveBeenCalledWith({
       p1: false,
       p2: false,
@@ -2083,11 +2162,12 @@ describe('Dashboard', () => {
 
       renderDashboard();
 
+      const projectPanel = () => within(screen.getByTestId('project-panel'));
       await waitFor(() => {
-        expect(screen.getByText('Show all')).toBeInTheDocument();
+        expect(projectPanel().getByText('Show all')).toBeInTheDocument();
       });
 
-      await userEvent.click(screen.getByText('Show all'));
+      await userEvent.click(projectPanel().getByText('Show all'));
 
       expect(mockSetProjectVisibilityPreferences).toHaveBeenCalledWith({
         p1: true,
@@ -2110,11 +2190,12 @@ describe('Dashboard', () => {
 
       renderDashboard();
 
+      const projectPanel = () => within(screen.getByTestId('project-panel'));
       await waitFor(() => {
-        expect(screen.getByText('Hide all')).toBeInTheDocument();
+        expect(projectPanel().getByText('Hide all')).toBeInTheDocument();
       });
 
-      await userEvent.click(screen.getByText('Hide all'));
+      await userEvent.click(projectPanel().getByText('Hide all'));
 
       expect(mockSetProjectVisibilityPreferences).toHaveBeenCalledWith({
         p1: false,

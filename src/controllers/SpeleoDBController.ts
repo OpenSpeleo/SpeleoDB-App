@@ -9,16 +9,22 @@
  * re-render via useSyncExternalStore.
  */
 
-import { HTTP_STATUS, MAP, MAP_OVERLAYS, NETWORK } from '../constants';
+import { HTTP_STATUS, MAP_OVERLAYS, NETWORK, TILE_PREFETCH } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import {
   clearCachedTilesRuntime,
   clearPrefetchJobsRuntime,
   setTileCacheOfflineModeRuntime,
+  setTileCacheOverLimitApprovedRuntime,
 } from '../services/TileCacheRuntime';
 import { LazyTilePrefetchService } from '../services/LazyTilePrefetchService';
 import type { TilePrefetchServiceLike } from '../services/TilePrefetchService';
+import {
+  buildTileUrlsForPoints,
+  computeTilePrefetchSignature,
+  extractPointCoordinates,
+} from '../services/tilePrefetchPlanner';
 import type {
   AuthResponse,
   AuthState,
@@ -54,6 +60,8 @@ export interface PreferencesPort {
     token?: string;
     instance?: string;
     lastSyncedAt?: number;
+    tileCacheOverLimitApproved?: boolean;
+    tileCacheOverLimitPromptAcknowledged?: boolean;
   };
   setPreferences(
     prefs: Partial<{
@@ -61,6 +69,8 @@ export interface PreferencesPort {
       token?: string;
       instance?: string;
       lastSyncedAt?: number;
+      tileCacheOverLimitApproved?: boolean;
+      tileCacheOverLimitPromptAcknowledged?: boolean;
     }>,
   ): void;
   clearPreferences(): void;
@@ -100,6 +110,12 @@ export class SpeleoDBController {
   private _syncStatus: SyncStatus = 'idle';
   private _lastSyncedAt: number | null = null;
   private _tilePrefetchJobs: TilePrefetchJobState[] = [];
+  // Tile-cache overflow consent (persisted) + a transient manual re-trigger.
+  private _tileCacheOverLimitApproved = false;
+  private _tileCacheOverLimitPromptAcknowledged = false;
+  private _storageConsentRequested = false;
+  // Latch so the "stuck while approved" diagnostic warns once, not per notify.
+  private _warnedStuckWhileApproved = false;
   private _listeners = new Set<() => void>();
   private tilePrefetch!: TilePrefetchServiceLike;
   private tilePrefetchUnsubscribe: (() => void) | null = null;
@@ -118,6 +134,10 @@ export class SpeleoDBController {
   private _syncStatusSnapshot: SyncStatus = this._syncStatus;
   private _lastSyncedAtSnapshot: number | null = this._lastSyncedAt;
   private _tilePrefetchJobsSnapshot: TilePrefetchJobState[] = this._tilePrefetchJobs;
+  private _tileCacheOverLimitApprovedSnapshot = this._tileCacheOverLimitApproved;
+  private _tileCacheOverLimitPromptAcknowledgedSnapshot =
+    this._tileCacheOverLimitPromptAcknowledged;
+  private _storageConsentRequestedSnapshot = this._storageConsentRequested;
 
   constructor(
     private service: SpeleoDBService,
@@ -127,6 +147,7 @@ export class SpeleoDBController {
   ) {
     this.attachTilePrefetch(tilePrefetch ?? this.createTilePrefetchService());
     this.restoreSession();
+    this.restoreTileCacheOverLimitConsent();
     this.setOfflineLocked(false);
   }
 
@@ -164,6 +185,41 @@ export class SpeleoDBController {
     return this._tilePrefetchJobsSnapshot;
   }
 
+  /** True when the user has approved letting tile prefetch exceed the cap. */
+  get isTileCacheOverLimitApproved(): boolean {
+    return this._tileCacheOverLimitApprovedSnapshot;
+  }
+
+  /**
+   * True when prefetch is stalled at the cache cap and overflow is not yet
+   * approved. Drives the Settings warning. False once approved.
+   */
+  get isTileCacheOverLimit(): boolean {
+    if (this._tileCacheOverLimitApprovedSnapshot) return false;
+    return this._tilePrefetchJobsSnapshot.some((job) => job.blockedByStorage === true);
+  }
+
+  /**
+   * True when the one-time auto consent popup should appear: over the limit and
+   * the user has not yet been asked. Suppressed forever once acknowledged.
+   */
+  get needsAutoStoragePrompt(): boolean {
+    return this.isTileCacheOverLimit && !this._tileCacheOverLimitPromptAcknowledgedSnapshot;
+  }
+
+  /** Transient flag set by the Settings warning to manually re-open the prompt. */
+  get storageConsentRequested(): boolean {
+    return this._storageConsentRequestedSnapshot;
+  }
+
+  /**
+   * Whether the storage-consent modal should be open: either the one-time auto
+   * prompt, or a manual re-trigger from Settings.
+   */
+  get storageConsentRequired(): boolean {
+    return this.needsAutoStoragePrompt || this._storageConsentRequestedSnapshot;
+  }
+
   isAuthenticated(): boolean {
     return this._authState.isAuthenticated;
   }
@@ -184,6 +240,10 @@ export class SpeleoDBController {
     this._syncStatusSnapshot = this._syncStatus;
     this._lastSyncedAtSnapshot = this._lastSyncedAt;
     this._tilePrefetchJobsSnapshot = [...this._tilePrefetchJobs];
+    this._tileCacheOverLimitApprovedSnapshot = this._tileCacheOverLimitApproved;
+    this._tileCacheOverLimitPromptAcknowledgedSnapshot =
+      this._tileCacheOverLimitPromptAcknowledged;
+    this._storageConsentRequestedSnapshot = this._storageConsentRequested;
     this._listeners.forEach((fn) => fn());
   }
 
@@ -248,10 +308,34 @@ export class SpeleoDBController {
 
   private attachTilePrefetch(service: TilePrefetchServiceLike): void {
     this.tilePrefetch = service;
+    this._warnedStuckWhileApproved = false;
     this.tilePrefetchUnsubscribe = this.tilePrefetch.subscribe((jobs) => {
       this._tilePrefetchJobs = jobs;
+      this.warnIfStuckWhileApproved(jobs);
       this.notify();
     });
+  }
+
+  /**
+   * Surface the otherwise-invisible failure mode where overflow is approved but
+   * a job remains `blockedByStorage` -- e.g. the runtime cap-lift never reached
+   * the tile cache, so `processQueue` keeps re-blocking. `isTileCacheOverLimit`
+   * intentionally returns false once approved (the Settings warning disappears),
+   * so without this the stalled prefetch would be completely silent. Latched to
+   * avoid log spam across repeated notifies.
+   */
+  private warnIfStuckWhileApproved(jobs: TilePrefetchJobState[]): void {
+    const stuck = this._tileCacheOverLimitApproved
+      && jobs.some((job) => job.blockedByStorage === true);
+    if (!stuck) {
+      this._warnedStuckWhileApproved = false;
+      return;
+    }
+    if (this._warnedStuckWhileApproved) return;
+    this._warnedStuckWhileApproved = true;
+    console.warn(
+      'Tile prefetch is blocked by storage while overflow is approved; the cap-lift may not have reached the tile cache.',
+    );
   }
 
   private createTilePrefetchService(): TilePrefetchServiceLike {
@@ -267,6 +351,81 @@ export class SpeleoDBController {
 
   async preloadTilePrefetch(): Promise<void> {
     await this.tilePrefetch.preload?.();
+  }
+
+  // ---- Tile-cache overflow consent ------------------------------------------
+
+  /** Restore persisted overflow consent and push it into the tile-cache runtime. */
+  private restoreTileCacheOverLimitConsent(): void {
+    try {
+      const prefs = this.prefs.getPreferences();
+      this._tileCacheOverLimitApproved = prefs.tileCacheOverLimitApproved === true;
+      this._tileCacheOverLimitPromptAcknowledged =
+        prefs.tileCacheOverLimitPromptAcknowledged === true;
+      this._tileCacheOverLimitApprovedSnapshot = this._tileCacheOverLimitApproved;
+      this._tileCacheOverLimitPromptAcknowledgedSnapshot =
+        this._tileCacheOverLimitPromptAcknowledged;
+      setTileCacheOverLimitApprovedRuntime(this._tileCacheOverLimitApproved);
+    } catch (error) {
+      console.warn('Failed to restore tile-cache overflow consent:', error);
+    }
+  }
+
+  private persistTileCacheOverLimitConsent(): void {
+    try {
+      this.prefs.setPreferences({
+        tileCacheOverLimitApproved: this._tileCacheOverLimitApproved,
+        tileCacheOverLimitPromptAcknowledged: this._tileCacheOverLimitPromptAcknowledged,
+      });
+    } catch (error) {
+      console.warn('Failed to persist tile-cache overflow consent:', error);
+    }
+  }
+
+  /** Manually re-open the storage-consent prompt (from the Settings warning). */
+  requestStorageConsentPrompt(): void {
+    if (this._storageConsentRequested) return;
+    this._storageConsentRequested = true;
+    this.notify();
+  }
+
+  /** Clear the manual re-trigger once the modal has consumed it. */
+  clearStorageConsentRequest(): void {
+    if (!this._storageConsentRequested) return;
+    this._storageConsentRequested = false;
+    this.notify();
+  }
+
+  /**
+   * User approved exceeding the cache cap. Persists both flags, lifts the cap in
+   * the tile-cache runtime, and resumes the stalled prefetch queue.
+   */
+  approveTileCacheOverLimit(): void {
+    this._tileCacheOverLimitApproved = true;
+    this._tileCacheOverLimitPromptAcknowledged = true;
+    this._storageConsentRequested = false;
+    this._warnedStuckWhileApproved = false;
+    this.persistTileCacheOverLimitConsent();
+    setTileCacheOverLimitApprovedRuntime(true);
+    this.notify();
+    this.tilePrefetch.resumeBlockedJobs();
+  }
+
+  /** User dismissed the prompt ("Not now"): remember it so it never auto-nags again. */
+  acknowledgeStoragePrompt(): void {
+    this._tileCacheOverLimitPromptAcknowledged = true;
+    this._storageConsentRequested = false;
+    this.persistTileCacheOverLimitConsent();
+    this.notify();
+  }
+
+  /** Turn overflow back off (from Settings). Keeps the acknowledged flag. */
+  revokeTileCacheOverLimit(): void {
+    this._tileCacheOverLimitApproved = false;
+    this._warnedStuckWhileApproved = false;
+    this.persistTileCacheOverLimitConsent();
+    setTileCacheOverLimitApprovedRuntime(false);
+    this.notify();
   }
 
   // ---- Actions --------------------------------------------------------------
@@ -442,6 +601,10 @@ export class SpeleoDBController {
       this._syncStatus = 'idle';
       this._lastSyncedAt = null;
       this._tilePrefetchJobs = [];
+      this._tileCacheOverLimitApproved = false;
+      this._tileCacheOverLimitPromptAcknowledged = false;
+      this._storageConsentRequested = false;
+      setTileCacheOverLimitApprovedRuntime(false);
       this.prefs.clearPreferences();
 
       try {
@@ -1082,8 +1245,9 @@ export class SpeleoDBController {
   }
 
   /**
-   * Build and enqueue tile prefetch jobs for every project with cached GeoJSON.
-   * Uses bbox+50m and zoom levels 0..18 so map imagery is available offline.
+   * Build and enqueue tile prefetch jobs so map imagery is available offline.
+   * Projects use their survey bbox; landmarks use a combined per-point job.
+   * Landmark prefetch is independent of project eligibility.
    */
   private async scheduleTilePrefetchPhase(
     context: CancellationContext,
@@ -1093,6 +1257,66 @@ export class SpeleoDBController {
       return this.createSkippedTilePrefetchPhase('offline_locked');
     }
 
+    const landmarkTileCount = await this.scheduleLandmarkTilePrefetch(context);
+    const projectResult = await this.scheduleProjectTilePrefetch(context, projects);
+
+    return {
+      ...projectResult,
+      landmarkTileCount,
+      landmarkScheduled: landmarkTileCount > 0,
+    };
+  }
+
+  /**
+   * Schedule a single combined "landmarks" tile prefetch job from the cached
+   * landmarks GeoJSON. Best-effort: failures are logged and do not fail the
+   * surrounding sync phase. Returns the number of tiles scheduled (0 when there
+   * are no landmarks or the build fails). Uses parity zoom/pad with projects via
+   * a per-point box union so a globally-scattered set never spans the planet.
+   */
+  private async scheduleLandmarkTilePrefetch(
+    context: CancellationContext,
+  ): Promise<number> {
+    try {
+      context.throwIfAborted();
+      const raw = await this.cache.getOverlayGeoJSON('landmarks');
+      context.throwIfAborted();
+      const normalized = normalizeGeoJSON(raw);
+      if (!normalized) return 0;
+
+      const points = extractPointCoordinates(normalized);
+      if (points.length === 0) return 0;
+
+      const tileUrls = buildTileUrlsForPoints(points, TILE_PREFETCH.LANDMARK_REQUEST);
+      if (tileUrls.length === 0) return 0;
+
+      await this.tilePrefetch.enqueueTileUrls(
+        {
+          id: TILE_PREFETCH.LANDMARK_TARGET_ID,
+          commitId: computeTilePrefetchSignature(points),
+          tileUrls,
+          zoomMin: TILE_PREFETCH.LANDMARK_REQUEST.minZoom,
+          zoomMax: TILE_PREFETCH.LANDMARK_REQUEST.maxZoom,
+          padMeters: TILE_PREFETCH.LANDMARK_REQUEST.padMeters,
+        },
+        { signal: context.signal },
+      );
+      context.throwIfAborted();
+
+      return tileUrls.length;
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+      console.warn('Landmark map prefetch scheduling failed:', error);
+      return 0;
+    }
+  }
+
+  private async scheduleProjectTilePrefetch(
+    context: CancellationContext,
+    projects: Project[],
+  ): Promise<TilePrefetchPhaseResult> {
     const eligible = projects.filter((p) => p.geojson_file && !p.exclude_geojson);
     if (eligible.length === 0) {
       return this.createSkippedTilePrefetchPhase('no_prefetch_candidates');
@@ -1139,12 +1363,7 @@ export class SpeleoDBController {
     }
 
     try {
-      await this.tilePrefetch.enqueueProjects(inputs, {
-        tileUrlTemplate: MAP.TILE_URL_TEMPLATE,
-        minZoom: 0,
-        maxZoom: 18,
-        padMeters: 50,
-      }, {
+      await this.tilePrefetch.enqueueProjects(inputs, TILE_PREFETCH.PROJECT_REQUEST, {
         signal: context.signal,
       });
       context.throwIfAborted();

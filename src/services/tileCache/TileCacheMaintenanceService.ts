@@ -31,12 +31,19 @@ export interface TileCacheMaintenanceDependencies {
   isOnline: () => boolean;
   now: () => number;
   maxCacheBytes: number;
+  /**
+   * When true, a pinned-blocked write that cannot be satisfied by evicting
+   * unpinned tiles is permitted to exceed `maxCacheBytes` instead of throwing.
+   * This is opt-in and driven by explicit user consent (see TileCacheService).
+   */
+  allowOverLimit: () => boolean;
 }
 
 const DEFAULT_DEPENDENCIES: TileCacheMaintenanceDependencies = {
   isOnline: defaultIsOnline,
   now: defaultNow,
   maxCacheBytes: MAP.TILE_CACHE_MAX_BYTES,
+  allowOverLimit: () => false,
 };
 
 export class TileCacheMaintenanceService {
@@ -119,9 +126,17 @@ export class TileCacheMaintenanceService {
     }
 
     if (bytesPlanned < bytesThatMustBeFreed) {
-      throw new TileCacheCapacityError(
-        'Tile cache is full and pinned auto-prefetched maps prevent further eviction.',
-      );
+      // The cap cannot be honored because pinned (auto-prefetched) tiles are
+      // not evictable. Only overflow when the user has explicitly approved it;
+      // otherwise surface the capacity error so the consent flow can prompt.
+      if (!this.deps.allowOverLimit()) {
+        throw new TileCacheCapacityError(
+          'Tile cache is full and pinned auto-prefetched maps prevent further eviction.',
+        );
+      }
+      // Approved overflow: reclaim whatever unpinned space we can and let the
+      // write proceed beyond the cap.
+      return deleteTilesByMetadata(toEvict, this.deps.now());
     }
 
     return deleteTilesByMetadata(toEvict, this.deps.now());

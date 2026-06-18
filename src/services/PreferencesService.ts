@@ -22,11 +22,20 @@ export interface UserPreferences {
   projectVisibility?: Record<string, boolean>;
   countryVisibility?: Record<string, boolean>;
   countryCollapsed?: Record<string, boolean>;
+  landmarkCollectionVisibility?: Record<string, boolean>;
+  landmarkCollectionCollapsed?: Record<string, boolean>;
   hasCompletedGuidedTour?: boolean;
   showLandmarks?: boolean;
   colorMode?: MapColorMode;
   measurementUnit?: MeasurementUnit;
   lastSyncedAt?: number;
+  /** True when the user has approved letting tile prefetch exceed the cache cap. */
+  tileCacheOverLimitApproved?: boolean;
+  /**
+   * True once the user has been shown the storage-overflow prompt at least once.
+   * Gates the one-time auto popup so it never auto-reappears across app starts.
+   */
+  tileCacheOverLimitPromptAcknowledged?: boolean;
 }
 
 function clearStoredPreferencesSilently(): void {
@@ -57,6 +66,8 @@ function normalizeBooleanRecord(value: unknown): Record<string, boolean> {
 const normalizeProjectVisibility = normalizeBooleanRecord;
 const normalizeCountryVisibility = normalizeBooleanRecord;
 const normalizeCountryCollapsed = normalizeBooleanRecord;
+const normalizeLandmarkCollectionVisibility = normalizeBooleanRecord;
+const normalizeLandmarkCollectionCollapsed = normalizeBooleanRecord;
 
 function normalizeGuidedTourCompletion(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value;
@@ -64,6 +75,11 @@ function normalizeGuidedTourCompletion(value: unknown): boolean | undefined {
 }
 
 function normalizeShowLandmarks(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  return undefined;
+}
+
+function normalizeOptionalBoolean(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value;
   return undefined;
 }
@@ -90,11 +106,15 @@ function emptyPreferences(): UserPreferences {
     projectVisibility: {},
     countryVisibility: {},
     countryCollapsed: {},
+    landmarkCollectionVisibility: {},
+    landmarkCollectionCollapsed: {},
     hasCompletedGuidedTour: undefined,
     showLandmarks: undefined,
     colorMode: undefined,
     measurementUnit: undefined,
     lastSyncedAt: undefined,
+    tileCacheOverLimitApproved: undefined,
+    tileCacheOverLimitPromptAcknowledged: undefined,
   };
 }
 
@@ -122,11 +142,21 @@ function readRawPreferences(): UserPreferences {
       projectVisibility: normalizeProjectVisibility(parsed.projectVisibility),
       countryVisibility: normalizeCountryVisibility(parsed.countryVisibility),
       countryCollapsed: normalizeCountryCollapsed(parsed.countryCollapsed),
+      landmarkCollectionVisibility: normalizeLandmarkCollectionVisibility(
+        parsed.landmarkCollectionVisibility,
+      ),
+      landmarkCollectionCollapsed: normalizeLandmarkCollectionCollapsed(
+        parsed.landmarkCollectionCollapsed,
+      ),
       hasCompletedGuidedTour: normalizeGuidedTourCompletion(parsed.hasCompletedGuidedTour),
       showLandmarks: normalizeShowLandmarks(parsed.showLandmarks),
       colorMode: normalizeColorMode(parsed.colorMode),
       measurementUnit: normalizeMeasurementUnit(parsed.measurementUnit),
       lastSyncedAt: normalizeLastSyncedAt(parsed.lastSyncedAt),
+      tileCacheOverLimitApproved: normalizeOptionalBoolean(parsed.tileCacheOverLimitApproved),
+      tileCacheOverLimitPromptAcknowledged: normalizeOptionalBoolean(
+        parsed.tileCacheOverLimitPromptAcknowledged,
+      ),
     };
   } catch {
     clearStoredPreferencesSilently();
@@ -164,11 +194,21 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
         projectVisibility: normalizeProjectVisibility(mutated.projectVisibility),
         countryVisibility: normalizeCountryVisibility(mutated.countryVisibility),
         countryCollapsed: normalizeCountryCollapsed(mutated.countryCollapsed),
+        landmarkCollectionVisibility: normalizeLandmarkCollectionVisibility(
+          mutated.landmarkCollectionVisibility,
+        ),
+        landmarkCollectionCollapsed: normalizeLandmarkCollectionCollapsed(
+          mutated.landmarkCollectionCollapsed,
+        ),
         hasCompletedGuidedTour: normalizeGuidedTourCompletion(mutated.hasCompletedGuidedTour),
         showLandmarks: normalizeShowLandmarks(mutated.showLandmarks),
         colorMode: normalizeColorMode(mutated.colorMode),
         measurementUnit: normalizeMeasurementUnit(mutated.measurementUnit),
         lastSyncedAt: normalizeLastSyncedAt(mutated.lastSyncedAt),
+        tileCacheOverLimitApproved: normalizeOptionalBoolean(mutated.tileCacheOverLimitApproved),
+        tileCacheOverLimitPromptAcknowledged: normalizeOptionalBoolean(
+          mutated.tileCacheOverLimitPromptAcknowledged,
+        ),
       };
       writePreferences(next);
     }
@@ -205,6 +245,14 @@ export function setPreferences(prefs: Partial<UserPreferences>): void {
       prefs.countryCollapsed === undefined
         ? current.countryCollapsed
         : normalizeCountryCollapsed(prefs.countryCollapsed),
+    landmarkCollectionVisibility:
+      prefs.landmarkCollectionVisibility === undefined
+        ? current.landmarkCollectionVisibility
+        : normalizeLandmarkCollectionVisibility(prefs.landmarkCollectionVisibility),
+    landmarkCollectionCollapsed:
+      prefs.landmarkCollectionCollapsed === undefined
+        ? current.landmarkCollectionCollapsed
+        : normalizeLandmarkCollectionCollapsed(prefs.landmarkCollectionCollapsed),
     hasCompletedGuidedTour:
       prefs.hasCompletedGuidedTour === undefined
         ? current.hasCompletedGuidedTour
@@ -225,6 +273,14 @@ export function setPreferences(prefs: Partial<UserPreferences>): void {
       prefs.lastSyncedAt === undefined
         ? current.lastSyncedAt
         : normalizeLastSyncedAt(prefs.lastSyncedAt),
+    tileCacheOverLimitApproved:
+      prefs.tileCacheOverLimitApproved === undefined
+        ? current.tileCacheOverLimitApproved
+        : normalizeOptionalBoolean(prefs.tileCacheOverLimitApproved),
+    tileCacheOverLimitPromptAcknowledged:
+      prefs.tileCacheOverLimitPromptAcknowledged === undefined
+        ? current.tileCacheOverLimitPromptAcknowledged
+        : normalizeOptionalBoolean(prefs.tileCacheOverLimitPromptAcknowledged),
   }));
 }
 
@@ -328,6 +384,69 @@ export function setCountryCollapsedPreference(
 }
 
 /**
+ * Read persisted landmark collection visibility map. Missing keys imply
+ * visible (true), mirroring the project visibility semantics.
+ */
+export function getLandmarkCollectionVisibilityPreferences(): Record<string, boolean> {
+  return { ...(getPreferences().landmarkCollectionVisibility ?? {}) };
+}
+
+/**
+ * Persist visibility for one landmark collection ID.
+ */
+export function setLandmarkCollectionVisibilityPreference(
+  collectionId: string,
+  visible: boolean,
+): void {
+  if (!collectionId) return;
+  setLandmarkCollectionVisibilityPreferences({ [collectionId]: visible });
+}
+
+/**
+ * Persist visibility for multiple landmark collections at once (used by the
+ * panel's `Show all` / `Hide all` bulk actions).
+ */
+export function setLandmarkCollectionVisibilityPreferences(
+  updates: Record<string, boolean>,
+): void {
+  const safeUpdates = normalizeLandmarkCollectionVisibility(updates);
+  if (Object.keys(safeUpdates).length === 0) return;
+
+  enqueuePreferencesMutation((current) => ({
+    ...current,
+    landmarkCollectionVisibility: {
+      ...(current.landmarkCollectionVisibility ?? {}),
+      ...safeUpdates,
+    },
+  }));
+}
+
+/**
+ * Read persisted landmark collection collapsed map. Missing keys imply
+ * expanded (false).
+ */
+export function getLandmarkCollectionCollapsedPreferences(): Record<string, boolean> {
+  return { ...(getPreferences().landmarkCollectionCollapsed ?? {}) };
+}
+
+/**
+ * Persist collapsed state for one landmark collection ID.
+ */
+export function setLandmarkCollectionCollapsedPreference(
+  collectionId: string,
+  collapsed: boolean,
+): void {
+  if (!collectionId) return;
+  enqueuePreferencesMutation((current) => ({
+    ...current,
+    landmarkCollectionCollapsed: {
+      ...(current.landmarkCollectionCollapsed ?? {}),
+      [collectionId]: collapsed,
+    },
+  }));
+}
+
+/**
  * Read guided tour completion flag.
  */
 export function getHasCompletedGuidedTour(): boolean {
@@ -353,6 +472,35 @@ export function getShowLandmarks(): boolean {
  */
 export function setShowLandmarks(visible: boolean): void {
   setPreferences({ showLandmarks: visible });
+}
+
+/**
+ * Read whether the user approved exceeding the tile-cache cap. Default false.
+ */
+export function getTileCacheOverLimitApproved(): boolean {
+  return getPreferences().tileCacheOverLimitApproved === true;
+}
+
+/**
+ * Persist whether the user approved exceeding the tile-cache cap.
+ */
+export function setTileCacheOverLimitApproved(approved: boolean): void {
+  setPreferences({ tileCacheOverLimitApproved: approved });
+}
+
+/**
+ * Read whether the storage-overflow prompt has already been shown + answered.
+ * Default false. Gates the one-time auto popup.
+ */
+export function getTileCacheOverLimitPromptAcknowledged(): boolean {
+  return getPreferences().tileCacheOverLimitPromptAcknowledged === true;
+}
+
+/**
+ * Persist that the storage-overflow prompt has been shown + answered.
+ */
+export function setTileCacheOverLimitPromptAcknowledged(acknowledged: boolean): void {
+  setPreferences({ tileCacheOverLimitPromptAcknowledged: acknowledged });
 }
 
 /**

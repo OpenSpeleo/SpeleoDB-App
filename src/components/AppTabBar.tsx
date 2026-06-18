@@ -4,11 +4,15 @@ import { useLocation, useHistory } from 'react-router-dom';
 interface AppTabBarProps {
   isProjectPanelOpen?: boolean;
   onProjectPanelChange?: (open: boolean) => void;
+  isLandmarkPanelOpen?: boolean;
+  onLandmarkPanelChange?: (open: boolean) => void;
 }
 
 const AppTabBar: React.FC<AppTabBarProps> = ({
   isProjectPanelOpen = false,
   onProjectPanelChange,
+  isLandmarkPanelOpen = false,
+  onLandmarkPanelChange,
 }) => {
   const location = useLocation();
   const history = useHistory();
@@ -16,7 +20,8 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
   const onSettings = location.pathname === '/settings';
 
   const isProjectsActive = onDashboard && isProjectPanelOpen;
-  const isMapActive = onDashboard && !isProjectPanelOpen;
+  const isLandmarksActive = onDashboard && isLandmarkPanelOpen;
+  const isMapActive = onDashboard && !isProjectPanelOpen && !isLandmarkPanelOpen;
 
   const openProjectPanel = () => {
     onProjectPanelChange?.(true);
@@ -24,6 +29,14 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
 
   const closeProjectPanel = () => {
     onProjectPanelChange?.(false);
+  };
+
+  const openLandmarkPanel = () => {
+    onLandmarkPanelChange?.(true);
+  };
+
+  const closeLandmarkPanel = () => {
+    onLandmarkPanelChange?.(false);
   };
 
   return (
@@ -62,6 +75,35 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
         <span className="text-[10px] font-medium leading-none">Projects</span>
       </button>
 
+      {/* Landmarks */}
+      <button
+        type="button"
+        role="tab"
+        aria-selected={isLandmarksActive}
+        data-testid="landmarks-tab"
+        onClick={() => {
+          if (!onDashboard) {
+            history.push('/dashboard');
+            openLandmarkPanel();
+          } else if (isLandmarkPanelOpen) {
+            closeLandmarkPanel();
+          } else {
+            openLandmarkPanel();
+          }
+        }}
+        className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
+          isLandmarksActive
+            ? 'text-purple-400'
+            : 'text-slate-400 active:text-slate-200'
+        }`}
+      >
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+        </svg>
+        <span className="text-[10px] font-medium leading-none">Landmarks</span>
+      </button>
+
       {/* Map */}
       <button
         type="button"
@@ -72,6 +114,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
             history.push('/dashboard');
           }
           if (isProjectPanelOpen) closeProjectPanel();
+          if (isLandmarkPanelOpen) closeLandmarkPanel();
         }}
         className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
           isMapActive

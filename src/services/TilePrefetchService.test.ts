@@ -186,6 +186,120 @@ describe('TilePrefetchService queue behavior', () => {
     service.dispose();
   });
 
+  it('enqueueTileUrls creates a job and downloads the provided tiles', async () => {
+    const { deps, fetchAndCacheTile } = createDeps();
+    const service = new TilePrefetchService(deps);
+
+    await service.enqueueTileUrls({
+      id: 'landmarks',
+      commitId: 'sig-1',
+      tileUrls: [
+        'https://tiles.example.com/0/0/0.png',
+        'https://tiles.example.com/1/1/1.png',
+      ],
+      zoomMin: 0,
+      zoomMax: 18,
+      padMeters: 50,
+    });
+    await service.waitForIdle();
+
+    const job = service.getSnapshot().find((j) => j.projectId === 'landmarks');
+    expect(job?.status).toBe('done');
+    expect(job?.totalTiles).toBe(2);
+    expect(job?.completedTiles).toBe(2);
+    expect(fetchAndCacheTile).toHaveBeenCalledTimes(2);
+    service.dispose();
+  });
+
+  it('enqueueTileUrls dedupes duplicate URLs within the target', async () => {
+    const { deps, fetchAndCacheTile } = createDeps();
+    const service = new TilePrefetchService(deps);
+
+    await service.enqueueTileUrls({
+      id: 'landmarks',
+      commitId: 'sig-dup',
+      tileUrls: [
+        'https://tiles.example.com/0/0/0.png',
+        'https://tiles.example.com/0/0/0.png',
+      ],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 50,
+    });
+    await service.waitForIdle();
+
+    const job = service.getSnapshot().find((j) => j.projectId === 'landmarks');
+    expect(job?.totalTiles).toBe(1);
+    expect(fetchAndCacheTile).toHaveBeenCalledTimes(1);
+    service.dispose();
+  });
+
+  it('downloads a tile once when shared between a project job and the landmarks job', async () => {
+    const cached = new Set<string>();
+    const { deps, fetchAndCacheTile } = createDeps({
+      hasCachedTile: vi.fn(async (url: string) => cached.has(url)),
+      fetchAndCacheTile: vi.fn(async (url: string) => {
+        cached.add(url);
+        return 2048;
+      }),
+    });
+    const service = new TilePrefetchService(deps);
+    const sharedUrl = 'https://tiles.example.com/0/0/0.png';
+
+    await service.enqueueProjects(
+      [{ projectId: 'p1', commitId: 'c1', geojson: pointFeatureCollection(2.3, 46.6) }],
+      {
+        tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
+        minZoom: 0,
+        maxZoom: 0,
+        padMeters: 50,
+      },
+    );
+    await service.waitForIdle();
+    expect(fetchAndCacheTile).toHaveBeenCalledTimes(1);
+
+    await service.enqueueTileUrls({
+      id: 'landmarks',
+      commitId: 'sig-1',
+      tileUrls: [sharedUrl, 'https://tiles.example.com/0/0/1.png'],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 50,
+    });
+    await service.waitForIdle();
+
+    // Only the one non-shared landmark tile is downloaded; the shared tile was
+    // already cached by the project job.
+    expect(fetchAndCacheTile).toHaveBeenCalledTimes(2);
+    const landmarks = service.getSnapshot().find((j) => j.projectId === 'landmarks');
+    expect(landmarks?.status).toBe('done');
+    expect(landmarks?.totalTiles).toBe(2);
+    expect(landmarks?.completedTiles).toBe(2);
+    service.dispose();
+  });
+
+  it('enqueueTileUrls is idempotent for an already-complete (id, commitId)', async () => {
+    const { deps, fetchAndCacheTile } = createDeps();
+    const service = new TilePrefetchService(deps);
+    const target = {
+      id: 'landmarks',
+      commitId: 'sig-1',
+      tileUrls: ['https://tiles.example.com/0/0/0.png'],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 50,
+    };
+
+    await service.enqueueTileUrls(target);
+    await service.waitForIdle();
+    expect(fetchAndCacheTile).toHaveBeenCalledTimes(1);
+
+    await service.enqueueTileUrls(target);
+    await service.waitForIdle();
+    expect(fetchAndCacheTile).toHaveBeenCalledTimes(1);
+    service.dispose();
+  });
+
   it('clears in-memory jobs on dispose', async () => {
     const { deps } = createDeps();
     const service = new TilePrefetchService(deps);
@@ -324,6 +438,82 @@ describe('TilePrefetchService queue behavior', () => {
     await service.waitForIdle();
 
     expect(fetchAndCacheTile).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('flags blockedByStorage and halts the queue on a capacity error (no hammering)', async () => {
+    const capacityError = Object.assign(new Error('Tile cache is full'), {
+      name: 'TileCacheCapacityError',
+    });
+    const { deps, fetchAndCacheTile } = createDeps({
+      fetchAndCacheTile: vi.fn(async () => {
+        throw capacityError;
+      }),
+    });
+    const service = new TilePrefetchService(deps);
+
+    await service.enqueueTileUrls({
+      id: 'landmarks',
+      commitId: 'sig-1',
+      tileUrls: [
+        'https://tiles.example.com/0/0/0.png',
+        'https://tiles.example.com/1/1/1.png',
+        'https://tiles.example.com/2/2/2.png',
+      ],
+      zoomMin: 0,
+      zoomMax: 18,
+      padMeters: 50,
+    });
+    await service.waitForIdle();
+
+    const job = service.getSnapshot().find((j) => j.projectId === 'landmarks');
+    expect(job?.blockedByStorage).toBe(true);
+    expect(job?.status).toBe('paused');
+    // Capacity errors are not retried and the queue halts after the first hit,
+    // so only one write is attempted (the other two tiles are not hammered).
+    expect(fetchAndCacheTile).toHaveBeenCalledTimes(1);
+    service.dispose();
+  });
+
+  it('resumes blocked jobs and completes once overflow is approved', async () => {
+    let capped = true;
+    const capacityError = Object.assign(new Error('Tile cache is full'), {
+      name: 'TileCacheCapacityError',
+    });
+    const { deps } = createDeps({
+      fetchAndCacheTile: vi.fn(async () => {
+        if (capped) throw capacityError;
+        return 1024;
+      }),
+    });
+    const service = new TilePrefetchService(deps);
+
+    await service.enqueueTileUrls({
+      id: 'landmarks',
+      commitId: 'sig-1',
+      tileUrls: [
+        'https://tiles.example.com/0/0/0.png',
+        'https://tiles.example.com/0/0/1.png',
+      ],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 50,
+    });
+    await service.waitForIdle();
+
+    let job = service.getSnapshot().find((j) => j.projectId === 'landmarks');
+    expect(job?.blockedByStorage).toBe(true);
+    expect(job?.completedTiles).toBe(0);
+
+    // Approve overflow: the cap no longer blocks writes; resume the queue.
+    capped = false;
+    service.resumeBlockedJobs();
+    await service.waitForIdle();
+
+    job = service.getSnapshot().find((j) => j.projectId === 'landmarks');
+    expect(job?.blockedByStorage).toBe(false);
+    expect(job?.status).toBe('done');
+    expect(job?.completedTiles).toBe(2);
     service.dispose();
   });
 });

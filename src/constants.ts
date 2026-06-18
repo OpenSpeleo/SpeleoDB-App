@@ -88,6 +88,29 @@ export const MAP = {
   MARKER_INTERACTION_MIN_ZOOM: 15,
 } as const;
 
+// ==================== TILE PREFETCH ====================
+// Offline satellite tile pre-caching policy. Each "request" describes the zoom
+// range + padding used to turn locations into the set of {z,x,y} tiles to
+// download. Projects use the bounding box of their survey GeoJSON; landmarks
+// use a per-point padded box (unioned + deduped) so a globally-scattered set of
+// landmarks never produces a world-spanning bounding box.
+export const TILE_PREFETCH = {
+  PROJECT_REQUEST: {
+    tileUrlTemplate: MAP.TILE_URL_TEMPLATE,
+    minZoom: 0,
+    maxZoom: 18,
+    padMeters: 50,
+  },
+  LANDMARK_REQUEST: {
+    tileUrlTemplate: MAP.TILE_URL_TEMPLATE,
+    minZoom: 0,
+    maxZoom: 18,
+    padMeters: 50,
+  },
+  // Synthetic prefetch-job id for the single combined landmarks job.
+  LANDMARK_TARGET_ID: 'landmarks',
+} as const;
+
 // ==================== COLORS ====================
 // Project colors are model-driven (`project.color` from the API). The mobile
 // app does not maintain a palette; see docs/project-colors.md.

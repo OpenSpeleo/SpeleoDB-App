@@ -112,6 +112,8 @@ type StoredPrefs = {
   token?: string;
   instance?: string;
   lastSyncedAt?: number;
+  tileCacheOverLimitApproved?: boolean;
+  tileCacheOverLimitPromptAcknowledged?: boolean;
 };
 
 function createMockPrefs(initial?: StoredPrefs): PreferencesPort {
@@ -143,6 +145,8 @@ function createMockTilePrefetch(
 ): TilePrefetchService {
   return {
     enqueueProjects: vi.fn(async () => {}),
+    enqueueTileUrls: vi.fn(async () => {}),
+    resumeBlockedJobs: vi.fn(),
     subscribe: vi.fn((listener: (jobs: TilePrefetchJobState[]) => void) => {
       listener([]);
       return () => {};
@@ -151,6 +155,50 @@ function createMockTilePrefetch(
     dispose: vi.fn(),
     ...overrides,
   } as unknown as TilePrefetchService;
+}
+
+/**
+ * A tile-prefetch mock whose subscribed jobs can be driven from the test, so we
+ * can simulate a storage-blocked job reaching the controller.
+ */
+function createControllableTilePrefetch() {
+  let listenerRef: (jobs: TilePrefetchJobState[]) => void = () => {};
+  const resumeBlockedJobs = vi.fn();
+  const service = {
+    enqueueProjects: vi.fn(async () => {}),
+    enqueueTileUrls: vi.fn(async () => {}),
+    resumeBlockedJobs,
+    subscribe: vi.fn((listener: (jobs: TilePrefetchJobState[]) => void) => {
+      listenerRef = listener;
+      listener([]);
+      return () => {};
+    }),
+    waitForIdle: vi.fn(async () => {}),
+    dispose: vi.fn(),
+  } as unknown as TilePrefetchService;
+  return {
+    service,
+    resumeBlockedJobs,
+    emit: (jobs: TilePrefetchJobState[]) => listenerRef(jobs),
+  };
+}
+
+function blockedLandmarkJob(): TilePrefetchJobState {
+  return {
+    projectId: 'landmarks',
+    commitId: 'sig-1',
+    status: 'paused',
+    zoomMin: 0,
+    zoomMax: 18,
+    padMeters: 50,
+    totalTiles: 10,
+    completedTiles: 0,
+    failedTiles: 0,
+    bytesDownloaded: 0,
+    estimatedBytes: 0,
+    blockedByStorage: true,
+    updatedAt: 1,
+  };
 }
 
 function createDeferred<T>() {
@@ -942,6 +990,7 @@ describe('SpeleoDBController', () => {
       const subscribe = vi.fn(() => () => {});
       const mockTilePrefetch = {
         enqueueProjects,
+        enqueueTileUrls: vi.fn(async () => {}),
         subscribe,
       } as unknown as TilePrefetchService;
 
@@ -971,6 +1020,100 @@ describe('SpeleoDBController', () => {
       expect(request.minZoom).toBe(0);
       expect(request.maxZoom).toBe(18);
       expect(request.padMeters).toBe(50);
+    });
+
+    it('enqueues a combined landmarks tile prefetch job from cached landmark points', async () => {
+      const enqueueTileUrls = vi.fn(async () => {});
+      const mockTilePrefetch = {
+        enqueueProjects: vi.fn(async () => {}),
+        enqueueTileUrls,
+        subscribe: vi.fn(() => () => {}),
+      } as unknown as TilePrefetchService;
+
+      cache.getGeoJSON = vi.fn(async () => ({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } }],
+      }));
+      cache.getOverlayGeoJSON = vi.fn(async (id: string) =>
+        id === 'landmarks'
+          ? {
+              type: 'FeatureCollection',
+              features: [
+                { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [10.4, 45.3] } },
+                { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [-73.9, 40.7] } },
+              ],
+            }
+          : null,
+      );
+
+      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+
+      const result = await controller.syncProjects();
+      await Promise.resolve();
+
+      expect(enqueueTileUrls).toHaveBeenCalledOnce();
+      const [target] = enqueueTileUrls.mock.calls.at(0) as unknown as [
+        { id: string; commitId: string; tileUrls: string[]; zoomMin: number; zoomMax: number; padMeters: number },
+      ];
+      expect(target.id).toBe('landmarks');
+      expect(target.zoomMin).toBe(0);
+      expect(target.zoomMax).toBe(18);
+      expect(target.padMeters).toBe(50);
+      expect(target.tileUrls.length).toBeGreaterThan(0);
+      expect(target.commitId).toMatch(/^sig-2-/);
+      expect(result.phases.tilePrefetch.landmarkScheduled).toBe(true);
+      expect(result.phases.tilePrefetch.landmarkTileCount).toBe(target.tileUrls.length);
+    });
+
+    it('skips landmark tile prefetch when there are no landmark points', async () => {
+      const enqueueTileUrls = vi.fn(async () => {});
+      const mockTilePrefetch = {
+        enqueueProjects: vi.fn(async () => {}),
+        enqueueTileUrls,
+        subscribe: vi.fn(() => () => {}),
+      } as unknown as TilePrefetchService;
+
+      cache.getOverlayGeoJSON = vi.fn(async () => ({ type: 'FeatureCollection', features: [] }));
+
+      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+
+      const result = await controller.syncProjects();
+
+      expect(enqueueTileUrls).not.toHaveBeenCalled();
+      expect(result.phases.tilePrefetch.landmarkScheduled).toBe(false);
+      expect(result.phases.tilePrefetch.landmarkTileCount).toBe(0);
+    });
+
+    it('produces a stable landmark signature across repeated syncs', async () => {
+      const enqueueTileUrls = vi.fn(async () => {});
+      const mockTilePrefetch = {
+        enqueueProjects: vi.fn(async () => {}),
+        enqueueTileUrls,
+        subscribe: vi.fn(() => () => {}),
+      } as unknown as TilePrefetchService;
+
+      cache.getOverlayGeoJSON = vi.fn(async (id: string) =>
+        id === 'landmarks'
+          ? {
+              type: 'FeatureCollection',
+              features: [
+                { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [10.4, 45.3] } },
+              ],
+            }
+          : null,
+      );
+
+      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
+
+      await controller.syncProjects();
+      await controller.syncProjects();
+
+      const first = enqueueTileUrls.mock.calls.at(0) as unknown as [{ commitId: string }];
+      const second = enqueueTileUrls.mock.calls.at(1) as unknown as [{ commitId: string }];
+      expect(first[0].commitId).toBe(second[0].commitId);
     });
 
     it('does not call network project sync while offline lock is active', async () => {
@@ -1448,6 +1591,153 @@ describe('SpeleoDBController', () => {
 
       expect(result.success).toBe(true);
       expect(service.authenticate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tile-cache overflow consent', () => {
+    it('flags over-limit and the one-time auto prompt from a blocked job', () => {
+      const tp = createControllableTilePrefetch();
+      const ctrl = new SpeleoDBController(service, prefs, cache, tp.service);
+
+      expect(ctrl.isTileCacheOverLimit).toBe(false);
+      expect(ctrl.needsAutoStoragePrompt).toBe(false);
+
+      tp.emit([blockedLandmarkJob()]);
+
+      expect(ctrl.isTileCacheOverLimit).toBe(true);
+      expect(ctrl.needsAutoStoragePrompt).toBe(true);
+      expect(ctrl.storageConsentRequired).toBe(true);
+    });
+
+    it('acknowledging the prompt persists it and suppresses the auto popup (warning stays)', () => {
+      const tp = createControllableTilePrefetch();
+      const ctrl = new SpeleoDBController(service, prefs, cache, tp.service);
+      tp.emit([blockedLandmarkJob()]);
+
+      ctrl.acknowledgeStoragePrompt();
+
+      expect(prefs.setPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ tileCacheOverLimitPromptAcknowledged: true }),
+      );
+      expect(ctrl.needsAutoStoragePrompt).toBe(false);
+      expect(ctrl.storageConsentRequired).toBe(false);
+      // The underlying condition persists, so the Settings warning stays visible.
+      expect(ctrl.isTileCacheOverLimit).toBe(true);
+    });
+
+    it('does not auto-prompt across restarts once acknowledged (persistent)', () => {
+      const acknowledgedPrefs = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+        tileCacheOverLimitPromptAcknowledged: true,
+      });
+      const tp = createControllableTilePrefetch();
+      const ctrl = new SpeleoDBController(service, acknowledgedPrefs, cache, tp.service);
+
+      tp.emit([blockedLandmarkJob()]);
+
+      expect(ctrl.isTileCacheOverLimit).toBe(true);
+      expect(ctrl.needsAutoStoragePrompt).toBe(false);
+    });
+
+    it('approving persists both flags, clears over-limit, and resumes prefetch', () => {
+      const tp = createControllableTilePrefetch();
+      const ctrl = new SpeleoDBController(service, prefs, cache, tp.service);
+      tp.emit([blockedLandmarkJob()]);
+
+      ctrl.approveTileCacheOverLimit();
+
+      expect(prefs.setPreferences).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tileCacheOverLimitApproved: true,
+          tileCacheOverLimitPromptAcknowledged: true,
+        }),
+      );
+      expect(ctrl.isTileCacheOverLimitApproved).toBe(true);
+      // Approval lifts the cap, so the over-limit condition no longer surfaces.
+      expect(ctrl.isTileCacheOverLimit).toBe(false);
+      expect(ctrl.needsAutoStoragePrompt).toBe(false);
+      expect(tp.resumeBlockedJobs).toHaveBeenCalledOnce();
+    });
+
+    it('manual request re-opens the prompt even after acknowledgement', () => {
+      const acknowledgedPrefs = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+        tileCacheOverLimitPromptAcknowledged: true,
+      });
+      const tp = createControllableTilePrefetch();
+      const ctrl = new SpeleoDBController(service, acknowledgedPrefs, cache, tp.service);
+      tp.emit([blockedLandmarkJob()]);
+
+      expect(ctrl.needsAutoStoragePrompt).toBe(false);
+      expect(ctrl.storageConsentRequired).toBe(false);
+
+      ctrl.requestStorageConsentPrompt();
+      expect(ctrl.storageConsentRequested).toBe(true);
+      expect(ctrl.storageConsentRequired).toBe(true);
+
+      ctrl.clearStorageConsentRequest();
+      expect(ctrl.storageConsentRequested).toBe(false);
+      expect(ctrl.storageConsentRequired).toBe(false);
+    });
+
+    it('warns once when a job stays blockedByStorage while overflow is approved', () => {
+      const tp = createControllableTilePrefetch();
+      const ctrl = new SpeleoDBController(service, prefs, cache, tp.service);
+      ctrl.approveTileCacheOverLimit();
+      expect(ctrl.isTileCacheOverLimitApproved).toBe(true);
+
+      // A real cap-lift would have cleared the flag; simulate the runtime
+      // failing to propagate by emitting a still-blocked job after approval.
+      allowConsoleWarn(/blocked by storage while overflow is approved/);
+      tp.emit([blockedLandmarkJob()]);
+      // Latched: a second emit of the same stuck state must not warn again.
+      tp.emit([blockedLandmarkJob()]);
+
+      // The Settings warning still stays hidden (approval semantics unchanged).
+      expect(ctrl.isTileCacheOverLimit).toBe(false);
+    });
+
+    it('revoking clears approval but keeps the acknowledged flag', () => {
+      const tp = createControllableTilePrefetch();
+      const ctrl = new SpeleoDBController(service, prefs, cache, tp.service);
+      ctrl.approveTileCacheOverLimit();
+      expect(ctrl.isTileCacheOverLimitApproved).toBe(true);
+
+      ctrl.revokeTileCacheOverLimit();
+
+      expect(ctrl.isTileCacheOverLimitApproved).toBe(false);
+      expect(prefs.setPreferences).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          tileCacheOverLimitApproved: false,
+          tileCacheOverLimitPromptAcknowledged: true,
+        }),
+      );
+    });
+
+    it('restores persisted approval at construction', () => {
+      const approvedPrefs = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+        tileCacheOverLimitApproved: true,
+        tileCacheOverLimitPromptAcknowledged: true,
+      });
+      const ctrl = new SpeleoDBController(service, approvedPrefs, cache);
+
+      expect(ctrl.isTileCacheOverLimitApproved).toBe(true);
+    });
+
+    it('resets consent state on logout', async () => {
+      const tp = createControllableTilePrefetch();
+      const ctrl = new SpeleoDBController(service, prefs, cache, tp.service);
+      ctrl.approveTileCacheOverLimit();
+      expect(ctrl.isTileCacheOverLimitApproved).toBe(true);
+
+      await ctrl.logout();
+
+      expect(ctrl.isTileCacheOverLimitApproved).toBe(false);
+      expect(ctrl.isTileCacheOverLimit).toBe(false);
     });
   });
 });

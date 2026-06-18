@@ -15,10 +15,11 @@ import {
   IonToggle,
   IonToolbar,
 } from '@ionic/react';
-import { chevronDownOutline, syncOutline } from 'ionicons/icons';
+import { chevronDownOutline, syncOutline, warningOutline } from 'ionicons/icons';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 import { useSpeleoDB } from '../context/useSpeleoDB';
+import { MAP } from '../constants';
 import { getManualTileCount, getTotalCacheBytes } from '../services/tileCache/TileCacheRepository';
 import AppTabBar from '../components/AppTabBar';
 import {
@@ -45,6 +46,8 @@ function formatNumber(n: number): string {
 
 const MAP_SELECT_CLASS = 'appearance-none min-w-[148px] rounded-lg border border-slate-500/70 bg-slate-800/90 text-sm text-slate-100 px-3 py-2 pr-9 shadow-inner shadow-black/20 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-cyan-400/60 focus:border-cyan-400/60';
 
+const TILE_CACHE_CAP_MB = Math.round(MAP.TILE_CACHE_MAX_BYTES / (1024 * 1024));
+
 interface SettingsProps {
   showLandmarks: boolean;
   onShowLandmarksChange: (visible: boolean) => void;
@@ -54,6 +57,8 @@ interface SettingsProps {
   onMeasurementUnitChange: (unit: MeasurementUnit) => void;
   isProjectPanelOpen: boolean;
   onProjectPanelChange: (open: boolean) => void;
+  isLandmarkPanelOpen: boolean;
+  onLandmarkPanelChange: (open: boolean) => void;
 }
 
 const Settings: React.FC<SettingsProps> = ({
@@ -65,10 +70,20 @@ const Settings: React.FC<SettingsProps> = ({
   onMeasurementUnitChange,
   isProjectPanelOpen,
   onProjectPanelChange,
+  isLandmarkPanelOpen,
+  onLandmarkPanelChange,
 }) => {
   const history = useHistory();
   const location = useLocation();
-  const { controller, projects, syncStatus, tilePrefetchJobs, lastSyncedAt } = useSpeleoDB();
+  const {
+    controller,
+    projects,
+    syncStatus,
+    tilePrefetchJobs,
+    lastSyncedAt,
+    isTileCacheOverLimit,
+    isTileCacheOverLimitApproved,
+  } = useSpeleoDB();
 
   const [cacheBytes, setCacheBytes] = useState(0);
   const [manualTileCount, setManualTileCount] = useState(0);
@@ -250,7 +265,44 @@ const Settings: React.FC<SettingsProps> = ({
               {formatNumber(syncProcessedTiles)} / {formatNumber(syncTotalTiles)}
             </span>
           </IonItem>
+
+          {isTileCacheOverLimitApproved && (
+            <IonItem data-testid="storage-approved-status">
+              <IonLabel className="ion-text-wrap">
+                <p className="text-sm text-slate-200">Extra storage allowed</p>
+                <p className="text-xs text-slate-400">
+                  Offline maps may exceed the {TILE_CACHE_CAP_MB} MB limit.
+                </p>
+              </IonLabel>
+              <button
+                slot="end"
+                data-testid="storage-revoke"
+                onClick={() => controller.revokeTileCacheOverLimit()}
+                className="text-sm text-cyan-300 hover:text-cyan-200 transition-colors"
+              >
+                Revoke
+              </button>
+            </IonItem>
+          )}
         </IonList>
+
+        {/* Storage over-limit warning */}
+        {isTileCacheOverLimit && (
+          <IonList inset>
+            <IonItem
+              button
+              detail={false}
+              onClick={() => controller.requestStorageConsentPrompt()}
+              className="ion-text-center"
+              data-testid="storage-over-limit-warning"
+            >
+              <IonLabel color="warning" className="ion-text-center">
+                <IonIcon icon={warningOutline} className="align-middle mr-2 text-base" />
+                Storage limit reached
+              </IonLabel>
+            </IonItem>
+          </IonList>
+        )}
 
         {/* Map Settings */}
         <IonList inset>
@@ -393,6 +445,8 @@ const Settings: React.FC<SettingsProps> = ({
         <AppTabBar
           isProjectPanelOpen={isProjectPanelOpen}
           onProjectPanelChange={onProjectPanelChange}
+          isLandmarkPanelOpen={isLandmarkPanelOpen}
+          onLandmarkPanelChange={onLandmarkPanelChange}
         />
       </IonFooter>
     </IonPage>

@@ -54,6 +54,9 @@ function buildShareText(detail: OverlayMarkerDetails): string {
       break;
     case 'landmark':
       lines.push(`Name: ${detail.name}`);
+      lines.push(
+        `Collection: ${detail.collectionName}${detail.isPersonalCollection ? ' (Private)' : ''}`,
+      );
       lines.push(`GPS: ${detail.gpsCoordinate}`);
       break;
     case 'projectPoint':
@@ -131,6 +134,20 @@ function renderDetailFields(detail: OverlayMarkerDetails) {
         <DetailCard>
           <DetailField label="Name" testId="overlay-marker-name" value={detail.name} />
           <DetailField label="Description" testId="overlay-marker-description" value={detail.description} />
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-400 mb-1">Collection</p>
+            <p className="flex items-center gap-2 text-sm text-slate-100">
+              <span data-testid="overlay-marker-collection">{detail.collectionName}</span>
+              {detail.isPersonalCollection && (
+                <span
+                  data-testid="overlay-marker-collection-private"
+                  className="rounded-full bg-slate-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-300"
+                >
+                  Private
+                </span>
+              )}
+            </p>
+          </div>
           <DetailField label="GPS coordinate" testId="overlay-marker-gps" value={detail.gpsCoordinate} />
         </DetailCard>
       );

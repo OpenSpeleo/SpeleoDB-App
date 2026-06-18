@@ -12,12 +12,23 @@ import { formatLastSync } from '../utils/formatLastSync';
 const mockLogout = vi.fn();
 const mockIsAuthenticated = vi.fn(() => true);
 const mockSyncProjects = vi.fn().mockResolvedValue(undefined);
+const mockRequestStorageConsentPrompt = vi.fn();
+const mockRevokeTileCacheOverLimit = vi.fn();
 
-const { mockTilePrefetchJobs, mockProjects, mockSyncStatus, mockLastSyncedAt } = vi.hoisted(() => ({
+const {
+  mockTilePrefetchJobs,
+  mockProjects,
+  mockSyncStatus,
+  mockLastSyncedAt,
+  mockIsTileCacheOverLimit,
+  mockIsTileCacheOverLimitApproved,
+} = vi.hoisted(() => ({
   mockTilePrefetchJobs: { current: [] as unknown[] },
   mockProjects: { current: [] as unknown[] },
   mockSyncStatus: { current: 'idle' as 'idle' | 'syncing' | 'done' | 'error' },
   mockLastSyncedAt: { current: null as number | null },
+  mockIsTileCacheOverLimit: { current: false },
+  mockIsTileCacheOverLimitApproved: { current: false },
 }));
 
 vi.mock('../context/useSpeleoDB', () => ({
@@ -26,11 +37,15 @@ vi.mock('../context/useSpeleoDB', () => ({
       logout: mockLogout,
       isAuthenticated: mockIsAuthenticated,
       syncProjects: mockSyncProjects,
+      requestStorageConsentPrompt: mockRequestStorageConsentPrompt,
+      revokeTileCacheOverLimit: mockRevokeTileCacheOverLimit,
     },
     projects: mockProjects.current,
     syncStatus: mockSyncStatus.current,
     lastSyncedAt: mockLastSyncedAt.current,
     tilePrefetchJobs: mockTilePrefetchJobs.current,
+    isTileCacheOverLimit: mockIsTileCacheOverLimit.current,
+    isTileCacheOverLimitApproved: mockIsTileCacheOverLimitApproved.current,
   }),
 }));
 
@@ -146,6 +161,7 @@ function renderSettings(
     const [colorMode, setColorMode] = React.useState(initialColorMode);
     const [measurementUnit, setMeasurementUnit] = React.useState(initialMeasurementUnit);
     const [isProjectPanelOpen, setIsProjectPanelOpen] = React.useState(false);
+    const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = React.useState(false);
     return (
       <Settings
         showLandmarks={showLandmarks}
@@ -156,6 +172,8 @@ function renderSettings(
         onMeasurementUnitChange={setMeasurementUnit}
         isProjectPanelOpen={isProjectPanelOpen}
         onProjectPanelChange={setIsProjectPanelOpen}
+        isLandmarkPanelOpen={isLandmarkPanelOpen}
+        onLandmarkPanelChange={setIsLandmarkPanelOpen}
       />
     );
   };
@@ -189,6 +207,10 @@ describe('Settings page', () => {
     mockProjects.current = [];
     mockSyncStatus.current = 'idle';
     mockLastSyncedAt.current = null;
+    mockIsTileCacheOverLimit.current = false;
+    mockIsTileCacheOverLimitApproved.current = false;
+    mockRequestStorageConsentPrompt.mockReset();
+    mockRevokeTileCacheOverLimit.mockReset();
     mockPersistShowLandmarks.mockReset();
     mockPersistColorMode.mockReset();
     mockPersistMeasurementUnit.mockReset();
@@ -235,6 +257,28 @@ describe('Settings page', () => {
 
     expect(screen.getByTestId('sync-pct')).toHaveTextContent('75%');
     expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,500 / 2,000');
+  });
+
+  it('includes the combined landmarks prefetch job in sync metrics', () => {
+    mockTilePrefetchJobs.current = [
+      {
+        projectId: 'p1', commitId: 'c1', status: 'downloading',
+        zoomMin: 0, zoomMax: 18, padMeters: 50,
+        totalTiles: 2000, completedTiles: 1400, failedTiles: 100,
+        bytesDownloaded: 500_000, estimatedBytes: 1_000_000, updatedAt: Date.now(),
+      },
+      {
+        projectId: 'landmarks', commitId: 'sig-1', status: 'downloading',
+        zoomMin: 0, zoomMax: 18, padMeters: 50,
+        totalTiles: 1000, completedTiles: 800, failedTiles: 0,
+        bytesDownloaded: 250_000, estimatedBytes: 500_000, updatedAt: Date.now(),
+      },
+    ];
+    renderSettings();
+
+    // Project processed 1500 + landmark processed 800 = 2300 of 3000 total.
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('2,300 / 3,000');
+    expect(screen.getByTestId('sync-pct')).toHaveTextContent('76%');
   });
 
   it('includes manually downloaded tiles in synchronization metrics', async () => {
@@ -533,6 +577,39 @@ describe('Settings page', () => {
       mockSyncStatus.current = 'syncing';
       renderSettings();
       expect(screen.getByTestId('sync-button')).toBeDisabled();
+    });
+  });
+
+  describe('Storage over-limit warning', () => {
+    it('is hidden by default', () => {
+      renderSettings();
+      expect(screen.queryByTestId('storage-over-limit-warning')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('storage-approved-status')).not.toBeInTheDocument();
+    });
+
+    it('shows a tappable warning when over the cache limit and re-opens the prompt', async () => {
+      mockIsTileCacheOverLimit.current = true;
+      const user = userEvent.setup();
+      renderSettings();
+
+      const warning = screen.getByTestId('storage-over-limit-warning');
+      expect(warning).toBeInTheDocument();
+
+      await user.click(warning);
+      expect(mockRequestStorageConsentPrompt).toHaveBeenCalledOnce();
+    });
+
+    it('shows the approved status with a Revoke action when overflow is approved', async () => {
+      mockIsTileCacheOverLimitApproved.current = true;
+      const user = userEvent.setup();
+      renderSettings();
+
+      expect(screen.getByTestId('storage-approved-status')).toBeInTheDocument();
+      // The warning is not shown at the same time as the approved status.
+      expect(screen.queryByTestId('storage-over-limit-warning')).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId('storage-revoke'));
+      expect(mockRevokeTileCacheOverLimit).toHaveBeenCalledOnce();
     });
   });
 });

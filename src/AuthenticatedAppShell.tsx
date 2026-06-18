@@ -20,9 +20,22 @@ function AuthenticatedRoutes(): ReactNode {
   const isDashboard = path === '/dashboard'
   const isSettings = path === '/settings'
   const [isProjectPanelOpen, setIsProjectPanelOpen] = useState(false)
+  const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = useState(false)
   const [showLandmarks, setShowLandmarks] = useState(() => getShowLandmarks())
   const [colorMode, setColorMode] = useState(() => getColorMode())
   const [measurementUnit, setMeasurementUnit] = useState(() => getMeasurementUnit())
+
+  // The project and landmark panels share the same left-edge slot, so opening
+  // one closes the other (they are mutually exclusive).
+  const handleProjectPanelChange = (open: boolean) => {
+    setIsProjectPanelOpen(open)
+    if (open) setIsLandmarkPanelOpen(false)
+  }
+
+  const handleLandmarkPanelChange = (open: boolean) => {
+    setIsLandmarkPanelOpen(open)
+    if (open) setIsProjectPanelOpen(false)
+  }
 
   return (
     <>
@@ -37,7 +50,9 @@ function AuthenticatedRoutes(): ReactNode {
         <Suspense fallback={null}>
           <Dashboard
             isProjectPanelOpen={isProjectPanelOpen}
-            onProjectPanelChange={setIsProjectPanelOpen}
+            onProjectPanelChange={handleProjectPanelChange}
+            isLandmarkPanelOpen={isLandmarkPanelOpen}
+            onLandmarkPanelChange={handleLandmarkPanelChange}
             showLandmarks={showLandmarks}
             colorMode={colorMode}
             measurementUnit={measurementUnit}
@@ -61,7 +76,9 @@ function AuthenticatedRoutes(): ReactNode {
             measurementUnit={measurementUnit}
             onMeasurementUnitChange={setMeasurementUnit}
             isProjectPanelOpen={isProjectPanelOpen}
-            onProjectPanelChange={setIsProjectPanelOpen}
+            onProjectPanelChange={handleProjectPanelChange}
+            isLandmarkPanelOpen={isLandmarkPanelOpen}
+            onLandmarkPanelChange={handleLandmarkPanelChange}
           />
         </Suspense>
       </div>
