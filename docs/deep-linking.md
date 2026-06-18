@@ -28,9 +28,17 @@ Both fire the same Capacitor `appUrlOpen` event, so in-app handling is unified. 
 
 ### iOS
 
-- **Info.plist** (`ios/App/App/Info.plist`): `CFBundleURLTypes` registers the `speleodb` custom scheme.
+- **Info.plist** (`ios/App/App/Info.plist`): `CFBundleURLTypes` registers the `speleodb` custom scheme. `UIApplicationSceneManifest` opts the app into the UIScene lifecycle (see below).
 - **App.entitlements** (`ios/App/App/App.entitlements`): `applinks:www.speleodb.org` in Associated Domains enables Universal Links. The existing `webcredentials:` entry is preserved.
-- **AppDelegate.swift**: Already delegates URL open and Universal Link continuation to Capacitor; no custom Swift code needed.
+- **SceneDelegate.swift** (`ios/App/App/SceneDelegate.swift`): Routes URL opens to Capacitor. Once the app adopts the UIScene lifecycle, UIKit stops calling `application(_:open:options:)` / `application(_:continue:restorationHandler:)` on the `UIApplicationDelegate`, so the equivalents live here instead:
+  - `scene(_:willConnectTo:options:)` handles cold-start launches (custom scheme via `connectionOptions.urlContexts`, Universal Links via `connectionOptions.userActivities`).
+  - `scene(_:openURLContexts:)` handles `speleodb://` opens while running/suspended.
+  - `scene(_:continue:)` handles Universal Links while running/suspended.
+  Each forwards to `ApplicationDelegateProxy.shared.application(_:open:)`, which fires the same Capacitor `appUrlOpen` event.
+
+### Why the UIScene lifecycle
+
+Apple requires apps built against the iOS 27 SDK to adopt the scene-based lifecycle; legacy AppDelegate-only apps fail to launch (the `UIScene lifecycle will soon be required` console warning precedes this). Adoption is two parts: the `UIApplicationSceneManifest` in `Info.plist` (points UIKit at `$(PRODUCT_MODULE_NAME).SceneDelegate` and the `Main` storyboard) and `SceneDelegate.swift`, which now owns the `UIWindow` and the URL-handling responsibilities formerly in `AppDelegate.swift`.
 
 ### Android
 
