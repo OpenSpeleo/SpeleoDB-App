@@ -9,6 +9,7 @@ import type { Project } from '../types/project';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import { getTile, upsertTile } from '../services/tileCache/TileCacheRepository';
 import { allowConsoleWarn } from '../test/consoleGuard';
+import { createAbortError } from '../utils/abort';
 
 function createProjectFixture(
   overrides: Omit<Partial<Project>, 'latest_commit'> & {
@@ -785,6 +786,155 @@ describe('SpeleoDBController', () => {
     });
   });
 
+  // ---- attemptReconnect (Settings "Go Online") ------------------------------
+
+  describe('attemptReconnect', () => {
+    function offlineLockedController(validateToken: ReturnType<typeof vi.fn>) {
+      const withToken = createMockPrefs({
+        token: 't',
+        instance: 'https://www.speleodb.org',
+      });
+      service = createMockService({
+        validateToken: validateToken as unknown as SpeleoDBService['validateToken'],
+      });
+      const ctrl = new SpeleoDBController(service, withToken, cache);
+      return { ctrl, withToken };
+    }
+
+    it('returns "ok", clears the offline lock, and launches a sync on 2xx', async () => {
+      // First probe fails (locks offline); the reconnect probe succeeds.
+      const validateToken = vi.fn()
+        .mockRejectedValueOnce(new Error('timeout'))
+        .mockResolvedValueOnce({ status: 200, data: {} } as HttpResponse<unknown>);
+      const { ctrl } = offlineLockedController(validateToken);
+
+      expect(await ctrl.validateSession()).toBe('network_error');
+      expect(ctrl.isOfflineLocked).toBe(true);
+
+      const result = await ctrl.attemptReconnect();
+      await flushPromises(8);
+
+      expect(result).toBe('ok');
+      expect(ctrl.isOfflineLocked).toBe(false);
+      expect(ctrl.isOnline).toBe(true);
+      // Probed the server even though it was offline-locked (unlike validateSession).
+      expect(validateToken).toHaveBeenCalledTimes(2);
+      // The success path launches a project sync.
+      expect(service.getProjectsGeoJSON).toHaveBeenCalled();
+    });
+
+    it('returns "network_error", stays offline-locked, and does not sync or logout', async () => {
+      const validateToken = vi.fn().mockRejectedValue(new Error('timeout'));
+      const { ctrl, withToken } = offlineLockedController(validateToken);
+
+      expect(await ctrl.validateSession()).toBe('network_error');
+      expect(ctrl.isOfflineLocked).toBe(true);
+
+      const result = await ctrl.attemptReconnect();
+      await flushPromises(4);
+
+      expect(result).toBe('network_error');
+      expect(ctrl.isOfflineLocked).toBe(true);
+      expect(ctrl.isAuthenticated()).toBe(true);
+      expect(withToken.clearPreferences).not.toHaveBeenCalled();
+      expect(service.getProjectsGeoJSON).not.toHaveBeenCalled();
+    });
+
+    it('returns "unauthorized" and logs out on 4xx', async () => {
+      const validateToken = vi.fn()
+        .mockRejectedValueOnce(new Error('timeout'))
+        .mockResolvedValueOnce({ status: 401, data: {} } as HttpResponse<unknown>);
+      const { ctrl, withToken } = offlineLockedController(validateToken);
+
+      expect(await ctrl.validateSession()).toBe('network_error');
+
+      const result = await ctrl.attemptReconnect();
+
+      expect(result).toBe('unauthorized');
+      expect(ctrl.isAuthenticated()).toBe(false);
+      expect(withToken.clearPreferences).toHaveBeenCalled();
+      expect(service.getProjectsGeoJSON).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---- Runtime online -> offline transition (failed Resync) -----------------
+
+  describe('syncProjects runtime offline transition', () => {
+    function onlineController() {
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      cache.getProjects = vi.fn(async () => [DEFAULT_PROJECT]);
+      const ctrl = new SpeleoDBController(service, withToken, cache);
+      return { ctrl, withToken };
+    }
+
+    it('flips offline (cache preserved, no logout) when the refresh hits a transport error', async () => {
+      allowConsoleWarn(
+        expect.stringContaining('syncProjects: API fetch failed:'),
+        expect.any(Error),
+      );
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => { throw new Error('Network failure'); }),
+      });
+      const { ctrl, withToken } = onlineController();
+      expect(ctrl.isOfflineLocked).toBe(false);
+
+      await ctrl.syncProjects();
+
+      expect(ctrl.isOfflineLocked).toBe(true);
+      expect(ctrl.isOnline).toBe(false);
+      expect(ctrl.isAuthenticated()).toBe(true);
+      expect(ctrl.projects).toEqual([DEFAULT_PROJECT]);
+      expect(withToken.clearPreferences).not.toHaveBeenCalled();
+    });
+
+    it('flips offline when the refresh returns a 5xx', async () => {
+      allowConsoleWarn(
+        expect.stringContaining('syncProjects: refresh skipped (status=500)'),
+      );
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => ({ status: 500, data: {} }) as HttpResponse<Project[]>),
+      });
+      const { ctrl } = onlineController();
+
+      await ctrl.syncProjects();
+
+      expect(ctrl.isOfflineLocked).toBe(true);
+      expect(ctrl.isOnline).toBe(false);
+      expect(ctrl.isAuthenticated()).toBe(true);
+    });
+
+    it('does NOT flip offline or logout on a 4xx refresh', async () => {
+      allowConsoleWarn(
+        expect.stringContaining('syncProjects: refresh skipped (status=403)'),
+      );
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => ({ status: 403, data: {} }) as HttpResponse<Project[]>),
+      });
+      const { ctrl, withToken } = onlineController();
+
+      await ctrl.syncProjects();
+
+      expect(ctrl.isOfflineLocked).toBe(false);
+      expect(ctrl.isAuthenticated()).toBe(true);
+      expect(withToken.clearPreferences).not.toHaveBeenCalled();
+    });
+
+    it('does NOT flip offline when the refresh is aborted', async () => {
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(async () => { throw createAbortError(); }),
+      });
+      const { ctrl } = onlineController();
+
+      await ctrl.syncProjects();
+
+      expect(ctrl.isOfflineLocked).toBe(false);
+      expect(ctrl.isAuthenticated()).toBe(true);
+    });
+  });
+
   describe('syncProjects invalidation', () => {
     it('does not restore projects or lastSyncedAt after logout while sync is waiting on the API', async () => {
       const response = createDeferred<HttpResponse<Project[]>>();
@@ -845,6 +995,40 @@ describe('SpeleoDBController', () => {
       expect(cache.setGeoJSON).not.toHaveBeenCalled();
       expect(ctrl.projects).toEqual([]);
       expect(ctrl.lastSyncedAt).toBeNull();
+    });
+
+    it('does not re-lock offline when a non-abort refresh failure lands after logout', async () => {
+      // Regression: a logged-out (aborted) sync whose refresh rejects with a
+      // non-abort transport error must NOT call enterOfflineMode() -- otherwise
+      // a logged-out controller wrongly reports isOfflineLocked === true. With
+      // the staleness guard, the aborted context rethrows before the warn fires.
+      const response = createDeferred<HttpResponse<Project[]>>();
+      service = createMockService({
+        getProjectsGeoJSON: vi.fn(() => response.promise),
+      });
+      cache.getProjects = vi.fn(async () => null);
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      const ctrl = new SpeleoDBController(service, withToken, cache);
+      expect(ctrl.isOfflineLocked).toBe(false);
+
+      const syncPromise = ctrl.syncProjects();
+      // Let the refresh reach (and await) the in-flight fetch before logout.
+      await flushPromises(8);
+
+      const logoutPromise = ctrl.logout();
+
+      // The in-flight refresh settles with a real (non-abort) network error
+      // *after* logout already aborted the sync context and cleared the lock.
+      response.reject(new Error('Network failure'));
+
+      await Promise.all([syncPromise, logoutPromise]);
+
+      expect(ctrl.isAuthenticated()).toBe(false);
+      expect(ctrl.isOfflineLocked).toBe(false);
+      expect(ctrl.isOnline).toBe(false);
     });
   });
 

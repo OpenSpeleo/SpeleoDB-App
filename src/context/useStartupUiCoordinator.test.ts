@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 
 import { useStartupUiCoordinator } from './useStartupUiCoordinator';
 import type { AuthState } from '../types';
@@ -67,5 +67,73 @@ describe('useStartupUiCoordinator storage-consent gating', () => {
     });
     expect(result.current.showStorageConsentModal).toBe(false);
     expect(result.current.storageConsentSuppressedByGate).toBe(false);
+  });
+});
+
+describe('useStartupUiCoordinator runtime offline modal', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  type CoordinatorProps = Parameters<typeof useStartupUiCoordinator>[0];
+
+  // No stored session => startup validation is not pending and validateSession
+  // is never called, so the offline modal gate depends purely on isOfflineLocked
+  // and the acknowledge/clear lifecycle.
+  function makeProps(overrides: Partial<CoordinatorProps> = {}): CoordinatorProps {
+    return {
+      authState: authenticated,
+      isOfflineLocked: false,
+      syncStatus: 'done',
+      controller: {
+        validateSession: vi.fn(async () => 'ok' as const),
+        isAuthenticated: () => true,
+      },
+      history: { replace: vi.fn() },
+      location: { pathname: '/dashboard' },
+      getPreferences: () => ({}),
+      hideSplashScreenSafely: vi.fn(),
+      storageConsentRequired: false,
+      ...overrides,
+    };
+  }
+
+  it('shows the offline modal when the app flips offline at runtime', () => {
+    const { result, rerender } = renderHook(
+      (props: CoordinatorProps) => useStartupUiCoordinator(props),
+      { initialProps: makeProps() },
+    );
+
+    // Online at startup, validation done, never acknowledged => no modal.
+    expect(result.current.showOfflineModal).toBe(false);
+
+    // A failed Resync flips the controller offline (isOfflineLocked true).
+    rerender(makeProps({ isOfflineLocked: true }));
+    expect(result.current.showOfflineModal).toBe(true);
+  });
+
+  it('re-shows the offline modal after a prior Go Offline acknowledgement and a reconnect', async () => {
+    const { result, rerender } = renderHook(
+      (props: CoordinatorProps) => useStartupUiCoordinator(props),
+      { initialProps: makeProps({ isOfflineLocked: true }) },
+    );
+
+    // First offline period: modal shows, user taps "Go Offline".
+    expect(result.current.showOfflineModal).toBe(true);
+    act(() => {
+      result.current.acknowledgeOfflineMode();
+    });
+    expect(result.current.showOfflineModal).toBe(false);
+
+    // Go Online succeeds -> lock clears. The coordinator re-arms the modal
+    // (offline_lock_cleared resets the acknowledgement) via a microtask.
+    await act(async () => {
+      rerender(makeProps({ isOfflineLocked: false }));
+    });
+    expect(result.current.showOfflineModal).toBe(false);
+
+    // A later runtime flip back to offline must show the modal again.
+    rerender(makeProps({ isOfflineLocked: true }));
+    expect(result.current.showOfflineModal).toBe(true);
   });
 });

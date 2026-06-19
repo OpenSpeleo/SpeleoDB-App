@@ -94,6 +94,8 @@ const Settings: React.FC<SettingsProps> = ({
   const [manualTileCount, setManualTileCount] = useState(0);
   const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [showReconnectFailedModal, setShowReconnectFailedModal] = useState(false);
 
   useEffect(() => {
     if (!controller.isAuthenticated()) {
@@ -167,6 +169,29 @@ const Settings: React.FC<SettingsProps> = ({
     history.push('/dashboard');
     void restartGuidedTourFromHelp();
   }, [history, onProjectPanelChange]);
+
+  const handleGoOnline = useCallback(async () => {
+    if (isReconnecting) return;
+    setIsReconnecting(true);
+    try {
+      const result = await controller.attemptReconnect();
+      if (result === 'unauthorized') {
+        history.replace('/login');
+        return;
+      }
+      if (result === 'network_error') {
+        setShowReconnectFailedModal(true);
+        return;
+      }
+      // 'ok': offline lock cleared and a sync launched by the controller; the
+      // Go Online section unmounts because isOfflineLocked is now false.
+    } catch {
+      // Treat unexpected failures like a failed reconnect: nothing changes.
+      setShowReconnectFailedModal(true);
+    } finally {
+      setIsReconnecting(false);
+    }
+  }, [controller, history, isReconnecting]);
 
   const handleLogout = useCallback(() => {
     setShowLogoutConfirmModal(true);
@@ -244,21 +269,25 @@ const Settings: React.FC<SettingsProps> = ({
           <IonListHeader>
             <IonLabel>Synchronization</IonLabel>
             <button
+              type="button"
               onClick={handleSync}
-              disabled={syncStatus === 'syncing'}
+              disabled={isOfflineLocked || syncStatus === 'syncing'}
               data-testid="sync-button"
-              className={`ml-auto mr-2 ${syncStatus === 'syncing' ? 'h-8 px-3 inline-flex items-center gap-2' : 'w-8 h-8 flex items-center justify-center'} rounded-lg
-                         text-slate-300 hover:text-white hover:bg-slate-700/50
-                         disabled:opacity-60 disabled:cursor-default transition-colors`}
-              aria-label={syncStatus === 'syncing' ? 'Syncing in progress' : 'Sync projects'}
+              className="app-btn app-btn--compact ml-auto mr-2 gap-2 bg-emerald-600/90 text-white
+                         hover:bg-emerald-500/90 active:bg-emerald-600 touch-manipulation
+                         disabled:opacity-60 disabled:cursor-default"
+              aria-label={syncStatus === 'syncing' ? 'Syncing in progress' : 'Resync projects'}
             >
               {syncStatus === 'syncing' ? (
                 <>
-                  <div className="w-3.5 h-3.5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
-                  <span className="text-xs" data-testid="sync-status-label">{'Syncing\u2026'}</span>
+                  <div className="w-4 h-4 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
+                  <span data-testid="sync-status-label">{'Syncing\u2026'}</span>
                 </>
               ) : (
-                <IonIcon icon={syncOutline} className="text-lg" />
+                <>
+                  <IonIcon icon={syncOutline} className="text-lg" />
+                  <span>Resync</span>
+                </>
               )}
             </button>
           </IonListHeader>
@@ -450,6 +479,24 @@ const Settings: React.FC<SettingsProps> = ({
           </IonItem>
         </IonList>
 
+        {/* Go Online (only while offline-locked) */}
+        {isOfflineLocked && (
+          <IonList inset>
+            <IonItem
+              button
+              detail={false}
+              disabled={isReconnecting}
+              onClick={handleGoOnline}
+              className="ion-text-center"
+              data-testid="go-online-button"
+            >
+              <IonLabel color="warning" className="ion-text-center">
+                {isReconnecting ? 'Reconnecting\u2026' : 'Go Online'}
+              </IonLabel>
+            </IonItem>
+          </IonList>
+        )}
+
         {/* Account */}
         <IonList inset>
           <IonItem
@@ -509,6 +556,48 @@ const Settings: React.FC<SettingsProps> = ({
                   className="app-btn bg-red-600 text-white hover:bg-red-500 disabled:opacity-50"
                 >
                   {isLoggingOut ? 'Clearing data\u2026' : 'Wipe local data & Sign Out'}
+                </button>
+              </div>
+            </div>
+          </IonContent>
+        </IonModal>
+
+        {/* Reconnect failed modal */}
+        <IonModal
+          isOpen={showReconnectFailedModal}
+          onDidDismiss={() => setShowReconnectFailedModal(false)}
+          data-testid="reconnect-failed-modal"
+        >
+          <IonContent className="ion-padding">
+            <div className="flex flex-col h-full justify-center max-w-sm mx-auto text-center">
+              <div className="mb-6">
+                <span className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-amber-500/20 text-amber-400 mb-4">
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M18.364 5.636a9 9 0 010 12.728m-12.728 0a9 9 0 010-12.728m9.9 2.829a5 5 0 010 7.07m-7.072 0a5 5 0 010-7.07M12 12h.01"
+                    />
+                  </svg>
+                </span>
+                <h2 className="text-xl font-semibold text-slate-100 mb-2">Couldn&apos;t reconnect</h2>
+                <p className="text-slate-300 text-sm mb-2">
+                  We could not reach the SpeleoDB server. You are still in offline mode.
+                </p>
+                <p className="text-slate-400 text-sm">
+                  Check your connection and try again, or keep working with your cached data.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowReconnectFailedModal(false)}
+                  data-testid="reconnect-failed-dismiss"
+                  className="app-btn bg-slate-700/60 text-slate-100 border border-slate-600/50
+                             hover:bg-slate-600/70 hover:text-white active:bg-slate-700 touch-manipulation"
+                >
+                  OK
                 </button>
               </div>
             </div>

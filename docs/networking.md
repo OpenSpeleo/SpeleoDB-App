@@ -5,7 +5,8 @@ This document defines how network state is handled in the app and what is intent
 ## Design intent
 
 - Networking must be deterministic and user-driven.
-- The app must not auto-switch state just because the device toggles Wi-Fi/cellular.
+- The app must not auto-switch state just because the device toggles Wi-Fi/cellular (no passive listeners).
+- State transitions are request-driven: they only happen as a result of an explicit, user-initiated network operation (startup validation, a Resync, or the Go Online reconnect) actually failing or succeeding against the server.
 - Offline users must keep local session and cached data unless auth is definitively invalid (`4xx`).
 
 ## No passive listeners
@@ -16,11 +17,19 @@ This document defines how network state is handled in the app and what is intent
 
 ## Allowed reconnect triggers
 
-Only one action may attempt to return online from offline mode:
+Two explicit, user-initiated actions may attempt to return online from offline mode:
 
 1. Close and reopen the app (startup validation flow).
+2. Tap **Go Online** in Settings, which calls `controller.attemptReconnect()` (an in-process reconnect that probes the server via `validateSessionAgainstServer()`, then launches a sync on success).
 
-If this action does not occur, app remains in offline behavior even if device connectivity changes. The Settings page sync button calls `syncProjects()` only and never performs an in-process reconnect.
+If neither action occurs, the app remains in offline behavior even if device connectivity changes. The Settings **Resync** button calls `syncProjects()` only, is disabled while offline-locked, and never performs a reconnect.
+
+## Offline-entry triggers (online -> offline)
+
+The app enters offline mode only as a result of a failed server probe, never from a passive connectivity event:
+
+1. Startup token validation returns a timeout / transport error / non-`4xx` status.
+2. A user-initiated **Resync** whose project-list refresh hits a timeout / transport error / `5xx`. The controller calls `enterOfflineMode()` (idempotent), shows the normal offline modal, and reveals the Go Online button. A `4xx` does not flip offline and does not log out (only startup validation acts on `4xx`).
 
 ## Startup connectivity feedback
 
@@ -43,8 +52,8 @@ If this action does not occur, app remains in offline behavior even if device co
 - During offline lock, normal data/map fetch paths should skip outbound network and use cache.
 - This includes dashboard project GeoJSON and read-only overlay GeoJSON (landmarks, stations, exploration leads, cylinder installs).
 - Map tile-layer selection is gated offline: only the forced satellite layer and layers the user has synced for offline use are selectable while offline-locked (others have no cached tiles). See `docs/map-layers.md`.
-- Reconnect attempts are explicit and limited to the app relaunch trigger above.
-- Transport errors/timeouts remain non-destructive (no logout, no cache purge).
+- Reconnect attempts are explicit and limited to the app relaunch trigger and the Settings Go Online button above.
+- Transport errors/timeouts remain non-destructive (no logout, no cache purge); they flip the app to offline mode (preserving session and cache) rather than wiping data.
 
 ## Auth and logout
 

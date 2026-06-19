@@ -12,6 +12,7 @@ import { formatLastSync } from '../utils/formatLastSync';
 const mockLogout = vi.fn();
 const mockIsAuthenticated = vi.fn(() => true);
 const mockSyncProjects = vi.fn().mockResolvedValue(undefined);
+const mockAttemptReconnect = vi.fn();
 const mockRequestStorageConsentPrompt = vi.fn();
 const mockRevokeTileCacheOverLimit = vi.fn();
 const mockSetLayerOfflineSync = vi.fn().mockResolvedValue(undefined);
@@ -40,6 +41,7 @@ vi.mock('../context/useSpeleoDB', () => ({
       logout: mockLogout,
       isAuthenticated: mockIsAuthenticated,
       syncProjects: mockSyncProjects,
+      attemptReconnect: mockAttemptReconnect,
       requestStorageConsentPrompt: mockRequestStorageConsentPrompt,
       revokeTileCacheOverLimit: mockRevokeTileCacheOverLimit,
       setLayerOfflineSync: mockSetLayerOfflineSync,
@@ -115,8 +117,14 @@ vi.mock('@ionic/react', () => ({
   IonListHeader: ({ children }: { children?: React.ReactNode }) => (
     <div>{children}</div>
   ),
-  IonItem: ({ children, onClick, ...rest }: { children?: React.ReactNode; onClick?: () => void; button?: boolean } & Record<string, unknown>) => (
-    <div data-testid={rest['data-testid'] as string ?? 'ion-item'} onClick={onClick}>{children}</div>
+  IonItem: ({ children, onClick, disabled, ...rest }: { children?: React.ReactNode; onClick?: () => void; button?: boolean; disabled?: boolean } & Record<string, unknown>) => (
+    // Mirror Ionic: a disabled item is non-interactive (no onClick) so tests
+    // exercise the rendered disabled gate, not just the handler's JS guard.
+    <div
+      data-testid={(rest['data-testid'] as string) ?? 'ion-item'}
+      aria-disabled={disabled ? 'true' : undefined}
+      onClick={disabled ? undefined : onClick}
+    >{children}</div>
   ),
   IonLabel: ({ children }: { children?: React.ReactNode }) => (
     <div>{children}</div>
@@ -144,10 +152,12 @@ vi.mock('@ionic/react', () => ({
   IonModal: ({
     children,
     isOpen,
+    ...rest
   }: {
     children?: React.ReactNode;
     isOpen?: boolean;
-  }) => (isOpen ? <div data-testid="ion-modal">{children}</div> : null),
+  } & Record<string, unknown>) =>
+    isOpen ? <div data-testid={(rest['data-testid'] as string) ?? 'ion-modal'}>{children}</div> : null,
   IonFooter: ({ children }: { children?: React.ReactNode }) => (
     <div data-testid="ion-footer">{children}</div>
   ),
@@ -211,6 +221,7 @@ describe('Settings page', () => {
     mockLogout.mockReset().mockResolvedValue(undefined);
     mockIsAuthenticated.mockReturnValue(true);
     mockSyncProjects.mockReset().mockResolvedValue(undefined);
+    mockAttemptReconnect.mockReset().mockResolvedValue('ok');
     mockGetManualTileCount.mockReset().mockResolvedValue(0);
     mockGetTotalCacheBytes.mockReset().mockResolvedValue(0);
     mockTilePrefetchJobs.current = [];
@@ -589,6 +600,121 @@ describe('Settings page', () => {
       mockSyncStatus.current = 'syncing';
       renderSettings();
       expect(screen.getByTestId('sync-button')).toBeDisabled();
+    });
+  });
+
+  describe('Resync button', () => {
+    it('renders the "Resync" label when idle', () => {
+      mockSyncStatus.current = 'idle';
+      renderSettings();
+      expect(screen.getByTestId('sync-button')).toHaveTextContent('Resync');
+    });
+
+    it('is disabled while offline-locked', () => {
+      mockIsOfflineLocked.current = true;
+      renderSettings();
+      expect(screen.getByTestId('sync-button')).toBeDisabled();
+    });
+
+    it('does not call syncProjects when clicked while offline-locked', async () => {
+      mockIsOfflineLocked.current = true;
+      const user = userEvent.setup();
+      renderSettings();
+
+      await user.click(screen.getByTestId('sync-button'));
+      expect(mockSyncProjects).not.toHaveBeenCalled();
+    });
+
+    it('calls syncProjects when clicked while online', async () => {
+      mockIsOfflineLocked.current = false;
+      const user = userEvent.setup();
+      renderSettings();
+
+      await user.click(screen.getByTestId('sync-button'));
+      await waitFor(() => expect(mockSyncProjects).toHaveBeenCalledOnce());
+    });
+  });
+
+  describe('Go Online button', () => {
+    it('is hidden when online', () => {
+      mockIsOfflineLocked.current = false;
+      renderSettings();
+      expect(screen.queryByTestId('go-online-button')).not.toBeInTheDocument();
+    });
+
+    it('is visible when offline-locked', () => {
+      mockIsOfflineLocked.current = true;
+      renderSettings();
+      expect(screen.getByTestId('go-online-button')).toBeInTheDocument();
+    });
+
+    it('calls attemptReconnect and shows no failure modal on success', async () => {
+      mockIsOfflineLocked.current = true;
+      mockAttemptReconnect.mockResolvedValue('ok');
+      const user = userEvent.setup();
+      renderSettings();
+
+      await user.click(screen.getByTestId('go-online-button'));
+
+      await waitFor(() => expect(mockAttemptReconnect).toHaveBeenCalledOnce());
+      expect(screen.queryByTestId('reconnect-failed-dismiss')).not.toBeInTheDocument();
+    });
+
+    it('shows the "Couldn\u2019t reconnect" modal on network_error and keeps the button', async () => {
+      mockIsOfflineLocked.current = true;
+      mockAttemptReconnect.mockResolvedValue('network_error');
+      const user = userEvent.setup();
+      renderSettings();
+
+      await user.click(screen.getByTestId('go-online-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('reconnect-failed-dismiss')).toBeInTheDocument();
+      });
+      // The modal carries its own data-testid (forwarded by IonModal), distinct
+      // from the logout modal, matching the production e2e selector.
+      expect(screen.getByTestId('reconnect-failed-modal')).toBeInTheDocument();
+      expect(screen.getByTestId('go-online-button')).toBeInTheDocument();
+
+      await user.click(screen.getByTestId('reconnect-failed-dismiss'));
+      await waitFor(() => {
+        expect(screen.queryByTestId('reconnect-failed-dismiss')).not.toBeInTheDocument();
+      });
+    });
+
+    it('navigates to /login on unauthorized', async () => {
+      mockIsOfflineLocked.current = true;
+      mockAttemptReconnect.mockResolvedValue('unauthorized');
+      const user = userEvent.setup();
+      const { history } = renderSettings();
+
+      await user.click(screen.getByTestId('go-online-button'));
+
+      await waitFor(() => expect(history.location.pathname).toBe('/login'));
+    });
+
+    it('guards against double-submission while a reconnect is in flight', async () => {
+      mockIsOfflineLocked.current = true;
+      let resolveAttempt: (value: string) => void = () => {};
+      mockAttemptReconnect.mockImplementation(
+        () => new Promise<string>((resolve) => { resolveAttempt = resolve; }),
+      );
+      const user = userEvent.setup();
+      renderSettings();
+
+      const button = screen.getByTestId('go-online-button');
+      await user.click(button);
+      await waitFor(() => expect(button).toHaveTextContent('Reconnecting\u2026'));
+      // The rendered item is also disabled (not just guarded in the handler).
+      expect(button).toHaveAttribute('aria-disabled', 'true');
+
+      await user.click(button);
+      expect(mockAttemptReconnect).toHaveBeenCalledOnce();
+
+      resolveAttempt('network_error');
+      await waitFor(() => {
+        expect(screen.getByTestId('reconnect-failed-dismiss')).toBeInTheDocument();
+      });
     });
   });
 

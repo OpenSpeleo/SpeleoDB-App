@@ -22,9 +22,11 @@ Displays live sync statistics and a manual sync trigger.
 | Sync progress | Computed from `tilePrefetchJobs` + manual tile count | Reactive + polled |
 | Tiles synced | Same as sync progress, formatted as `processed / total` | Reactive + polled |
 
-The **Sync button** (circular arrow icon in the section header) calls `controller.syncProjects()`. It does not attempt offline reconnect. `syncProjects()` now returns a structured phase result (cache load, project refresh, GeoJSON sync, overlay sync, tile-prefetch scheduling), but the Settings page still treats sync as a fire-and-refresh action: errors are caught and swallowed, and cache stats are refreshed afterward regardless.
+The **Resync button** (emerald-green pill labelled `Resync` with the circular-arrow `syncOutline` icon, in the section header; `app-btn app-btn--compact` + `bg-emerald-600/90`, matching the panels' "Show all" buttons but green) calls `controller.syncProjects()`. It does not attempt offline reconnect. `syncProjects()` returns a structured phase result (cache load, project refresh, GeoJSON sync, overlay sync, tile-prefetch scheduling), but the Settings page still treats sync as a fire-and-refresh action: errors are caught and swallowed, and cache stats are refreshed afterward regardless.
 
-While `syncStatus === 'syncing'`, the sync button widens to display an inline spinner plus a `Syncing…` label (`data-testid="sync-status-label"`). The button is also disabled in this state to prevent double-submission.
+The button is **disabled while offline-locked** (`isOfflineLocked`): syncing is an online-only action, and going back online is handled by the dedicated **Go Online** button (see Account section). It is also disabled while `syncStatus === 'syncing'`, where it shows an inline spinner plus a `Syncing…` label (`data-testid="sync-status-label"`) to prevent double-submission. The `data-testid` remains `sync-button`.
+
+> Runtime offline transition: a Resync only runs while online, but if its project-list refresh cannot reach the server (timeout, transport error, or 5xx), the controller flips the app to offline mode (see `docs/offline-mode.md` and `docs/networking.md`). A `4xx` keeps the existing behavior (cache preserved, no logout, no offline flip).
 
 `Last sync` is set by `SpeleoDBController.syncProjects()` only after the project-list refresh succeeds and the refreshed list is persisted via `cache.setProjects()`. The timestamp therefore reflects a successful project refresh phase, not completion of the later GeoJSON / overlay / tile-prefetch phases. Timeouts, transport errors, and non-2xx responses do **not** advance the timestamp. The value is persisted via `PreferencesService.setPreferences({ lastSyncedAt })`, restored on the next app launch via `restoreSession()`, and reset to `null` on logout.
 
@@ -50,6 +52,16 @@ Lists every map tile layer (`MAP_LAYERS`) with an offline-sync toggle and a per-
 
 - **Show Tutorial** button: closes the project panel (if open), navigates to `/dashboard`, and restarts the guided tour from step 1 via the lazy runtime loader `restartGuidedTourFromHelp()`. Ignores `hasCompletedGuidedTour`.
 
+### Go Online (offline only)
+
+A dedicated section rendered **only while offline-locked** (`isOfflineLocked`), placed between the Tutorial and Account sections.
+
+- **Go Online** button (`data-testid="go-online-button"`): calls `controller.attemptReconnect()`, the second allowed reconnect trigger alongside app relaunch. It is user-driven, not a passive connectivity listener.
+  - `ok`: the controller clears the offline lock (online restored) and launches a sync; the section unmounts automatically because `isOfflineLocked` becomes false.
+  - `network_error`: still unreachable. A local **Couldn't reconnect** modal (`data-testid="reconnect-failed-modal"`) is shown, the app stays offline, and the button remains. Nothing else changes.
+  - `unauthorized` (`4xx`): the controller has already logged out and purged local data; Settings navigates to `/login`.
+- Re-entry is guarded with local `isReconnecting` state (the button shows `Reconnecting…` and is disabled during the attempt) to prevent double-submission.
+
 ### Account
 
 - **Sign Out** button: opens a confirmation modal. On confirm, calls `controller.logout()`, dismisses the modal, and navigates to `/login`. The button is disabled while logout is in progress to prevent double-submission.
@@ -65,6 +77,7 @@ Lists every map tile layer (`MAP_LAYERS`) with an offline-sync toggle and a per-
 - `selectedMapLayerId` / `layerOfflineSync`: shared state owned by `AuthenticatedAppShell`, passed to Dashboard + Settings; persisted via `PreferencesService`. Layer offline-sync side effects (prefetch enqueue / cleanup) are owned by `SpeleoDBController`.
 - `isProjectPanelOpen`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
 - Logout modal: local state (`showLogoutConfirmModal`, `isLoggingOut`).
+- Reconnect flow: local state (`isReconnecting`, `showReconnectFailedModal`). The authoritative online/offline state (`isOfflineLocked`) is owned by `SpeleoDBController` and consumed read-only via `useSpeleoDB()`.
 
 ## Polling lifecycle
 
@@ -72,8 +85,9 @@ The 3-second polling interval for cache stats activates only when `location.path
 
 ## Offline behavior
 
-- The sync button calls `syncProjects()` which respects the controller's offline lock. When offline-locked, the sync is effectively a no-op (cached data is already present).
-- The Settings page does not attempt reconnect. Reconnect is limited to app relaunch per the networking contract.
+- The Resync button is disabled while offline-locked, so `syncProjects()` is not invoked offline. (It still respects the controller's offline lock defensively.)
+- Reconnect from offline mode is performed by the **Go Online** button via `controller.attemptReconnect()`. This is one of the two allowed reconnect triggers (the other is app relaunch) per the networking contract; the app still uses no passive `online`/`offline` listeners.
+- A Resync that runs while online but cannot reach the server (timeout / transport error / 5xx) flips the app to offline mode via the controller (offline modal shown, Go Online button revealed). A `4xx` does not flip offline.
 
 ## Source code
 
@@ -97,6 +111,7 @@ The 3-second polling interval for cache stats activates only when `location.path
 5. Verify color mode selector propagates to Dashboard map rendering in real time.
 6. Verify map unit selector changes depth gauge + distance scale labels on Dashboard.
 7. Verify `Last sync` updates after a successful sync and shows `Never` after logout.
-8. Verify the `Syncing…` label appears on the sync button while `syncStatus === 'syncing'`.
-9. Run `npx vitest run src/pages/Settings.test.tsx`.
-10. Update this document if sections, state ownership, or offline behavior changes.
+8. Verify the `Syncing…` label appears on the Resync button while `syncStatus === 'syncing'`, and that the button is disabled while offline-locked.
+9. Verify the Go Online button appears only while offline-locked and routes `ok`/`network_error`/`unauthorized` correctly (sync + auto-hide / failure modal / redirect to login).
+10. Run `npx vitest run src/pages/Settings.test.tsx`.
+11. Update this document if sections, state ownership, or offline behavior changes.

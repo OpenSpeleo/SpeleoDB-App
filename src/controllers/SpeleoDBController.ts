@@ -382,6 +382,22 @@ export class SpeleoDBController {
     setTileCacheOfflineModeRuntime(locked);
   }
 
+  /**
+   * Flip the app from online to offline at runtime when a server request shows
+   * we can no longer reach the backend (timeout / transport error / 5xx).
+   *
+   * Idempotent: a no-op when already offline-locked so repeated failures don't
+   * thrash `notify()`. This is request-driven (only called from a failed
+   * user-initiated network operation) -- the app never subscribes to passive
+   * `online`/`offline` connectivity events. See docs/networking.md.
+   */
+  private enterOfflineMode(): void {
+    if (this._isOfflineLocked) return;
+    this._isOnline = false;
+    this.setOfflineLocked(true);
+    this.notify();
+  }
+
   async preloadTilePrefetch(): Promise<void> {
     await this.tilePrefetch.preload?.();
   }
@@ -605,6 +621,30 @@ export class SpeleoDBController {
       return 'network_error';
     }
     return this.validateSessionAgainstServer();
+  }
+
+  /**
+   * Explicit user-initiated reconnect attempt from offline mode (Settings ->
+   * "Go Online"). Unlike `validateSession()`, this bypasses the offline-lock
+   * short-circuit and actually probes the server.
+   *
+   * - `ok`            -> session is valid: offline lock is cleared (online
+   *                      restored) and a project sync is launched.
+   * - `network_error` -> still unreachable: stays offline-locked, no logout.
+   * - `unauthorized`  -> 4xx: session invalid, logout + cache purge already ran.
+   *
+   * This is the second allowed reconnect trigger alongside app relaunch. It is
+   * user-driven, not a passive connectivity listener. See docs/networking.md.
+   */
+  async attemptReconnect(): Promise<'ok' | 'unauthorized' | 'network_error'> {
+    const result = await this.validateSessionAgainstServer();
+    if (result === 'ok') {
+      // Fire-and-forget: the offline lock is already cleared, so the UI can
+      // hide the Go Online button immediately while the sync runs. syncProjects
+      // tracks itself for logout teardown.
+      void this.syncProjects();
+    }
+    return result;
   }
 
   private async validateSessionAgainstServer(): Promise<'ok' | 'unauthorized' | 'network_error'> {
@@ -1070,6 +1110,13 @@ export class SpeleoDBController {
         console.warn(
           `syncProjects: refresh skipped (status=${response.status}); preserving cached projects.`,
         );
+        // A 4xx means the server is reachable (auth/validation issue) and never
+        // triggers logout here per the v2 contract -- keep current behavior. A
+        // 5xx / non-4xx status means the backend is unreachable, so flip the
+        // app offline (shows the offline modal + reveals Go Online).
+        if (!isClientErrorStatus(response.status)) {
+          this.enterOfflineMode();
+        }
         return {
           phase: {
             phase: 'project_refresh',
@@ -1134,8 +1181,16 @@ export class SpeleoDBController {
       if (isAbortError(error)) {
         throw error;
       }
+      // A superseded or logged-out sync is always aborted. Rethrow as an abort
+      // so a stale, non-abort completion can never flip global offline state
+      // (e.g. re-lock offline after logout cleared it). Mirrors the success and
+      // non-2xx branches, which are already guarded by throwIfAborted above.
+      context.throwIfAborted();
 
       console.warn('syncProjects: API fetch failed:', error);
+      // Timeout / transport failure: the backend is unreachable, so flip the
+      // app offline. Cache is preserved; no logout.
+      this.enterOfflineMode();
       return {
         phase: {
           phase: 'project_refresh',

@@ -30,17 +30,20 @@ This document defines the offline cache feature, user-facing offline modal behav
   - do not reprompt again during the same offline period.
 - After user acknowledged offline mode, prompt may appear again only after offline lock is cleared by an explicit reconnect path and later re-entered.
 
-## Online recovery behavior (strict)
+## Online recovery behavior
 
-When app is in offline mode, only one action is allowed to attempt returning online:
+When app is in offline mode, two user-driven actions are allowed to attempt returning online:
 
 1. Close and reopen the app (startup validation attempt).
+2. Tap **Go Online** in Settings (`controller.attemptReconnect()`).
 
-This action must run a tentative reconnect flow and resolve to exactly one outcome:
+Both run a tentative reconnect flow (`validateSessionAgainstServer()`) and resolve to exactly one outcome:
 
-- reconnect success: clear offline lock and resume online behavior.
-- still offline: remain offline without forced logout and without repeated blocking prompts.
-- unauthorized (4xx): follow logout/cache purge behavior.
+- reconnect success (`2xx`): clear offline lock and resume online behavior. The Settings **Go Online** path additionally launches a project sync; the button hides once `isOfflineLocked` is false.
+- still offline (`5xx` / timeout / transport): remain offline without forced logout and without repeated blocking prompts. The Settings **Go Online** path shows a local "Couldn't reconnect" modal and changes nothing.
+- unauthorized (`4xx`): follow logout/cache purge behavior.
+
+Both paths are explicit and user-initiated. The app still does **not** subscribe to passive `online`/`offline` connectivity events. `attemptReconnect()` deliberately bypasses the offline-lock short-circuit in `validateSession()` so it can actually probe the server while offline-locked.
 
 ## Startup auth outcome matrix
 
@@ -57,9 +60,17 @@ This action must run a tentative reconnect flow and resolve to exactly one outco
 - Offline mode uses cached app data and cached map resources.
 - Dashboard map overlays (landmarks, stations, exploration leads, cylinder installs) are read from cached GeoJSON when offline.
 - Outbound network requests should be skipped for normal offline operation paths.
-- Explicit reconnect attempts are limited to the app relaunch recovery path above.
-- The Settings page sync button calls `syncProjects()` only. It does not attempt offline reconnect.
+- Explicit reconnect attempts are limited to the app relaunch recovery path and the Settings **Go Online** button above.
+- The Settings **Resync** button calls `syncProjects()` only and is disabled while offline-locked. It does not attempt offline reconnect.
 - The app does not use passive `online`/`offline` browser listeners. Connectivity changes alone do not trigger reconnect or modal state changes.
+
+## Runtime offline transition (online -> offline)
+
+The app can flip from online to offline at runtime, request-driven (never via a passive listener):
+
+- A **Resync** runs only while online. If its project-list refresh cannot reach the server -- a timeout, transport error, or `5xx` (any non-`4xx`, non-`2xx` status) -- the controller calls `enterOfflineMode()`: `isOnline` becomes false, the offline lock is set, the normal offline modal is shown, and the Settings **Go Online** button is revealed. Cached data is preserved and no logout occurs.
+- A `4xx` during a data fetch never flips offline and never logs out (only `validateSession()` acts on `4xx`); see the v2 contract in `docs/networking.md`.
+- `enterOfflineMode()` is idempotent (a no-op when already offline-locked) so repeated failures do not thrash UI state. Aborted (superseded/logged-out) refreshes do not flip offline.
 
 ## Logout and data purge
 
@@ -71,6 +82,8 @@ In offline mode flows, local data must only be purged on authentication-invalid 
 - Startup UI coordination: `src/context/useStartupUiCoordinator.ts`
 - React provider bridge: `src/context/SpeleoDBProvider.tsx`
 - Auth decision logic: `src/controllers/SpeleoDBController.ts`
+- Manual reconnect + runtime offline transition: `SpeleoDBController.attemptReconnect()` and `SpeleoDBController.enterOfflineMode()` (wired into `refreshProjectsPhase`)
+- Reconnect UI (Go Online button + "Couldn't reconnect" modal): `src/pages/Settings.tsx`
 - Timeout/transport behavior: `src/services/HttpClient.ts`
 - Auth API call: `src/services/SpeleoDBService.ts`
 - Logout policy detail: `docs/logout-behavior.md`
@@ -127,6 +140,7 @@ When modifying auth/offline logic:
 1. Verify timeout and network failures do not call `logout()`.
 2. Verify only 4xx auth failures trigger cache purge.
 3. Verify modal can be acknowledged with `Go Offline` and is not repeatedly re-shown in same offline period.
-4. Verify the only reconnect path while offline is app relaunch.
-5. Run targeted tests for controller, provider, dashboard, tile cache, and tile prefetch paths.
-6. Update this document if any behavior changes.
+4. Verify the only reconnect paths while offline are app relaunch and the Settings `Go Online` button (`attemptReconnect()`); no passive `online`/`offline` listeners.
+5. Verify a failed Resync (timeout / transport / 5xx) flips the app offline, while a `4xx` does not.
+6. Run targeted tests for controller, provider, dashboard, settings, tile cache, and tile prefetch paths.
+7. Update this document if any behavior changes.
