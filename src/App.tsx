@@ -39,11 +39,12 @@ const AuthenticatedAppShell = lazy(() => import('./AuthenticatedAppShell'))
 
 /**
  * Renders the login route directly and lazy-loads the authenticated
- * shell only for dashboard/settings paths.
+ * shell only for dashboard/settings/pending paths.
  */
 const AppRoutes: React.FC = () => {
   const path = useLocation().pathname;
-  const isAuthenticatedRoute = path === '/dashboard' || path === '/settings';
+  const isAuthenticatedRoute =
+    path === '/dashboard' || path === '/settings' || path === '/pending';
 
   if (!isAuthenticatedRoute) {
     return (

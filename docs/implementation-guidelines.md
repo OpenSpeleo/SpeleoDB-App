@@ -27,7 +27,8 @@ This document defines high-level architecture boundaries and coding expectations
 ## Networking and offline rules
 
 - Do not add passive `window` `online`/`offline` listeners for reconnect orchestration.
-- Explicit reconnect paths are limited to app relaunch startup validation.
+- Explicit reconnect paths are limited to app relaunch startup validation,
+  Settings **Go Online**, and Pending Changes **Try Reconnect**.
 - Timeout/transport/non-`4xx` auth failures must preserve session and local cache.
 - Only auth-invalid `4xx` outcomes should trigger logout and local data purge.
 - When offline lock is active, normal data/map flows should avoid outbound network calls.

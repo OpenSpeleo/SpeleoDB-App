@@ -32,15 +32,16 @@ This document defines the offline cache feature, user-facing offline modal behav
 
 ## Online recovery behavior
 
-When app is in offline mode, two user-driven actions are allowed to attempt returning online:
+When app is in offline mode, user-driven actions are allowed to attempt returning online:
 
 1. Close and reopen the app (startup validation attempt).
-2. Tap **Go Online** in Settings (`controller.attemptReconnect()`).
+2. Tap **Go Online** in Settings or **Try Reconnect** on Pending Changes
+   (both call `controller.attemptReconnect()`).
 
 Both run a tentative reconnect flow (`validateSessionAgainstServer()`) and resolve to exactly one outcome:
 
-- reconnect success (`2xx`): clear offline lock and resume online behavior. The Settings **Go Online** path additionally launches a project sync; the button hides once `isOfflineLocked` is false.
-- still offline (`5xx` / timeout / transport): remain offline without forced logout and without repeated blocking prompts. The Settings **Go Online** path shows a local "Couldn't reconnect" modal and changes nothing.
+- reconnect success (`2xx`): clear offline lock and resume online behavior. The Settings **Go Online** / Pending **Try Reconnect** path additionally launches a project sync; the button hides once `isOfflineLocked` is false.
+- still offline (`5xx` / timeout / transport): remain offline without forced logout and without repeated blocking prompts. The Settings **Go Online** / Pending **Try Reconnect** path shows a local "Couldn't reconnect" modal and changes nothing.
 - unauthorized (`4xx`): follow logout/cache purge behavior.
 
 Both paths are explicit and user-initiated. The app still does **not** subscribe to passive `online`/`offline` connectivity events. `attemptReconnect()` deliberately bypasses the offline-lock short-circuit in `validateSession()` so it can actually probe the server while offline-locked.
@@ -60,7 +61,11 @@ Both paths are explicit and user-initiated. The app still does **not** subscribe
 - Offline mode uses cached app data and cached map resources.
 - Dashboard map overlays (landmarks, stations, exploration leads, cylinder installs) are read from cached GeoJSON when offline.
 - Outbound network requests should be skipped for normal offline operation paths.
-- Explicit reconnect attempts are limited to the app relaunch recovery path and the Settings **Go Online** button above.
+- Landmark create/edit/delete are the exception to "read-only offline": they are
+  captured as persistent offline ops, folded optimistically over the cached
+  overlay, and replayed on the next sync. No outbound request is made while
+  offline-locked; the op simply queues. See `docs/offline-landmark-queue.md`.
+- Explicit reconnect attempts are limited to the app relaunch recovery path, the Settings **Go Online** button, and the Pending Changes **Try Reconnect** button above.
 - The Settings **Resync** button calls `syncProjects()` only and is disabled while offline-locked. It does not attempt offline reconnect.
 - The app does not use passive `online`/`offline` browser listeners. Connectivity changes alone do not trigger reconnect or modal state changes.
 

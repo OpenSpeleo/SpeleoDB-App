@@ -10,6 +10,7 @@ function renderTabBar(
   pathname: string,
   isProjectPanelOpen = false,
   isLandmarkPanelOpen = false,
+  pendingOpsCount = 0,
 ) {
   const history = createMemoryHistory({ initialEntries: [pathname] });
   const onProjectPanelChange = vi.fn();
@@ -21,6 +22,7 @@ function renderTabBar(
         onProjectPanelChange={onProjectPanelChange}
         isLandmarkPanelOpen={isLandmarkPanelOpen}
         onLandmarkPanelChange={onLandmarkPanelChange}
+        pendingOpsCount={pendingOpsCount}
       />
     </Router>,
   );
@@ -99,5 +101,34 @@ describe('AppTabBar', () => {
     await user.click(screen.getByTestId('landmarks-tab'));
 
     expect(onLandmarkPanelChange).toHaveBeenCalledWith(false);
+  });
+
+  it('hides the Pending tab when there are no pending ops', () => {
+    renderTabBar('/dashboard', false, false, 0);
+    expect(screen.queryByTestId('pending-tab')).toBeNull();
+  });
+
+  it('reveals the Pending tab with a badge when there are pending ops', () => {
+    renderTabBar('/dashboard', false, false, 3);
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(5);
+    expect(tabs[3]).toHaveAttribute('data-testid', 'pending-tab');
+    expect(tabs[3]).toHaveTextContent('Pending');
+    expect(tabs[4]).toHaveTextContent('Settings');
+    expect(screen.getByTestId('pending-tab-badge')).toHaveTextContent('3');
+  });
+
+  it('navigates to the Pending page when the Pending tab is tapped', async () => {
+    const user = userEvent.setup();
+    const { history } = renderTabBar('/dashboard', false, false, 2);
+
+    await user.click(screen.getByTestId('pending-tab'));
+
+    expect(history.location.pathname).toBe('/pending');
+  });
+
+  it('keeps the Pending tab visible on /pending even when the queue is empty', () => {
+    renderTabBar('/pending', false, false, 0);
+    expect(screen.getByTestId('pending-tab')).toBeTruthy();
   });
 });

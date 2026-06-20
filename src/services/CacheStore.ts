@@ -5,8 +5,14 @@
  * dependencies; the raw IndexedDB API is wrapped just enough to keep
  * call-sites readable.
  *
- * Database : "speleo_cache"  (version 1)
- * Stores   : "projects", "geojson"
+ * Database : "speleo_cache"  (version 2)
+ * Stores   : "projects", "geojson", "offline_ops"
+ *
+ * Version history:
+ * - v1: "projects", "geojson".
+ * - v2: added "offline_ops" for the offline mutation queue. The migration is
+ *   purely additive (`createObjectStore` for the missing store); existing
+ *   "projects"/"geojson" data is preserved with zero loss.
  */
 
 // ==================== Stored entry shape ====================
@@ -20,8 +26,8 @@ export interface CacheEntry<T = unknown> {
 // ==================== Constants ====================
 
 const DB_NAME = 'speleo_cache';
-const DB_VERSION = 1;
-const STORE_NAMES = ['projects', 'geojson'] as const;
+const DB_VERSION = 2;
+const STORE_NAMES = ['projects', 'geojson', 'offline_ops'] as const;
 
 export type StoreName = (typeof STORE_NAMES)[number];
 
@@ -65,6 +71,20 @@ export class CacheStore {
       const tx = db.transaction(store, 'readonly');
       const req = tx.objectStore(store).get(key);
       req.onsuccess = () => resolve((req.result as CacheEntry<T>) ?? null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  /**
+   * Read every entry value from a store. Used by the offline queue to load all
+   * persisted ops at once. Order is not guaranteed; callers sort as needed.
+   */
+  async getAll<T = unknown>(store: StoreName): Promise<CacheEntry<T>[]> {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, 'readonly');
+      const req = tx.objectStore(store).getAll();
+      req.onsuccess = () => resolve((req.result as CacheEntry<T>[]) ?? []);
       req.onerror = () => reject(req.error);
     });
   }

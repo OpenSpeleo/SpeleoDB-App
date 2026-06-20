@@ -6,6 +6,8 @@ interface AppTabBarProps {
   onProjectPanelChange?: (open: boolean) => void;
   isLandmarkPanelOpen?: boolean;
   onLandmarkPanelChange?: (open: boolean) => void;
+  /** Number of pending offline ops; the Pending tab is hidden when 0. */
+  pendingOpsCount?: number;
 }
 
 const AppTabBar: React.FC<AppTabBarProps> = ({
@@ -13,11 +15,14 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
   onProjectPanelChange,
   isLandmarkPanelOpen = false,
   onLandmarkPanelChange,
+  pendingOpsCount = 0,
 }) => {
   const location = useLocation();
   const history = useHistory();
   const onDashboard = location.pathname === '/dashboard';
   const onSettings = location.pathname === '/settings';
+  const onPending = location.pathname === '/pending';
+  const showPendingTab = pendingOpsCount > 0 || onPending;
 
   const isProjectsActive = onDashboard && isProjectPanelOpen;
   const isLandmarksActive = onDashboard && isLandmarkPanelOpen;
@@ -127,6 +132,39 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
         </svg>
         <span className="text-[10px] font-medium leading-none">Map</span>
       </button>
+
+      {/* Pending (offline ops) -- hidden when there is nothing queued */}
+      {showPendingTab && (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={onPending}
+          data-testid="pending-tab"
+          onClick={() => {
+            if (!onPending) history.push('/pending');
+          }}
+          className={`app-tab-bar__tab relative flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
+            onPending
+              ? 'text-purple-400'
+              : 'text-slate-400 active:text-slate-200'
+          }`}
+        >
+          <span className="relative">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25L4.5 12m0 0l3 3.75M4.5 12h11.25m0-8.25L19.5 7.5m0 0l-3 3.75m3-3.75H8.25" />
+            </svg>
+            {pendingOpsCount > 0 && (
+              <span
+                data-testid="pending-tab-badge"
+                className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-purple-500 text-white text-[10px] font-semibold leading-4 text-center"
+              >
+                {pendingOpsCount > 99 ? '99+' : pendingOpsCount}
+              </span>
+            )}
+          </span>
+          <span className="text-[10px] font-medium leading-none">Pending</span>
+        </button>
+      )}
 
       {/* Settings */}
       <button

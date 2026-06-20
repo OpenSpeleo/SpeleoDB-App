@@ -119,8 +119,10 @@ flowchart TD
 Single seam: `createLandmark` / `updateLandmark` / `deleteLandmark` in
 `SpeleoDBController` are the only place that (1) call the service, (2) apply a
 pure mutation to the cached `overlay:landmarks` `FeatureCollection`, (3) bump
-`landmarksRevision`, and (4) `notify()`. The OFFLINE phase will wrap step (1)
-with a queue and replay; steps (2)-(4) are unchanged.
+`landmarksRevision`, and (4) `notify()`. The offline queue wraps step (1) with
+an enqueue + later replay (see `docs/offline-landmark-queue.md`); steps (2)-(4)
+are unchanged, and `getOverlayGeoJSON('landmarks')` folds pending ops over the
+cached collection so the optimistic view needs no extra UI wiring.
 
 ## Key APIs / concepts
 
@@ -146,18 +148,23 @@ with a queue and replay; steps (2)-(4) are unchanged.
 
 ## Long-press ring UX
 
-While the user holds the map, a circular ring renders at the touch point and
-fills from 0% to 100% over `MAP.LONG_PRESS_DURATION_MS`. Moving past the tap
-threshold cancels the press (and the ring). On completion, a heavy haptic fires
-and the Map Point modal opens. The ring is purely presentational and reuses the
-existing long-press timer in `Dashboard.tsx`.
+While the user holds the map, a circular ring renders at the touch point after
+`MAP.LONG_PRESS_RING_REVEAL_DELAY_MS` so normal quick taps do not flash an
+animation. It then fills over the remaining hold time before
+`MAP.LONG_PRESS_DURATION_MS`. Moving past the tap threshold cancels the press
+(and the ring). On completion, a heavy haptic fires and the Map Point modal
+opens. The ring is purely presentational and reuses the existing long-press
+timer in `Dashboard.tsx`.
 
 The ring only appears when a landmark could actually be created: the press is
 armed only at/above `MAP.MARKER_INTERACTION_MIN_ZOOM` (`isMarkerInteractionZoom`
 in `Dashboard.tsx`), so at low zoom ("high altitude") no ring shows at all. The
-empty-spot requirement is still enforced when the timer fires
-(`isEmptyMapSpotAtClientPoint`), so a long-press on an existing marker cancels
-without opening Map Point.
+empty-spot requirement is enforced before the ring reveal and again when the
+timer fires (`isEmptyMapSpotAtClientPoint`), so a long-press on an existing
+landmark/overlay marker shows no ring and does not open Map Point. Project
+survey lines/fills and the user's GPS location dot are intentionally allowed so
+users can still create landmarks on mapped cave lines or at their current
+position.
 
 ## Landmark feature id (important)
 
@@ -172,15 +179,20 @@ reaches the map; `properties` is always preserved by MapLibre, so taps resolve
 the correct id. `buildLandmarkFeatureFromApi` already sets `properties.id` for
 created/edited landmarks.
 
-## Offline / lifecycle (this phase)
+## Offline / lifecycle
 
-- Online only: while offline-locked (`hasNetworkAccess()` is false), the CRUD
-  controller methods reject with a typed `offline` `LandmarkMutationError` and
-  the UI surfaces a "not available offline yet" message. The OFFLINE phase
-  replaces this rejection with an enqueue + later replay.
-- The cached landmarks GeoJSON and collections list are cleared with the rest of
-  the caches on logout (no new persistence lifecycle).
-- **Single-writer assumption (online phase).** `applyLandmarkUpsert` /
+- **Offline is now implemented.** While offline-locked (`hasNetworkAccess()` is
+  false) -- or when an online request fails in a way that means "not reachable"
+  (transport error / timeout / 5xx) -- the CRUD controller methods enqueue a
+  persistent `OfflineOp` instead of rejecting, reflect it optimistically by
+  folding it over the cached overlay, and replay it on the next sync. Definitive
+  failures (4xx) still throw the typed `LandmarkMutationError`. The old
+  "not available offline yet" rejection is gone. See
+  `docs/offline-landmark-queue.md` for the queue, replay, and conflict design.
+- The cached landmarks GeoJSON, the writable-collections list (now cached during
+  sync so the offline create picker works), and the pending offline queue are
+  all cleared with the rest of the caches on logout.
+- **Cache-write concurrency.** `applyLandmarkUpsert` /
   `applyLandmarkRemoval` read-modify-write the cached `overlay:landmarks`
   collection. The UI serializes user mutations through per-flow `busy` flags
   (no two create/edit/delete run at once), so the only race window is a CRUD
@@ -188,9 +200,10 @@ created/edited landmarks.
   full-overwrites the same cache from the server. That is last-writer-wins: a
   just-created landmark can be momentarily dropped from the cache if the server
   hasn't indexed it yet, and reappears on the next sync. This matches the web
-  viewer's eventual-consistency model and is acceptable while online. The
-  OFFLINE phase replaces the network call with a queue and will serialize
-  enqueue + replay against the sync, closing this window.
+  viewer's eventual-consistency model and is acceptable while online. Offline
+  mutations are different: while queued ops exist or are actively replaying,
+  project sync skips the landmarks overlay full-refresh so it cannot clobber the
+  ground-truth layer underneath the optimistic fold. Other overlays still sync.
 
 ## Collection picker (async load)
 

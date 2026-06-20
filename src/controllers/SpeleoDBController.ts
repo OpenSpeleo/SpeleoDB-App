@@ -63,6 +63,25 @@ import {
   type LandmarkCreateInput,
   type LandmarkUpdateInput,
 } from '../types/landmark';
+import {
+  OfflineOpPersistenceError,
+  OfflineOpQueue,
+  type OfflineReplayPort,
+  type OfflineSyncSummary,
+} from '../offline/OfflineOpQueue';
+import { OfflineOpStore } from '../offline/OfflineOpStore';
+import { generateLocalLandmarkId } from '../offline/ops/OfflineOp';
+import {
+  findLandmarkFeature,
+  normalizeCollection,
+  roundCoordinate,
+  snapshotFromFeature,
+} from '../offline/landmarkSnapshot';
+import type {
+  LandmarkSnapshot,
+  OfflineConflictChoice,
+  OfflineOpView,
+} from '../types/offlineOp';
 import { CancellationContext } from './CancellationContext';
 import { isAbortError } from '../utils/abort';
 import type {
@@ -157,6 +176,11 @@ export class SpeleoDBController {
   private _storageConsentRequested = false;
   // Latch so the "stuck while approved" diagnostic warns once, not per notify.
   private _warnedStuckWhileApproved = false;
+  // Offline mutation queue (landmark create/edit/delete made while offline or
+  // after a "not reachable" failure). Owns persistence + optimistic fold +
+  // replay/conflict resolution. See docs/offline-landmark-queue.md.
+  private offlineQueue!: OfflineOpQueue;
+  private _pendingOpsRevision = 0;
   private _listeners = new Set<() => void>();
   private tilePrefetch!: TilePrefetchServiceLike;
   private tilePrefetchUnsubscribe: (() => void) | null = null;
@@ -184,17 +208,77 @@ export class SpeleoDBController {
   private _tileCacheOverLimitPromptAcknowledgedSnapshot =
     this._tileCacheOverLimitPromptAcknowledged;
   private _storageConsentRequestedSnapshot = this._storageConsentRequested;
+  private _pendingOpsCountSnapshot = 0;
+  private _pendingOpsRevisionSnapshot = this._pendingOpsRevision;
 
   constructor(
     private service: SpeleoDBService,
     private prefs: PreferencesPort,
     private cache: ProjectCacheService,
     tilePrefetch?: TilePrefetchServiceLike,
+    private offlineOpStore: OfflineOpStore = new OfflineOpStore(),
   ) {
     this.attachTilePrefetch(tilePrefetch ?? this.createTilePrefetchService());
+    this.offlineQueue = this.buildOfflineQueue();
     this.restoreSession();
     this.restoreTileCacheOverLimitConsent();
     this.setOfflineLocked(false);
+    // Load persisted ops so the map folds them and the Pending tab appears on
+    // startup (before any user action). Only refresh the UI when something was
+    // actually restored, so a clean start does not perturb revisions.
+    void this.offlineQueue
+      .load()
+      .then(() => {
+        if (this.offlineQueue.count > 0) this.handleOfflineQueueChange();
+      })
+      .catch((error) => console.warn('Failed to load offline op queue:', error));
+  }
+
+  /**
+   * Build the offline queue with a replay port bound to this controller's
+   * service + cache. Credentials are resolved at call time so a token refresh
+   * is always reflected. Ground-truth writes reuse the existing single
+   * cache-write seam (`applyLandmarkUpsert` / `applyLandmarkRemoval`).
+   */
+  private buildOfflineQueue(): OfflineOpQueue {
+    const port: OfflineReplayPort = {
+      hasNetworkAccess: () => this.hasNetworkAccess(),
+      postLandmark: (input) => {
+        const credentials = this.requireQueueCredentials();
+        return this.service.createLandmark(credentials.instance, credentials.token, input);
+      },
+      patchLandmark: (id, input) => {
+        const credentials = this.requireQueueCredentials();
+        return this.service.updateLandmark(credentials.instance, credentials.token, id, input);
+      },
+      deleteLandmark: (id) => {
+        const credentials = this.requireQueueCredentials();
+        return this.service.deleteLandmark(credentials.instance, credentials.token, id);
+      },
+      fetchLandmarksGeoJSON: () => {
+        const credentials = this.requireQueueCredentials();
+        return this.service.getLandmarksGeoJSON(credentials.instance, credentials.token);
+      },
+      applyUpsert: (landmark) => this.applyLandmarkUpsert(landmark),
+      applyRemoval: (id) => this.applyLandmarkRemoval(id),
+    };
+    return new OfflineOpQueue(this.offlineOpStore, port, () => this.handleOfflineQueueChange());
+  }
+
+  private requireQueueCredentials(): { token: string; instance: string } {
+    const credentials = this.getSyncCredentials();
+    if (!credentials) {
+      throw new Error('No credentials available for offline replay.');
+    }
+    return credentials;
+  }
+
+  private handleOfflineQueueChange(): void {
+    // A queue change can alter the optimistic fold, so refresh both the map
+    // (landmarksRevision) and the pending list (pendingOpsRevision).
+    this._landmarksRevision += 1;
+    this._pendingOpsRevision += 1;
+    this.notify();
   }
 
   // ---- State accessors (snapshot-based for useSyncExternalStore) -------------
@@ -238,6 +322,16 @@ export class SpeleoDBController {
    */
   get landmarksRevision(): number {
     return this._landmarksRevisionSnapshot;
+  }
+
+  /** Number of pending offline mutations (drives the Pending tab + badge). */
+  get pendingOpsCount(): number {
+    return this._pendingOpsCountSnapshot;
+  }
+
+  /** Bumped on any offline-queue change so the Pending page re-reads the list. */
+  get pendingOpsRevision(): number {
+    return this._pendingOpsRevisionSnapshot;
   }
 
   /** True when the user has approved letting tile prefetch exceed the cap. */
@@ -300,6 +394,8 @@ export class SpeleoDBController {
     this._tileCacheOverLimitPromptAcknowledgedSnapshot =
       this._tileCacheOverLimitPromptAcknowledged;
     this._storageConsentRequestedSnapshot = this._storageConsentRequested;
+    this._pendingOpsCountSnapshot = this.offlineQueue ? this.offlineQueue.count : 0;
+    this._pendingOpsRevisionSnapshot = this._pendingOpsRevision;
     this._listeners.forEach((fn) => fn());
   }
 
@@ -811,6 +907,11 @@ export class SpeleoDBController {
 
       // Recreate a fresh prefetch service so runtime state restarts from zero.
       this.attachTilePrefetch(this.createTilePrefetchService());
+      // Rebuild the offline queue so its in-memory ops are dropped along with
+      // the persisted store (cleared by cache.clearAll above).
+      this.offlineQueue = this.buildOfflineQueue();
+      this._pendingOpsRevision += 1;
+      this.notify();
     } finally {
       this._isPurgingLocalData = false;
     }
@@ -966,9 +1067,19 @@ export class SpeleoDBController {
 
   /**
    * Read an overlay GeoJSON payload from cache.
+   *
+   * For landmarks, this returns the optimistic view: the cached server snapshot
+   * (ground truth) with all pending offline ops folded over it in order. When
+   * there are no pending ops it returns the raw cached payload unchanged, so the
+   * online path is unaffected.
    */
   async getOverlayGeoJSON(overlayId: MapOverlayId): Promise<unknown | null> {
-    return this.cache.getOverlayGeoJSON(overlayId);
+    const raw = await this.cache.getOverlayGeoJSON(overlayId);
+    if (overlayId !== 'landmarks') return raw;
+    await this.offlineQueue.load();
+    if (this.offlineQueue.count === 0) return raw;
+    const base = normalizeGeoJSON(raw) ?? { type: 'FeatureCollection', features: [] };
+    return this.offlineQueue.foldOver(base);
   }
 
   // ==================== Landmark CRUD ====================
@@ -976,11 +1087,14 @@ export class SpeleoDBController {
   /**
    * Fetch the user's writable landmark collections (for the create/edit picker).
    *
-   * Online only for now. Returns `[]` (never throws) when offline-locked or on
-   * any failure, so the form can still fall back to the personal collection.
+   * Online: fetches fresh and caches the result so offline creates can still
+   * pick a collection. Offline (or on any failure): returns the cached list, or
+   * `[]` so the form falls back to the personal collection. Never throws.
    */
   async getLandmarkCollections(): Promise<LandmarkCollection[]> {
-    if (!this.hasNetworkAccess()) return [];
+    if (!this.hasNetworkAccess()) {
+      return (await this.cache.getLandmarkCollections()) ?? [];
+    }
     const credentials = this.getSyncCredentials();
     if (!credentials) return [];
 
@@ -989,83 +1103,127 @@ export class SpeleoDBController {
         credentials.instance,
         credentials.token,
       );
-      if (!isSuccessfulStatus(response.status)) return [];
-      return mapLandmarkCollections(response.data);
+      if (!isSuccessfulStatus(response.status)) {
+        return (await this.cache.getLandmarkCollections()) ?? [];
+      }
+      const collections = mapLandmarkCollections(response.data);
+      await this.cache.setLandmarkCollections(collections);
+      return collections;
     } catch (error) {
       if (isAbortError(error)) return [];
       console.warn('Failed to load landmark collections:', error);
-      return [];
+      return (await this.cache.getLandmarkCollections()) ?? [];
     }
   }
 
   /**
-   * Create a landmark online, then upsert it into the cached landmarks overlay.
+   * Create a landmark.
    *
-   * The single cache-write seam: the offline phase will replace the network
-   * call with an enqueue and reuse the same local apply. Throws
-   * `LandmarkMutationError` on any failure (offline, validation, duplicate,
-   * permission, network).
+   * Online + reachable: POST, then upsert into the cached overlay (the existing
+   * single cache-write seam). If offline-locked or the request fails in a way
+   * that means "not reachable" (transport error / timeout / 5xx), the create is
+   * enqueued as an offline op and folded optimistically. Definitive failures
+   * (4xx: validation/duplicate/permission) still throw `LandmarkMutationError`.
    */
   async createLandmark(input: LandmarkCreateInput): Promise<LandmarkApiObject> {
-    const credentials = this.requireOnlineCredentials();
-    const response = await this.runLandmarkRequest(() =>
-      this.service.createLandmark(credentials.instance, credentials.token, input),
-    );
-    const landmark = this.extractLandmark(response.status, response.data);
-    await this.applyLandmarkUpsert(landmark);
-    return landmark;
+    const credentials = this.getSyncCredentials();
+    if (!credentials) throw new LandmarkMutationError('permission', 'You are not signed in.');
+
+    if (this.hasNetworkAccess()) {
+      try {
+        const response = await this.attemptLandmarkRequest(() =>
+          this.service.createLandmark(credentials.instance, credentials.token, input),
+        );
+        const landmark = this.extractLandmark(response.status, response.data);
+        await this.applyLandmarkUpsert(landmark);
+        return landmark;
+      } catch (error) {
+        if (this.isUnreachableError(error)) {
+          this.enterOfflineMode();
+          return this.enqueueCreate(input);
+        }
+        throw error;
+      }
+    }
+    return this.enqueueCreate(input);
   }
 
   /**
-   * Edit a landmark online, then upsert the updated feature into the cache.
+   * Edit a landmark. Same online/offline/4xx semantics as `createLandmark`.
    */
   async updateLandmark(
     id: string,
     input: LandmarkUpdateInput,
   ): Promise<LandmarkApiObject> {
-    const credentials = this.requireOnlineCredentials();
-    const response = await this.runLandmarkRequest(() =>
-      this.service.updateLandmark(credentials.instance, credentials.token, id, input),
-    );
-    const landmark = this.extractLandmark(response.status, response.data);
-    await this.applyLandmarkUpsert(landmark);
-    return landmark;
+    const credentials = this.getSyncCredentials();
+    if (!credentials) throw new LandmarkMutationError('permission', 'You are not signed in.');
+
+    if (this.hasNetworkAccess()) {
+      try {
+        const response = await this.attemptLandmarkRequest(() =>
+          this.service.updateLandmark(credentials.instance, credentials.token, id, input),
+        );
+        const landmark = this.extractLandmark(response.status, response.data);
+        await this.applyLandmarkUpsert(landmark);
+        return landmark;
+      } catch (error) {
+        if (this.isUnreachableError(error)) {
+          this.enterOfflineMode();
+          return this.enqueueUpdate(id, input);
+        }
+        throw error;
+      }
+    }
+    return this.enqueueUpdate(id, input);
   }
 
   /**
-   * Delete a landmark online, then remove it from the cached landmarks overlay.
+   * Delete a landmark. Same online/offline/4xx semantics as `createLandmark`.
    */
   async deleteLandmark(id: string): Promise<void> {
-    const credentials = this.requireOnlineCredentials();
-    const response = await this.runLandmarkRequest(() =>
-      this.service.deleteLandmark(credentials.instance, credentials.token, id),
-    );
-    if (!isSuccessfulStatus(response.status)) {
-      throw parseLandmarkMutationError(response.status, response.data);
-    }
-    await this.applyLandmarkRemoval(id);
-  }
-
-  private requireOnlineCredentials(): { token: string; instance: string } {
-    if (!this.hasNetworkAccess()) {
-      throw new LandmarkMutationError(
-        'offline',
-        'Landmark changes are not available offline yet.',
-      );
-    }
     const credentials = this.getSyncCredentials();
-    if (!credentials) {
-      throw new LandmarkMutationError('permission', 'You are not signed in.');
+    if (!credentials) throw new LandmarkMutationError('permission', 'You are not signed in.');
+
+    if (this.hasNetworkAccess()) {
+      try {
+        const response = await this.attemptLandmarkRequest(() =>
+          this.service.deleteLandmark(credentials.instance, credentials.token, id),
+        );
+        if (!isSuccessfulStatus(response.status)) {
+          throw parseLandmarkMutationError(response.status, response.data);
+        }
+        await this.applyLandmarkRemoval(id);
+        return;
+      } catch (error) {
+        if (this.isUnreachableError(error)) {
+          this.enterOfflineMode();
+          await this.enqueueDelete(id);
+          return;
+        }
+        throw error;
+      }
     }
-    return credentials;
+    await this.enqueueDelete(id);
   }
 
-  /** Run a landmark HTTP call, translating transport failures into typed errors. */
-  private async runLandmarkRequest<T>(
+  // ---- Offline enqueue helpers ----------------------------------------------
+
+  private isUnreachableError(error: unknown): boolean {
+    return error instanceof LandmarkMutationError && error.kind === 'network';
+  }
+
+  /**
+   * Issue a landmark HTTP call, treating transport failures, timeouts, and 5xx
+   * as "not reachable" (a `network` LandmarkMutationError -> enqueue). A 4xx
+   * passes through as the raw response so the caller can surface the typed
+   * validation/permission/duplicate error.
+   */
+  private async attemptLandmarkRequest<T>(
     call: () => Promise<{ status: number; data: T }>,
   ): Promise<{ status: number; data: T }> {
+    let response: { status: number; data: T };
     try {
-      return await call();
+      response = await call();
     } catch (error) {
       if (error instanceof LandmarkMutationError) throw error;
       throw new LandmarkMutationError(
@@ -1073,6 +1231,155 @@ export class SpeleoDBController {
         'Could not reach the server. Check your connection and try again.',
       );
     }
+    if (response.status >= 500) {
+      throw new LandmarkMutationError(
+        'network',
+        'Could not reach the server. Check your connection and try again.',
+      );
+    }
+    return response;
+  }
+
+  private async enqueueCreate(input: LandmarkCreateInput): Promise<LandmarkApiObject> {
+    const landmark = await this.buildOptimisticCreate(input);
+    try {
+      await this.offlineQueue.enqueueCreate(landmark);
+    } catch (error) {
+      this.throwOfflineQueuePersistenceError(error);
+    }
+    return landmark;
+  }
+
+  private async enqueueUpdate(
+    id: string,
+    input: LandmarkUpdateInput,
+  ): Promise<LandmarkApiObject> {
+    // The footprint is ONLY the last known server state from the ground-truth
+    // cache. If the landmark isn't in the ground truth we record `null` rather
+    // than fabricating a baseline from the user's own edit -- inventing one
+    // would guarantee a false "changed on the server" conflict on the next sync.
+    const baseline = await this.currentLandmarkSnapshot(id);
+    const next = this.snapshotFromUpdate(input, baseline);
+    try {
+      await this.offlineQueue.enqueueUpdate(id, baseline, next);
+    } catch (error) {
+      this.throwOfflineQueuePersistenceError(error);
+    }
+    return {
+      id,
+      name: next.name,
+      description: next.description,
+      latitude: next.latitude,
+      longitude: next.longitude,
+      collection: next.collection ?? '',
+    };
+  }
+
+  private async enqueueDelete(id: string): Promise<void> {
+    const baseline = await this.currentLandmarkSnapshot(id);
+    try {
+      await this.offlineQueue.enqueueDelete(id, baseline);
+    } catch (error) {
+      this.throwOfflineQueuePersistenceError(error);
+    }
+  }
+
+  private throwOfflineQueuePersistenceError(error: unknown): never {
+    if (error instanceof OfflineOpPersistenceError) {
+      throw new LandmarkMutationError(
+        'unknown',
+        'Could not save this offline change on this device. Please try again before closing the app.',
+      );
+    }
+    throw error;
+  }
+
+  /**
+   * Footprint of a landmark's last known server state, read from the
+   * ground-truth cache. Returns `null` when the landmark is not in the ground
+   * truth (see the footprint rules in docs/offline-landmark-queue.md).
+   */
+  private async currentLandmarkSnapshot(id: string): Promise<LandmarkSnapshot | null> {
+    const fc = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks'));
+    const feature = findLandmarkFeature(fc, id);
+    return feature ? snapshotFromFeature(feature) : null;
+  }
+
+  private snapshotFromUpdate(
+    input: LandmarkUpdateInput,
+    fallback: LandmarkSnapshot | null,
+  ): LandmarkSnapshot {
+    return {
+      name: input.name ?? fallback?.name ?? '',
+      description: input.description ?? fallback?.description ?? '',
+      latitude: roundCoordinate(input.latitude ?? fallback?.latitude ?? 0),
+      longitude: roundCoordinate(input.longitude ?? fallback?.longitude ?? 0),
+      collection:
+        input.collection !== undefined
+          ? normalizeCollection(input.collection)
+          : fallback?.collection ?? null,
+    };
+  }
+
+  /** Build the optimistic landmark for an offline create (resolves display props from cache). */
+  private async buildOptimisticCreate(input: LandmarkCreateInput): Promise<LandmarkApiObject> {
+    const collectionId =
+      typeof input.collection === 'string' && input.collection.trim() !== ''
+        ? input.collection.trim()
+        : null;
+    let collectionName = 'Personal Landmarks';
+    let collectionColor = '';
+    let isPersonal = collectionId === null;
+    if (collectionId) {
+      const cached = await this.cache.getLandmarkCollections();
+      const match = cached?.find((collection) => collection.id === collectionId);
+      collectionName = match?.name ?? '';
+      collectionColor = match?.color ?? '';
+      isPersonal = match?.isPersonal ?? false;
+    }
+    return {
+      id: generateLocalLandmarkId(),
+      name: input.name,
+      description: input.description ?? '',
+      latitude: roundCoordinate(input.latitude),
+      longitude: roundCoordinate(input.longitude),
+      collection: collectionId ?? '',
+      collection_name: collectionName,
+      collection_color: collectionColor,
+      is_personal_collection: isPersonal,
+      can_write: true,
+      can_delete: true,
+    };
+  }
+
+  // ---- Offline queue public API ---------------------------------------------
+
+  /** Pending offline ops, newest first (for the Pending page). */
+  getPendingOps(): OfflineOpView[] {
+    return this.offlineQueue.views();
+  }
+
+  /** Replay every pending op against the server. */
+  async syncOfflineOps(): Promise<OfflineSyncSummary> {
+    return this.offlineQueue.syncAll();
+  }
+
+  /** Replay a single pending op. */
+  async syncOfflineOp(id: string): Promise<OfflineSyncSummary> {
+    return this.offlineQueue.syncOne(id);
+  }
+
+  /** Discard a pending op; the map reverts to the prior version via re-fold. */
+  async discardOfflineOp(id: string): Promise<void> {
+    await this.offlineQueue.discard(id);
+  }
+
+  /** Resolve a conflicted op by keeping the local change or the server version. */
+  async resolveOfflineOpConflict(
+    id: string,
+    choice: OfflineConflictChoice,
+  ): Promise<OfflineSyncSummary> {
+    return this.offlineQueue.resolveConflict(id, choice);
   }
 
   private extractLandmark(status: number, data: unknown): LandmarkApiObject {
@@ -1504,6 +1811,9 @@ export class SpeleoDBController {
     await Promise.all(MAP_OVERLAYS.map(async (overlay) => {
       context.throwIfAborted();
       if (!this.hasNetworkAccess()) return;
+      if (overlay.id === 'landmarks' && await this.shouldSkipLandmarkOverlaySync()) {
+        return;
+      }
 
       try {
         const response = await this.fetchOverlayGeoJSON(
@@ -1551,6 +1861,22 @@ export class SpeleoDBController {
       }
     }));
 
+    // Best-effort: cache the writable collection list so an offline create can
+    // still pick a collection. Never fails the overlay phase.
+    try {
+      context.throwIfAborted();
+      const collectionsResponse = await this.service.getLandmarkCollections(instance, token, {
+        signal: context.signal,
+      });
+      context.throwIfAborted();
+      if (isSuccessfulStatus(collectionsResponse.status)) {
+        await this.cache.setLandmarkCollections(mapLandmarkCollections(collectionsResponse.data));
+      }
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      console.warn('Failed to cache landmark collections during sync:', error);
+    }
+
     return {
       phase: 'overlay_sync',
       status: failedOverlayCount > 0 ? 'failed' : 'applied',
@@ -1559,6 +1885,17 @@ export class SpeleoDBController {
       syncedOverlayCount,
       failedOverlayCount,
     };
+  }
+
+  private async shouldSkipLandmarkOverlaySync(): Promise<boolean> {
+    if (this.offlineQueue.isReplaying) return true;
+    try {
+      await this.offlineQueue.load();
+    } catch (error) {
+      console.warn('Skipping landmarks overlay sync because pending ops could not be loaded:', error);
+      return true;
+    }
+    return this.offlineQueue.count > 0;
   }
 
   private fetchOverlayGeoJSON(

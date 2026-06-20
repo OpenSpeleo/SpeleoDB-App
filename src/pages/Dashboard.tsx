@@ -155,7 +155,6 @@ const LONG_PRESS_BLOCKING_STATIC_LAYER_IDS = [
   'surface-stations-labels',
   'subsurface-stations-labels',
   'cylinder-installs-labels',
-  'user-location-dot',
 ] as const;
 
 const PROJECT_LAYER_ORDER_ANCHOR_SOURCE_ID = 'project-layer-order-anchor-source';
@@ -480,12 +479,13 @@ const Dashboard: React.FC<DashboardProps> = ({
   layerOfflineSync,
 }) => {
   const history = useHistory();
-  const { controller, projects, tilePrefetchJobs, isOfflineLocked, landmarksRevision, lastSyncedAt } = useSpeleoDB();
+  const { controller, projects, tilePrefetchJobs, isOfflineLocked, landmarksRevision, lastSyncedAt, pendingOpsCount } = useSpeleoDB();
   const didSyncRef = useRef(false);
   const didFitRef = useRef(false);
   const mapRef = useRef<MapRef>(null);
   const mapPointerTapCandidateRef = useRef<MapPointerTapCandidate | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [selectedOverlayMarkerDetail, setSelectedOverlayMarkerDetail] =
     useState<OverlayMarkerDetails | null>(null);
@@ -834,9 +834,9 @@ const Dashboard: React.FC<DashboardProps> = ({
     () =>
       [
         ...LONG_PRESS_BLOCKING_STATIC_LAYER_IDS,
-        ...projectGeometryLayerIds,
+        ...projectPointLayerIds,
       ] as readonly string[],
-    [projectGeometryLayerIds],
+    [projectPointLayerIds],
   );
 
   const markerParseContext = useMemo<MarkerParseContext>(() => {
@@ -986,6 +986,10 @@ const Dashboard: React.FC<DashboardProps> = ({
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+    if (longPressRingTimerRef.current !== null) {
+      clearTimeout(longPressRingTimerRef.current);
+      longPressRingTimerRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
@@ -1012,13 +1016,25 @@ const Dashboard: React.FC<DashboardProps> = ({
         sampleDepthAtClientPoint(event.clientX, event.clientY);
         const cx = event.clientX;
         const cy = event.clientY;
-        // Only arm the long-press (and show its loading ring) when the map is
+        // Only arm the long-press when the map is
         // zoomed in far enough that a landmark can be created. Below the marker
         // interaction zoom, creation is impossible, so the ring must not appear
         // at all. The empty-spot requirement is enforced when the timer fires.
         if (isMarkerInteractionZoom()) {
-          setLongPressRing({ x: cx, y: cy });
+          const pointerId = event.pointerId;
+          longPressRingTimerRef.current = setTimeout(() => {
+            longPressRingTimerRef.current = null;
+            const candidate = mapPointerTapCandidateRef.current;
+            if (!candidate || candidate.pointerId !== pointerId || candidate.moved) {
+              return;
+            }
+            if (!isEmptyMapSpotAtClientPoint(cx, cy)) {
+              return;
+            }
+            setLongPressRing({ x: cx, y: cy });
+          }, MAP.LONG_PRESS_RING_REVEAL_DELAY_MS);
           longPressTimerRef.current = setTimeout(() => {
+            clearLongPressTimer();
             longPressTimerRef.current = null;
             mapPointerTapCandidateRef.current = null;
             setLongPressRing(null);
@@ -2114,7 +2130,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             <LongPressRing
               x={longPressRing.x}
               y={longPressRing.y}
-              durationMs={MAP.LONG_PRESS_DURATION_MS}
+              durationMs={MAP.LONG_PRESS_DURATION_MS - MAP.LONG_PRESS_RING_REVEAL_DELAY_MS}
               sizePx={MAP.LONG_PRESS_RING_SIZE_PX}
               strokePx={MAP.LONG_PRESS_RING_STROKE_PX}
             />
@@ -2137,6 +2153,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             onProjectPanelChange={onProjectPanelChange}
             isLandmarkPanelOpen={isLandmarkPanelOpen}
             onLandmarkPanelChange={onLandmarkPanelChange}
+            pendingOpsCount={pendingOpsCount}
           />
         </div>
       </IonContent>

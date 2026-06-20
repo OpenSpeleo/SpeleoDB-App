@@ -4,7 +4,7 @@ export interface LongPressRingProps {
   /** Viewport coordinates (px) of the touch point. */
   x: number;
   y: number;
-  /** Fill duration; should match MAP.LONG_PRESS_DURATION_MS. */
+  /** Fill duration; usually the remaining hold time after the reveal delay. */
   durationMs: number;
   sizePx: number;
   strokePx: number;
@@ -17,8 +17,8 @@ export interface LongPressRingProps {
  *
  * Purely presentational and non-interactive, and driven entirely by a CSS
  * keyframe animation (no React state) so it never schedules an async update.
- * Mounted on press and unmounted on cancel/complete, so a fresh mount restarts
- * the fill each press.
+ * Mounted after a short intent delay and unmounted on cancel/complete, so a
+ * fresh mount restarts the fill each press.
  */
 const LongPressRing: React.FC<LongPressRingProps> = ({ x, y, durationMs, sizePx, strokePx }) => {
   const radius = (sizePx - strokePx) / 2;

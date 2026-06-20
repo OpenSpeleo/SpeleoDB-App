@@ -2,7 +2,7 @@
  * Pure helpers for landmark create/edit/delete.
  *
  * Kept free of React, network, and storage so they are trivially testable and
- * reusable by both the online path (today) and the offline queue (later).
+ * reusable by both the online path and the offline queue.
  *
  * - Validation of user input.
  * - Building a GeoJSON Feature from an API landmark, matching the exact
@@ -152,6 +152,23 @@ export function buildLandmarkFeatureFromApi(
       can_delete: landmark.can_delete ?? false,
     },
   };
+}
+
+/**
+ * Pull a `LandmarkApiObject` out of a mutation response body, accepting either
+ * the `{ landmark: {...} }` envelope or a bare landmark object. Returns null if
+ * no object with a string `id` is present (lenient; never throws). Used by the
+ * offline replay path, which tolerates a malformed 2xx and falls back to the
+ * locally intended values.
+ */
+export function extractLandmarkObject(data: unknown): LandmarkApiObject | null {
+  const envelope = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+  const candidate =
+    envelope.landmark && typeof envelope.landmark === 'object'
+      ? (envelope.landmark as Record<string, unknown>)
+      : envelope;
+  if (typeof candidate.id !== 'string' || candidate.id === '') return null;
+  return candidate as unknown as LandmarkApiObject;
 }
 
 function featureId(feature: GeoJSON.Feature): string {

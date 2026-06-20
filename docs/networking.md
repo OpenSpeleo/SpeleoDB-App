@@ -17,12 +17,12 @@ This document defines how network state is handled in the app and what is intent
 
 ## Allowed reconnect triggers
 
-Two explicit, user-initiated actions may attempt to return online from offline mode:
+Explicit, user-initiated actions may attempt to return online from offline mode:
 
 1. Close and reopen the app (startup validation flow).
-2. Tap **Go Online** in Settings, which calls `controller.attemptReconnect()` (an in-process reconnect that probes the server via `validateSessionAgainstServer()`, then launches a sync on success).
+2. Tap **Go Online** in Settings or **Try Reconnect** on Pending Changes. Both call `controller.attemptReconnect()` (an in-process reconnect that probes the server via `validateSessionAgainstServer()`, then launches a sync on success).
 
-If neither action occurs, the app remains in offline behavior even if device connectivity changes. The Settings **Resync** button calls `syncProjects()` only, is disabled while offline-locked, and never performs a reconnect.
+If none of these actions occurs, the app remains in offline behavior even if device connectivity changes. The Settings **Resync** button calls `syncProjects()` only, is disabled while offline-locked, and never performs a reconnect.
 
 ## Offline-entry triggers (online -> offline)
 
@@ -88,9 +88,20 @@ Implementation notes:
 - Keep reconnect logic explicit and initiated only from documented triggers.
 - Follow code architecture and testing conventions in `docs/implementation-guidelines.md`.
 
+## Landmark mutations and the offline queue
+
+Landmark create/edit/delete are request-driven like everything else. A mutation
+that hits a transport error, timeout, or 5xx is treated as "not reachable" and
+enqueued as a persistent offline op (a 4xx is a definitive answer and is surfaced
+to the user, not queued). Replaying the queue is a side-effect of an explicit,
+user-initiated action (the Pending page's Sync Now / per-row Sync, or a
+controller sync); it never runs from a passive connectivity listener. See
+`docs/offline-landmark-queue.md`.
+
 See also:
 
 - `docs/offline-mode.md`
+- `docs/offline-landmark-queue.md`
 - `docs/logout-behavior.md`
 - `docs/implementation-guidelines.md`
 - `docs/dashboard-map-overlays.md`

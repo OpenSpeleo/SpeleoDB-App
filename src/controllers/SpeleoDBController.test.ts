@@ -10,6 +10,8 @@ import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import { getTile, upsertTile } from '../services/tileCache/TileCacheRepository';
 import { allowConsoleWarn } from '../test/consoleGuard';
 import { createAbortError } from '../utils/abort';
+import { OfflineOpStore } from '../offline/OfflineOpStore';
+import type { SerializedOfflineOp } from '../types/offlineOp';
 
 function createProjectFixture(
   overrides: Omit<Partial<Project>, 'latest_commit'> & {
@@ -97,6 +99,7 @@ function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBServic
       status: 200,
       data: { type: 'FeatureCollection', features: [] },
     }) as HttpResponse<GeoJSON.FeatureCollection>),
+    getLandmarkCollections: vi.fn(async () => ({ status: 200, data: [] }) as HttpResponse<unknown>),
     downloadJSON: vi.fn(async () => ({
       status: 200,
       data: {
@@ -139,8 +142,29 @@ function createMockCache(): ProjectCacheService {
     getOverlayGeoJSON: vi.fn(async () => null),
     setOverlayGeoJSON: vi.fn(async () => true),
     getCachedCommitId: vi.fn(async () => null),
+    getLandmarkCollections: vi.fn(async () => null),
+    setLandmarkCollections: vi.fn(async () => true),
     clearAll: vi.fn(async () => {}),
   } as unknown as ProjectCacheService;
+}
+
+/** In-memory OfflineOpStore so controller offline tests are isolated from IDB. */
+function createMemoryOpStore(): OfflineOpStore {
+  const records = new Map<string, SerializedOfflineOp>();
+  return {
+    list: vi.fn(async () => [...records.values()].sort((a, b) => a.seq - b.seq)),
+    put: vi.fn(async (op: SerializedOfflineOp) => {
+      records.set(op.id, op);
+      return true;
+    }),
+    remove: vi.fn(async (id: string) => {
+      records.delete(id);
+      return true;
+    }),
+    clear: vi.fn(async () => {
+      records.clear();
+    }),
+  } as unknown as OfflineOpStore;
 }
 
 function createMockTilePrefetch(
@@ -2133,11 +2157,21 @@ describe('SpeleoDBController landmark CRUD', () => {
     can_delete: true,
   };
 
-  function onlineController(serviceOverrides?: Partial<SpeleoDBService>, cacheRef?: ProjectCacheService) {
+  function onlineController(
+    serviceOverrides?: Partial<SpeleoDBService>,
+    cacheRef?: ProjectCacheService,
+    opStore: OfflineOpStore = createMemoryOpStore(),
+  ) {
     const service = createMockService(serviceOverrides);
     const prefs = createMockPrefs({ ...ONLINE_PREFS });
     const cache = cacheRef ?? createMockCache();
-    const controller = new SpeleoDBController(service, prefs, cache, createMockTilePrefetch());
+    const controller = new SpeleoDBController(
+      service,
+      prefs,
+      cache,
+      createMockTilePrefetch(),
+      opStore,
+    );
     return { service, prefs, cache, controller };
   }
 
@@ -2149,7 +2183,13 @@ describe('SpeleoDBController landmark CRUD', () => {
     });
     const prefs = createMockPrefs({ ...ONLINE_PREFS });
     const cache = createMockCache();
-    const controller = new SpeleoDBController(service, prefs, cache, createMockTilePrefetch());
+    const controller = new SpeleoDBController(
+      service,
+      prefs,
+      cache,
+      createMockTilePrefetch(),
+      createMemoryOpStore(),
+    );
     await controller.validateSession();
     expect(controller.isOfflineLocked).toBe(true);
     return { service, prefs, cache, controller };
@@ -2202,15 +2242,21 @@ describe('SpeleoDBController landmark CRUD', () => {
       expect(written.features.map((f) => f.id).sort()).toEqual(['lm-0', 'lm-1']);
     });
 
-    it('rejects with an offline error when offline-locked and never calls the service', async () => {
+    it('enqueues an offline op (no service call, ground truth untouched) when offline-locked', async () => {
       const createLandmark = vi.fn();
       const { controller, cache } = await offlineController({ createLandmark } as never);
 
-      await expect(
-        controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 }),
-      ).rejects.toMatchObject({ kind: 'offline' });
+      const result = await controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 });
+
+      // Optimistic landmark carries a local temp id; nothing was sent or written.
+      expect(result.id.startsWith('local:')).toBe(true);
       expect(createLandmark).not.toHaveBeenCalled();
       expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+      expect(controller.pendingOpsCount).toBe(1);
+
+      // The optimistic view folds the pending create over the (empty) ground truth.
+      const folded = (await controller.getOverlayGeoJSON('landmarks')) as GeoJSON.FeatureCollection;
+      expect(folded.features.map((f) => f.properties?.name)).toContain('Camp');
     });
 
     it('rejects with a permission error when credentials are missing', async () => {
@@ -2237,13 +2283,62 @@ describe('SpeleoDBController landmark CRUD', () => {
       expect(controller.landmarksRevision).toBe(0);
     });
 
-    it('maps a transport throw to a network error', async () => {
+    it('enqueues an offline op when an online create hits a transport error', async () => {
+      // A transport failure means "not reachable" -> queue it, do not lose it.
       const createLandmark = vi.fn(async () => { throw new Error('boom'); });
-      const { controller } = onlineController({ createLandmark } as never);
+      const { controller, cache } = onlineController({ createLandmark } as never);
+
+      const result = await controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 });
+
+      expect(createLandmark).toHaveBeenCalledOnce();
+      expect(result.id.startsWith('local:')).toBe(true);
+      expect(controller.pendingOpsCount).toBe(1);
+      expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+    });
+
+    it('surfaces an error when an unreachable create cannot be saved durably', async () => {
+      const createLandmark = vi.fn(async () => { throw new Error('boom'); });
+      const failingStore = {
+        list: vi.fn(async () => []),
+        put: vi.fn(async () => false),
+        remove: vi.fn(async () => true),
+        clear: vi.fn(async () => {}),
+      } as unknown as OfflineOpStore;
+      const { controller, cache } = onlineController(
+        { createLandmark } as never,
+        undefined,
+        failingStore,
+      );
 
       await expect(
         controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 }),
-      ).rejects.toMatchObject({ kind: 'network' });
+      ).rejects.toMatchObject({
+        kind: 'unknown',
+        message: expect.stringContaining('Could not save this offline change'),
+      });
+      expect(controller.pendingOpsCount).toBe(0);
+      expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+    });
+
+    it('enqueues an offline op when an online create hits a 5xx', async () => {
+      const createLandmark = vi.fn(async () => ({ status: 503, data: {} }));
+      const { controller } = onlineController({ createLandmark } as never);
+
+      const result = await controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 });
+
+      expect(result.id.startsWith('local:')).toBe(true);
+      expect(controller.pendingOpsCount).toBe(1);
+    });
+
+    it('flips the app to offline mode when an online create is unreachable', async () => {
+      const createLandmark = vi.fn(async () => { throw new Error('network down'); });
+      const { controller } = onlineController({ createLandmark } as never);
+      expect(controller.isOfflineLocked).toBe(false);
+
+      await controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 });
+
+      expect(controller.isOfflineLocked).toBe(true);
+      expect(controller.isOnline).toBe(false);
     });
 
     it('rejects a malformed success payload with no landmark id', async () => {
@@ -2291,11 +2386,23 @@ describe('SpeleoDBController landmark CRUD', () => {
       expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
     });
 
-    it('rejects when offline-locked', async () => {
-      const { controller } = await offlineController();
-      await expect(controller.updateLandmark('lm-1', { name: 'x' })).rejects.toMatchObject({
-        kind: 'offline',
-      });
+    it('enqueues an offline edit when offline-locked', async () => {
+      const { controller, cache } = await offlineController();
+      const result = await controller.updateLandmark('lm-1', { name: 'x', latitude: 1, longitude: 2 });
+      expect(result.name).toBe('x');
+      expect(controller.pendingOpsCount).toBe(1);
+      expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+    });
+
+    it('flips the app to offline mode when an online edit is unreachable', async () => {
+      const updateLandmark = vi.fn(async () => { throw new Error('network down'); });
+      const { controller } = onlineController({ updateLandmark } as never);
+      expect(controller.isOfflineLocked).toBe(false);
+
+      await controller.updateLandmark('lm-1', { name: 'x', latitude: 1, longitude: 2 });
+
+      expect(controller.isOfflineLocked).toBe(true);
+      expect(controller.pendingOpsCount).toBe(1);
     });
   });
 
@@ -2330,12 +2437,26 @@ describe('SpeleoDBController landmark CRUD', () => {
       expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
     });
 
-    it('rejects when offline-locked and never calls the service', async () => {
+    it('enqueues an offline delete (no service call) when offline-locked', async () => {
       const deleteLandmark = vi.fn();
-      const { controller } = await offlineController({ deleteLandmark } as never);
+      const { controller, cache } = await offlineController({ deleteLandmark } as never);
 
-      await expect(controller.deleteLandmark('lm-1')).rejects.toMatchObject({ kind: 'offline' });
+      await controller.deleteLandmark('lm-1');
+
       expect(deleteLandmark).not.toHaveBeenCalled();
+      expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+      expect(controller.pendingOpsCount).toBe(1);
+    });
+
+    it('flips the app to offline mode when an online delete is unreachable', async () => {
+      const deleteLandmark = vi.fn(async () => { throw new Error('network down'); });
+      const { controller } = onlineController({ deleteLandmark } as never);
+      expect(controller.isOfflineLocked).toBe(false);
+
+      await controller.deleteLandmark('lm-1');
+
+      expect(controller.isOfflineLocked).toBe(true);
+      expect(controller.pendingOpsCount).toBe(1);
     });
   });
 
@@ -2389,6 +2510,364 @@ describe('SpeleoDBController landmark CRUD', () => {
     await controller.syncProjects();
 
     expect(controller.landmarksRevision).toBeGreaterThan(0);
+  });
+
+  it('does not full-overwrite the landmarks overlay while pending offline ops exist', async () => {
+    const pendingCreate: SerializedOfflineOp = {
+      id: 'op-create',
+      entityType: 'landmark',
+      kind: 'create',
+      seq: 1,
+      createdAt: Date.now(),
+      status: 'pending',
+      created: {
+        id: 'local:camp',
+        name: 'Offline Camp',
+        description: '',
+        latitude: 1,
+        longitude: 2,
+        collection: '',
+      },
+    };
+    const opStore = {
+      list: vi.fn(async () => [pendingCreate]),
+      put: vi.fn(async () => true),
+      remove: vi.fn(async () => true),
+      clear: vi.fn(async () => {}),
+    } as unknown as OfflineOpStore;
+    const getLandmarksGeoJSON = vi.fn(async () => ({
+      status: 200,
+      data: { type: 'FeatureCollection', features: [] },
+    }) as HttpResponse<GeoJSON.FeatureCollection>);
+    const service = createMockService({ getLandmarksGeoJSON });
+    const prefs = createMockPrefs({ ...ONLINE_PREFS });
+    const cache = createMockCache();
+    const controller = new SpeleoDBController(
+      service,
+      prefs,
+      cache,
+      createMockTilePrefetch(),
+      opStore,
+    );
+
+    await controller.syncProjects();
+
+    expect(getLandmarksGeoJSON).not.toHaveBeenCalled();
+    expect(cache.setOverlayGeoJSON).not.toHaveBeenCalledWith(
+      'landmarks',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  // ---- footprint fidelity (real cache) --------------------------------------
+
+  describe('conflict footprint (real cache, server unchanged)', () => {
+    const serverGeo: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          id: 'lm-1',
+          // Mirror the real backend geojson: id only at feature level, no
+          // properties.id; full-precision coordinates.
+          properties: {
+            name: 'Camp',
+            description: 'Base camp',
+            collection: 'col-1',
+            collection_name: 'Survey A',
+            collection_color: '#3b82f6',
+            is_personal_collection: false,
+            can_write: true,
+            can_delete: true,
+          },
+          geometry: { type: 'Point', coordinates: [-122.2512345, 45.5012345] },
+        },
+      ],
+    };
+
+    // Mirrors the real "Go Online -> Sync" flow: an unreachable CRUD locks the
+    // app offline, so the queue can only be replayed after a reconnect clears
+    // the lock. validateToken defaults to 200 in the mock service.
+    async function goOnlineAndSync(controller: SpeleoDBController) {
+      await controller.attemptReconnect();
+      await flushPromises(5);
+      return controller.syncOfflineOps();
+    }
+
+    async function realCacheController(serviceOverrides: Partial<SpeleoDBService>) {
+      const { ProjectCacheService: RealCache } = await import('../services/ProjectCacheService');
+      const cache = new RealCache();
+      await cache.clearAll();
+      await cache.setOverlayGeoJSON('landmarks', serverGeo);
+      const service = createMockService({
+        getLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: serverGeo })),
+        ...serviceOverrides,
+      });
+      const prefs = createMockPrefs({ ...ONLINE_PREFS });
+      const controller = new SpeleoDBController(
+        service,
+        prefs,
+        cache,
+        createMockTilePrefetch(),
+        createMemoryOpStore(),
+      );
+      return { controller, cache, service };
+    }
+
+    it('edits offline then syncs WITHOUT a false conflict when the server is unchanged', async () => {
+      // First service call (the online attempt) fails -> enqueue; the replay
+      // PATCH succeeds.
+      const updateLandmark = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('network down'))
+        .mockResolvedValue({ status: 200, data: { landmark: { ...apiLandmark, name: 'Renamed' } } });
+      const { controller } = await realCacheController({ updateLandmark } as never);
+
+      // Edit only the name; resend every other field exactly as the server has it.
+      await controller.updateLandmark('lm-1', {
+        name: 'Renamed',
+        description: 'Base camp',
+        latitude: 45.5012345,
+        longitude: -122.2512345,
+        collection: 'col-1',
+      });
+      expect(controller.pendingOpsCount).toBe(1);
+
+      const result = await goOnlineAndSync(controller);
+
+      expect(result.conflicted).toBe(0);
+      expect(result.succeeded).toBe(1);
+      expect(updateLandmark).toHaveBeenCalledTimes(2);
+      expect(controller.pendingOpsCount).toBe(0);
+    });
+
+    it('deletes offline then syncs WITHOUT a false conflict when the server is unchanged', async () => {
+      const deleteLandmark = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('network down'))
+        .mockResolvedValue({ status: 200, data: { message: 'deleted' } });
+      const { controller } = await realCacheController({ deleteLandmark } as never);
+
+      await controller.deleteLandmark('lm-1');
+      expect(controller.pendingOpsCount).toBe(1);
+
+      const result = await goOnlineAndSync(controller);
+
+      expect(result.conflicted).toBe(0);
+      expect(result.succeeded).toBe(1);
+      expect(controller.pendingOpsCount).toBe(0);
+    });
+
+    it('does NOT fabricate a baseline (no false conflict) when the landmark is absent from the ground truth', async () => {
+      // currentLandmarkSnapshot returns null (mock cache has nothing), so the op
+      // must carry a null footprint and the replay must push without claiming a
+      // conflict -- the exact "every edit warns me" symptom, prevented.
+      const updateLandmark = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('network down'))
+        .mockResolvedValue({ status: 200, data: { landmark: { ...apiLandmark, name: 'Renamed' } } });
+      // Mock cache returns null for getOverlayGeoJSON; server pull returns a
+      // DIFFERENT current value -- a fabricated baseline would have conflicted.
+      const { controller } = onlineController({
+        updateLandmark,
+        getLandmarksGeoJSON: vi.fn(async () => ({
+          status: 200,
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                id: 'lm-1',
+                properties: { name: 'Server Current', description: '', collection: 'col-1' },
+                geometry: { type: 'Point', coordinates: [-122.25, 45.5] },
+              },
+            ],
+          },
+        })),
+      } as never);
+
+      await controller.updateLandmark('lm-1', {
+        name: 'Renamed',
+        description: '',
+        latitude: 45.5,
+        longitude: -122.25,
+        collection: 'col-1',
+      });
+
+      const result = await goOnlineAndSync(controller);
+
+      expect(result.conflicted).toBe(0);
+      expect(result.succeeded).toBe(1);
+      expect(updateLandmark).toHaveBeenCalledTimes(2);
+    });
+
+    it('does NOT conflict on the exact real-world mismatch (7dp + personal UUID vs 6dp + empty)', async () => {
+      // Reproduces the reported console footprint mismatch:
+      //   baseline: [..., 20.3027113, -87.4376589, "<personal-uuid>"]   (7dp, UUID, NO personal flag)
+      //   server:   [..., 20.302711,  -87.437659,  null]               (6dp, empty)
+      const PERSONAL_UUID = '1b6b338e-35b7-4a81-a982-c166e4301793';
+      const { ProjectCacheService: RealCache } = await import('../services/ProjectCacheService');
+      const cache = new RealCache();
+      await cache.clearAll();
+      // No landmark-collections cached on purpose: the fix must NOT depend on
+      // resolving the personal collection id (collection is excluded entirely).
+      // Ground truth cached in create/edit-API shape: personal UUID, 7dp coords,
+      // and crucially NO is_personal_collection flag.
+      await cache.setOverlayGeoJSON('landmarks', {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            id: 'lm-bbb',
+            properties: {
+              id: 'lm-bbb',
+              name: 'Bbb456',
+              description: 'Bbb',
+              collection: PERSONAL_UUID,
+              can_write: true,
+              can_delete: true,
+            },
+            geometry: { type: 'Point', coordinates: [-87.4376589, 20.3027113] },
+          },
+        ],
+      });
+
+      // The geojson endpoint: 6dp coords and an empty collection.
+      const geojson = {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            id: 'lm-bbb',
+            properties: { name: 'Bbb456', description: 'Bbb', collection: '' },
+            geometry: { type: 'Point', coordinates: [-87.437659, 20.302711] },
+          },
+        ],
+      };
+      const fullLandmark = {
+        id: 'lm-bbb',
+        name: 'Renamed',
+        description: 'Bbb',
+        latitude: 20.3027113,
+        longitude: -87.4376589,
+        collection: PERSONAL_UUID,
+      };
+      const updateLandmark = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('network down'))
+        .mockResolvedValue({ status: 200, data: { landmark: fullLandmark } });
+      const service = createMockService({
+        updateLandmark,
+        getLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: geojson })),
+      } as never);
+      const controller = new SpeleoDBController(
+        service,
+        createMockPrefs({ ...ONLINE_PREFS }),
+        cache,
+        createMockTilePrefetch(),
+        createMemoryOpStore(),
+      );
+
+      // Edit (rename) -- resends the cached 7dp coords and the personal UUID.
+      await controller.updateLandmark('lm-bbb', {
+        name: 'Renamed',
+        description: 'Bbb',
+        latitude: 20.3027113,
+        longitude: -87.4376589,
+        collection: PERSONAL_UUID,
+      });
+      const editResult = await goOnlineAndSync(controller);
+      expect(editResult.conflicted).toBe(0);
+      expect(editResult.succeeded).toBe(1);
+    });
+
+    it('does NOT conflict on delete for the same real-world mismatch', async () => {
+      const PERSONAL_UUID = '1b6b338e-35b7-4a81-a982-c166e4301793';
+      const { ProjectCacheService: RealCache } = await import('../services/ProjectCacheService');
+      const cache = new RealCache();
+      await cache.clearAll();
+      await cache.setOverlayGeoJSON('landmarks', {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            id: 'lm-bbb',
+            properties: {
+              id: 'lm-bbb',
+              name: 'Bbb456',
+              description: 'Bbb',
+              collection: PERSONAL_UUID,
+              can_write: true,
+              can_delete: true,
+            },
+            geometry: { type: 'Point', coordinates: [-87.4376589, 20.3027113] },
+          },
+        ],
+      });
+      const geojson = {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            id: 'lm-bbb',
+            properties: { name: 'Bbb456', description: 'Bbb', collection: '' },
+            geometry: { type: 'Point', coordinates: [-87.437659, 20.302711] },
+          },
+        ],
+      };
+      const deleteLandmark = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('network down'))
+        .mockResolvedValue({ status: 200, data: { message: 'deleted' } });
+      const controller = new SpeleoDBController(
+        createMockService({
+          deleteLandmark,
+          getLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: geojson })),
+        } as never),
+        createMockPrefs({ ...ONLINE_PREFS }),
+        cache,
+        createMockTilePrefetch(),
+        createMemoryOpStore(),
+      );
+
+      await controller.deleteLandmark('lm-bbb');
+      const result = await goOnlineAndSync(controller);
+
+      expect(result.conflicted).toBe(0);
+      expect(result.succeeded).toBe(1);
+    });
+
+    it('DOES flag a conflict when the server actually changed since the baseline', async () => {
+      const changedServer: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: [
+          {
+            ...serverGeo.features[0],
+            properties: { ...serverGeo.features[0].properties, name: 'Renamed On Web' },
+          },
+        ],
+      };
+      const updateLandmark = vi.fn().mockRejectedValueOnce(new Error('network down'));
+      const { controller } = await realCacheController({
+        updateLandmark,
+        getLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: changedServer })),
+      } as never);
+
+      await controller.updateLandmark('lm-1', {
+        name: 'My Rename',
+        description: 'Base camp',
+        latitude: 45.5012345,
+        longitude: -122.2512345,
+        collection: 'col-1',
+      });
+
+      const result = await goOnlineAndSync(controller);
+
+      expect(result.conflicted).toBe(1);
+      // The PATCH must NOT have been sent for the conflicted op.
+      expect(updateLandmark).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ---- chaos: sequential mutations accumulate revisions ---------------------

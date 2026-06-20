@@ -16,6 +16,10 @@ export interface SpeleoDBContextValue {
   tilePrefetchJobs: TilePrefetchJobState[];
   /** Bumped after any landmark create/edit/delete writes the cached overlay. */
   landmarksRevision: number;
+  /** Number of pending offline mutations (drives the Pending tab + badge). */
+  pendingOpsCount: number;
+  /** Bumped on any offline-queue change so the Pending page re-reads the list. */
+  pendingOpsRevision: number;
   /** Storage-consent modal should be open (one-time auto prompt or manual re-trigger). */
   storageConsentRequired: boolean;
   /** Prefetch stalled at the cache cap and overflow not yet approved. */

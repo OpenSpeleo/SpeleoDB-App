@@ -8,6 +8,7 @@
 import { CacheStore } from './CacheStore';
 import type { Project } from '../types/project';
 import type { MapOverlayId } from '../types/mapOverlay';
+import type { LandmarkCollection } from '../types/landmark';
 import { isAbortError, throwIfAborted } from '../utils/abort';
 
 // ==================== Internal keys ====================
@@ -15,6 +16,12 @@ import { isAbortError, throwIfAborted } from '../utils/abort';
 /** The projects list is stored under a single well-known key. */
 const PROJECTS_LIST_KEY = 'list';
 const OVERLAY_KEY_PREFIX = 'overlay:';
+/**
+ * Writable landmark collections cached during sync (in the `projects` store)
+ * so the create form's collection picker still works offline. Cleared with the
+ * rest of the cache on logout.
+ */
+const LANDMARK_COLLECTIONS_KEY = 'landmark-collections';
 
 // ==================== Service ====================
 
@@ -168,12 +175,40 @@ export class ProjectCacheService {
     }
   }
 
+  // ---- Writable landmark collections (offline create picker) ------------------
+
+  /** Read the cached writable landmark collections, or null if none cached. */
+  async getLandmarkCollections(): Promise<LandmarkCollection[] | null> {
+    try {
+      const entry = await this.store.get<LandmarkCollection[]>('projects', LANDMARK_COLLECTIONS_KEY);
+      return entry?.data ?? null;
+    } catch (error) {
+      console.error('ProjectCacheService.getLandmarkCollections failed:', error);
+      return null;
+    }
+  }
+
+  /** Cache the writable landmark collections (overwrites). */
+  async setLandmarkCollections(collections: LandmarkCollection[]): Promise<boolean> {
+    try {
+      await this.store.set('projects', LANDMARK_COLLECTIONS_KEY, {
+        data: collections,
+        cachedAt: Date.now(),
+      });
+      return true;
+    } catch (error) {
+      console.error('ProjectCacheService.setLandmarkCollections failed:', error);
+      return false;
+    }
+  }
+
   // ---- Housekeeping -----------------------------------------------------------
 
-  /** Wipe all cached projects and geojson data (e.g. on logout). */
+  /** Wipe all cached projects, geojson, and queued offline ops (e.g. on logout). */
   async clearAll(): Promise<void> {
     await this.store.clear('projects');
     await this.store.clear('geojson');
+    await this.store.clear('offline_ops');
   }
 
   private getOverlayCacheKey(overlayId: MapOverlayId): string {

@@ -100,6 +100,8 @@ export const MAP = {
   // circular loading ring has time to visibly fill before the modal opens.
   // See docs/landmark-crud.md.
   LONG_PRESS_DURATION_MS: 550,
+  // Delay before showing the ring so normal quick taps do not flash an animation.
+  LONG_PRESS_RING_REVEAL_DELAY_MS: 140,
   LONG_PRESS_EMPTY_SPOT_RADIUS_PX: 18,
   // Diameter (px) of the circular long-press loading ring rendered at the touch
   // point while the user holds an empty spot.

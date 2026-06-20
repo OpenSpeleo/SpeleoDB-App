@@ -1789,7 +1789,7 @@ describe('Dashboard', () => {
     }
   });
 
-  it('does not open GPS modal when long press intersects survey line area', async () => {
+  it('allows a long press on survey line geometry', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mockProjects = [makeProject({ id: 'p1', name: 'Line Hit Long Press Project' })];
@@ -1801,22 +1801,68 @@ describe('Dashboard', () => {
         expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
       });
 
-      mockQueryRenderedFeatures.mockReturnValueOnce([
-        {
-          layer: { id: 'project-p1-line' },
-          properties: { section_name: 'Main line' },
-        },
-      ]);
+      const queryWithLineHit = ((...args: unknown[]): MockRenderedFeature[] => {
+        const options = args[1] as { layers?: string[] } | undefined;
+        return options?.layers?.includes('project-p1-line')
+          ? [
+              {
+                layer: { id: 'project-p1-line' },
+                properties: { section_name: 'Main line' },
+              },
+            ]
+          : [];
+      }) as () => MockRenderedFeature[];
+      mockQueryRenderedFeatures.mockImplementation(queryWithLineHit);
 
       const surface = getMapTouchSurface();
       fireEvent.pointerDown(surface, {
         pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
       });
 
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_RING_REVEAL_DELAY_MS); });
+      expect(screen.getByTestId('long-press-ring')).toBeInTheDocument();
+
       act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
 
-      expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
-      expect(mockMapUnproject).not.toHaveBeenCalled();
+      expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+      expect(mockMapUnproject).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('allows a long press on the GPS location dot', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderDashboard();
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+      const queryWithLocationDot = ((...args: unknown[]): MockRenderedFeature[] => {
+        const options = args[1] as { layers?: string[] } | undefined;
+        return options?.layers?.includes('user-location-dot')
+          ? [
+              {
+                layer: { id: 'user-location-dot' },
+                properties: {},
+              },
+            ]
+          : [];
+      }) as () => MockRenderedFeature[];
+      mockQueryRenderedFeatures.mockImplementation(queryWithLocationDot);
+
+      const surface = getMapTouchSurface();
+      fireEvent.pointerDown(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      });
+
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_RING_REVEAL_DELAY_MS); });
+      expect(screen.getByTestId('long-press-ring')).toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+
+      expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+      expect(mockMapUnproject).toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -2567,42 +2613,97 @@ describe('Dashboard -- Landmark CRUD', () => {
     simulatePointerTap(getMapTouchSurface());
   }
 
+  it('renders a pending offline landmark from the folded overlay', async () => {
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) =>
+      overlayId === 'landmarks'
+        ? overlayPointFeatureCollection({
+            id: 'local:pending-camp',
+            name: 'Pending Camp',
+            description: 'Created offline',
+            collection: '',
+            collection_name: 'Personal Landmarks',
+            is_personal_collection: true,
+            can_write: true,
+            can_delete: true,
+          })
+        : null,
+    );
+
+    renderDashboard();
+
+    expect(await screen.findByTestId('landmark-row-local:pending-camp')).toHaveTextContent(
+      'Pending Camp',
+    );
+    expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+  });
+
   // ---- long-press ring ------------------------------------------------------
 
-  it('shows the circular loading ring while holding and removes it on release', async () => {
-    renderDashboard();
-    await waitFor(() => {
-      expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
-    });
-    const surface = getMapTouchSurface();
+  it('delays the circular loading ring while holding and removes it on release', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderDashboard();
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+      const surface = getMapTouchSurface();
 
-    await act(async () => {
       fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
-    });
-    expect(screen.getByTestId('long-press-ring')).toBeInTheDocument();
+      expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
 
-    await act(async () => {
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_RING_REVEAL_DELAY_MS); });
+      expect(screen.getByTestId('long-press-ring')).toBeInTheDocument();
+
       fireEvent.pointerUp(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
-    });
-    expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not flash the loading ring for a quick tap', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderDashboard();
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+      const surface = getMapTouchSurface();
+
+      act(() => {
+        fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
+        fireEvent.pointerUp(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
+        vi.advanceTimersByTime(MAP.LONG_PRESS_RING_REVEAL_DELAY_MS);
+      });
+
+      expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('removes the ring when the finger moves past the tap threshold', async () => {
-    renderDashboard();
-    await waitFor(() => {
-      expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
-    });
-    const surface = getMapTouchSurface();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderDashboard();
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+      const surface = getMapTouchSurface();
 
-    await act(async () => {
-      fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
-    });
-    expect(screen.getByTestId('long-press-ring')).toBeInTheDocument();
+      act(() => {
+        fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
+        vi.advanceTimersByTime(MAP.LONG_PRESS_RING_REVEAL_DELAY_MS);
+      });
+      expect(screen.getByTestId('long-press-ring')).toBeInTheDocument();
 
-    await act(async () => {
-      fireEvent.pointerMove(surface, { pointerId: 1, pointerType: 'touch', clientX: 300, clientY: 400 });
-    });
-    expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
+      act(() => {
+        fireEvent.pointerMove(surface, { pointerId: 1, pointerType: 'touch', clientX: 300, clientY: 400 });
+      });
+      expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does NOT show the ring when zoomed out too far to create a landmark', async () => {
@@ -2633,13 +2734,16 @@ describe('Dashboard -- Landmark CRUD', () => {
       const surface = getMapTouchSurface();
 
       fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
-      // Ring shows (zoom is high enough)…
-      expect(screen.getByTestId('long-press-ring')).toBeInTheDocument();
-
-      // …but the spot is occupied by a marker when the timer fires.
-      mockQueryRenderedFeatures.mockReturnValueOnce([
+      // The spot is occupied by a marker when the ring would normally appear.
+      const markerHit = [
         { layer: { id: 'landmarks-layer' }, properties: { id: 'lm-1' }, geometry: { type: 'Point', coordinates: [2.3, 46.6] } },
-      ]);
+      ];
+      mockQueryRenderedFeatures
+        .mockReturnValueOnce(markerHit)
+        .mockReturnValueOnce(markerHit);
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_RING_REVEAL_DELAY_MS); });
+      expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
+
       act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
 
       expect(screen.queryByTestId('create-landmark-button')).not.toBeInTheDocument();

@@ -12,6 +12,7 @@ import {
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Settings = lazy(() => import('./pages/Settings'))
+const PendingOps = lazy(() => import('./pages/PendingOps'))
 
 setupIonicReact({
   mode: 'ios',
@@ -21,6 +22,7 @@ function AuthenticatedRoutes(): ReactNode {
   const path = useLocation().pathname
   const isDashboard = path === '/dashboard'
   const isSettings = path === '/settings'
+  const isPending = path === '/pending'
   const [isProjectPanelOpen, setIsProjectPanelOpen] = useState(false)
   const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = useState(false)
   const [showLandmarks, setShowLandmarks] = useState(() => getShowLandmarks())
@@ -93,13 +95,30 @@ function AuthenticatedRoutes(): ReactNode {
           />
         </Suspense>
       </div>
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          visibility: isPending ? 'visible' : 'hidden',
+          pointerEvents: isPending ? 'auto' : 'none',
+        }}
+      >
+        <Suspense fallback={null}>
+          <PendingOps
+            isProjectPanelOpen={isProjectPanelOpen}
+            onProjectPanelChange={handleProjectPanelChange}
+            isLandmarkPanelOpen={isLandmarkPanelOpen}
+            onLandmarkPanelChange={handleLandmarkPanelChange}
+          />
+        </Suspense>
+      </div>
     </>
   )
 }
 
 /**
- * Keeps Dashboard + Settings mounted behind the authenticated shell so map
- * state survives tab switches, while allowing the whole shell to load lazily.
+ * Keeps Dashboard + Settings + Pending mounted behind the authenticated shell
+ * so map state survives tab switches, while allowing the whole shell to load lazily.
  */
 export default function AuthenticatedAppShell(): ReactNode {
   return (

@@ -50,6 +50,10 @@ vi.mock('./pages/Login', () => ({
   default: () => <div data-testid="mock-login">login</div>,
 }));
 
+vi.mock('./pages/PendingOps', () => ({
+  default: () => <div data-testid="mock-pending" />,
+}));
+
 vi.mock('./pages/Dashboard', () => ({
   default: ({
     showLandmarks,
