@@ -63,6 +63,11 @@ export function SpeleoDBStoreProvider({ children }: SpeleoDBStoreProviderProps) 
     () => controller.tilePrefetchJobs,
   )
 
+  const landmarksRevision = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.landmarksRevision,
+  )
+
   const storageConsentRequired = useSyncExternalStore(
     (cb) => controller.subscribe(cb),
     () => controller.storageConsentRequired,
@@ -87,6 +92,7 @@ export function SpeleoDBStoreProvider({ children }: SpeleoDBStoreProviderProps) 
     syncStatus,
     lastSyncedAt,
     tilePrefetchJobs,
+    landmarksRevision,
     storageConsentRequired,
     isTileCacheOverLimit,
     isTileCacheOverLimitApproved,

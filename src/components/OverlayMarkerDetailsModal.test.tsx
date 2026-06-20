@@ -39,6 +39,11 @@ const landmarkDetail: OverlayMarkerDetails = {
   gpsCoordinate: '46.6000, 2.3000',
   collectionName: 'Shared Survey',
   isPersonalCollection: false,
+  canWrite: false,
+  canDelete: false,
+  collectionId: 'col-shared',
+  latitude: 46.6,
+  longitude: 2.3,
 };
 
 const personalLandmarkDetail: OverlayMarkerDetails = {
@@ -49,11 +54,18 @@ const personalLandmarkDetail: OverlayMarkerDetails = {
   gpsCoordinate: '46.6100, 2.3100',
   collectionName: 'Personal Landmarks',
   isPersonalCollection: true,
+  canWrite: true,
+  canDelete: true,
+  collectionId: 'col-personal',
+  latitude: 46.61,
+  longitude: 2.31,
 };
 
 const mapLongPressDetail: OverlayMarkerDetails = {
   type: 'mapLongPress',
   gpsCoordinate: '46.7000, 2.4000',
+  latitude: 46.7,
+  longitude: 2.4,
 };
 
 const cylinderDetail: OverlayMarkerDetails = {
@@ -213,5 +225,89 @@ describe('OverlayMarkerDetailsModal', () => {
     render(<OverlayMarkerDetailsModal detail={landmarkDetail} onClose={vi.fn()} />);
 
     await user.click(screen.getByTestId('share-button'));
+  });
+
+  describe('landmark CRUD actions', () => {
+    it('shows the Create Landmark button for a map long-press point', async () => {
+      const onCreate = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <OverlayMarkerDetailsModal
+          detail={mapLongPressDetail}
+          onClose={vi.fn()}
+          onCreateLandmark={onCreate}
+        />,
+      );
+
+      const button = screen.getByTestId('create-landmark-button');
+      expect(button).toBeInTheDocument();
+      await user.click(button);
+      expect(onCreate).toHaveBeenCalledOnce();
+    });
+
+    it('does not show Create Landmark when no handler is provided', () => {
+      render(<OverlayMarkerDetailsModal detail={mapLongPressDetail} onClose={vi.fn()} />);
+      expect(screen.queryByTestId('create-landmark-button')).not.toBeInTheDocument();
+    });
+
+    it('shows Edit and Delete for a writable landmark', async () => {
+      const onEdit = vi.fn();
+      const onDelete = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <OverlayMarkerDetailsModal
+          detail={personalLandmarkDetail}
+          onClose={vi.fn()}
+          onEditLandmark={onEdit}
+          onDeleteLandmark={onDelete}
+        />,
+      );
+
+      await user.click(screen.getByTestId('edit-landmark-button'));
+      await user.click(screen.getByTestId('delete-landmark-button'));
+      expect(onEdit).toHaveBeenCalledOnce();
+      expect(onDelete).toHaveBeenCalledOnce();
+    });
+
+    it('hides Edit/Delete for a read-only landmark', () => {
+      render(
+        <OverlayMarkerDetailsModal
+          detail={landmarkDetail}
+          onClose={vi.fn()}
+          onEditLandmark={vi.fn()}
+          onDeleteLandmark={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId('edit-landmark-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('delete-landmark-button')).not.toBeInTheDocument();
+    });
+
+    it('shows only Delete when the user can delete but not write', () => {
+      render(
+        <OverlayMarkerDetailsModal
+          detail={{ ...landmarkDetail, canWrite: false, canDelete: true }}
+          onClose={vi.fn()}
+          onEditLandmark={vi.fn()}
+          onDeleteLandmark={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId('edit-landmark-button')).not.toBeInTheDocument();
+      expect(screen.getByTestId('delete-landmark-button')).toBeInTheDocument();
+    });
+
+    it('does not render landmark actions for non-landmark overlay types', () => {
+      render(
+        <OverlayMarkerDetailsModal
+          detail={projectPointDetail}
+          onClose={vi.fn()}
+          onEditLandmark={vi.fn()}
+          onDeleteLandmark={vi.fn()}
+          onCreateLandmark={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId('edit-landmark-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('delete-landmark-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('create-landmark-button')).not.toBeInTheDocument();
+    });
   });
 });

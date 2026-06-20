@@ -153,7 +153,7 @@ const Login: React.FC = () => {
                 </div>
                 <div className="mt-6">
                   <button
-                    className="app-btn w-full text-white bg-purple-500 hover:bg-purple-600 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed group"
+                    className="app-btn app-btn--primary w-full shadow-sm group"
                     type="submit"
                     disabled={isLoading}
                   >

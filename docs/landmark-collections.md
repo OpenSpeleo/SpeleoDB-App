@@ -7,9 +7,13 @@ to the mobile app as a touch-friendly side panel reachable from a dedicated
 ## Feature intent
 
 Browse landmarks grouped by their collection, control visibility per collection,
-and locate any landmark on the map — all while fully offline. No create / edit /
-delete / move: this is a strict read-only surface, consistent with the rest of
-the app's overlay UX (`docs/dashboard-map-overlays.md`).
+and locate any landmark on the map — all while fully offline.
+
+This panel itself remains a read-only browse/locate surface. Landmark
+**create / edit / delete** is a separate (online) surface reachable from the map
+(long-press to create, tap a marker to edit/delete); see `docs/landmark-crud.md`.
+Collection management (create/edit/delete collections, bulk transfer) still
+exists only in the web viewer.
 
 ## Design space and decisions
 
@@ -148,10 +152,11 @@ The read-only details modal is reachable solely by physically tapping the marker
 on the map (`handleLocateLandmark` in `src/pages/Dashboard.tsx` deliberately does
 not open the modal).
 
-## Read-only UX constraints
+## Read-only UX constraints (this panel)
 
-- No create / edit / delete / move / bulk-transfer UI (those exist only in the
-  web viewer). The panel and details modal are strictly view + locate.
+- The Landmarks **panel** is strictly view + locate. Landmark create/edit/delete
+  is handled on the map (see `docs/landmark-crud.md`), not from this panel.
+- Collection create/edit/delete/move and bulk-transfer remain web-viewer only.
 
 ## Tests
 

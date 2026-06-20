@@ -114,6 +114,15 @@ Do not only document "what changed"; include "why this architecture exists".
 See `docs/coding-rules.md`.
 These are **hard rules** — violations must be fixed before merging.
 
+**Buttons (hard rule):** every `.app-btn` MUST carry a solid color variant
+(`app-btn--primary | secondary | danger | info | success`, defined unlayered in
+`src/index.css`). NEVER use an opacity-modified background utility
+(`bg-<color>/<NN>`, e.g. `bg-slate-800/70`) as a button fill — it renders as
+invisible "bare text" on Android WebViews. A button with no visible background
+is a bug. Self-check: `app-btn[^"]*bg-` must return zero matches in
+`src/**/*.tsx`. See `.cursor/rules/ui-buttons.mdc` and
+`tasks/lessons/button-backgrounds.md`.
+
 ## Working rules
 
 1. Read relevant docs before proposing or implementing changes.

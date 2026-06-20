@@ -13,10 +13,18 @@ export const API = {
   AUTH_TOKEN_ENDPOINT: BASE_PATH + '/user/auth-token/',
   PROJECTS_GEOJSON_ENDPOINT: BASE_PATH + '/projects/geojson/',
   LANDMARKS_GEOJSON_ENDPOINT: BASE_PATH + '/landmarks/geojson/',
+  // Landmark CRUD: POST creates, and `${LANDMARKS_ENDPOINT}${id}/` is the
+  // detail endpoint for PATCH/DELETE. See docs/landmark-crud.md.
+  LANDMARKS_ENDPOINT: BASE_PATH + '/landmarks/',
+  LANDMARK_COLLECTIONS_ENDPOINT: BASE_PATH + '/landmark-collections/',
   SUBSURFACE_STATIONS_GEOJSON_ENDPOINT: BASE_PATH + '/stations/subsurface/geojson/',
   SURFACE_STATIONS_GEOJSON_ENDPOINT: BASE_PATH + '/stations/surface/geojson/',
   EXPLORATION_LEADS_GEOJSON_ENDPOINT: BASE_PATH + '/exploration-leads/geojson/',
   CYLINDER_INSTALLS_GEOJSON_ENDPOINT: BASE_PATH + '/cylinder-installs/geojson/',
+  /** Detail endpoint for a single landmark (PATCH/DELETE). */
+  landmarkDetailEndpoint(id: string): string {
+    return `${BASE_PATH}/landmarks/${encodeURIComponent(id)}/`;
+  },
 } as const;
 
 // ==================== HTTP STATUS CODES ====================
@@ -88,8 +96,15 @@ export const MAP = {
   MAX_ZOOM: 19.9,
   // Hard cap for all cached tile payloads (prefetch + runtime map browsing).
   TILE_CACHE_MAX_BYTES: 500 * 1024 * 1024,
-  LONG_PRESS_DURATION_MS: 300,
+  // Long-press to drop a map point / create a landmark. Raised from 300ms so the
+  // circular loading ring has time to visibly fill before the modal opens.
+  // See docs/landmark-crud.md.
+  LONG_PRESS_DURATION_MS: 550,
   LONG_PRESS_EMPTY_SPOT_RADIUS_PX: 18,
+  // Diameter (px) of the circular long-press loading ring rendered at the touch
+  // point while the user holds an empty spot.
+  LONG_PRESS_RING_SIZE_PX: 64,
+  LONG_PRESS_RING_STROKE_PX: 4,
   // Minimum zoom for any marker interaction that opens a modal
   // (marker taps, long-press GPS). Below this zoom, taps on markers
   // and long-press GPS are silently ignored to prevent accidental

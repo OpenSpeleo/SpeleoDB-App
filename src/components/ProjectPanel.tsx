@@ -340,8 +340,7 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
               type="button"
               onClick={onShowAll}
               aria-label="Show all projects"
-              className="app-btn app-btn--compact bg-purple-600/90 text-white hover:bg-purple-500/90
-                         active:bg-purple-600 touch-manipulation"
+              className="app-btn app-btn--compact app-btn--primary touch-manipulation"
             >
               Show all
             </button>
@@ -349,9 +348,7 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
               type="button"
               onClick={onHideAll}
               aria-label="Hide all projects"
-              className="app-btn app-btn--compact bg-slate-700/60 text-slate-100 border border-slate-600/50
-                         hover:bg-slate-600/70 hover:text-white active:bg-slate-700
-                         touch-manipulation"
+              className="app-btn app-btn--compact app-btn--secondary touch-manipulation"
             >
               Hide all
             </button>

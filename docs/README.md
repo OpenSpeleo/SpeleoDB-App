@@ -21,6 +21,7 @@ This folder contains product and engineering documentation for core app behavior
 - `external-links.md`: why `target="_blank"` fails on Android in Capacitor, the `openExternalUrl()` contract, and the rule that all external links must use it.
 - `deep-linking.md`: custom URL scheme (`speleodb://`), Universal Links / App Links setup, server `.well-known/` files, and fallback behavior.
 - `map-layers.md`: changeable map tile layers (ESRI satellite + hillshade), the layer switcher, per-layer offline sync + prioritized prefetch, magic-hash missing-tile detection, offline gating, and storage-cap interaction.
+- `landmark-crud.md`: online create/edit/delete of landmarks from the map, the collection picker, permission gating, long-press loading ring, the single cache-write seam, and the offline-ready architecture.
 
 ## Maintainer note
 

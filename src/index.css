@@ -134,3 +134,68 @@ body {
   padding: 0.625rem 0.875rem;
   font-size: 0.875rem;
 }
+
+/*
+ * Button color variants — SOLID, unlayered backgrounds.
+ *
+ * WHY THIS EXISTS: every `.app-btn` MUST carry a color variant. Relying on
+ * Tailwind background *utilities* for the fill is fragile here for two reasons:
+ *  1. Tailwind v4 utilities live in `@layer utilities`; unlayered author rules
+ *     (like `.app-btn`) and preflight can win the cascade, dropping the fill.
+ *  2. Opacity-modified utilities (`bg-slate-800/70`) compile to
+ *     `color-mix(in oklab, …)`, which renders invisibly / not at all on older
+ *     Android WebViews — the button then looks like plain text with NO
+ *     background. This has bitten us repeatedly. See docs/coding-rules.md and
+ *     tasks/lessons/button-backgrounds.md.
+ *
+ * These variants use SOLID Tailwind theme tokens (`var(--color-*)`) in
+ * UNLAYERED CSS, so the fill always renders. Add layout-only utilities
+ * (`w-full`, `gap-2`, `mb-3`, …) alongside the variant as needed.
+ */
+.app-btn--primary {
+  background-color: var(--color-purple-600);
+  color: #fff;
+}
+.app-btn--primary:hover {
+  background-color: var(--color-purple-500);
+}
+
+.app-btn--secondary {
+  background-color: var(--color-slate-700);
+  color: var(--color-slate-100);
+  border: 1px solid var(--color-slate-600);
+}
+.app-btn--secondary:hover {
+  background-color: var(--color-slate-600);
+  color: #fff;
+}
+
+.app-btn--danger {
+  background-color: var(--color-red-600);
+  color: #fff;
+}
+.app-btn--danger:hover {
+  background-color: var(--color-red-500);
+}
+
+.app-btn--info {
+  background-color: var(--color-blue-600);
+  color: #fff;
+}
+.app-btn--info:hover {
+  background-color: var(--color-blue-500);
+}
+
+.app-btn--success {
+  background-color: var(--color-emerald-600);
+  color: #fff;
+}
+.app-btn--success:hover {
+  background-color: var(--color-emerald-500);
+}
+
+/* Shared disabled treatment for every variant. */
+.app-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

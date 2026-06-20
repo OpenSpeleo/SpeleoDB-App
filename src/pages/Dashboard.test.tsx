@@ -7,6 +7,7 @@ import { createMemoryHistory } from 'history';
 import Dashboard from './Dashboard';
 import { MAP } from '../constants';
 import type { Project } from '../types/project';
+import { LandmarkMutationError } from '../types/landmark';
 import { allowConsoleWarn } from '../test/consoleGuard';
 
 // jsdom lacks PointerEvent -- polyfill so fireEvent.pointerDown/Up creates
@@ -401,14 +402,24 @@ const mockGetProjectGeoJSON = vi.fn().mockResolvedValue(null);
 const mockGetOverlayGeoJSON = vi.fn().mockResolvedValue(null);
 const mockLogout = vi.fn();
 const mockIsAuthenticated = vi.fn().mockReturnValue(true);
+const mockGetLandmarkCollections = vi.fn().mockResolvedValue([]);
+const mockCreateLandmark = vi.fn().mockResolvedValue({ id: 'lm-new' });
+const mockUpdateLandmark = vi.fn().mockResolvedValue({ id: 'lm-1' });
+const mockDeleteLandmark = vi.fn().mockResolvedValue(undefined);
 let mockIsOfflineLocked = false;
 let mockProjects: Project[] = [];
+let mockLandmarksRevision = 0;
+let mockLastSyncedAt: number | null = null;
 const mockController = {
   syncProjects: mockSyncProjects,
   getProjectGeoJSON: mockGetProjectGeoJSON,
   getOverlayGeoJSON: mockGetOverlayGeoJSON,
   logout: mockLogout,
   isAuthenticated: mockIsAuthenticated,
+  getLandmarkCollections: mockGetLandmarkCollections,
+  createLandmark: mockCreateLandmark,
+  updateLandmark: mockUpdateLandmark,
+  deleteLandmark: mockDeleteLandmark,
 };
 
 vi.mock('../context/useSpeleoDB', () => ({
@@ -418,8 +429,9 @@ vi.mock('../context/useSpeleoDB', () => ({
     syncStatus: 'idle' as const,
     isOnline: true,
     isOfflineLocked: mockIsOfflineLocked,
-    lastSyncedAt: null,
+    lastSyncedAt: mockLastSyncedAt,
     tilePrefetchJobs: [],
+    landmarksRevision: mockLandmarksRevision,
   }),
 }));
 
@@ -2497,5 +2509,315 @@ describe('Dashboard -- Geolocation error modal', () => {
     await waitFor(() => {
       expect(screen.queryByText('Location Permission Required')).not.toBeInTheDocument();
     });
+  });
+});
+
+// ==================== Landmark CRUD ====================
+
+describe('Dashboard -- Landmark CRUD', () => {
+  const WRITABLE_LANDMARK = {
+    id: 'lm-1',
+    name: 'Big Entrance',
+    description: 'Main entrance',
+    collection: 'col-1',
+    collection_name: 'Survey A',
+    is_personal_collection: false,
+    can_write: true,
+    can_delete: true,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mapPropsRef.current = null;
+    mockIsAuthenticated.mockReturnValue(true);
+    mockIsOfflineLocked = false;
+    mockLandmarksRevision = 0;
+    mockLastSyncedAt = null;
+    mockProjects = [makeProject({ id: 'p1', name: 'CRUD Project' })];
+    mockGetProjectVisibilityPreferences.mockReturnValue({});
+    mockGetCountryVisibilityPreferences.mockReturnValue({});
+    mockGetCountryCollapsedPreferences.mockReturnValue({});
+    mockGetShowLandmarks.mockReturnValue(true);
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) =>
+      overlayId === 'landmarks'
+        ? overlayPointFeatureCollection({ ...WRITABLE_LANDMARK })
+        : null,
+    );
+    mockQueryRenderedFeatures.mockReturnValue([]);
+    mockMapGetLayer.mockImplementation((id: string) => ({ id }));
+    mockMapGetZoom.mockReturnValue(15);
+    mockGetLandmarkCollections.mockResolvedValue([
+      { id: 'col-1', name: 'Survey A', color: '#111', isPersonal: false, canWrite: true },
+      { id: 'col-personal', name: 'Personal Landmarks', color: '#fff', isPersonal: true, canWrite: true },
+    ]);
+    mockCreateLandmark.mockResolvedValue({ id: 'lm-new' });
+    mockUpdateLandmark.mockResolvedValue({ id: 'lm-1' });
+    mockDeleteLandmark.mockResolvedValue(undefined);
+  });
+
+  function tapLandmark(props: Record<string, unknown> = {}) {
+    mockQueryRenderedFeatures.mockReturnValueOnce([
+      {
+        layer: { id: 'landmarks-layer' },
+        properties: { ...WRITABLE_LANDMARK, ...props },
+        geometry: { type: 'Point', coordinates: [2.3, 46.6] },
+      },
+    ]);
+    simulatePointerTap(getMapTouchSurface());
+  }
+
+  // ---- long-press ring ------------------------------------------------------
+
+  it('shows the circular loading ring while holding and removes it on release', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+    });
+    const surface = getMapTouchSurface();
+
+    await act(async () => {
+      fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
+    });
+    expect(screen.getByTestId('long-press-ring')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.pointerUp(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
+    });
+    expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
+  });
+
+  it('removes the ring when the finger moves past the tap threshold', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+    });
+    const surface = getMapTouchSurface();
+
+    await act(async () => {
+      fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
+    });
+    expect(screen.getByTestId('long-press-ring')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.pointerMove(surface, { pointerId: 1, pointerType: 'touch', clientX: 300, clientY: 400 });
+    });
+    expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
+  });
+
+  it('does NOT show the ring when zoomed out too far to create a landmark', async () => {
+    mockMapGetZoom.mockReturnValue(MAP.MARKER_INTERACTION_MIN_ZOOM - 1);
+    renderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+    });
+    const surface = getMapTouchSurface();
+
+    await act(async () => {
+      fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
+    });
+    expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.pointerUp(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
+    });
+  });
+
+  it('still requires an empty spot: a long press on a marker does not open Map Point', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderDashboard();
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+      const surface = getMapTouchSurface();
+
+      fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
+      // Ring shows (zoom is high enough)…
+      expect(screen.getByTestId('long-press-ring')).toBeInTheDocument();
+
+      // …but the spot is occupied by a marker when the timer fires.
+      mockQueryRenderedFeatures.mockReturnValueOnce([
+        { layer: { id: 'landmarks-layer' }, properties: { id: 'lm-1' }, geometry: { type: 'Point', coordinates: [2.3, 46.6] } },
+      ]);
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+
+      expect(screen.queryByTestId('create-landmark-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // ---- create flow ----------------------------------------------------------
+
+  it('opens the create form from a long-press map point and creates a landmark', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderDashboard();
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+      const surface = getMapTouchSurface();
+
+      fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+
+      // Map Point modal now offers Create Landmark.
+      expect(screen.getByTestId('create-landmark-button')).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('create-landmark-button'));
+
+      expect(screen.getByTestId('landmark-form-modal')).toBeInTheDocument();
+      expect(screen.getByText('Create Landmark')).toBeInTheDocument();
+
+      fireEvent.change(screen.getByTestId('landmark-name-input'), { target: { value: 'New Spot' } });
+      fireEvent.click(screen.getByTestId('landmark-form-submit'));
+
+      await act(async () => { await Promise.resolve(); });
+
+      expect(mockCreateLandmark).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'New Spot' }),
+      );
+      await waitFor(() => {
+        expect(screen.queryByTestId('landmark-form-modal')).not.toBeInTheDocument();
+      });
+      expect(screen.getByTestId('landmark-toast')).toHaveTextContent('Landmark created');
+      expect(mockGetLandmarkCollections).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the create form open and shows the error when offline', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockCreateLandmark.mockRejectedValue(
+        new LandmarkMutationError('offline', 'Landmark changes are not available offline yet.'),
+      );
+      renderDashboard();
+      await waitFor(() => {
+        expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
+      });
+      const surface = getMapTouchSurface();
+
+      fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
+      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+      fireEvent.click(screen.getByTestId('create-landmark-button'));
+      fireEvent.change(screen.getByTestId('landmark-name-input'), { target: { value: 'New Spot' } });
+      fireEvent.click(screen.getByTestId('landmark-form-submit'));
+
+      await act(async () => { await Promise.resolve(); });
+
+      expect(screen.getByTestId('landmark-form-modal')).toBeInTheDocument();
+      expect(screen.getByTestId('landmark-submit-error')).toHaveTextContent(
+        'Landmark changes are not available offline yet.',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // ---- edit flow ------------------------------------------------------------
+
+  it('opens the edit form from a writable landmark and saves changes', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+    });
+
+    tapLandmark();
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('edit-landmark-button'));
+    expect(screen.getByTestId('landmark-form-modal')).toBeInTheDocument();
+    expect(screen.getByText('Edit Landmark')).toBeInTheDocument();
+    expect(screen.getByTestId('landmark-name-input')).toHaveValue('Big Entrance');
+
+    fireEvent.change(screen.getByTestId('landmark-name-input'), { target: { value: 'Renamed' } });
+    fireEvent.click(screen.getByTestId('landmark-form-submit'));
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(mockUpdateLandmark).toHaveBeenCalledWith(
+      'lm-1',
+      expect.objectContaining({ name: 'Renamed' }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByTestId('landmark-form-modal')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('landmark-toast')).toHaveTextContent('Landmark updated');
+  });
+
+  // ---- delete flow ----------------------------------------------------------
+
+  it('deletes a landmark after confirmation', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+    });
+
+    tapLandmark();
+    fireEvent.click(screen.getByTestId('delete-landmark-button'));
+
+    expect(screen.getByTestId('delete-landmark-confirm')).toBeInTheDocument();
+    expect(screen.getByTestId('delete-landmark-confirm-warning')).toHaveTextContent(
+      'This action cannot be undone.',
+    );
+
+    fireEvent.click(screen.getByTestId('delete-landmark-confirm-confirm'));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(mockDeleteLandmark).toHaveBeenCalledWith('lm-1');
+    await waitFor(() => {
+      expect(screen.queryByTestId('delete-landmark-confirm')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('landmark-toast')).toHaveTextContent('Landmark deleted');
+  });
+
+  it('does not delete when the confirmation is cancelled', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+    });
+
+    tapLandmark();
+    fireEvent.click(screen.getByTestId('delete-landmark-button'));
+    fireEvent.click(screen.getByTestId('delete-landmark-confirm-cancel'));
+
+    expect(mockDeleteLandmark).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('delete-landmark-confirm')).not.toBeInTheDocument();
+  });
+
+  it('surfaces an error toast when deletion fails', async () => {
+    mockDeleteLandmark.mockRejectedValue(
+      new LandmarkMutationError('permission', 'You do not have permission to modify this landmark.'),
+    );
+    renderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+    });
+
+    tapLandmark();
+    fireEvent.click(screen.getByTestId('delete-landmark-button'));
+    fireEvent.click(screen.getByTestId('delete-landmark-confirm-confirm'));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByTestId('landmark-toast')).toHaveTextContent(
+      'You do not have permission to modify this landmark.',
+    );
+  });
+
+  // ---- permission gating ----------------------------------------------------
+
+  it('hides Edit/Delete for a read-only landmark', async () => {
+    renderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+    });
+
+    tapLandmark({ can_write: false, can_delete: false });
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    expect(screen.queryByTestId('edit-landmark-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('delete-landmark-button')).not.toBeInTheDocument();
   });
 });

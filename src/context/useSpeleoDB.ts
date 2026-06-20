@@ -14,6 +14,8 @@ export interface SpeleoDBContextValue {
   syncStatus: SyncStatus;
   lastSyncedAt: number | null;
   tilePrefetchJobs: TilePrefetchJobState[];
+  /** Bumped after any landmark create/edit/delete writes the cached overlay. */
+  landmarksRevision: number;
   /** Storage-consent modal should be open (one-time auto prompt or manual re-trigger). */
   storageConsentRequired: boolean;
   /** Prefetch stalled at the cache cap and overflow not yet approved. */

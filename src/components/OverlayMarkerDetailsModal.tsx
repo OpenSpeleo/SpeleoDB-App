@@ -6,6 +6,12 @@ import type { OverlayMarkerDetails } from '../utils/overlayMarkerDetails';
 interface OverlayMarkerDetailsModalProps {
   detail: OverlayMarkerDetails | null;
   onClose: () => void;
+  /** Open the create-landmark form for a long-pressed map point. */
+  onCreateLandmark?: () => void;
+  /** Open the edit form for the shown landmark. */
+  onEditLandmark?: () => void;
+  /** Open the delete confirmation for the shown landmark. */
+  onDeleteLandmark?: () => void;
 }
 
 const SHAREABLE_TYPES = new Set<OverlayMarkerDetails['type']>(['landmark', 'surfaceStation', 'projectPoint', 'mapLongPress']);
@@ -173,6 +179,9 @@ function renderDetailFields(detail: OverlayMarkerDetails) {
 const OverlayMarkerDetailsModal: React.FC<OverlayMarkerDetailsModalProps> = ({
   detail,
   onClose,
+  onCreateLandmark,
+  onEditLandmark,
+  onDeleteLandmark,
 }) => {
   const handleShare = useCallback(async () => {
     if (!detail) return;
@@ -216,11 +225,51 @@ const OverlayMarkerDetailsModal: React.FC<OverlayMarkerDetailsModalProps> = ({
 
           {renderDetailFields(detail)}
 
+          {detail.type === 'mapLongPress' && onCreateLandmark && (
+            <button
+              type="button"
+              onClick={onCreateLandmark}
+              data-testid="create-landmark-button"
+              className="app-btn app-btn--primary w-full mb-3 gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M12 4v16m8-8H4" />
+              </svg>
+              Create Landmark
+            </button>
+          )}
+
+          {detail.type === 'landmark' && (detail.canWrite || detail.canDelete) && (
+            <div className={`grid gap-3 mb-3 ${detail.canWrite && detail.canDelete ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              {detail.canWrite && onEditLandmark && (
+                <button
+                  type="button"
+                  onClick={onEditLandmark}
+                  data-testid="edit-landmark-button"
+                  className="app-btn app-btn--info"
+                >
+                  Edit Landmark
+                </button>
+              )}
+              {detail.canDelete && onDeleteLandmark && (
+                <button
+                  type="button"
+                  onClick={onDeleteLandmark}
+                  data-testid="delete-landmark-button"
+                  className="app-btn app-btn--danger"
+                >
+                  Delete Landmark
+                </button>
+              )}
+            </div>
+          )}
+
           <div className={`grid gap-3 ${SHAREABLE_TYPES.has(detail.type) ? 'grid-cols-2' : 'grid-cols-1'}`}>
             <button
               type="button"
               onClick={onClose}
-              className="app-btn bg-slate-700 text-slate-200 hover:bg-slate-600"
+              className="app-btn app-btn--secondary"
             >
               Close
             </button>
@@ -229,7 +278,7 @@ const OverlayMarkerDetailsModal: React.FC<OverlayMarkerDetailsModalProps> = ({
                 type="button"
                 onClick={handleShare}
                 data-testid="share-button"
-                className="app-btn bg-purple-600/80 text-white hover:bg-purple-500/80 gap-2"
+                className="app-btn app-btn--primary gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

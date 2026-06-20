@@ -8,13 +8,23 @@
 
 import { API, HEADERS } from '../constants';
 import { getInstanceBaseUrl } from '../utils/url';
-import type { HttpClient, HttpResponse } from './HttpClient';
+import type { HttpClient, HttpResponse, HttpRequest } from './HttpClient';
 import type { AuthTokenResponse } from '../types';
 import type { Project } from '../types/project';
+import type {
+  LandmarkApiObject,
+  LandmarkCreateInput,
+  LandmarkUpdateInput,
+} from '../types/landmark';
 
 export interface ServiceRequestOptions {
   signal?: AbortSignal
   timeoutMs?: number
+}
+
+/** Response envelope for a single landmark mutation. */
+export interface LandmarkMutationResponse {
+  landmark: LandmarkApiObject;
 }
 
 export class SpeleoDBService {
@@ -102,6 +112,88 @@ export class SpeleoDBService {
     );
   }
 
+  // ==================== Landmark CRUD ====================
+
+  /**
+   * GET /api/v2/landmark-collections/  (with Token header)
+   *
+   * Returns the user's landmark collections (used to populate the create/edit
+   * collection picker). Shape is backend-defined; callers map it.
+   */
+  async getLandmarkCollections(
+    instance: string,
+    token: string,
+    options: ServiceRequestOptions = {},
+  ): Promise<HttpResponse<unknown>> {
+    return this.authorizedRequest(
+      'GET',
+      instance,
+      token,
+      API.LANDMARK_COLLECTIONS_ENDPOINT,
+      options,
+    );
+  }
+
+  /**
+   * POST /api/v2/landmarks/  (with Token header)
+   *
+   * Creates a landmark. Omit `collection` (or send null) to use the user's
+   * personal collection.
+   */
+  async createLandmark(
+    instance: string,
+    token: string,
+    input: LandmarkCreateInput,
+    options: ServiceRequestOptions = {},
+  ): Promise<HttpResponse<LandmarkMutationResponse | unknown>> {
+    return this.authorizedRequest<LandmarkMutationResponse>(
+      'POST',
+      instance,
+      token,
+      API.LANDMARKS_ENDPOINT,
+      { ...options, data: input },
+    );
+  }
+
+  /**
+   * PATCH /api/v2/landmarks/<id>/  (with Token header)
+   *
+   * Partially updates a landmark. Only provided fields are changed.
+   */
+  async updateLandmark(
+    instance: string,
+    token: string,
+    id: string,
+    input: LandmarkUpdateInput,
+    options: ServiceRequestOptions = {},
+  ): Promise<HttpResponse<LandmarkMutationResponse | unknown>> {
+    return this.authorizedRequest<LandmarkMutationResponse>(
+      'PATCH',
+      instance,
+      token,
+      API.landmarkDetailEndpoint(id),
+      { ...options, data: input },
+    );
+  }
+
+  /**
+   * DELETE /api/v2/landmarks/<id>/  (with Token header)
+   */
+  async deleteLandmark(
+    instance: string,
+    token: string,
+    id: string,
+    options: ServiceRequestOptions = {},
+  ): Promise<HttpResponse<unknown>> {
+    return this.authorizedRequest(
+      'DELETE',
+      instance,
+      token,
+      API.landmarkDetailEndpoint(id),
+      options,
+    );
+  }
+
   /**
    * GET /api/v2/stations/subsurface/geojson/  (with Token header)
    */
@@ -182,13 +274,37 @@ export class SpeleoDBService {
     endpoint: string,
     options: ServiceRequestOptions = {},
   ): Promise<HttpResponse<T | unknown>> {
+    return this.authorizedRequest<T>('GET', instance, token, endpoint, options);
+  }
+
+  /**
+   * Issue an authenticated request (Token header) to an instance endpoint.
+   *
+   * Generalizes the read-only `getAuthorized` so the same auth/URL logic backs
+   * landmark create/update/delete. Pass `data` for a JSON body.
+   */
+  private async authorizedRequest<T>(
+    method: HttpRequest['method'],
+    instance: string,
+    token: string,
+    endpoint: string,
+    options: ServiceRequestOptions & { data?: unknown } = {},
+  ): Promise<HttpResponse<T | unknown>> {
     const baseUrl = getInstanceBaseUrl(instance);
     const url = baseUrl + endpoint;
 
+    const headers: Record<string, string> = {
+      [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}`,
+    };
+    if (options.data !== undefined) {
+      headers[HEADERS.CONTENT_TYPE] = HEADERS.APPLICATION_JSON_UTF8;
+    }
+
     return this.http.request<T | unknown>({
       url,
-      method: 'GET',
-      headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
+      method,
+      headers,
+      data: options.data,
       signal: options.signal,
       timeoutMs: options.timeoutMs,
     });

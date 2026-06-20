@@ -53,6 +53,13 @@ import DistanceScale from '../components/map/DistanceScale';
 import DepthGauge from '../components/map/DepthGauge';
 import { PERMISSION_DENIED_SENTINEL } from '../utils/geolocationError';
 import OverlayMarkerDetailsModal from '../components/OverlayMarkerDetailsModal';
+import LandmarkFormModal from '../components/LandmarkFormModal';
+import type { LandmarkFormInitialValues, LandmarkFormMode } from '../components/LandmarkFormModal';
+import ConfirmDialog from '../components/ConfirmDialog';
+import LongPressRing from '../components/LongPressRing';
+import type { LandmarkCollection } from '../types/landmark';
+import { LandmarkMutationError } from '../types/landmark';
+import { ensureLandmarkPropertyIds, type NormalizedLandmarkInput } from '../utils/landmarkMutations';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { createProjectColorState, getProjectColor } from '../utils/projectColors';
 import type { MapColorMode } from '../types/mapColorMode';
@@ -70,6 +77,7 @@ import {
 } from '../utils/overlayMarkerDetails';
 import type {
   InteractiveOverlayFeature,
+  LandmarkDetails,
   MapLongPressDetails,
   MarkerParseContext,
   OverlayMarkerDetails,
@@ -472,7 +480,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   layerOfflineSync,
 }) => {
   const history = useHistory();
-  const { controller, projects, tilePrefetchJobs, isOfflineLocked } = useSpeleoDB();
+  const { controller, projects, tilePrefetchJobs, isOfflineLocked, landmarksRevision, lastSyncedAt } = useSpeleoDB();
   const didSyncRef = useRef(false);
   const didFitRef = useRef(false);
   const mapRef = useRef<MapRef>(null);
@@ -481,6 +489,22 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const [selectedOverlayMarkerDetail, setSelectedOverlayMarkerDetail] =
     useState<OverlayMarkerDetails | null>(null);
+
+  // ---- Landmark CRUD state --------------------------------------------------
+  // Circular long-press loading ring position (viewport px), null when idle.
+  const [longPressRing, setLongPressRing] = useState<{ x: number; y: number } | null>(null);
+  // Create/edit form: non-null means open. Delete confirm target: non-null open.
+  const [landmarkForm, setLandmarkForm] = useState<
+    { mode: LandmarkFormMode; initialValues: LandmarkFormInitialValues; editId: string | null } | null
+  >(null);
+  const [landmarkCollections, setLandmarkCollections] = useState<LandmarkCollection[]>([]);
+  const [landmarkFormBusy, setLandmarkFormBusy] = useState(false);
+  const [landmarkFormError, setLandmarkFormError] = useState<string | null>(null);
+  const [landmarkDeleteTarget, setLandmarkDeleteTarget] = useState<LandmarkDetails | null>(null);
+  const [landmarkDeleteBusy, setLandmarkDeleteBusy] = useState(false);
+  const [landmarkToast, setLandmarkToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
+  const landmarkToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
   const [mapViewMetrics, setMapViewMetrics] = useState<{ zoom: number; latitude: number }>(() => ({
     zoom: MAP.DEFAULT_ZOOM,
     latitude: MAP.DEFAULT_CENTER[1],
@@ -695,7 +719,11 @@ const Dashboard: React.FC<DashboardProps> = ({
 
           const featureCollection = normalizeGeoJSON(raw);
           if (featureCollection && featureCollection.features.length > 0) {
-            nextData[overlay.id] = normalizeOverlayGeoJSON(overlay.id, featureCollection);
+            const normalized = normalizeOverlayGeoJSON(overlay.id, featureCollection);
+            nextData[overlay.id] =
+              overlay.id === 'landmarks'
+                ? (ensureLandmarkPropertyIds(normalized) as GeoJSON.FeatureCollection)
+                : normalized;
           }
         } catch (error) {
           console.warn(`Failed to load cached overlay ${overlay.id}:`, error);
@@ -709,7 +737,11 @@ const Dashboard: React.FC<DashboardProps> = ({
     return () => {
       stale = true;
     };
-  }, [controller, loadTrigger]);
+    // `landmarksRevision` bumps after a landmark create/edit/delete writes the
+    // cached overlay; `lastSyncedAt` changes after any sync/resync rewrites the
+    // overlay cache (e.g. a landmark deleted on the web). Re-read on either so
+    // the map + panel always reflect the latest cached overlays.
+  }, [controller, loadTrigger, landmarksRevision, lastSyncedAt]);
 
   const visibleOverlayGeoJsonData = useMemo(() => {
     const nextData: MapOverlayGeoJsonRecord = {};
@@ -897,8 +929,19 @@ const Dashboard: React.FC<DashboardProps> = ({
     const detail: MapLongPressDetails = {
       type: 'mapLongPress',
       gpsCoordinate: formatLatLng(lngLat.lat, lngLat.lng),
+      latitude: lngLat.lat,
+      longitude: lngLat.lng,
     };
     setSelectedOverlayMarkerDetail(detail);
+  }, []);
+
+  const isMarkerInteractionZoom = useCallback((): boolean => {
+    const map = mapRef.current?.getMap() as unknown as OverlayFeatureQueryMap | undefined;
+    if (!map?.getZoom) {
+      return false;
+    }
+    const zoom = map.getZoom();
+    return Number.isFinite(zoom) && zoom >= MAP.MARKER_INTERACTION_MIN_ZOOM;
   }, []);
 
   const isEmptyMapSpotAtClientPoint = useCallback((clientX: number, clientY: number): boolean => {
@@ -969,22 +1012,31 @@ const Dashboard: React.FC<DashboardProps> = ({
         sampleDepthAtClientPoint(event.clientX, event.clientY);
         const cx = event.clientX;
         const cy = event.clientY;
-        longPressTimerRef.current = setTimeout(() => {
-          longPressTimerRef.current = null;
-          mapPointerTapCandidateRef.current = null;
-          if (!isEmptyMapSpotAtClientPoint(cx, cy)) {
-            return;
-          }
-          Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {});
-          openLongPressGpsDetail(cx, cy);
-        }, MAP.LONG_PRESS_DURATION_MS);
+        // Only arm the long-press (and show its loading ring) when the map is
+        // zoomed in far enough that a landmark can be created. Below the marker
+        // interaction zoom, creation is impossible, so the ring must not appear
+        // at all. The empty-spot requirement is enforced when the timer fires.
+        if (isMarkerInteractionZoom()) {
+          setLongPressRing({ x: cx, y: cy });
+          longPressTimerRef.current = setTimeout(() => {
+            longPressTimerRef.current = null;
+            mapPointerTapCandidateRef.current = null;
+            setLongPressRing(null);
+            if (!isEmptyMapSpotAtClientPoint(cx, cy)) {
+              return;
+            }
+            Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {});
+            openLongPressGpsDetail(cx, cy);
+          }, MAP.LONG_PRESS_DURATION_MS);
+        }
       } else {
+        setLongPressRing(null);
         clearProbedDepth();
       }
     } else {
       mapPointerTapCandidateRef.current = null;
     }
-  }, [clearLongPressTimer, clearProbedDepth, isEmptyMapSpotAtClientPoint, openLongPressGpsDetail, sampleDepthAtClientPoint]);
+  }, [clearLongPressTimer, clearProbedDepth, isEmptyMapSpotAtClientPoint, isMarkerInteractionZoom, openLongPressGpsDetail, sampleDepthAtClientPoint]);
 
   const handleMapGestureMove = useCallback((
     event: React.PointerEvent<HTMLDivElement>,
@@ -1001,6 +1053,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     if (distance > MAP_TOUCH_TAP_MAX_MOVEMENT_PX) {
       candidate.moved = true;
       clearLongPressTimer();
+      setLongPressRing(null);
     }
     if (candidate.pointerType === 'touch' || candidate.pointerType === 'pen') {
       sampleDepthAtClientPoint(event.clientX, event.clientY);
@@ -1011,6 +1064,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     event: React.PointerEvent<HTMLDivElement>,
   ) => {
     clearLongPressTimer();
+    setLongPressRing(null);
 
     const candidate = mapPointerTapCandidateRef.current;
     if (!candidate || candidate.pointerId !== event.pointerId) {
@@ -1260,6 +1314,169 @@ const Dashboard: React.FC<DashboardProps> = ({
   const handleDismissOverlayMarkerDetailsModal = useCallback(() => {
     setSelectedOverlayMarkerDetail(null);
   }, []);
+
+  // ---- Landmark CRUD handlers -----------------------------------------------
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (landmarkToastTimerRef.current !== null) {
+        clearTimeout(landmarkToastTimerRef.current);
+      }
+    };
+  }, []);
+
+  const showLandmarkToast = useCallback((message: string, tone: 'success' | 'error') => {
+    if (landmarkToastTimerRef.current !== null) {
+      clearTimeout(landmarkToastTimerRef.current);
+    }
+    setLandmarkToast({ message, tone });
+    landmarkToastTimerRef.current = setTimeout(() => {
+      if (isMountedRef.current) setLandmarkToast(null);
+      landmarkToastTimerRef.current = null;
+    }, 3000);
+  }, []);
+
+  // Load the writable collection list for the picker (best-effort, online only).
+  const loadLandmarkCollections = useCallback(() => {
+    void (async () => {
+      try {
+        const collections = await controller.getLandmarkCollections();
+        if (isMountedRef.current) setLandmarkCollections(collections);
+      } catch {
+        if (isMountedRef.current) setLandmarkCollections([]);
+      }
+    })();
+  }, [controller]);
+
+  const handleOpenCreateLandmark = useCallback(() => {
+    const detail = selectedOverlayMarkerDetail;
+    if (!detail || detail.type !== 'mapLongPress') return;
+    setSelectedOverlayMarkerDetail(null);
+    setLandmarkFormError(null);
+    setLandmarkForm({
+      mode: 'create',
+      editId: null,
+      initialValues: {
+        latitude: detail.latitude,
+        longitude: detail.longitude,
+      },
+    });
+    loadLandmarkCollections();
+  }, [selectedOverlayMarkerDetail, loadLandmarkCollections]);
+
+  const handleOpenEditLandmark = useCallback(() => {
+    const detail = selectedOverlayMarkerDetail;
+    if (!detail || detail.type !== 'landmark') return;
+    setSelectedOverlayMarkerDetail(null);
+    setLandmarkFormError(null);
+    setLandmarkForm({
+      mode: 'edit',
+      editId: detail.id,
+      initialValues: {
+        name: detail.name === 'N/A' ? '' : detail.name,
+        description: detail.description === 'N/A' ? '' : detail.description,
+        latitude: detail.latitude,
+        longitude: detail.longitude,
+        collectionId: detail.collectionId,
+        collectionName: detail.collectionName === 'N/A' ? null : detail.collectionName,
+      },
+    });
+    loadLandmarkCollections();
+  }, [selectedOverlayMarkerDetail, loadLandmarkCollections]);
+
+  const handleOpenDeleteLandmark = useCallback(() => {
+    const detail = selectedOverlayMarkerDetail;
+    if (!detail || detail.type !== 'landmark') return;
+    setSelectedOverlayMarkerDetail(null);
+    setLandmarkDeleteTarget(detail);
+  }, [selectedOverlayMarkerDetail]);
+
+  const handleCancelLandmarkForm = useCallback(() => {
+    if (landmarkFormBusy) return;
+    setLandmarkForm(null);
+    setLandmarkFormError(null);
+  }, [landmarkFormBusy]);
+
+  const handleSubmitLandmarkForm = useCallback(
+    (value: NormalizedLandmarkInput) => {
+      const form = landmarkForm;
+      if (!form || landmarkFormBusy) return;
+      setLandmarkFormBusy(true);
+      setLandmarkFormError(null);
+      void (async () => {
+        try {
+          if (form.mode === 'create') {
+            await controller.createLandmark({
+              name: value.name,
+              description: value.description,
+              latitude: value.latitude,
+              longitude: value.longitude,
+              collection: value.collection,
+            });
+          } else if (form.editId) {
+            await controller.updateLandmark(form.editId, {
+              name: value.name,
+              description: value.description,
+              latitude: value.latitude,
+              longitude: value.longitude,
+              collection: value.collection,
+            });
+          }
+          if (!isMountedRef.current) return;
+          setLandmarkForm(null);
+          showLandmarkToast(
+            form.mode === 'create' ? 'Landmark created' : 'Landmark updated',
+            'success',
+          );
+        } catch (error) {
+          if (!isMountedRef.current) return;
+          const message =
+            error instanceof LandmarkMutationError
+              ? error.message
+              : 'Something went wrong. Please try again.';
+          setLandmarkFormError(message);
+        } finally {
+          if (isMountedRef.current) setLandmarkFormBusy(false);
+        }
+      })();
+    },
+    [controller, landmarkForm, landmarkFormBusy, showLandmarkToast],
+  );
+
+  const handleCancelDeleteLandmark = useCallback(() => {
+    if (landmarkDeleteBusy) return;
+    setLandmarkDeleteTarget(null);
+  }, [landmarkDeleteBusy]);
+
+  const handleConfirmDeleteLandmark = useCallback(() => {
+    const target = landmarkDeleteTarget;
+    if (!target || landmarkDeleteBusy) return;
+    setLandmarkDeleteBusy(true);
+    void (async () => {
+      try {
+        await controller.deleteLandmark(target.id);
+        if (!isMountedRef.current) return;
+        setLandmarkDeleteTarget(null);
+        showLandmarkToast('Landmark deleted', 'success');
+      } catch (error) {
+        if (!isMountedRef.current) return;
+        const isGone = error instanceof LandmarkMutationError && error.kind === 'not_found';
+        setLandmarkDeleteTarget(null);
+        showLandmarkToast(
+          isGone
+            ? 'Landmark already removed'
+            : error instanceof LandmarkMutationError
+              ? error.message
+              : 'Could not delete the landmark. Please try again.',
+          isGone ? 'success' : 'error',
+        );
+      } finally {
+        if (isMountedRef.current) setLandmarkDeleteBusy(false);
+      }
+    })();
+  }, [controller, landmarkDeleteTarget, landmarkDeleteBusy, showLandmarkToast]);
 
   // ---- Render ---------------------------------------------------------------
 
@@ -1839,7 +2056,69 @@ const Dashboard: React.FC<DashboardProps> = ({
           <OverlayMarkerDetailsModal
             detail={selectedOverlayMarkerDetail}
             onClose={handleDismissOverlayMarkerDetailsModal}
+            onCreateLandmark={handleOpenCreateLandmark}
+            onEditLandmark={handleOpenEditLandmark}
+            onDeleteLandmark={handleOpenDeleteLandmark}
           />
+
+          {landmarkForm && (
+            <LandmarkFormModal
+              isOpen
+              mode={landmarkForm.mode}
+              initialValues={landmarkForm.initialValues}
+              collections={landmarkCollections}
+              busy={landmarkFormBusy}
+              submitError={landmarkFormError}
+              onSubmit={handleSubmitLandmarkForm}
+              onCancel={handleCancelLandmarkForm}
+            />
+          )}
+
+          <ConfirmDialog
+            isOpen={landmarkDeleteTarget !== null}
+            title="Delete Landmark"
+            message={
+              <>
+                Are you sure you want to delete{' '}
+                <span className="font-semibold text-slate-100">
+                  {landmarkDeleteTarget && landmarkDeleteTarget.name !== 'N/A'
+                    ? landmarkDeleteTarget.name
+                    : 'this landmark'}
+                </span>
+                ?
+              </>
+            }
+            warning="This action cannot be undone."
+            confirmLabel="Delete"
+            cancelLabel="Cancel"
+            danger
+            busy={landmarkDeleteBusy}
+            busyLabel={'Deleting\u2026'}
+            onConfirm={handleConfirmDeleteLandmark}
+            onCancel={handleCancelDeleteLandmark}
+            testId="delete-landmark-confirm"
+          />
+
+          {landmarkToast && (
+            <div
+              data-testid="landmark-toast"
+              className={`fixed left-1/2 -translate-x-1/2 bottom-24 z-[10000] px-4 py-2 rounded-lg text-sm text-white shadow-lg ${
+                landmarkToast.tone === 'success' ? 'bg-emerald-600' : 'bg-red-600'
+              }`}
+            >
+              {landmarkToast.message}
+            </div>
+          )}
+
+          {longPressRing && (
+            <LongPressRing
+              x={longPressRing.x}
+              y={longPressRing.y}
+              durationMs={MAP.LONG_PRESS_DURATION_MS}
+              sizePx={MAP.LONG_PRESS_RING_SIZE_PX}
+              strokePx={MAP.LONG_PRESS_RING_STROKE_PX}
+            />
+          )}
 
           <GeolocationErrorModal error={geoError} onDismiss={() => setGeoError(null)} />
 

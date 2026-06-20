@@ -237,6 +237,104 @@ describe('SpeleoDBService', () => {
     });
   });
 
+  // ---- landmark CRUD --------------------------------------------------------
+
+  describe('getLandmarkCollections', () => {
+    it('GETs /api/v2/landmark-collections/ with auth', async () => {
+      http = createMockHttpClient({ status: 200, data: [] });
+      service = new SpeleoDBService(http);
+
+      const res = await service.getLandmarkCollections(INSTANCE, TOKEN);
+
+      expect(res.status).toBe(200);
+      const req = http.calls[0];
+      expect(req.method).toBe('GET');
+      expect(req.url).toBe(INSTANCE + API.LANDMARK_COLLECTIONS_ENDPOINT);
+      expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
+      expect(req.data).toBeUndefined();
+    });
+  });
+
+  describe('createLandmark', () => {
+    it('POSTs JSON to /api/v2/landmarks/ with auth + content-type', async () => {
+      const created = { landmark: { id: 'lm-1', name: 'Camp' } };
+      http = createMockHttpClient({ status: 201, data: created });
+      service = new SpeleoDBService(http);
+
+      const input = { name: 'Camp', description: 'd', latitude: 1, longitude: 2, collection: 'c1' };
+      const res = await service.createLandmark(INSTANCE, TOKEN, input);
+
+      expect(res.status).toBe(201);
+      expect(res.data).toEqual(created);
+
+      const req = http.calls[0];
+      expect(req.method).toBe('POST');
+      expect(req.url).toBe(INSTANCE + API.LANDMARKS_ENDPOINT);
+      expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
+      expect(req.headers?.[HEADERS.CONTENT_TYPE]).toBe(HEADERS.APPLICATION_JSON_UTF8);
+      expect(req.data).toEqual(input);
+    });
+
+    it('returns a 400 duplicate body verbatim', async () => {
+      const body = { error: 'A landmark for GPS coordinate (1, 2) already exists or is invalid.' };
+      http = createMockHttpClient({ status: 400, data: body });
+      service = new SpeleoDBService(http);
+
+      const res = await service.createLandmark(INSTANCE, TOKEN, {
+        name: 'Camp',
+        latitude: 1,
+        longitude: 2,
+      });
+      expect(res.status).toBe(400);
+      expect(res.data).toEqual(body);
+    });
+
+    it('forwards an AbortSignal', async () => {
+      const ac = new AbortController();
+      await service.createLandmark(
+        INSTANCE,
+        TOKEN,
+        { name: 'C', latitude: 0, longitude: 0 },
+        { signal: ac.signal },
+      );
+      expect(http.calls[0].signal).toBe(ac.signal);
+    });
+  });
+
+  describe('updateLandmark', () => {
+    it('PATCHes /api/v2/landmarks/<id>/ with the id URL-encoded and a JSON body', async () => {
+      const updated = { landmark: { id: 'lm 1', name: 'Renamed' } };
+      http = createMockHttpClient({ status: 200, data: updated });
+      service = new SpeleoDBService(http);
+
+      const res = await service.updateLandmark(INSTANCE, TOKEN, 'lm 1', { name: 'Renamed' });
+
+      expect(res.status).toBe(200);
+      const req = http.calls[0];
+      expect(req.method).toBe('PATCH');
+      expect(req.url).toBe(INSTANCE + API.landmarkDetailEndpoint('lm 1'));
+      expect(req.url).toContain('lm%201');
+      expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
+      expect(req.data).toEqual({ name: 'Renamed' });
+    });
+  });
+
+  describe('deleteLandmark', () => {
+    it('DELETEs /api/v2/landmarks/<id>/ with auth and no body', async () => {
+      http = createMockHttpClient({ status: 200, data: { message: 'deleted' } });
+      service = new SpeleoDBService(http);
+
+      const res = await service.deleteLandmark(INSTANCE, TOKEN, 'lm-1');
+
+      expect(res.status).toBe(200);
+      const req = http.calls[0];
+      expect(req.method).toBe('DELETE');
+      expect(req.url).toBe(INSTANCE + API.landmarkDetailEndpoint('lm-1'));
+      expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
+      expect(req.data).toBeUndefined();
+    });
+  });
+
   // ---- downloadJSON ---------------------------------------------------------
 
   describe('downloadJSON', () => {

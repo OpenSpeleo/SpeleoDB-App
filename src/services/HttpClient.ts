@@ -16,7 +16,7 @@ import { createAbortError, throwIfAborted } from '../utils/abort';
 
 export interface HttpRequest {
   url: string;
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   headers?: Record<string, string>;
   /** JSON-serialisable body (used on both native and web). */
   data?: unknown;

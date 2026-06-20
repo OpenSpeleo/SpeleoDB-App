@@ -50,6 +50,19 @@ import type {
   TilePrefetchRequest,
 } from '../types/tilePrefetch';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
+import {
+  mapLandmarkCollections,
+  parseLandmarkMutationError,
+  removeLandmarkFeature,
+  upsertLandmarkFeature,
+} from '../utils/landmarkMutations';
+import {
+  LandmarkMutationError,
+  type LandmarkApiObject,
+  type LandmarkCollection,
+  type LandmarkCreateInput,
+  type LandmarkUpdateInput,
+} from '../types/landmark';
 import { CancellationContext } from './CancellationContext';
 import { isAbortError } from '../utils/abort';
 import type {
@@ -135,6 +148,9 @@ export class SpeleoDBController {
   private _syncStatus: SyncStatus = 'idle';
   private _lastSyncedAt: number | null = null;
   private _tilePrefetchJobs: TilePrefetchJobState[] = [];
+  // Monotonic counter bumped after any landmark create/edit/delete writes the
+  // cached overlay:landmarks FeatureCollection, so the Dashboard re-reads it.
+  private _landmarksRevision = 0;
   // Tile-cache overflow consent (persisted) + a transient manual re-trigger.
   private _tileCacheOverLimitApproved = false;
   private _tileCacheOverLimitPromptAcknowledged = false;
@@ -163,6 +179,7 @@ export class SpeleoDBController {
   private _syncStatusSnapshot: SyncStatus = this._syncStatus;
   private _lastSyncedAtSnapshot: number | null = this._lastSyncedAt;
   private _tilePrefetchJobsSnapshot: TilePrefetchJobState[] = this._tilePrefetchJobs;
+  private _landmarksRevisionSnapshot: number = this._landmarksRevision;
   private _tileCacheOverLimitApprovedSnapshot = this._tileCacheOverLimitApproved;
   private _tileCacheOverLimitPromptAcknowledgedSnapshot =
     this._tileCacheOverLimitPromptAcknowledged;
@@ -212,6 +229,15 @@ export class SpeleoDBController {
 
   get tilePrefetchJobs(): TilePrefetchJobState[] {
     return this._tilePrefetchJobsSnapshot;
+  }
+
+  /**
+   * Bumped after every landmark create/edit/delete that writes the cached
+   * overlay:landmarks payload. The Dashboard re-reads the cache when this
+   * changes so the map + Landmark panel reflect the mutation.
+   */
+  get landmarksRevision(): number {
+    return this._landmarksRevisionSnapshot;
   }
 
   /** True when the user has approved letting tile prefetch exceed the cap. */
@@ -269,6 +295,7 @@ export class SpeleoDBController {
     this._syncStatusSnapshot = this._syncStatus;
     this._lastSyncedAtSnapshot = this._lastSyncedAt;
     this._tilePrefetchJobsSnapshot = [...this._tilePrefetchJobs];
+    this._landmarksRevisionSnapshot = this._landmarksRevision;
     this._tileCacheOverLimitApprovedSnapshot = this._tileCacheOverLimitApproved;
     this._tileCacheOverLimitPromptAcknowledgedSnapshot =
       this._tileCacheOverLimitPromptAcknowledged;
@@ -875,6 +902,17 @@ export class SpeleoDBController {
             credentials.instance,
             credentials.token,
           );
+          // The overlay caches (incl. landmarks) were just rewritten from the
+          // server. `lastSyncedAt` already fired during the earlier project
+          // refresh phase (before this rewrite), so bump the overlay revision
+          // now to make the UI re-read the freshly written cache. Without this,
+          // a landmark deleted/added elsewhere would not appear after a resync.
+          if (
+            this.isSyncContextCurrent(context)
+            && result.phases.overlaySync.status !== 'skipped'
+          ) {
+            this.bumpLandmarksRevision();
+          }
           result.phases.tilePrefetch = await this.scheduleTilePrefetchPhase(
             context,
             refreshOutcome.projects,
@@ -931,6 +969,148 @@ export class SpeleoDBController {
    */
   async getOverlayGeoJSON(overlayId: MapOverlayId): Promise<unknown | null> {
     return this.cache.getOverlayGeoJSON(overlayId);
+  }
+
+  // ==================== Landmark CRUD ====================
+
+  /**
+   * Fetch the user's writable landmark collections (for the create/edit picker).
+   *
+   * Online only for now. Returns `[]` (never throws) when offline-locked or on
+   * any failure, so the form can still fall back to the personal collection.
+   */
+  async getLandmarkCollections(): Promise<LandmarkCollection[]> {
+    if (!this.hasNetworkAccess()) return [];
+    const credentials = this.getSyncCredentials();
+    if (!credentials) return [];
+
+    try {
+      const response = await this.service.getLandmarkCollections(
+        credentials.instance,
+        credentials.token,
+      );
+      if (!isSuccessfulStatus(response.status)) return [];
+      return mapLandmarkCollections(response.data);
+    } catch (error) {
+      if (isAbortError(error)) return [];
+      console.warn('Failed to load landmark collections:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Create a landmark online, then upsert it into the cached landmarks overlay.
+   *
+   * The single cache-write seam: the offline phase will replace the network
+   * call with an enqueue and reuse the same local apply. Throws
+   * `LandmarkMutationError` on any failure (offline, validation, duplicate,
+   * permission, network).
+   */
+  async createLandmark(input: LandmarkCreateInput): Promise<LandmarkApiObject> {
+    const credentials = this.requireOnlineCredentials();
+    const response = await this.runLandmarkRequest(() =>
+      this.service.createLandmark(credentials.instance, credentials.token, input),
+    );
+    const landmark = this.extractLandmark(response.status, response.data);
+    await this.applyLandmarkUpsert(landmark);
+    return landmark;
+  }
+
+  /**
+   * Edit a landmark online, then upsert the updated feature into the cache.
+   */
+  async updateLandmark(
+    id: string,
+    input: LandmarkUpdateInput,
+  ): Promise<LandmarkApiObject> {
+    const credentials = this.requireOnlineCredentials();
+    const response = await this.runLandmarkRequest(() =>
+      this.service.updateLandmark(credentials.instance, credentials.token, id, input),
+    );
+    const landmark = this.extractLandmark(response.status, response.data);
+    await this.applyLandmarkUpsert(landmark);
+    return landmark;
+  }
+
+  /**
+   * Delete a landmark online, then remove it from the cached landmarks overlay.
+   */
+  async deleteLandmark(id: string): Promise<void> {
+    const credentials = this.requireOnlineCredentials();
+    const response = await this.runLandmarkRequest(() =>
+      this.service.deleteLandmark(credentials.instance, credentials.token, id),
+    );
+    if (!isSuccessfulStatus(response.status)) {
+      throw parseLandmarkMutationError(response.status, response.data);
+    }
+    await this.applyLandmarkRemoval(id);
+  }
+
+  private requireOnlineCredentials(): { token: string; instance: string } {
+    if (!this.hasNetworkAccess()) {
+      throw new LandmarkMutationError(
+        'offline',
+        'Landmark changes are not available offline yet.',
+      );
+    }
+    const credentials = this.getSyncCredentials();
+    if (!credentials) {
+      throw new LandmarkMutationError('permission', 'You are not signed in.');
+    }
+    return credentials;
+  }
+
+  /** Run a landmark HTTP call, translating transport failures into typed errors. */
+  private async runLandmarkRequest<T>(
+    call: () => Promise<{ status: number; data: T }>,
+  ): Promise<{ status: number; data: T }> {
+    try {
+      return await call();
+    } catch (error) {
+      if (error instanceof LandmarkMutationError) throw error;
+      throw new LandmarkMutationError(
+        'network',
+        'Could not reach the server. Check your connection and try again.',
+      );
+    }
+  }
+
+  private extractLandmark(status: number, data: unknown): LandmarkApiObject {
+    if (!isSuccessfulStatus(status)) {
+      throw parseLandmarkMutationError(status, data);
+    }
+    const envelope = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+    const candidate =
+      envelope.landmark && typeof envelope.landmark === 'object'
+        ? (envelope.landmark as Record<string, unknown>)
+        : envelope;
+    if (typeof candidate.id !== 'string' || candidate.id === '') {
+      throw new LandmarkMutationError(
+        'unknown',
+        'The server returned an unexpected response.',
+        { status },
+      );
+    }
+    return candidate as unknown as LandmarkApiObject;
+  }
+
+  private async applyLandmarkUpsert(landmark: LandmarkApiObject): Promise<void> {
+    const current = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks'));
+    const next = upsertLandmarkFeature(current, landmark);
+    await this.cache.setOverlayGeoJSON('landmarks', next);
+    this.bumpLandmarksRevision();
+  }
+
+  private async applyLandmarkRemoval(id: string): Promise<void> {
+    const current = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks'));
+    const next = removeLandmarkFeature(current, id);
+    await this.cache.setOverlayGeoJSON('landmarks', next);
+    this.bumpLandmarksRevision();
+  }
+
+  private bumpLandmarksRevision(): void {
+    this._landmarksRevision += 1;
+    this.notify();
   }
 
   /**

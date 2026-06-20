@@ -293,9 +293,13 @@ The shareable type set is defined as `SHAREABLE_TYPES` in `src/components/Overla
 
 ## Read-only UX constraints
 
-- No create/edit/delete/move UI.
-- Overlay marker details are view-only and never allow edits.
-- Overlay functionality remains read-only.
+- These overlays (exploration leads, cylinder installs, subsurface/surface
+  stations, project points) remain strictly read-only: display + view-only
+  details, no create/edit/delete/move UI.
+- **Exception — landmarks.** The `landmark` and `mapLongPress` detail types now
+  expose create/edit/delete actions (gated by `can_write`/`can_delete`). This is
+  the one mutable overlay surface; see `docs/landmark-crud.md`. All other overlay
+  detail types stay view-only.
 
 ## Regression tests
 

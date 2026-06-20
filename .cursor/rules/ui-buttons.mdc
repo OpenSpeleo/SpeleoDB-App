@@ -1,0 +1,56 @@
+---
+description: Button styling contract — every button must have a visible solid background
+alwaysApply: true
+---
+
+# Buttons must have a visible, solid background
+
+A button that renders as bare text (no visible background) is a BUG, not a
+style choice. This has shipped repeatedly. Follow these rules with zero
+exceptions.
+
+## Hard rules
+
+1. Every `.app-btn` MUST also carry exactly one color variant class:
+   `app-btn--primary`, `app-btn--secondary`, `app-btn--danger`,
+   `app-btn--info`, or `app-btn--success` (defined unlayered in
+   `src/index.css`). These set a SOLID `background-color` via Tailwind theme
+   tokens (`var(--color-*)`), so the fill always renders.
+
+   ```tsx
+   // GOOD
+   <button className="app-btn app-btn--secondary">Cancel</button>
+   <button className="app-btn app-btn--primary w-full gap-2">Save</button>
+
+   // BAD — no variant; relies on a Tailwind bg utility for the fill
+   <button className="app-btn bg-slate-800/70 text-slate-200">Cancel</button>
+   ```
+
+2. NEVER use an opacity-modified background utility (`bg-<color>-<n>/<NN>`,
+   e.g. `bg-slate-800/70`, `bg-purple-600/90`) as the *fill* of a button.
+   - In Tailwind v4 these compile to `color-mix(in oklab, …)`, which renders
+     invisibly / not at all on older Android WebViews — the button looks like
+     plain text.
+   - Tailwind background *utilities* are layered (`@layer utilities`) and can
+     also lose the cascade to unlayered author rules + preflight.
+   - Use a solid variant class instead. Opacity-modified colors are only for
+     decorative/secondary layering (blurs, subtle card tints), never a button
+     fill.
+
+3. A button must never depend solely on `text-*` color to be visible. If you
+   can read the label but see no button shape/fill, it is broken.
+
+4. Add layout-only utilities (`w-full`, `gap-2`, `mb-3`, `ml-auto`,
+   `touch-manipulation`, `shadow-sm`, …) alongside the variant freely. Disabled
+   styling is handled by `.app-btn:disabled` — do not re-add
+   `disabled:opacity-50`.
+
+5. Ionic `IonButton` already provides a solid theme background and is exempt.
+
+## Before finishing any UI change that adds/edits a button
+
+- Confirm each `<button className="app-btn …">` includes an `app-btn--*`
+  variant.
+- Grep check: `app-btn[^"]*bg-` must return NO matches in `src/**/*.tsx`.
+
+See `docs/coding-rules.md` and `tasks/lessons/button-backgrounds.md`.

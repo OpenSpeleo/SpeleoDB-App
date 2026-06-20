@@ -74,6 +74,12 @@ export interface LandmarkDetails {
   gpsCoordinate: string;
   collectionName: string;
   isPersonalCollection: boolean;
+  // CRUD support: gate Edit/Delete actions and prefill the edit form.
+  canWrite: boolean;
+  canDelete: boolean;
+  collectionId: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface ProjectPointDetails {
@@ -87,6 +93,8 @@ export interface ProjectPointDetails {
 export interface MapLongPressDetails {
   type: 'mapLongPress';
   gpsCoordinate: string;
+  latitude: number;
+  longitude: number;
 }
 
 export type OverlayMarkerDetails =
@@ -261,6 +269,15 @@ function parseLandmark(feature: InteractiveOverlayFeature): LandmarkDetails {
     properties.is_personal_collection === true
     || properties.collection_type === 'PERSONAL';
   const collectionName = normalizeStringProperty(properties.collection_name);
+  const collectionId =
+    typeof properties.collection === 'string' && properties.collection.trim() !== ''
+      ? properties.collection.trim()
+      : null;
+  const coordinates = feature.geometry?.type === 'Point' && Array.isArray(feature.geometry.coordinates)
+    ? feature.geometry.coordinates
+    : null;
+  const longitude = coordinates && Number.isFinite(coordinates[0]) ? coordinates[0] : null;
+  const latitude = coordinates && Number.isFinite(coordinates[1]) ? coordinates[1] : null;
   return {
     type: 'landmark',
     id: getFeatureId(feature),
@@ -274,6 +291,11 @@ function parseLandmark(feature: InteractiveOverlayFeature): LandmarkDetails {
           ? 'Personal Landmarks'
           : 'N/A',
     isPersonalCollection,
+    canWrite: properties.can_write === true,
+    canDelete: properties.can_delete === true,
+    collectionId,
+    latitude,
+    longitude,
   };
 }
 

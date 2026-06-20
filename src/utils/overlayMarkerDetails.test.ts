@@ -202,6 +202,33 @@ describe('overlayMarkerDetails utilities', () => {
         gpsCoordinate: '46.6, 2.3',
         collectionName: 'Shared Survey',
         isPersonalCollection: false,
+        canWrite: false,
+        canDelete: false,
+        collectionId: null,
+        latitude: 46.6,
+        longitude: 2.3,
+      });
+    });
+
+    it('exposes permissions, collection id, and coordinates for an editable landmark', () => {
+      expect(parseOverlayMarkerDetails({
+        layer: { id: 'landmarks-layer' },
+        properties: {
+          id: 'lm-9',
+          name: 'Editable',
+          collection: 'col-7',
+          collection_name: 'Survey A',
+          can_write: true,
+          can_delete: true,
+        },
+        geometry: { type: 'Point', coordinates: [2.3, 46.6] },
+      })).toMatchObject({
+        type: 'landmark',
+        canWrite: true,
+        canDelete: true,
+        collectionId: 'col-7',
+        latitude: 46.6,
+        longitude: 2.3,
       });
     });
 
@@ -218,6 +245,11 @@ describe('overlayMarkerDetails utilities', () => {
         gpsCoordinate: '46.6, 2.3',
         collectionName: 'Personal Landmarks',
         isPersonalCollection: true,
+        canWrite: false,
+        canDelete: false,
+        collectionId: null,
+        latitude: 46.6,
+        longitude: 2.3,
       });
     });
 
@@ -233,6 +265,11 @@ describe('overlayMarkerDetails utilities', () => {
         gpsCoordinate: 'N/A',
         collectionName: 'N/A',
         isPersonalCollection: false,
+        canWrite: false,
+        canDelete: false,
+        collectionId: null,
+        latitude: null,
+        longitude: null,
       });
     });
 

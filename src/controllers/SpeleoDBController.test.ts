@@ -2113,3 +2113,296 @@ describe('SpeleoDBController', () => {
     });
   });
 });
+
+// ==================== Landmark CRUD ====================
+
+describe('SpeleoDBController landmark CRUD', () => {
+  const ONLINE_PREFS = { token: 'tok', instance: 'https://www.speleodb.org' };
+
+  const apiLandmark = {
+    id: 'lm-1',
+    name: 'Camp',
+    description: 'Base camp',
+    latitude: 45.5,
+    longitude: -122.25,
+    collection: 'col-1',
+    collection_name: 'Survey A',
+    collection_color: '#3b82f6',
+    is_personal_collection: false,
+    can_write: true,
+    can_delete: true,
+  };
+
+  function onlineController(serviceOverrides?: Partial<SpeleoDBService>, cacheRef?: ProjectCacheService) {
+    const service = createMockService(serviceOverrides);
+    const prefs = createMockPrefs({ ...ONLINE_PREFS });
+    const cache = cacheRef ?? createMockCache();
+    const controller = new SpeleoDBController(service, prefs, cache, createMockTilePrefetch());
+    return { service, prefs, cache, controller };
+  }
+
+  /** Build an offline-locked controller by failing startup validation. */
+  async function offlineController(serviceOverrides?: Partial<SpeleoDBService>) {
+    const service = createMockService({
+      validateToken: vi.fn(async () => { throw new Error('timeout'); }),
+      ...serviceOverrides,
+    });
+    const prefs = createMockPrefs({ ...ONLINE_PREFS });
+    const cache = createMockCache();
+    const controller = new SpeleoDBController(service, prefs, cache, createMockTilePrefetch());
+    await controller.validateSession();
+    expect(controller.isOfflineLocked).toBe(true);
+    return { service, prefs, cache, controller };
+  }
+
+  // ---- createLandmark -------------------------------------------------------
+
+  describe('createLandmark', () => {
+    it('calls the service, upserts the new feature into cache, and bumps the revision', async () => {
+      const createLandmark = vi.fn(async () => ({ status: 201, data: { landmark: apiLandmark } }));
+      const { controller, cache } = onlineController({ createLandmark } as never);
+
+      expect(controller.landmarksRevision).toBe(0);
+      const result = await controller.createLandmark({
+        name: 'Camp',
+        latitude: 45.5,
+        longitude: -122.25,
+        collection: 'col-1',
+      });
+
+      expect(result.id).toBe('lm-1');
+      expect(createLandmark).toHaveBeenCalledWith(
+        ONLINE_PREFS.instance,
+        ONLINE_PREFS.token,
+        expect.objectContaining({ name: 'Camp', collection: 'col-1' }),
+      );
+      const setCalls = (cache.setOverlayGeoJSON as ReturnType<typeof vi.fn>).mock.calls;
+      expect(setCalls).toHaveLength(1);
+      expect(setCalls[0][0]).toBe('landmarks');
+      const written = setCalls[0][1] as GeoJSON.FeatureCollection;
+      expect(written.features.map((f) => f.id)).toContain('lm-1');
+      expect(controller.landmarksRevision).toBe(1);
+    });
+
+    it('merges into the existing cached landmarks collection', async () => {
+      const existing: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: [
+          { type: 'Feature', id: 'lm-0', properties: { id: 'lm-0' }, geometry: { type: 'Point', coordinates: [0, 0] } },
+        ],
+      };
+      const cache = createMockCache();
+      (cache.getOverlayGeoJSON as ReturnType<typeof vi.fn>).mockResolvedValue(existing);
+      const createLandmark = vi.fn(async () => ({ status: 201, data: { landmark: apiLandmark } }));
+      const { controller } = onlineController({ createLandmark } as never, cache);
+
+      await controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 });
+
+      const written = (cache.setOverlayGeoJSON as ReturnType<typeof vi.fn>).mock.calls[0][1] as GeoJSON.FeatureCollection;
+      expect(written.features.map((f) => f.id).sort()).toEqual(['lm-0', 'lm-1']);
+    });
+
+    it('rejects with an offline error when offline-locked and never calls the service', async () => {
+      const createLandmark = vi.fn();
+      const { controller, cache } = await offlineController({ createLandmark } as never);
+
+      await expect(
+        controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 }),
+      ).rejects.toMatchObject({ kind: 'offline' });
+      expect(createLandmark).not.toHaveBeenCalled();
+      expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+    });
+
+    it('rejects with a permission error when credentials are missing', async () => {
+      const service = createMockService();
+      const prefs = createMockPrefs({});
+      const controller = new SpeleoDBController(service, prefs, createMockCache(), createMockTilePrefetch());
+
+      await expect(
+        controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 }),
+      ).rejects.toMatchObject({ kind: 'permission' });
+    });
+
+    it('maps a 400 duplicate-coordinate response and does not touch the cache', async () => {
+      const createLandmark = vi.fn(async () => ({
+        status: 400,
+        data: { error: 'A landmark for GPS coordinate (1, 2) already exists or is invalid.' },
+      }));
+      const { controller, cache } = onlineController({ createLandmark } as never);
+
+      await expect(
+        controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 }),
+      ).rejects.toMatchObject({ kind: 'duplicate' });
+      expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+      expect(controller.landmarksRevision).toBe(0);
+    });
+
+    it('maps a transport throw to a network error', async () => {
+      const createLandmark = vi.fn(async () => { throw new Error('boom'); });
+      const { controller } = onlineController({ createLandmark } as never);
+
+      await expect(
+        controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 }),
+      ).rejects.toMatchObject({ kind: 'network' });
+    });
+
+    it('rejects a malformed success payload with no landmark id', async () => {
+      const createLandmark = vi.fn(async () => ({ status: 201, data: { landmark: { name: 'x' } } }));
+      const { controller, cache } = onlineController({ createLandmark } as never);
+
+      await expect(
+        controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 }),
+      ).rejects.toMatchObject({ kind: 'unknown' });
+      expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---- updateLandmark -------------------------------------------------------
+
+  describe('updateLandmark', () => {
+    it('upserts the updated feature and bumps the revision', async () => {
+      const updateLandmark = vi.fn(async () => ({
+        status: 200,
+        data: { landmark: { ...apiLandmark, name: 'Renamed' } },
+      }));
+      const { controller, cache } = onlineController({ updateLandmark } as never);
+
+      const result = await controller.updateLandmark('lm-1', { name: 'Renamed' });
+
+      expect(result.name).toBe('Renamed');
+      expect(updateLandmark).toHaveBeenCalledWith(
+        ONLINE_PREFS.instance,
+        ONLINE_PREFS.token,
+        'lm-1',
+        expect.objectContaining({ name: 'Renamed' }),
+      );
+      const written = (cache.setOverlayGeoJSON as ReturnType<typeof vi.fn>).mock.calls[0][1] as GeoJSON.FeatureCollection;
+      expect(written.features.find((f) => f.id === 'lm-1')?.properties?.name).toBe('Renamed');
+      expect(controller.landmarksRevision).toBe(1);
+    });
+
+    it('maps a 403 to a permission error and skips cache write', async () => {
+      const updateLandmark = vi.fn(async () => ({ status: 403, data: {} }));
+      const { controller, cache } = onlineController({ updateLandmark } as never);
+
+      await expect(controller.updateLandmark('lm-1', { name: 'x' })).rejects.toMatchObject({
+        kind: 'permission',
+      });
+      expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+    });
+
+    it('rejects when offline-locked', async () => {
+      const { controller } = await offlineController();
+      await expect(controller.updateLandmark('lm-1', { name: 'x' })).rejects.toMatchObject({
+        kind: 'offline',
+      });
+    });
+  });
+
+  // ---- deleteLandmark -------------------------------------------------------
+
+  describe('deleteLandmark', () => {
+    it('removes the feature from the cache and bumps the revision', async () => {
+      const existing: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: [
+          { type: 'Feature', id: 'lm-1', properties: { id: 'lm-1' }, geometry: { type: 'Point', coordinates: [0, 0] } },
+          { type: 'Feature', id: 'lm-2', properties: { id: 'lm-2' }, geometry: { type: 'Point', coordinates: [1, 1] } },
+        ],
+      };
+      const cache = createMockCache();
+      (cache.getOverlayGeoJSON as ReturnType<typeof vi.fn>).mockResolvedValue(existing);
+      const deleteLandmark = vi.fn(async () => ({ status: 200, data: { message: 'deleted' } }));
+      const { controller } = onlineController({ deleteLandmark } as never, cache);
+
+      await controller.deleteLandmark('lm-1');
+
+      const written = (cache.setOverlayGeoJSON as ReturnType<typeof vi.fn>).mock.calls[0][1] as GeoJSON.FeatureCollection;
+      expect(written.features.map((f) => f.id)).toEqual(['lm-2']);
+      expect(controller.landmarksRevision).toBe(1);
+    });
+
+    it('maps a 404 to not_found and does not write the cache', async () => {
+      const deleteLandmark = vi.fn(async () => ({ status: 404, data: {} }));
+      const { controller, cache } = onlineController({ deleteLandmark } as never);
+
+      await expect(controller.deleteLandmark('lm-1')).rejects.toMatchObject({ kind: 'not_found' });
+      expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+    });
+
+    it('rejects when offline-locked and never calls the service', async () => {
+      const deleteLandmark = vi.fn();
+      const { controller } = await offlineController({ deleteLandmark } as never);
+
+      await expect(controller.deleteLandmark('lm-1')).rejects.toMatchObject({ kind: 'offline' });
+      expect(deleteLandmark).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---- getLandmarkCollections -----------------------------------------------
+
+  describe('getLandmarkCollections', () => {
+    it('returns mapped writable collections when online', async () => {
+      const getLandmarkCollections = vi.fn(async () => ({
+        status: 200,
+        data: [
+          { id: 'c1', name: 'Survey A', is_personal: false, user_permission_level: 2 },
+          { id: 'c2', name: 'Read Only', is_personal: false, user_permission_level: 1 },
+        ],
+      }));
+      const { controller } = onlineController({ getLandmarkCollections } as never);
+
+      const result = await controller.getLandmarkCollections();
+      expect(result.map((c) => c.id)).toEqual(['c1']);
+    });
+
+    it('returns [] when offline-locked', async () => {
+      const getLandmarkCollections = vi.fn();
+      const { controller } = await offlineController({ getLandmarkCollections } as never);
+
+      expect(await controller.getLandmarkCollections()).toEqual([]);
+      expect(getLandmarkCollections).not.toHaveBeenCalled();
+    });
+
+    it('returns [] on a non-2xx response', async () => {
+      const getLandmarkCollections = vi.fn(async () => ({ status: 500, data: {} }));
+      const { controller } = onlineController({ getLandmarkCollections } as never);
+      expect(await controller.getLandmarkCollections()).toEqual([]);
+    });
+
+    it('returns [] when the request throws', async () => {
+      allowConsoleWarn('Failed to load landmark collections:', expect.any(Error));
+      const getLandmarkCollections = vi.fn(async () => { throw new Error('net'); });
+      const { controller } = onlineController({ getLandmarkCollections } as never);
+      expect(await controller.getLandmarkCollections()).toEqual([]);
+    });
+  });
+
+  // ---- resync refreshes overlays --------------------------------------------
+
+  it('bumps the landmarks revision after a resync rewrites the overlay cache', async () => {
+    // A landmark deleted on the web is reflected by a resync that re-fetches the
+    // landmarks overlay; the revision bump makes the UI re-read the fresh cache.
+    const { controller } = onlineController();
+    expect(controller.landmarksRevision).toBe(0);
+
+    await controller.syncProjects();
+
+    expect(controller.landmarksRevision).toBeGreaterThan(0);
+  });
+
+  // ---- chaos: sequential mutations accumulate revisions ---------------------
+
+  it('accumulates the revision across multiple successful mutations', async () => {
+    const createLandmark = vi.fn(async () => ({ status: 201, data: { landmark: apiLandmark } }));
+    const updateLandmark = vi.fn(async () => ({ status: 200, data: { landmark: apiLandmark } }));
+    const deleteLandmark = vi.fn(async () => ({ status: 200, data: {} }));
+    const { controller } = onlineController({ createLandmark, updateLandmark, deleteLandmark } as never);
+
+    await controller.createLandmark({ name: 'A', latitude: 1, longitude: 2 });
+    await controller.updateLandmark('lm-1', { name: 'B' });
+    await controller.deleteLandmark('lm-1');
+
+    expect(controller.landmarksRevision).toBe(3);
+  });
+});

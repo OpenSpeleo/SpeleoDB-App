@@ -1,0 +1,216 @@
+# Landmark CRUD (Online, Offline-Ready)
+
+Create, edit, and delete landmarks from the mobile map viewer, mirroring the
+SpeleoDB web map viewer's **Landmark Manager**. This document covers the
+**ONLINE** behavior. The architecture intentionally funnels every mutation
+through a single cache-write seam so the **OFFLINE** queue can be layered on
+later without touching the UI.
+
+This complements `docs/landmark-collections.md`, which describes the read-only
+browse/locate panel. That panel remains the browse surface; this document adds
+the mutable surface (create/edit/delete) reachable from the map.
+
+## Feature intent
+
+- Long-press an empty spot on the map to drop a point. A circular loading ring
+  fills during the press; on completion the **Map Point** modal opens with a
+  **Create Landmark** action.
+- Tap a landmark marker to open its details modal, which now offers **Edit
+  Landmark** and **Delete Landmark** actions, each gated by the landmark's
+  `can_write` / `can_delete` permission flags.
+- Deletion always requires an explicit confirmation ("This action cannot be
+  undone.").
+- Create/Edit use a shared form with a collection picker (writable collections
+  only, default "Personal Landmarks"), name, description, latitude, longitude.
+
+## Design space and decisions
+
+- **Why reuse the cached landmarks GeoJSON as the single source of truth?** The
+  backend `/api/v2/landmarks/geojson/` payload already carries everything the
+  map and the details modal need on every feature: `id`, `name`, `description`,
+  `collection`, `collection_name`, `collection_color`, `is_personal_collection`,
+  plus `can_write` / `can_delete`. `normalizeGeoJSON` does not strip properties,
+  so after a successful mutation we can upsert/remove a single feature in the
+  cached `FeatureCollection` and the map + panel update with zero refetch. This
+  is also what makes the feature offline-ready: the same local apply works
+  whether the write hit the network or a future offline queue.
+
+- **Why a `landmarksRevision` counter instead of a reactive GeoJSON value?** The
+  Dashboard already reads the cached overlay once on mount. Rather than thread a
+  large `FeatureCollection` through the store on every change, the controller
+  bumps a small monotonic `landmarksRevision`; the Dashboard re-reads the cache
+  in an effect keyed on it. Cheap to diff, minimal blast radius. The same effect
+  is also keyed on `lastSyncedAt`, so a landmark deleted/added on the web and
+  pulled in by a later resync (not just the mount sync) also refreshes the map +
+  panel.
+
+- **Why a shared `LandmarkFormModal` for create and edit?** The two flows differ
+  only in initial values and which API call fires on submit. One component keeps
+  validation, the collection picker, and error handling in a single place.
+
+- **Why full collection-picker parity?** The web viewer lets the user choose any
+  collection they can write to and defaults to their personal collection. The
+  app fetches the writable set from `/api/v2/landmark-collections/` and caches it
+  so the picker is populated and the default is correct.
+
+- **No drag-to-move (deferred).** The web viewer supports dragging a marker to
+  move it; mobile uses editable latitude/longitude fields instead. Drag-to-move
+  is a tracked follow-up.
+
+## Backend API contract
+
+All requests use `Authorization: Token <token>` (the same scheme the app uses
+for every other authenticated GET). Base URL is the user's instance.
+
+| Operation | Method + URL | Body | Success |
+|---|---|---|---|
+| Create | `POST /api/v2/landmarks/` | `{ name, description?, latitude, longitude, collection? }` | `201 { landmark: {...} }` |
+| Update | `PATCH /api/v2/landmarks/<id>/` | any subset of writable fields | `200 { landmark: {...} }` |
+| Delete | `DELETE /api/v2/landmarks/<id>/` | none | `200 { message }` |
+| Collections | `GET /api/v2/landmark-collections/` | none | list of collections |
+
+Notes:
+
+- `collection` is optional on create. Omitting it (or sending `null`) makes the
+  backend assign the user's auto-created "Personal Landmarks" collection.
+- Assigning a collection requires `READ_AND_WRITE` (level >= 2) on it.
+- Editing/deleting a landmark requires `READ_AND_WRITE` on the landmark's
+  collection. The UI gates the Edit/Delete actions on `can_write` / `can_delete`.
+
+Landmark fields: `id` (uuid, read-only), `name` (required, <= 100 chars),
+`description` (optional), `latitude` (-90..90), `longitude` (-180..180),
+`collection` (uuid), plus read-only `collection_name`, `collection_color`,
+`is_personal_collection`, `can_write`, `can_delete`, `created_by`,
+`creation_date`, `modified_date`.
+
+Errors:
+
+- Duplicate `(collection, latitude, longitude)` -> `400 { error: "...already
+  exists..." }`.
+- Field validation -> `400 { errors: { <field>: [..] } }`.
+- Insufficient permission -> `403`.
+
+`PATCH` support required adding `'PATCH'` to `HttpClient`'s method union
+(`src/services/HttpClient.ts`); both the native CapacitorHttp and web fetch
+paths pass the verb through unchanged.
+
+## Architecture / data flow
+
+```mermaid
+flowchart TD
+  longpress["Long-press empty map (ring fills)"] --> mappoint["Map Point modal: Create Landmark"]
+  markertap["Tap landmark marker"] --> details["Details modal: Edit / Delete (gated)"]
+  mappoint --> form["LandmarkFormModal (create)"]
+  details --> form2["LandmarkFormModal (edit)"]
+  details --> confirm["ConfirmDialog (delete)"]
+  form --> ctrl["controller.createLandmark / updateLandmark"]
+  form2 --> ctrl
+  confirm --> ctrl2["controller.deleteLandmark"]
+  ctrl --> svc["SpeleoDBService POST/PATCH"]
+  ctrl2 --> svc2["SpeleoDBService DELETE"]
+  svc --> apply["landmarkMutations.upsertLandmarkFeature"]
+  svc2 --> apply2["landmarkMutations.removeLandmarkFeature"]
+  apply --> cache["ProjectCacheService overlay:landmarks"]
+  apply2 --> cache
+  cache --> rev["controller.landmarksRevision++ -> notify"]
+  rev --> dash["Dashboard re-reads cache -> map source + LandmarkPanel"]
+```
+
+Single seam: `createLandmark` / `updateLandmark` / `deleteLandmark` in
+`SpeleoDBController` are the only place that (1) call the service, (2) apply a
+pure mutation to the cached `overlay:landmarks` `FeatureCollection`, (3) bump
+`landmarksRevision`, and (4) `notify()`. The OFFLINE phase will wrap step (1)
+with a queue and replay; steps (2)-(4) are unchanged.
+
+## Key APIs / concepts
+
+- **Constants:** `API.LANDMARKS_ENDPOINT`, `API.LANDMARK_COLLECTIONS_ENDPOINT`,
+  `API.landmarkDetailEndpoint(id)`, and `MAP.LONG_PRESS_*` ring constants
+  (`src/constants.ts`).
+- **Types:** `LandmarkApiObject`, `LandmarkCollection`, `LandmarkCreateInput`,
+  `LandmarkUpdateInput`, `LandmarkMutationError` (`src/types/landmark.ts`).
+- **Service:** `createLandmark`, `updateLandmark`, `deleteLandmark`,
+  `getLandmarkCollections` on top of a generalized private `authorizedRequest`
+  (`src/services/SpeleoDBService.ts`).
+- **Pure mutation util:** `validateLandmarkInput`, `buildLandmarkFeatureFromApi`,
+  `upsertLandmarkFeature`, `removeLandmarkFeature`, `parseLandmarkMutationError`
+  (`src/utils/landmarkMutations.ts`).
+- **Controller:** `createLandmark`, `updateLandmark`, `deleteLandmark`,
+  `getLandmarkCollections`, `landmarksRevision` (`SpeleoDBController.ts`).
+- **Context:** `landmarksRevision` plus the CRUD methods are reached through the
+  shared `controller` on `useSpeleoDB`.
+- **Details parsing:** `LandmarkDetails` gains `canWrite`, `canDelete`,
+  `collectionId`, `latitude`, `longitude` (`src/utils/overlayMarkerDetails.ts`).
+- **UI:** `LandmarkFormModal`, `ConfirmDialog`, `LongPressRing`
+  (`src/components/`), plus new actions in `OverlayMarkerDetailsModal`.
+
+## Long-press ring UX
+
+While the user holds the map, a circular ring renders at the touch point and
+fills from 0% to 100% over `MAP.LONG_PRESS_DURATION_MS`. Moving past the tap
+threshold cancels the press (and the ring). On completion, a heavy haptic fires
+and the Map Point modal opens. The ring is purely presentational and reuses the
+existing long-press timer in `Dashboard.tsx`.
+
+The ring only appears when a landmark could actually be created: the press is
+armed only at/above `MAP.MARKER_INTERACTION_MIN_ZOOM` (`isMarkerInteractionZoom`
+in `Dashboard.tsx`), so at low zoom ("high altitude") no ring shows at all. The
+empty-spot requirement is still enforced when the timer fires
+(`isEmptyMapSpotAtClientPoint`), so a long-press on an existing marker cancels
+without opening Map Point.
+
+## Landmark feature id (important)
+
+The backend GeoJSON puts the landmark id only at the **feature** level
+(`feature.id = str(uuid)`) and does NOT include `id` in `properties`. MapLibre
+does not reliably surface non-numeric feature ids through
+`queryRenderedFeatures`, so a tapped landmark would otherwise resolve to an
+unknown id and edit/delete would target the wrong record (the marker would not
+disappear). `ensureLandmarkPropertyIds` (`src/utils/landmarkMutations.ts`)
+copies `feature.id` into `properties.id` for the landmarks overlay before it
+reaches the map; `properties` is always preserved by MapLibre, so taps resolve
+the correct id. `buildLandmarkFeatureFromApi` already sets `properties.id` for
+created/edited landmarks.
+
+## Offline / lifecycle (this phase)
+
+- Online only: while offline-locked (`hasNetworkAccess()` is false), the CRUD
+  controller methods reject with a typed `offline` `LandmarkMutationError` and
+  the UI surfaces a "not available offline yet" message. The OFFLINE phase
+  replaces this rejection with an enqueue + later replay.
+- The cached landmarks GeoJSON and collections list are cleared with the rest of
+  the caches on logout (no new persistence lifecycle).
+- **Single-writer assumption (online phase).** `applyLandmarkUpsert` /
+  `applyLandmarkRemoval` read-modify-write the cached `overlay:landmarks`
+  collection. The UI serializes user mutations through per-flow `busy` flags
+  (no two create/edit/delete run at once), so the only race window is a CRUD
+  write overlapping a background project resync, whose `syncMapOverlaysPhase`
+  full-overwrites the same cache from the server. That is last-writer-wins: a
+  just-created landmark can be momentarily dropped from the cache if the server
+  hasn't indexed it yet, and reappears on the next sync. This matches the web
+  viewer's eventual-consistency model and is acceptable while online. The
+  OFFLINE phase replaces the network call with a queue and will serialize
+  enqueue + replay against the sync, closing this window.
+
+## Collection picker (async load)
+
+The writable collection list is fetched (`controller.getLandmarkCollections`)
+*after* the form opens, so the form initially renders with an empty list and
+only the synthetic "Personal Landmarks" fallback (value `''` -> `collection:
+null`). When the real list arrives, `LandmarkFormModal` re-seeds the picker's
+default to the personal collection **unless the user already changed it**. This
+keeps the shown selection consistent with the value that is submitted; without
+it the controlled `<select>` would hold a stale value that no longer matches any
+rendered option, and the form could create the landmark in a different
+collection than the one displayed.
+
+## Tests
+
+- `src/utils/landmarkMutations.test.ts`
+- `src/services/SpeleoDBService.test.ts`
+- `src/controllers/SpeleoDBController.test.ts`
+- `src/components/LandmarkFormModal.test.tsx`
+- `src/components/ConfirmDialog.test.tsx`
+- `src/components/LongPressRing.test.tsx`
+- `src/components/OverlayMarkerDetailsModal.test.tsx`
+- `src/pages/Dashboard.test.tsx`

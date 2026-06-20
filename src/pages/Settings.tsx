@@ -273,9 +273,8 @@ const Settings: React.FC<SettingsProps> = ({
               onClick={handleSync}
               disabled={isOfflineLocked || syncStatus === 'syncing'}
               data-testid="sync-button"
-              className="app-btn app-btn--compact ml-auto mr-2 gap-2 bg-emerald-600/90 text-white
-                         hover:bg-emerald-500/90 active:bg-emerald-600 touch-manipulation
-                         disabled:opacity-60 disabled:cursor-default"
+              className="app-btn app-btn--compact app-btn--success ml-auto mr-2 gap-2
+                         touch-manipulation"
               aria-label={syncStatus === 'syncing' ? 'Syncing in progress' : 'Resync projects'}
             >
               {syncStatus === 'syncing' ? (
@@ -545,7 +544,7 @@ const Settings: React.FC<SettingsProps> = ({
                   type="button"
                   disabled={isLoggingOut}
                   onClick={() => setShowLogoutConfirmModal(false)}
-                  className="app-btn bg-slate-800/70 text-slate-200 hover:bg-slate-700/70 disabled:opacity-50"
+                  className="app-btn app-btn--secondary"
                 >
                   Cancel
                 </button>
@@ -553,7 +552,7 @@ const Settings: React.FC<SettingsProps> = ({
                   type="button"
                   disabled={isLoggingOut}
                   onClick={handleConfirmLogout}
-                  className="app-btn bg-red-600 text-white hover:bg-red-500 disabled:opacity-50"
+                  className="app-btn app-btn--danger"
                 >
                   {isLoggingOut ? 'Clearing data\u2026' : 'Wipe local data & Sign Out'}
                 </button>
@@ -594,8 +593,7 @@ const Settings: React.FC<SettingsProps> = ({
                   type="button"
                   onClick={() => setShowReconnectFailedModal(false)}
                   data-testid="reconnect-failed-dismiss"
-                  className="app-btn bg-slate-700/60 text-slate-100 border border-slate-600/50
-                             hover:bg-slate-600/70 hover:text-white active:bg-slate-700 touch-manipulation"
+                  className="app-btn app-btn--secondary touch-manipulation"
                 >
                   OK
                 </button>
