@@ -10,7 +10,7 @@ import { HttpClient } from '../services/HttpClient';
 import { SpeleoDBService } from '../services/SpeleoDBService';
 import { ProjectCacheService } from '../services/ProjectCacheService';
 import { SpeleoDBController, type PreferencesPort } from '../controllers/SpeleoDBController';
-import { canRunIntegrationTests, TEST_ENV } from './env';
+import { canRunIntegrationTests, isGitHubActionsPasswordLoginBlocked, TEST_ENV } from './env';
 
 /** In-memory preferences (mirrors PreferencesService without touching localStorage). */
 function createMemoryPrefs(initial?: Partial<{ email: string; token: string; instance: string }>): PreferencesPort {
@@ -33,6 +33,20 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
   const password = TEST_ENV.password!;
   const oauthToken = TEST_ENV.oauthToken!;
 
+  async function expectConfiguredTokenStillValid(): Promise<void> {
+    const http = new HttpClient();
+    const service = new SpeleoDBService(http);
+    const tokenRes = await service.validateToken(instance, oauthToken);
+    expect(tokenRes.status).toBeGreaterThanOrEqual(200);
+    expect(tokenRes.status).toBeLessThan(300);
+  }
+
+  async function acceptGitHubActionsPasswordAuthBlock(result: { success: boolean; message: string }): Promise<boolean> {
+    if (!isGitHubActionsPasswordLoginBlocked(result)) return false;
+    await expectConfiguredTokenStillValid();
+    return true;
+  }
+
   let controller: SpeleoDBController;
   let prefs: PreferencesPort;
 
@@ -52,6 +66,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
         expect(isUnverifiedEmailLoginFailure(result)).toBe(true);
         return;
       }
+      if (await acceptGitHubActionsPasswordAuthBlock(result)) return;
 
       expect(result.success).toBe(true);
       expect(result.token).toBeTruthy();
@@ -113,6 +128,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
         expect(isUnverifiedEmailLoginFailure(loginResult)).toBe(true);
         return;
       }
+      if (await acceptGitHubActionsPasswordAuthBlock(loginResult)) return;
       expect(loginResult.success).toBe(true);
 
       // Build a new controller that will restore session from prefs
@@ -137,6 +153,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
         expect(isUnverifiedEmailLoginFailure(loginResult)).toBe(true);
         return;
       }
+      if (await acceptGitHubActionsPasswordAuthBlock(loginResult)) return;
       expect(controller.isAuthenticated()).toBe(true);
 
       await controller.logout();

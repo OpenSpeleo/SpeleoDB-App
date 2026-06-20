@@ -1,14 +1,13 @@
 repos:
   - repo: local
     hooks:
-
       - id: eslint
         name: eslint --fix on staged TS/TSX
         entry: npx eslint --fix
         language: system
         files: \.(ts|tsx)$
         pass_filenames: true
-        
+
       - id: lockfile-sync
         # `npm ci --dry-run` exits non-zero when package.json and
         # package-lock.json are out of sync, without touching node_modules.
@@ -22,16 +21,6 @@ repos:
       - id: typecheck
         name: TypeScript --noEmit
         entry: npx tsc --noEmit
-        language: system
-        pass_filenames: false
-        always_run: true
-
-      - id: unit-tests
-        # Excludes integration tests so the hook stays offline and credential-
-        # free. Integration tests live in src/tests/*.integration.test.ts and
-        # run in CI / via `npm run test.unit -- --run`.
-        name: vitest run (unit only)
-        entry: npm run test.unit -- --run --exclude **/*.integration.test.ts --exclude **/*.integration.test.tsx
         language: system
         pass_filenames: false
         always_run: true

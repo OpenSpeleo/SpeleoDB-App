@@ -13,10 +13,10 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  lint:
-    name: Lint
+  prek:
+    name: Prek Hooks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -24,26 +24,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx eslint .
+      - name: Run all prek hooks
+        run: PREK_HOME="$RUNNER_TEMP/prek" npx prek run -a --show-diff-on-failure
+      - name: Ensure hooks did not modify tracked files
+        run: git diff --exit-code
 
-  typecheck:
-    name: Type Check
+  unit-tests:
+    name: Full Vitest Suite
+    needs: [prek]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx tsc --noEmit
-
-  test:
-    name: Unit Tests
-    needs: [lint, typecheck]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       SPELEODB_INSTANCE_URL: ${{ secrets.SPELEODB_INSTANCE_URL }}
       SPELEODB_OAUTH_TOKEN: ${{ secrets.SPELEODB_OAUTH_TOKEN }}
@@ -57,7 +47,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run test.unit -- --run --reporter=verbose --coverage
+      - run: npm run test.unit -- --run --reporter=verbose --coverage --no-file-parallelism
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -65,9 +55,9 @@ jobs:
           path: coverage/
           retention-days: 14
 
-  build:
-    name: Production Build
-    needs: [lint, typecheck]
+  web-build:
+    name: Production Web Build
+    needs: [prek, unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -86,11 +76,11 @@ jobs:
 
   build-android:
     name: Build Android
-    needs: [build]
+    needs: [web-build]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
-      SENTRY_DSN_ANDROID: ${{ secrets.SENTRY_DSN_ANDROID }}
+      SENTRY_DSN_ANDROID: ${{ secrets.SENTRY_DSN_ANDROID || 'https://public@example.invalid/1' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -109,6 +99,8 @@ jobs:
       - run: npx cap sync android
       - name: Generate temporary Android keystore
         run: |
+          set -euo pipefail
+
           KEYSTORE_PATH="$RUNNER_TEMP/ci-release.keystore"
           keytool -genkeypair \
             -keystore "$KEYSTORE_PATH" \
@@ -144,11 +136,11 @@ jobs:
 
   build-ios:
     name: Build iOS
-    needs: [build]
+    needs: [web-build]
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
-      SENTRY_DSN_IOS: ${{ secrets.SENTRY_DSN_IOS }}
+      SENTRY_DSN_IOS: ${{ secrets.SENTRY_DSN_IOS || 'https://public@example.invalid/1' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -272,7 +264,7 @@ jobs:
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [test, build-android, build-ios]
+    needs: [unit-tests, build-android, build-ios]
     runs-on: ubuntu-latest
     permissions:
       contents: write

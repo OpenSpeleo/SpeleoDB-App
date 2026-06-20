@@ -7,6 +7,7 @@ This folder contains product and engineering documentation for core app behavior
 - `offline-mode.md`: how offline mode works, startup auth timeout behavior, logout rules, and test expectations.
 - `logout-behavior.md`: when logout/cache purge happens and what data is cleared.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
+- `ci.md`: GitHub Actions stages, Vitest non-watch requirements, integration-test secrets, and native build verification.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding conventions, and testing expectations.
 - `onboarding-modal.md`: companion onboarding modal design intent, responsive layout behavior, and UX requirements.
 - `project-panel.md`: project panel layout, open/close behavior, zoom-to-project, auto-close UX, country grouping, and persistence.

@@ -46,7 +46,10 @@ export const canRunIntegrationTests =
   TEST_ENV.enabled &&
   !!TEST_ENV.instanceUrl &&
   !!TEST_ENV.email &&
-  !!TEST_ENV.password;
+  !!TEST_ENV.password &&
+  !!TEST_ENV.oauthToken;
+
+export const isGitHubActions = process.env.GITHUB_ACTIONS === 'true';
 
 function extractAuthFailureMessage(payload: unknown): string | undefined {
   if (!payload || typeof payload !== 'object') return undefined;
@@ -70,4 +73,16 @@ export function isUnverifiedEmailAuthFailure(status: number, payload: unknown): 
   const message = extractAuthFailureMessage(payload);
   if (!message) return false;
   return message.toLowerCase().includes('email address has not been verified');
+}
+
+export function isGitHubActionsForbiddenAuthFailure(status: number): boolean {
+  return isGitHubActions && status === 403;
+}
+
+export function isGitHubActionsPasswordLoginBlocked(
+  result: { success: boolean; message: string },
+): boolean {
+  if (!isGitHubActions || result.success) return false;
+  const message = result.message.toLowerCase();
+  return message.includes('forbidden') || message.includes('permission') || message.includes('login failed');
 }

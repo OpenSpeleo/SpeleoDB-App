@@ -1910,18 +1910,22 @@ describe('Dashboard', () => {
       await waitFor(() => {
         expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
       });
+      await waitFor(() => {
+        expect(document.querySelector('[data-layer-id="project-p1-point"]')).not.toBeNull();
+      });
+      await act(async () => {});
 
       const surface = getMapTouchSurface();
 
-      fireEvent.pointerDown(surface, {
-        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      act(() => {
+        fireEvent.pointerDown(surface, {
+          pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+        });
+        fireEvent.pointerUp(surface, {
+          pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+        });
+        vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS);
       });
-
-      fireEvent.pointerUp(surface, {
-        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
-      });
-
-      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
 
       expect(mockMapUnproject).not.toHaveBeenCalled();
     } finally {
@@ -2668,6 +2672,10 @@ describe('Dashboard -- Landmark CRUD', () => {
       await waitFor(() => {
         expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull();
       });
+      await waitFor(() => {
+        expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
+      });
+      await act(async () => {});
       const surface = getMapTouchSurface();
 
       act(() => {

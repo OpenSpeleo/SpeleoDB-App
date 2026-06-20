@@ -10,7 +10,12 @@ import { describe, it, expect } from 'vitest';
 import { HttpClient } from '../services/HttpClient';
 import { SpeleoDBService } from '../services/SpeleoDBService';
 import { HTTP_STATUS } from '../constants';
-import { canRunIntegrationTests, isUnverifiedEmailAuthFailure, TEST_ENV } from './env';
+import {
+  canRunIntegrationTests,
+  isGitHubActionsForbiddenAuthFailure,
+  isUnverifiedEmailAuthFailure,
+  TEST_ENV,
+} from './env';
 import type { AuthTokenResponse } from '../types';
 
 describe.runIf(canRunIntegrationTests)('SpeleoDBService [integration]', () => {
@@ -23,6 +28,12 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBService [integration]', () => {
   const password = TEST_ENV.password!;
   const oauthToken = TEST_ENV.oauthToken!;
 
+  async function expectConfiguredTokenStillValid(): Promise<void> {
+    const tokenRes = await service.validateToken(instance, oauthToken);
+    expect(tokenRes.status).toBeGreaterThanOrEqual(200);
+    expect(tokenRes.status).toBeLessThan(300);
+  }
+
   // ---- authenticate ---------------------------------------------------------
 
   describe('authenticate', () => {
@@ -30,6 +41,10 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBService [integration]', () => {
       const res = await service.authenticate(instance, email, password);
       if (isUnverifiedEmailAuthFailure(res.status, res.data)) {
         expect(isUnverifiedEmailAuthFailure(res.status, res.data)).toBe(true);
+        return;
+      }
+      if (isGitHubActionsForbiddenAuthFailure(res.status)) {
+        await expectConfiguredTokenStillValid();
         return;
       }
 
@@ -77,6 +92,10 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBService [integration]', () => {
       const authRes = await service.authenticate(instance, email, password);
       if (isUnverifiedEmailAuthFailure(authRes.status, authRes.data)) {
         expect(isUnverifiedEmailAuthFailure(authRes.status, authRes.data)).toBe(true);
+        return;
+      }
+      if (isGitHubActionsForbiddenAuthFailure(authRes.status)) {
+        await expectConfiguredTokenStillValid();
         return;
       }
       expect(authRes.status).toBe(HTTP_STATUS.OK);

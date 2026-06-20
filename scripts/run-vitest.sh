@@ -23,7 +23,14 @@ for index, token in enumerate(tokens):
         skip_next = False
         continue
 
-    if token in ("--experimental-webstorage", "--localstorage-file", "--sessionstorage-file"):
+    if token in (
+        "--experimental-webstorage",
+        "--webstorage",
+        "--no-webstorage",
+        "--no-experimental-webstorage",
+        "--localstorage-file",
+        "--sessionstorage-file",
+    ):
         if token in ("--localstorage-file", "--sessionstorage-file") and index + 1 < len(tokens):
             skip_next = True
         continue
@@ -51,9 +58,33 @@ unset NPM_CONFIG_NODE_OPTIONS
 unset npm_config_localstorage_file
 unset npm_config_sessionstorage_file
 unset npm_config_experimental_webstorage
+unset npm_config_webstorage
 unset npm_package_config_localstorage_file
 unset npm_package_config_sessionstorage_file
 unset npm_package_config_experimental_webstorage
+unset npm_package_config_webstorage
+
+detect_webstorage_disable_flag() {
+  local flag
+  for flag in --no-webstorage --no-experimental-webstorage; do
+    if node "$flag" -e "" >/dev/null 2>&1; then
+      printf '%s\n' "$flag"
+      return 0
+    fi
+  done
+}
+
+NODE_WEBSTORAGE_ARGS=()
+if WEBSTORAGE_DISABLE_FLAG="$(detect_webstorage_disable_flag)"; then
+  NODE_WEBSTORAGE_ARGS=("$WEBSTORAGE_DISABLE_FLAG")
+fi
+
+run_vitest() {
+  exec node \
+    "${NODE_WEBSTORAGE_ARGS[@]}" \
+    ./node_modules/vitest/vitest.mjs \
+    "$@"
+}
 
 HAS_POOL_FLAG=0
 if (($# > 0)); then
@@ -67,26 +98,14 @@ fi
 
 if [[ "$HAS_POOL_FLAG" -eq 1 ]]; then
   if (($# > 0)); then
-    exec node \
-      --no-webstorage \
-      ./node_modules/vitest/vitest.mjs \
-      "$@"
+    run_vitest "$@"
   fi
 
-  exec node \
-    --no-webstorage \
-    ./node_modules/vitest/vitest.mjs
+  run_vitest
 fi
 
 if (($# > 0)); then
-  exec node \
-    --no-webstorage \
-    ./node_modules/vitest/vitest.mjs \
-    --pool=threads \
-    "$@"
+  run_vitest --pool=threads "$@"
 fi
 
-exec node \
-  --no-webstorage \
-  ./node_modules/vitest/vitest.mjs \
-  --pool=threads
+run_vitest --pool=threads
