@@ -179,6 +179,7 @@ function renderSettings(
     const [measurementUnit, setMeasurementUnit] = React.useState(initialMeasurementUnit);
     const [isProjectPanelOpen, setIsProjectPanelOpen] = React.useState(false);
     const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = React.useState(false);
+    const [isGpsPanelOpen, setIsGpsPanelOpen] = React.useState(false);
     const [layerOfflineSync, setLayerOfflineSync] = React.useState<Record<string, boolean>>({});
     return (
       <Settings
@@ -194,6 +195,8 @@ function renderSettings(
         onProjectPanelChange={setIsProjectPanelOpen}
         isLandmarkPanelOpen={isLandmarkPanelOpen}
         onLandmarkPanelChange={setIsLandmarkPanelOpen}
+        isGpsPanelOpen={isGpsPanelOpen}
+        onGpsPanelChange={setIsGpsPanelOpen}
       />
     );
   };

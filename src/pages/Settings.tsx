@@ -63,6 +63,8 @@ interface SettingsProps {
   onProjectPanelChange: (open: boolean) => void;
   isLandmarkPanelOpen: boolean;
   onLandmarkPanelChange: (open: boolean) => void;
+  isGpsPanelOpen: boolean;
+  onGpsPanelChange: (open: boolean) => void;
 }
 
 const Settings: React.FC<SettingsProps> = ({
@@ -78,6 +80,8 @@ const Settings: React.FC<SettingsProps> = ({
   onProjectPanelChange,
   isLandmarkPanelOpen,
   onLandmarkPanelChange,
+  isGpsPanelOpen,
+  onGpsPanelChange,
 }) => {
   const history = useHistory();
   const location = useLocation();
@@ -91,6 +95,7 @@ const Settings: React.FC<SettingsProps> = ({
     isTileCacheOverLimitApproved,
     isOfflineLocked,
     pendingOpsCount,
+    gpsRecordingState,
   } = useSpeleoDB();
 
   const [cacheBytes, setCacheBytes] = useState(0);
@@ -556,6 +561,9 @@ const Settings: React.FC<SettingsProps> = ({
           onProjectPanelChange={onProjectPanelChange}
           isLandmarkPanelOpen={isLandmarkPanelOpen}
           onLandmarkPanelChange={onLandmarkPanelChange}
+          isGpsPanelOpen={isGpsPanelOpen}
+          onGpsPanelChange={onGpsPanelChange}
+          isGpsRecording={gpsRecordingState !== 'idle'}
           pendingOpsCount={pendingOpsCount}
         />
       </IonFooter>

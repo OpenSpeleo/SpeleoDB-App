@@ -204,11 +204,15 @@ export class ProjectCacheService {
 
   // ---- Housekeeping -----------------------------------------------------------
 
-  /** Wipe all cached projects, geojson, and queued offline ops (e.g. on logout). */
+  /**
+   * Wipe all cached projects, geojson, queued offline ops, and recorded GPS
+   * tracks (e.g. on logout).
+   */
   async clearAll(): Promise<void> {
     await this.store.clear('projects');
     await this.store.clear('geojson');
     await this.store.clear('offline_ops');
+    await this.store.clear('gps_tracks');
   }
 
   private getOverlayCacheKey(overlayId: MapOverlayId): string {

@@ -76,6 +76,8 @@ function setup(options: SetupOptions = {}) {
           onProjectPanelChange={vi.fn()}
           isLandmarkPanelOpen={false}
           onLandmarkPanelChange={vi.fn()}
+          isGpsPanelOpen={false}
+          onGpsPanelChange={vi.fn()}
         />
       </SpeleoDBContext.Provider>
     </MemoryRouter>,

@@ -8,6 +8,12 @@ const config: CapacitorConfig = {
     hostname: "www.speleodb.org",
     androidScheme: "https",
   },
+  android: {
+    // Required by @capacitor-community/background-geolocation: without the
+    // legacy bridge, Android halts WebView location updates ~5 min after the
+    // app is backgrounded. See the plugin README / issue #89.
+    useLegacyBridge: true,
+  },
   plugins: {
     CapacitorHttp: {
       enabled: true,

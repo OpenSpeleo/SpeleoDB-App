@@ -93,6 +93,41 @@ export function SpeleoDBStoreProvider({ children }: SpeleoDBStoreProviderProps) 
     () => controller.isTileCacheOverLimitApproved,
   )
 
+  const gpsTracks = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.gpsTracks,
+  )
+
+  const gpsRecordingState = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.gpsRecordingState,
+  )
+
+  const gpsRecordingStartedAt = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.gpsRecordingStartedAt,
+  )
+
+  const gpsRecordingElapsedMs = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.gpsRecordingElapsedMs,
+  )
+
+  const gpsRecordingElapsedUpdatedAt = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.gpsRecordingElapsedUpdatedAt,
+  )
+
+  const gpsTracksRevision = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.gpsTracksRevision,
+  )
+
+  const gpsRecordingError = useSyncExternalStore(
+    (cb) => controller.subscribe(cb),
+    () => controller.gpsRecordingError,
+  )
+
   const value: SpeleoDBContextValue = {
     controller,
     authState,
@@ -108,6 +143,13 @@ export function SpeleoDBStoreProvider({ children }: SpeleoDBStoreProviderProps) 
     storageConsentRequired,
     isTileCacheOverLimit,
     isTileCacheOverLimitApproved,
+    gpsTracks,
+    gpsRecordingState,
+    gpsRecordingStartedAt,
+    gpsRecordingElapsedMs,
+    gpsRecordingElapsedUpdatedAt,
+    gpsTracksRevision,
+    gpsRecordingError,
   }
 
   return (

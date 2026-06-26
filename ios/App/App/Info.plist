@@ -25,9 +25,13 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>SpeleoDB uses your location to center the map on your current position during fieldwork.</string>
+	<string>SpeleoDB records your GPS track while the app is in the background or your screen is locked, so you can capture a surface route without keeping the app open.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>SpeleoDB uses your location to center the map on your current position during fieldwork.</string>
+	<string>SpeleoDB uses your location to center the map on your position, record GPS tracks, and collect high-accuracy survey points during fieldwork.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

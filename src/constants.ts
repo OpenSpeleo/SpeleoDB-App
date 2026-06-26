@@ -21,9 +21,19 @@ export const API = {
   SURFACE_STATIONS_GEOJSON_ENDPOINT: BASE_PATH + '/stations/surface/geojson/',
   EXPLORATION_LEADS_GEOJSON_ENDPOINT: BASE_PATH + '/exploration-leads/geojson/',
   CYLINDER_INSTALLS_GEOJSON_ENDPOINT: BASE_PATH + '/cylinder-installs/geojson/',
+  // GPS tracks: a recorded track is uploaded to SpeleoDB as a GPX file via the
+  // GPX import endpoint (PUT multipart `file`, optional `collection`). The
+  // backend turns waypoints into Landmarks and tracks into GPSTrack rows and
+  // returns `{ landmarks_created, gps_tracks_created }`. See docs/gps-tracks.md.
+  GPX_IMPORT_ENDPOINT: BASE_PATH + '/import/gpx/',
+  GPS_TRACKS_ENDPOINT: BASE_PATH + '/gps_tracks/',
   /** Detail endpoint for a single landmark (PATCH/DELETE). */
   landmarkDetailEndpoint(id: string): string {
     return `${BASE_PATH}/landmarks/${encodeURIComponent(id)}/`;
+  },
+  /** Detail endpoint for a single GPS track (GET/PATCH/DELETE). */
+  gpsTrackDetailEndpoint(id: string): string {
+    return `${BASE_PATH}/gps_tracks/${encodeURIComponent(id)}/`;
   },
 } as const;
 
@@ -112,6 +122,76 @@ export const MAP = {
   // and long-press GPS are silently ignored to prevent accidental
   // triggers at region scale.
   MARKER_INTERACTION_MIN_ZOOM: 15,
+} as const;
+
+// ==================== GPS ====================
+// GPS track recording + high-confidence point averaging. See docs/gps-tracks.md.
+export const GPS = {
+  // App identity stamped into generated GPX files (creator attribute).
+  GPX_CREATOR: 'SpeleoDB App',
+  // MIME type for GPX documents (upload multipart part + share/download Blob).
+  GPX_CONTENT_TYPE: 'application/gpx+xml',
+  // Live position watch options shared by recording + averaging. High accuracy
+  // is required for survey-grade work; the timeout guards against a watch that
+  // never produces a first fix.
+  WATCH_OPTIONS: {
+    enableHighAccuracy: true,
+    timeout: 30000,
+    maximumAge: 0,
+  } as const,
+  // GPS fix timestamps can lag the JavaScript wall clock by a small amount when
+  // a watch starts. Allow a short grace while still dropping the much older
+  // last-known-location replay that mobile OSes commonly emit first.
+  WATCH_START_STALE_FIX_GRACE_MS: 2_000,
+  // Track recording cadence: keep at most one fix per this interval. A surface
+  // walking path overlaid on a cave survey doesn't need sub-second density;
+  // ~1 point / 15 s keeps tracks small and meaningful while still capturing the
+  // route. The FIRST in-session fix is kept immediately (see shouldAcceptFix),
+  // so recording starts as fast as the high-accuracy point collector. Track
+  // recording shares the exact GPS gate with averaging -- only this interval
+  // differs (averaging uses AVERAGING_MIN_SAMPLE_INTERVAL_MS).
+  TRACK_SAMPLE_INTERVAL_MS: 15_000,
+  // Persistent notification shown by the background-geolocation foreground
+  // service while a track is recording (Android requires it; on iOS the status
+  // bar turns blue). Tapping it returns to the app.
+  BACKGROUND_TRACKING_TITLE: 'Recording GPS track',
+  BACKGROUND_TRACKING_MESSAGE: 'SpeleoDB is recording your track. Tap to return; Stop in the app to finish.',
+  // Averaging session: the user collects a single high-confidence point over a
+  // 1-2 minute window. `MIN_MS`/`MIN_SAMPLES` gate the "good enough to save"
+  // hint; `TARGET_MS`/`TARGET_SAMPLES` are where confidence reaches 100%.
+  AVERAGING_MIN_MS: 60_000,
+  AVERAGING_TARGET_MS: 120_000,
+  AVERAGING_MIN_SAMPLES: 30,
+  AVERAGING_TARGET_SAMPLES: 60,
+  // Reject averaging samples worse than this horizontal accuracy (meters).
+  AVERAGING_MAX_ACCURACY_METERS: 50,
+  // Minimum spacing between accepted averaging samples. A warm GPS can emit
+  // several fixes per second (and the OS bursts a few on watch start); those
+  // sub-second fixes are highly correlated and don't improve the average, so we
+  // keep at most ~1/sec. This makes the sample count tick up like seconds
+  // instead of jumping to 3-4 immediately.
+  AVERAGING_MIN_SAMPLE_INTERVAL_MS: 1000,
+  // Accuracy band for the confidence model: <= GOOD scores 1.0, >= POOR scores
+  // the floor; linear in between. Tuned for consumer phone GPS.
+  AVERAGING_GOOD_ACCURACY_METERS: 5,
+  AVERAGING_POOR_ACCURACY_METERS: 50,
+  AVERAGING_ACCURACY_FLOOR_SCORE: 0.4,
+  // Easing exponent applied to the confidence base (time+sample progress).
+  // > 1 makes confidence grow slowly early and only climb near the targets, so
+  // it does not race to a high value in the first few seconds. 100% still
+  // requires reaching both the target time AND target sample count.
+  AVERAGING_CONFIDENCE_EXPONENT: 2.2,
+  // Constellations shown in the averaging UI's satellite checklist. Live in-use
+  // status is only reportable on Android (see docs/gps-tracks.md); the order is
+  // display order.
+  CONSTELLATIONS: [
+    { id: 'gps', label: 'GPS', region: 'USA' },
+    { id: 'glonass', label: 'GLONASS', region: 'Russia' },
+    { id: 'galileo', label: 'Galileo', region: 'EU' },
+    { id: 'beidou', label: 'BeiDou', region: 'China' },
+    { id: 'qzss', label: 'QZSS', region: 'Japan' },
+    { id: 'sbas', label: 'SBAS', region: 'Augmentation' },
+  ] as const,
 } as const;
 
 // ==================== MAP TILE LAYERS ====================

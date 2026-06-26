@@ -7,6 +7,7 @@ import { createMemoryHistory } from 'history';
 import Dashboard from './Dashboard';
 import { MAP } from '../constants';
 import type { Project } from '../types/project';
+import type { LocalGpsTrack } from '../types/gpsTrack';
 import { LandmarkMutationError } from '../types/landmark';
 import { allowConsoleWarn } from '../test/consoleGuard';
 
@@ -208,11 +209,17 @@ vi.mock('maplibre-gl', () => ({
 vi.mock('../components/AppTabBar', () => ({
   default: ({
     onProjectPanelChange,
+    onGpsPanelChange,
+    onTabPress,
   }: {
     onProjectPanelChange?: (open: boolean) => void;
+    onGpsPanelChange?: (open: boolean) => void;
+    onTabPress?: () => void;
   }) => (
     <div data-testid="app-tab-bar">
-      <button data-testid="projects-tab" onClick={() => onProjectPanelChange?.(true)}>Projects</button>
+      <button data-testid="projects-tab" onClick={() => { onTabPress?.(); onProjectPanelChange?.(true); }}>Projects</button>
+      <button data-testid="gps-tab" onClick={() => { onTabPress?.(); onGpsPanelChange?.(true); }}>GPS</button>
+      <button data-testid="map-tab" onClick={() => { onTabPress?.(); }}>Map</button>
     </div>
   ),
 }));
@@ -410,6 +417,8 @@ let mockIsOfflineLocked = false;
 let mockProjects: Project[] = [];
 let mockLandmarksRevision = 0;
 let mockLastSyncedAt: number | null = null;
+let mockGpsRecordingState: 'idle' | 'recording' | 'paused' = 'idle';
+let mockGpsTracks: LocalGpsTrack[] = [];
 const mockController = {
   syncProjects: mockSyncProjects,
   getProjectGeoJSON: mockGetProjectGeoJSON,
@@ -420,6 +429,18 @@ const mockController = {
   createLandmark: mockCreateLandmark,
   updateLandmark: mockUpdateLandmark,
   deleteLandmark: mockDeleteLandmark,
+  // GPS recording surface (defaults are inert for non-GPS Dashboard tests).
+  currentTrackPoints: [],
+  startTrackRecording: vi.fn().mockResolvedValue(undefined),
+  pauseTrackRecording: vi.fn().mockResolvedValue(undefined),
+  resumeTrackRecording: vi.fn().mockResolvedValue(undefined),
+  stopTrackRecording: vi.fn().mockResolvedValue(null),
+  discardTrackRecording: vi.fn().mockResolvedValue(undefined),
+  deleteGpsTrack: vi.fn().mockResolvedValue(undefined),
+  renameGpsTrack: vi.fn().mockResolvedValue(undefined),
+  uploadGpsTrack: vi.fn().mockResolvedValue(null),
+  uploadGpsTrackFile: vi.fn().mockResolvedValue(null),
+  getTrackGpxFile: vi.fn().mockReturnValue({ fileName: 'track.gpx', gpx: '<gpx/>' }),
 };
 
 vi.mock('../context/useSpeleoDB', () => ({
@@ -432,6 +453,12 @@ vi.mock('../context/useSpeleoDB', () => ({
     lastSyncedAt: mockLastSyncedAt,
     tilePrefetchJobs: [],
     landmarksRevision: mockLandmarksRevision,
+    gpsTracks: mockGpsTracks,
+    gpsRecordingState: mockGpsRecordingState,
+    gpsRecordingStartedAt: mockGpsRecordingState === 'idle' ? null : Date.now() - 30_000,
+    gpsRecordingElapsedMs: mockGpsRecordingState === 'idle' ? 0 : 30_000,
+    gpsRecordingElapsedUpdatedAt: mockGpsRecordingState === 'recording' ? Date.now() : null,
+    gpsTracksRevision: 0,
   }),
 }));
 
@@ -453,6 +480,7 @@ function renderDashboard(options?: {
   const Harness: React.FC = () => {
     const [isProjectPanelOpen, setIsProjectPanelOpen] = React.useState(false);
     const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = React.useState(false);
+    const [isGpsPanelOpen, setIsGpsPanelOpen] = React.useState(false);
     const [showLandmarks] = React.useState(initialShowLandmarks);
     const [selectedMapLayerId, setSelectedMapLayerId] = React.useState(initialLayerId);
     return (
@@ -461,6 +489,8 @@ function renderDashboard(options?: {
         onProjectPanelChange={setIsProjectPanelOpen}
         isLandmarkPanelOpen={isLandmarkPanelOpen}
         onLandmarkPanelChange={setIsLandmarkPanelOpen}
+        isGpsPanelOpen={isGpsPanelOpen}
+        onGpsPanelChange={setIsGpsPanelOpen}
         showLandmarks={showLandmarks}
         colorMode={initialColorMode}
         measurementUnit={initialMeasurementUnit}
@@ -1722,6 +1752,7 @@ describe('Dashboard', () => {
       expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
       expect(mockMapUnproject).not.toHaveBeenCalled();
     } finally {
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });
@@ -1882,19 +1913,21 @@ describe('Dashboard', () => {
 
       const surface = getMapTouchSurface();
 
-      fireEvent.pointerDown(surface, {
-        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      await act(async () => {
+        fireEvent.pointerDown(surface, {
+          pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+        });
+        fireEvent.pointerMove(surface, {
+          pointerId: 1, pointerType: 'touch', clientX: 170, clientY: 80,
+        });
+        vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS);
+        await Promise.resolve();
       });
-
-      fireEvent.pointerMove(surface, {
-        pointerId: 1, pointerType: 'touch', clientX: 170, clientY: 80,
-      });
-
-      act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
 
       expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
       expect(mockMapUnproject).not.toHaveBeenCalled();
     } finally {
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });
@@ -1929,6 +1962,7 @@ describe('Dashboard', () => {
 
       expect(mockMapUnproject).not.toHaveBeenCalled();
     } finally {
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });
@@ -2710,6 +2744,7 @@ describe('Dashboard -- Landmark CRUD', () => {
       });
       expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
     } finally {
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });
@@ -2931,5 +2966,212 @@ describe('Dashboard -- Landmark CRUD', () => {
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.queryByTestId('edit-landmark-button')).not.toBeInTheDocument();
     expect(screen.queryByTestId('delete-landmark-button')).not.toBeInTheDocument();
+  });
+});
+
+describe('Dashboard GPS panel', () => {
+  beforeEach(() => {
+    mockIsOfflineLocked = false;
+    mockGpsRecordingState = 'idle';
+    mockGpsTracks = [];
+    vi.clearAllMocks();
+  });
+
+  it('renders the GPS panel and tab', async () => {
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+    expect(screen.getByTestId('gps-tab')).toBeInTheDocument();
+    expect(screen.getByTestId('gps-panel')).toBeInTheDocument();
+    // The panel opens the dedicated recorder; it has no inline Start.
+    expect(screen.getByTestId('gps-open-recorder')).toBeInTheDocument();
+    expect(screen.queryByTestId('gps-recording-screen')).not.toBeInTheDocument();
+  });
+
+  it('opens the dedicated recording screen and starts recording from it', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-open-recorder'));
+
+    // The full-screen recorder is now shown, with its own back button + Start.
+    expect(screen.getByTestId('gps-recording-screen')).toBeInTheDocument();
+    expect(screen.getByTestId('gps-recording-back')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('gps-start-recording'));
+    expect(mockController.startTrackRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the recording screen via the back button (recording not stopped)', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-open-recorder'));
+    await user.click(screen.getByTestId('gps-recording-back'));
+
+    expect(screen.queryByTestId('gps-recording-screen')).not.toBeInTheDocument();
+    expect(mockController.stopTrackRecording).not.toHaveBeenCalled();
+  });
+
+  it('Cancel just closes the recording screen when idle (no confirm, no discard)', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-open-recorder'));
+    await user.click(screen.getByTestId('gps-recording-cancel'));
+
+    expect(screen.queryByTestId('gps-recording-screen')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('gps-recording-cancel-confirm')).not.toBeInTheDocument();
+    expect(mockController.discardTrackRecording).not.toHaveBeenCalled();
+  });
+
+  it('Cancel while recording confirms, then discards and closes', async () => {
+    mockGpsRecordingState = 'recording';
+    const user = userEvent.setup();
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-open-recorder'));
+    await user.click(screen.getByTestId('gps-recording-cancel'));
+
+    // A confirmation appears; the screen is still open and nothing discarded yet.
+    expect(screen.getByTestId('gps-recording-cancel-confirm')).toBeInTheDocument();
+    expect(mockController.discardTrackRecording).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId('gps-recording-cancel-confirm-confirm'));
+    expect(mockController.discardTrackRecording).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('gps-recording-screen')).not.toBeInTheDocument();
+  });
+
+  it('dismissing the cancel confirmation keeps recording', async () => {
+    mockGpsRecordingState = 'recording';
+    const user = userEvent.setup();
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-open-recorder'));
+    await user.click(screen.getByTestId('gps-recording-cancel'));
+    await user.click(screen.getByTestId('gps-recording-cancel-confirm-cancel'));
+
+    expect(mockController.discardTrackRecording).not.toHaveBeenCalled();
+    expect(screen.getByTestId('gps-recording-screen')).toBeInTheDocument();
+  });
+
+  it('opens the averaging modal from High-Accuracy GPS Point', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-collect-point'));
+
+    expect(screen.getByTestId('gps-averaging-modal')).toBeInTheDocument();
+  });
+
+  it('confirms before uploading a saved GPS track', async () => {
+    const user = userEvent.setup();
+    mockGpsTracks = [
+      {
+        id: 'trk-upload',
+        name: 'Surface Walk',
+        points: [
+          { latitude: 45, longitude: -73, timestamp: 1000 },
+          { latitude: 45.001, longitude: -73.001, timestamp: 16_000 },
+        ],
+        createdAt: 1000,
+        updatedAt: 16_000,
+        uploadStatus: 'local',
+        uploadError: null,
+      },
+    ];
+    mockController.getTrackGpxFile.mockResolvedValueOnce({ fileName: 'surface_walk.gpx', gpx: '<gpx>track</gpx>' });
+    mockController.uploadGpsTrackFile.mockResolvedValueOnce({
+      ...mockGpsTracks[0],
+      uploadStatus: 'uploaded',
+    });
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-track-upload-trk-upload'));
+
+    expect(screen.getByTestId('gps-upload-confirm')).toBeInTheDocument();
+    expect(screen.getByTestId('gps-upload-confirm')).toHaveTextContent('Surface Walk');
+    expect(mockController.uploadGpsTrackFile).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId('gps-upload-confirm-confirm'));
+
+    await waitFor(() =>
+      expect(mockController.uploadGpsTrackFile).toHaveBeenCalledWith('trk-upload', {
+        fileName: 'surface_walk.gpx',
+        gpx: '<gpx>track</gpx>',
+      }),
+    );
+    expect(await screen.findByTestId('landmark-toast')).toHaveTextContent('Track uploaded to SpeleoDB');
+  });
+
+  it('shows a GPX conversion error before upload execution', async () => {
+    const user = userEvent.setup();
+    mockGpsTracks = [
+      {
+        id: 'trk-bad-gpx',
+        name: 'Broken Track',
+        points: [
+          { latitude: 45, longitude: -73, timestamp: 1000 },
+          { latitude: 45.001, longitude: -73.001, timestamp: 16_000 },
+        ],
+        createdAt: 1000,
+        updatedAt: 16_000,
+        uploadStatus: 'local',
+        uploadError: null,
+      },
+    ];
+    mockController.getTrackGpxFile.mockRejectedValueOnce(new Error('GPX build failed'));
+    allowConsoleWarn('GPS track action failed.', expect.objectContaining({ phase: 'gpx' }));
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-track-upload-trk-bad-gpx'));
+    await user.click(screen.getByTestId('gps-upload-confirm-confirm'));
+
+    expect(mockController.uploadGpsTrackFile).not.toHaveBeenCalled();
+    expect(await screen.findByTestId('landmark-toast')).toHaveTextContent(
+      'Could not create the GPX file for this track.',
+    );
+  });
+
+  it('collapses the recording screen when a bottom tab is pressed', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-open-recorder'));
+    expect(screen.getByTestId('gps-recording-screen')).toBeInTheDocument();
+
+    // Tapping a menu tab collapses the overlay and reveals that tab's view.
+    await user.click(screen.getByTestId('map-tab'));
+    expect(screen.queryByTestId('gps-recording-screen')).not.toBeInTheDocument();
+  });
+
+  it('collapses the averaging view when a bottom tab is pressed', async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-collect-point'));
+    expect(screen.getByTestId('gps-averaging-modal')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('map-tab'));
+    expect(screen.queryByTestId('gps-averaging-modal')).not.toBeInTheDocument();
   });
 });

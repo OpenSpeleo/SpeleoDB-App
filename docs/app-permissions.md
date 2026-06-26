@@ -8,32 +8,84 @@ This document lists all native permissions declared by the app, why each is need
 
 **iOS** (`ios/App/App/Info.plist`):
 - `NSLocationWhenInUseUsageDescription`
-- `NSLocationAlwaysAndWhenInUseUsageDescription`
+- `NSLocationAlwaysAndWhenInUseUsageDescription` (background track recording)
+- `UIBackgroundModes` → `location` (lets recording continue with the app
+  backgrounded / screen locked)
 
 **Android** (`android/app/src/main/AndroidManifest.xml`):
 - `ACCESS_COARSE_LOCATION`
 - `ACCESS_FINE_LOCATION`
+- `POST_NOTIFICATIONS` (Android 13+, requested best-effort before recording
+  starts for the persistent "recording" notification, via a local Android-only
+  Capacitor plugin; recording still works if it is denied)
+- `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_LOCATION` are contributed by the
+  `@capacitor-community/background-geolocation` plugin's manifest via merge
+  (used only by track recording).
+- `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` — optional reliability nudge so OEM power
+  managers don't kill the recording foreground service. Requested only on an
+  explicit user tap from the recording screen's banner; recording works without
+  it. iOS has no equivalent.
 
 ### Why
 
-The "My Location" button on the map uses `@capacitor/geolocation` to get the user's current position and fly the map to that location. This is essential for fieldwork -- cavers need to locate themselves relative to cave survey data.
+Location powers three field-work features:
+
+1. The **"My Location"** button: get the current position once and fly the map to it
+   (`@capacitor/geolocation`, foreground).
+2. **GPS track recording** (the GPS menu): records the path the user walks. This
+   runs in the **background / with the screen locked** so a surface route can be
+   captured without keeping the app open, via
+   `@capacitor-community/background-geolocation` (a foreground service +
+   notification on Android; background location updates on iOS). See
+   `docs/gps-tracks.md`.
+3. **GPS point averaging** (the GPS menu): a foreground watch collects fixes over
+   ~1-2 minutes to compute a single high-confidence point the user can save as a
+   landmark (`@capacitor/geolocation`, foreground).
+
+All three are essential for fieldwork -- cavers need to locate themselves and
+capture survey-grade points/tracks relative to cave survey data.
 
 ### Privacy guarantees
 
-- **On-demand only.** Location is accessed exclusively when the user taps the "My Location" button. There is no background location tracking, no continuous GPS polling, no geofencing, and no location-based notifications.
-- **Minimal permission level.** The code explicitly requests only `'location'` (foreground/when-in-use) via `Geolocation.requestPermissions({ permissions: ['location'] })`. The app never requests "always" or background location authorization.
-- **Not stored.** The coordinates are held in ephemeral React state (`userLocation`) to render a temporary blue dot on the map. The state resets when the user navigates away. No location data is written to localStorage, IndexedDB, or any persistent store.
-- **Not transmitted.** Location coordinates are never sent to the SpeleoDB backend or any third-party service. They stay entirely on-device.
-- **Not logged.** No location data appears in console logs, analytics, crash reports, or any telemetry.
-- **No "always" access used.** The `NSLocationAlwaysAndWhenInUseUsageDescription` key is declared in Info.plist solely because the Capacitor geolocation plugin binary references the CoreLocation API at link time. The app never calls `requestAlwaysAuthorization()` and iOS will only ever show the "while using the app" prompt. The `NSLocationAlwaysUsageDescription` key (which would enable legacy "always" access) is intentionally absent.
+- **User-initiated only.** Location is accessed only as a direct result of a user
+  action: tapping "My Location", starting a recording, or opening the averaging
+  collector. Watches are torn down the moment the user stops/cancels recording,
+  closes the averaging collector, or logs out. The recording screen's back
+  button intentionally leaves recording running. There is no geofencing or
+  location-based marketing.
+- **Background use is recording-only and always visible.** Only **track
+  recording** uses background location, and only while a recording is actually
+  running. While it runs the user sees a persistent notification (Android) or a
+  blue status bar (iOS), and recording ends as soon as they tap Stop/Cancel.
+  "My Location" and averaging remain strictly foreground.
+- **Stored only when the user records.** The "My Location" dot is ephemeral React
+  state. Recorded **GPS tracks** are, by design, persisted on-device in the
+  `gps_tracks` IndexedDB store so a force-quit does not lose already captured
+  points; they are wiped on logout. The averaging session's samples are
+  ephemeral; only the averaged point the user explicitly saves becomes a
+  landmark. iOS declares precise-location collection in `PrivacyInfo.xcprivacy`
+  for app functionality, with no tracking.
+- **Transmitted only on an explicit upload.** Location data leaves the device only
+  when the user explicitly uploads a track to SpeleoDB (`PUT /api/v2/import/gpx/`)
+  or saves an averaged point as a landmark (which syncs like any landmark). Sharing
+  a GPX routes through the OS share sheet at the user's request. Nothing is sent
+  to any third-party service automatically.
+- **Not logged.** No location data appears in console logs, analytics, crash
+  reports, or any telemetry.
 
 ### User-facing purpose strings
 
-Both iOS keys use the same string:
+- `NSLocationWhenInUseUsageDescription`:
+  > SpeleoDB uses your location to center the map on your position, record GPS tracks, and collect high-accuracy survey points during fieldwork.
+- `NSLocationAlwaysAndWhenInUseUsageDescription`:
+  > SpeleoDB records your GPS track while the app is in the background or your screen is locked, so you can capture a surface route without keeping the app open.
 
-> SpeleoDB uses your location to center the map on your current position during fieldwork.
-
-Android handles location permission via a runtime dialog managed by Capacitor. No custom string is needed in the manifest.
+Android handles location via Capacitor / the plugin and the `POST_NOTIFICATIONS`
+permission via a small **local, Android-only** Capacitor plugin
+(`RecordingNotificationPermission`, in `android/app/src/main/java/.../`), so
+nothing notification-related is linked into the iOS build. The
+background-tracking notification text comes from `GPS.BACKGROUND_TRACKING_TITLE`
+/ `BACKGROUND_TRACKING_MESSAGE` and the channel name from `strings.xml`.
 
 ### Error handling UX
 
@@ -51,6 +103,16 @@ Instructions vary by platform. For example, "Permission Denied" tells iOS users 
 
 The modal is dismissed with a single "OK" button. No location data is logged or transmitted on error.
 
+**GPS track recording** errors are handled separately (recording uses the
+background watcher, not the "My Location" path). An up-front permission denial
+when starting a recording throws and shows a toast. A *fatal* authorization
+error *during* a live recording -- the background plugin's `NOT_AUTHORIZED`
+(permission revoked / "Always" denied / location services off) or the web
+`GeolocationPositionError.code === 1` -- stops the recording, resets it to idle,
+and shows a toast; any already-captured points are finalized into a saved track
+so nothing is lost. A transient error (brief signal loss) is logged and
+recording continues. See `docs/gps-tracks.md` ("Permissions").
+
 ## Internet (Android)
 
 ### Declared permission
@@ -65,7 +127,9 @@ Required for all network operations: API authentication, project sync, GeoJSON d
 
 - iOS permissions: `ios/App/App/Info.plist`
 - Android permissions: `android/app/src/main/AndroidManifest.xml`
-- Geolocation usage: `src/pages/Dashboard.tsx` (`handleGoToMyLocation`)
+- Geolocation usage: `src/pages/Dashboard.tsx` (`handleGoToMyLocation`), GPS track recording + averaging (`src/services/GeolocationWatcher.ts`, `src/services/BackgroundGeolocationWatcher.ts`, `src/hooks/useGpsAveraging.ts`, `src/controllers/SpeleoDBController.ts`); see `docs/gps-tracks.md`
+- Background tracking notification config: `capacitor.config.ts` (`android.useLegacyBridge`), `android/app/src/main/res/values/strings.xml`, `src/constants.ts` (`GPS.BACKGROUND_TRACKING_*`)
+- Battery-optimization nudge (Android): `src/services/BatteryOptimizationGuard.ts`, recording-screen banner in `src/components/GpsRecordingScreen.tsx`, plugin `@capawesome-team/capacitor-android-battery-optimization`
 - Geolocation error modal: `src/components/GeolocationErrorModal.tsx`
 - Error code parsing: `src/utils/geolocationError.ts`
-- Capacitor plugin: `@capacitor/geolocation`
+- Capacitor plugins: `@capacitor/geolocation` (foreground), `@capacitor-community/background-geolocation` (background recording)

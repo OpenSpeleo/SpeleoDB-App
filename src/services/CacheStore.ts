@@ -5,14 +5,16 @@
  * dependencies; the raw IndexedDB API is wrapped just enough to keep
  * call-sites readable.
  *
- * Database : "speleo_cache"  (version 2)
- * Stores   : "projects", "geojson", "offline_ops"
+ * Database : "speleo_cache"  (version 3)
+ * Stores   : "projects", "geojson", "offline_ops", "gps_tracks"
  *
  * Version history:
  * - v1: "projects", "geojson".
  * - v2: added "offline_ops" for the offline mutation queue. The migration is
  *   purely additive (`createObjectStore` for the missing store); existing
  *   "projects"/"geojson" data is preserved with zero loss.
+ * - v3: added "gps_tracks" for recorded GPS tracks (record offline, upload on
+ *   reconnect). Same additive migration; all existing data is preserved.
  */
 
 // ==================== Stored entry shape ====================
@@ -26,8 +28,8 @@ export interface CacheEntry<T = unknown> {
 // ==================== Constants ====================
 
 const DB_NAME = 'speleo_cache';
-const DB_VERSION = 2;
-const STORE_NAMES = ['projects', 'geojson', 'offline_ops'] as const;
+const DB_VERSION = 3;
+const STORE_NAMES = ['projects', 'geojson', 'offline_ops', 'gps_tracks'] as const;
 
 export type StoreName = (typeof STORE_NAMES)[number];
 

@@ -98,10 +98,24 @@ user-initiated action (the Pending page's Sync Now / per-row Sync, or a
 controller sync); it never runs from a passive connectivity listener. See
 `docs/offline-landmark-queue.md`.
 
+## GPS track uploads and the offline drain
+
+GPS track uploads follow the same request-driven model as landmark mutations. An
+upload that hits a transport error, timeout, `408`, `429`, or `5xx` marks the
+track `pending` (never dropped); reachability failures also flip the app offline
+(`enterOfflineMode`). A definitive `4xx` is surfaced as an `error`. Pending
+track uploads are drained by `SpeleoDBController.uploadPendingGpsTracks()`, which
+is wired into successful startup validation and the explicit reconnect path
+(`attemptReconnect()` -> Settings **Go Online** / Pending **Try Reconnect**). It
+never runs from a passive connectivity listener. Only tracks already marked
+`pending` drain automatically; untouched `local` tracks require an explicit
+Upload tap. Recording itself makes no network calls. See `docs/gps-tracks.md`.
+
 See also:
 
 - `docs/offline-mode.md`
 - `docs/offline-landmark-queue.md`
+- `docs/gps-tracks.md`
 - `docs/logout-behavior.md`
 - `docs/implementation-guidelines.md`
 - `docs/dashboard-map-overlays.md`

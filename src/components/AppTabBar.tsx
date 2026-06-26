@@ -6,6 +6,16 @@ interface AppTabBarProps {
   onProjectPanelChange?: (open: boolean) => void;
   isLandmarkPanelOpen?: boolean;
   onLandmarkPanelChange?: (open: boolean) => void;
+  isGpsPanelOpen?: boolean;
+  onGpsPanelChange?: (open: boolean) => void;
+  /** Show a live recording dot on the GPS tab while a track is recording. */
+  isGpsRecording?: boolean;
+  /**
+   * Called at the start of every tab press (before navigation/panel changes).
+   * Used to collapse any full-screen GPS overlay (averaging / recording) so the
+   * pressed tab's normal view becomes visible.
+   */
+  onTabPress?: () => void;
   /** Number of pending offline ops; the Pending tab is hidden when 0. */
   pendingOpsCount?: number;
 }
@@ -15,6 +25,10 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
   onProjectPanelChange,
   isLandmarkPanelOpen = false,
   onLandmarkPanelChange,
+  isGpsPanelOpen = false,
+  onGpsPanelChange,
+  isGpsRecording = false,
+  onTabPress,
   pendingOpsCount = 0,
 }) => {
   const location = useLocation();
@@ -26,7 +40,9 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
 
   const isProjectsActive = onDashboard && isProjectPanelOpen;
   const isLandmarksActive = onDashboard && isLandmarkPanelOpen;
-  const isMapActive = onDashboard && !isProjectPanelOpen && !isLandmarkPanelOpen;
+  const isGpsActive = onDashboard && isGpsPanelOpen;
+  const isMapActive =
+    onDashboard && !isProjectPanelOpen && !isLandmarkPanelOpen && !isGpsPanelOpen;
 
   const openProjectPanel = () => {
     onProjectPanelChange?.(true);
@@ -44,6 +60,14 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
     onLandmarkPanelChange?.(false);
   };
 
+  const openGpsPanel = () => {
+    onGpsPanelChange?.(true);
+  };
+
+  const closeGpsPanel = () => {
+    onGpsPanelChange?.(false);
+  };
+
   return (
     <div
       data-testid="app-tab-bar"
@@ -59,6 +83,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
         data-tour="menu-toggle"
         data-testid="projects-tab"
         onClick={() => {
+          onTabPress?.();
           if (!onDashboard) {
             history.push('/dashboard');
             openProjectPanel();
@@ -87,6 +112,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
         aria-selected={isLandmarksActive}
         data-testid="landmarks-tab"
         onClick={() => {
+          onTabPress?.();
           if (!onDashboard) {
             history.push('/dashboard');
             openLandmarkPanel();
@@ -109,17 +135,54 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
         <span className="text-[10px] font-medium leading-none">Landmarks</span>
       </button>
 
+      {/* GPS */}
+      <button
+        type="button"
+        role="tab"
+        aria-selected={isGpsActive}
+        data-testid="gps-tab"
+        onClick={() => {
+          onTabPress?.();
+          if (!onDashboard) {
+            history.push('/dashboard');
+            openGpsPanel();
+          } else if (isGpsPanelOpen) {
+            closeGpsPanel();
+          } else {
+            openGpsPanel();
+          }
+        }}
+        className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
+          isGpsActive ? 'text-purple-400' : 'text-slate-400 active:text-slate-200'
+        }`}
+      >
+        <span className="relative flex h-6 w-6 items-start justify-center">
+          <svg className="w-5 h-5" fill="currentColor" viewBox="8.19 8.5 83.61 83" aria-hidden="true">
+            <path d="m30.191 89.5c0 1.1016-0.89844 2-2 2-11.031 0-20-8.9688-20-20 0-1.1016 0.89844-2 2-2 1.1016 0 2 0.89844 2 2 0 8.8203 7.1797 16 16 16 1.1094 0 2 0.89844 2 2zm-2-12c-3.3086 0-6-2.6914-6-6 0-1.1016-0.89844-2-2-2-1.1016 0-2 0.89844-2 2 0 5.5117 4.4883 10 10 10 1.1016 0 2-0.89844 2-2s-0.89062-2-2-2zm63.32-5.0703-18.383-18.379c-0.39062-0.39062-1.0195-0.39062-1.4102 0l-7.0703 7.0703-4.2383-4.2383 12.699-12.699c1.1914-1.1914 1.1914-3.1211 0-4.3086l-0.67188-0.67188 3.8398-3.8398c1.7812-1.7812 1.7812-4.6797 0-6.4609l-4.8594-4.8594c-1.7812-1.7812-4.6797-1.7812-6.4609 0l-3.8398 3.8398-0.67188-0.67187c-1.1914-1.1914-3.1211-1.1914-4.3086 0l-12.699 12.699-4.2383-4.2383 7.0703-7.0703c0.39062-0.39062 0.39062-1.0195 0-1.4102l-18.398-18.402c-0.39062-0.39062-1.0195-0.39062-1.4102 0l-16.973 16.973c-0.39062 0.39062-0.39062 1.0195 0 1.4102l18.379 18.379c0.19922 0.19922 0.44922 0.28906 0.71094 0.28906s0.51172-0.10156 0.71094-0.28906l7.0703-7.0703 4.2383 4.2383-7.0391 7.0391c-1.1914 1.1914-1.1914 3.1211 0 4.3086l0.30078 0.30078c-5.2812-1.8203-11.422-1.5312-17.211 1.0703-0.30078 0.14062-0.51172 0.41016-0.57031 0.73047-0.058594 0.32031 0.039063 0.64844 0.28125 0.89062l26.871 26.871c0.19141 0.19141 0.44141 0.28906 0.71094 0.28906 0.058594 0 0.12109-0.011719 0.17969-0.019531 0.32031-0.058594 0.60156-0.26953 0.73047-0.57031 1.25-2.7812 1.9805-5.6719 2.1797-8.5781 0.21094-3.0312-0.16016-5.9414-1.0703-8.6016l0.26953 0.26953c0.58984 0.58984 1.3711 0.89062 2.1484 0.89062 0.78125 0 1.5586-0.30078 2.1484-0.89062l7.0391-7.0391 4.2383 4.2383-7.0703 7.0703c-0.39062 0.39062-0.39062 1.0195 0 1.4102l18.379 18.379c0.19922 0.19922 0.44922 0.28906 0.71094 0.28906s0.51172-0.10156 0.71094-0.28906l16.969-16.969c0.39453-0.34766 0.39453-0.98828 0.007813-1.3789z"></path>
+          </svg>
+          {isGpsRecording && (
+            <span
+              data-testid="gps-tab-recording-dot"
+              className="absolute -top-1 -right-1.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-slate-900 animate-pulse"
+            />
+          )}
+        </span>
+        <span className="text-[10px] font-medium leading-none">GPS</span>
+      </button>
+
       {/* Map */}
       <button
         type="button"
         role="tab"
         aria-selected={isMapActive}
         onClick={() => {
+          onTabPress?.();
           if (!onDashboard) {
             history.push('/dashboard');
           }
           if (isProjectPanelOpen) closeProjectPanel();
           if (isLandmarkPanelOpen) closeLandmarkPanel();
+          if (isGpsPanelOpen) closeGpsPanel();
         }}
         className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
           isMapActive
@@ -141,6 +204,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
           aria-selected={onPending}
           data-testid="pending-tab"
           onClick={() => {
+            onTabPress?.();
             if (!onPending) history.push('/pending');
           }}
           className={`app-tab-bar__tab relative flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
@@ -174,6 +238,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
         data-tour="settings-tab"
         data-testid="settings-tab"
         onClick={() => {
+          onTabPress?.();
           if (!onSettings) history.push('/settings');
         }}
         className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${

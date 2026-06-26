@@ -14,6 +14,29 @@ import { createAbortError, throwIfAborted } from '../utils/abort';
 
 // ==================== Public types ====================
 
+/** A single text file part of a multipart/form-data upload. */
+export interface MultipartFilePart {
+  /** Form field name (the backend reads `file`). */
+  fieldName: string;
+  fileName: string;
+  /** MIME type written into the part header. */
+  contentType: string;
+  /** UTF-8 text content (GPX). Binary is intentionally unsupported. */
+  content: string;
+}
+
+/**
+ * A multipart/form-data payload that works on BOTH transports. The web path
+ * builds a real `FormData`; the native path serializes a raw multipart body
+ * string with an explicit boundary (CapacitorHttp has no FormData support).
+ * Only text parts are supported, which is all the GPX upload needs.
+ */
+export interface MultipartPayload {
+  /** Simple text fields (e.g. `collection`). */
+  fields?: Record<string, string>;
+  file: MultipartFilePart;
+}
+
 export interface HttpRequest {
   url: string;
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -22,6 +45,11 @@ export interface HttpRequest {
   data?: unknown;
   /** FormData body -- web-only; ignored on native. */
   formData?: FormData;
+  /**
+   * Cross-platform multipart/form-data text upload. Preferred over `formData`
+   * because it also works on native (CapacitorHttp). See `MultipartPayload`.
+   */
+  multipart?: MultipartPayload;
   /** Per-request timeout; defaults to NETWORK.REQUEST_TIMEOUT_MS. */
   timeoutMs?: number;
   /** Optional caller-owned cancellation. */
@@ -31,6 +59,18 @@ export interface HttpRequest {
 export interface HttpResponse<T = unknown> {
   status: number;
   data: T;
+}
+
+export interface HttpClientDeps {
+  isNativePlatform?: () => boolean;
+  nativeHttp?: Pick<typeof CapacitorHttp, 'request'>;
+}
+
+export class MultipartPayloadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MultipartPayloadError';
+  }
 }
 
 // ==================== Helpers ====================
@@ -184,9 +224,87 @@ function buildWebHeaders(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+// ==================== Multipart helpers ====================
+
+const CRLF = '\r\n';
+
+/** Generate a unique multipart boundary token. */
+function generateBoundary(): string {
+  const random = Math.random().toString(36).slice(2);
+  return `----SpeleoDBFormBoundary${Date.now().toString(36)}${random}`;
+}
+
+function quoteMultipartHeaderValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r|\n/g, ' ');
+}
+
+function assertSafeTextField(name: string, value: string): void {
+  if (/[\r\n]/.test(name) || /[\r\n]/.test(value)) {
+    throw new MultipartPayloadError('Multipart field names and values must not contain CRLF characters.');
+  }
+}
+
+function assertNoBoundaryCollision(content: string, boundary: string): void {
+  if (content.includes(`--${boundary}`)) {
+    throw new MultipartPayloadError('Multipart content contains the generated boundary.');
+  }
+}
+
+function validateMultipartPayload(payload: MultipartPayload, boundary?: string): void {
+  for (const [name, value] of Object.entries(payload.fields ?? {})) {
+    assertSafeTextField(name, value);
+  }
+  const file = payload.file;
+  assertSafeTextField(file.fieldName, file.contentType);
+  assertSafeTextField('filename', file.fileName);
+  if (boundary) {
+    assertNoBoundaryCollision(file.content, boundary);
+  }
+}
+
+/**
+ * Serialize a multipart payload to a raw body string for native transport.
+ * Only text parts are emitted, so a plain string body is byte-correct.
+ */
+export function buildMultipartString(payload: MultipartPayload, boundary: string): string {
+  validateMultipartPayload(payload, boundary);
+  const parts: string[] = [];
+  for (const [name, value] of Object.entries(payload.fields ?? {})) {
+    parts.push(
+      `--${boundary}${CRLF}` +
+        `Content-Disposition: form-data; name="${quoteMultipartHeaderValue(name)}"${CRLF}${CRLF}` +
+        `${value}${CRLF}`,
+    );
+  }
+  const file = payload.file;
+  parts.push(
+    `--${boundary}${CRLF}` +
+      `Content-Disposition: form-data; name="${quoteMultipartHeaderValue(file.fieldName)}"; filename="${quoteMultipartHeaderValue(file.fileName)}"${CRLF}` +
+      `Content-Type: ${file.contentType}${CRLF}${CRLF}` +
+      `${file.content}${CRLF}`,
+  );
+  parts.push(`--${boundary}--${CRLF}`);
+  return parts.join('');
+}
+
+/** Build a real `FormData` from a multipart payload (web transport). */
+function buildMultipartFormData(payload: MultipartPayload): FormData {
+  validateMultipartPayload(payload);
+  const fd = new FormData();
+  for (const [name, value] of Object.entries(payload.fields ?? {})) {
+    fd.append(name, value);
+  }
+  const file = payload.file;
+  const blob = new Blob([file.content], { type: file.contentType });
+  fd.append(file.fieldName, blob, file.fileName);
+  return fd;
+}
+
 // ==================== HttpClient ====================
 
 export class HttpClient {
+  constructor(private deps: HttpClientDeps = {}) {}
+
   /**
    * Send an HTTP request. Automatically chooses CapacitorHttp on native
    * or fetch on web.
@@ -194,7 +312,7 @@ export class HttpClient {
   async request<T = unknown>(req: HttpRequest): Promise<HttpResponse<T>> {
     const timeout = req.timeoutMs ?? NETWORK.REQUEST_TIMEOUT_MS;
 
-    if (isNativePlatform()) {
+    if ((this.deps.isNativePlatform ?? isNativePlatform)()) {
       return this.nativeRequest<T>(req, timeout);
     }
     return this.webRequest<T>(req, timeout);
@@ -204,13 +322,29 @@ export class HttpClient {
 
   private async nativeRequest<T>(req: HttpRequest, timeout: number): Promise<HttpResponse<T>> {
     throwIfAborted(req.signal);
-    const nativeHeaders = await buildNativeHeaders(req.url, req.headers);
+
+    let data = req.data;
+    let headerOverrides = req.headers;
+    // CapacitorHttp has no FormData support, so serialize multipart uploads to a
+    // raw body string with an explicit boundary and matching Content-Type. GPX
+    // is text, so a string body is byte-correct (no binary encoding needed).
+    if (req.multipart) {
+      const boundary = generateBoundary();
+      data = buildMultipartString(req.multipart, boundary);
+      headerOverrides = {
+        ...(req.headers ?? {}),
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      };
+    }
+
+    const nativeHeaders = await buildNativeHeaders(req.url, headerOverrides);
+    const nativeHttp = this.deps.nativeHttp ?? CapacitorHttp;
     const response = await this.awaitWithAbort(
-      CapacitorHttp.request({
+      nativeHttp.request({
         url: req.url,
         method: req.method,
         headers: nativeHeaders,
-        data: req.data,
+        data,
         connectTimeout: timeout,
         readTimeout: timeout,
       }),
@@ -274,8 +408,9 @@ export class HttpClient {
       // When using FormData the browser MUST set the Content-Type header itself
       // (it includes the multipart boundary), so we strip any caller-supplied
       // Content-Type to avoid a mismatch the server would reject as 400.
-      if (req.formData) {
-        init.body = req.formData;
+      const formData = req.formData ?? (req.multipart ? buildMultipartFormData(req.multipart) : undefined);
+      if (formData) {
+        init.body = formData;
         init.headers = buildWebHeaders(req.url, req.headers, true);
       } else {
         init.headers = buildWebHeaders(req.url, req.headers);

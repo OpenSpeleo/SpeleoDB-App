@@ -10,6 +10,10 @@ import {
   type LogOptions,
   type PluginOption,
 } from 'vite'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const repoRoot = path.dirname(fileURLToPath(import.meta.url))
 
 // Custom logger that drops a single class of third-party noise while leaving
 // every other build message intact: lightningcss (Vite 8's CSS minifier) does
@@ -155,6 +159,12 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     customLogger: baseLogger,
+    resolve: {
+      alias: {
+        events: path.resolve(repoRoot, 'src/polyfills/node-events.ts'),
+        url: path.resolve(repoRoot, 'src/polyfills/node-url.ts'),
+      },
+    },
     build: {
       // The app ships inside Capacitor, so cold-start parse/compile time matters
       // more than transfer size. The explicit bundle-budget plugin above enforces

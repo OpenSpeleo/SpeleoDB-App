@@ -11,6 +11,7 @@ import { useHistory } from 'react-router-dom';
 import {
   IonPage,
   IonContent,
+  IonModal,
 } from '@ionic/react';
 import Map, { Layer, Source } from 'react-map-gl/maplibre';
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
@@ -43,7 +44,15 @@ import {
 } from '../services/PreferencesService';
 import ProjectPanel from '../components/ProjectPanel';
 import LandmarkPanel from '../components/LandmarkPanel';
+import GpsPanel from '../components/GpsPanel';
+import GpsRecordingScreen from '../components/GpsRecordingScreen';
+import { BatteryOptimizationGuard } from '../services/BatteryOptimizationGuard';
+import GpsAveragingModal, { type GpsAveragingPhase } from '../components/GpsAveragingModal';
 import AppTabBar from '../components/AppTabBar';
+import { useGpsAveraging } from '../hooks/useGpsAveraging';
+import { GpxFileService } from '../services/GpxFileService';
+import { errorToLogDetails } from '../utils/errorDiagnostics';
+import type { LocalGpsTrack } from '../types/gpsTrack';
 import {
   buildLandmarkCollectionGroups,
   type LandmarkListItem,
@@ -62,6 +71,7 @@ import { LandmarkMutationError } from '../types/landmark';
 import { ensureLandmarkPropertyIds, type NormalizedLandmarkInput } from '../utils/landmarkMutations';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { createProjectColorState, getProjectColor } from '../utils/projectColors';
+import { trackPointsToFeatureCollection } from '../utils/gpsTrackGeoJson';
 import type { MapColorMode } from '../types/mapColorMode';
 import type { MeasurementUnit } from '../types/measurementUnit';
 import {
@@ -458,6 +468,8 @@ interface DashboardProps {
   onProjectPanelChange: (open: boolean) => void;
   isLandmarkPanelOpen: boolean;
   onLandmarkPanelChange: (open: boolean) => void;
+  isGpsPanelOpen: boolean;
+  onGpsPanelChange: (open: boolean) => void;
   showLandmarks: boolean;
   colorMode: MapColorMode;
   measurementUnit: MeasurementUnit;
@@ -471,6 +483,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   onProjectPanelChange,
   isLandmarkPanelOpen,
   onLandmarkPanelChange,
+  isGpsPanelOpen,
+  onGpsPanelChange,
   showLandmarks,
   colorMode,
   measurementUnit,
@@ -479,7 +493,20 @@ const Dashboard: React.FC<DashboardProps> = ({
   layerOfflineSync,
 }) => {
   const history = useHistory();
-  const { controller, projects, tilePrefetchJobs, isOfflineLocked, landmarksRevision, lastSyncedAt, pendingOpsCount } = useSpeleoDB();
+  const {
+    controller,
+    projects,
+    tilePrefetchJobs,
+    isOfflineLocked,
+    landmarksRevision,
+    lastSyncedAt,
+    pendingOpsCount,
+    gpsTracks,
+    gpsRecordingState,
+    gpsRecordingElapsedMs,
+    gpsRecordingElapsedUpdatedAt,
+    gpsTracksRevision,
+  } = useSpeleoDB();
   const didSyncRef = useRef(false);
   const didFitRef = useRef(false);
   const mapRef = useRef<MapRef>(null);
@@ -505,6 +532,44 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [landmarkToast, setLandmarkToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
   const landmarkToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
+
+  // ---- GPS state ------------------------------------------------------------
+  // The dedicated full-screen recording screen (own page with a back button).
+  const [isRecorderOpen, setIsRecorderOpen] = useState(false);
+  const [isAveragingOpen, setIsAveragingOpen] = useState(false);
+  // Stopwatch-style session: idle (held) -> running -> stopped (paused, data
+  // retained) -> running (resume/continue). Reset is the only thing that zeroes
+  // (it bumps the nonce, which clears the hook's samples).
+  const [averagingPhase, setAveragingPhase] = useState<GpsAveragingPhase>('idle');
+  const [averagingNonce, setAveragingNonce] = useState(0);
+  const [showAveragingResetConfirm, setShowAveragingResetConfirm] = useState(false);
+  // Confirm before abandoning an in-progress recording via the Cancel button.
+  const [showRecordingCancelConfirm, setShowRecordingCancelConfirm] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<LocalGpsTrack | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [uploadTarget, setUploadTarget] = useState<LocalGpsTrack | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  // Android-only nudge to exempt the app from battery optimization so OEM power
+  // managers don't kill the recording service. Dismissal is per-session.
+  const [showBatteryHint, setShowBatteryHint] = useState(false);
+  const batteryHintDismissedRef = useRef(false);
+  const batteryGuard = useMemo(() => new BatteryOptimizationGuard(), []);
+  const gpxFileService = useMemo(() => new GpxFileService(), []);
+  const averaging = useGpsAveraging(isAveragingOpen && averagingPhase === 'running', {
+    restartNonce: averagingNonce,
+  });
+
+  // The live recording buffer lives on the controller; re-read it whenever the
+  // GPS revision bumps (a new fix appended bumps it).
+  const currentTrackPoints = useMemo(
+    () => controller.currentTrackPoints,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [controller, gpsTracksRevision],
+  );
+  const currentTrackFeatureCollection = useMemo(
+    () => trackPointsToFeatureCollection(currentTrackPoints, { name: 'Current GPS recording' }),
+    [currentTrackPoints],
+  );
   const [mapViewMetrics, setMapViewMetrics] = useState<{ zoom: number; latitude: number }>(() => ({
     zoom: MAP.DEFAULT_ZOOM,
     latitude: MAP.DEFAULT_CENTER[1],
@@ -1461,6 +1526,286 @@ const Dashboard: React.FC<DashboardProps> = ({
     [controller, landmarkForm, landmarkFormBusy, showLandmarkToast],
   );
 
+  // ---- GPS handlers ---------------------------------------------------------
+
+  const handleOpenRecorder = useCallback(() => {
+    setIsRecorderOpen(true);
+  }, []);
+
+  // Collapse any full-screen GPS overlay (recorder / averaging) so a bottom-tab
+  // press reveals that tab's normal view. Recording keeps running (it lives in
+  // the controller); only the on-screen view is dismissed. If averaging has data,
+  // tab collapse behaves like Stop (pause), not Reset.
+  const closeGpsOverlays = useCallback(() => {
+    setIsRecorderOpen(false);
+    setIsAveragingOpen(false);
+    setAveragingPhase((prev) => (prev === 'running' ? 'stopped' : prev));
+  }, []);
+
+  const handleStartRecording = useCallback(() => {
+    void (async () => {
+      try {
+        await controller.startTrackRecording();
+      } catch (error) {
+        if (!isMountedRef.current) return;
+        const message =
+          error instanceof Error ? error.message : 'Could not start GPS recording.';
+        showLandmarkToast(message, 'error');
+        return;
+      }
+      // Once recording is live, nudge (Android only) to disable battery
+      // optimization if it's still active and the user hasn't dismissed it.
+      if (batteryHintDismissedRef.current) return;
+      const active = await batteryGuard.isOptimizationActive();
+      if (isMountedRef.current && active) setShowBatteryHint(true);
+    })();
+  }, [controller, showLandmarkToast, batteryGuard]);
+
+  const handleFixBatteryOptimization = useCallback(() => {
+    void (async () => {
+      await batteryGuard.requestExemption();
+      // Re-check after the system dialog returns; hide once exempted.
+      const stillActive = await batteryGuard.isOptimizationActive();
+      if (!isMountedRef.current) return;
+      if (!stillActive) {
+        setShowBatteryHint(false);
+        batteryHintDismissedRef.current = true;
+      }
+    })();
+  }, [batteryGuard]);
+
+  const handleDismissBatteryHint = useCallback(() => {
+    batteryHintDismissedRef.current = true;
+    setShowBatteryHint(false);
+  }, []);
+
+  const handlePauseRecording = useCallback(() => {
+    void controller.pauseTrackRecording();
+  }, [controller]);
+
+  const handleResumeRecording = useCallback(() => {
+    void controller.resumeTrackRecording();
+  }, [controller]);
+
+  // Stop from the recording screen, then leave the screen (back to the map).
+  const handleStopRecordingFromScreen = useCallback(() => {
+    void (async () => {
+      const track = await controller.stopTrackRecording();
+      if (!isMountedRef.current) return;
+      setIsRecorderOpen(false);
+      showLandmarkToast(track ? 'Track saved' : 'No points were recorded', track ? 'success' : 'error');
+    })();
+  }, [controller, showLandmarkToast]);
+
+  // Cancel from the recording screen: if a recording is in progress (recording
+  // or paused) confirm before discarding; otherwise just close the screen.
+  const handleCancelRecording = useCallback(() => {
+    if (gpsRecordingState === 'idle') {
+      setIsRecorderOpen(false);
+      return;
+    }
+    setShowRecordingCancelConfirm(true);
+  }, [gpsRecordingState]);
+
+  const handleDismissRecordingCancel = useCallback(() => {
+    setShowRecordingCancelConfirm(false);
+  }, []);
+
+  const handleConfirmRecordingCancel = useCallback(() => {
+    setShowRecordingCancelConfirm(false);
+    void controller.discardTrackRecording();
+    setIsRecorderOpen(false);
+  }, [controller]);
+
+  const handleCollectPoint = useCallback(() => {
+    if (averagingPhase === 'stopped' && averaging.result) {
+      setIsAveragingOpen(true);
+      return;
+    }
+    // Open held (no watch); bump the nonce so any prior session's data is
+    // cleared. The user presses Start to begin collecting.
+    setAveragingPhase('idle');
+    setAveragingNonce((n) => n + 1);
+    setIsAveragingOpen(true);
+  }, [averaging.result, averagingPhase]);
+
+  const handleStartAveraging = useCallback(() => {
+    // Start (from held) or resume/continue (from stopped) -- both just run.
+    if (averaging.status === 'permission-denied' || averaging.status === 'error') {
+      setAveragingNonce((n) => n + 1);
+    }
+    setAveragingPhase('running');
+  }, [averaging.status]);
+
+  const handleStopAveraging = useCallback(() => {
+    // Pause: stop reading but keep the collected data (stopwatch Stop).
+    setAveragingPhase('stopped');
+  }, []);
+
+  // Reset is destructive, so confirm first.
+  const handleRequestAveragingReset = useCallback(() => {
+    setShowAveragingResetConfirm(true);
+  }, []);
+
+  const handleCancelAveragingReset = useCallback(() => {
+    setShowAveragingResetConfirm(false);
+  }, []);
+
+  const handleConfirmAveragingReset = useCallback(() => {
+    setShowAveragingResetConfirm(false);
+    // Clear the collected fixes. If running, keep running (continue from zero);
+    // if paused, drop back to the held/zero state.
+    setAveragingNonce((n) => n + 1);
+    setAveragingPhase((prev) => (prev === 'running' ? 'running' : 'idle'));
+  }, []);
+
+  const handleCancelAveraging = useCallback(() => {
+    setIsAveragingOpen(false);
+    setAveragingPhase('idle');
+    setAveragingNonce((n) => n + 1);
+  }, []);
+
+  // Save an averaged point as a landmark by reusing the shared create form
+  // (works online and offline via the controller's landmark seam).
+  const handleAveragingSave = useCallback(
+    (pointToSave: { latitude: number; longitude: number; altitude: number | null }) => {
+      setIsAveragingOpen(false);
+      setAveragingPhase('idle');
+      setAveragingNonce((n) => n + 1);
+      setLandmarkFormError(null);
+      setLandmarkForm({
+        mode: 'create',
+        editId: null,
+        initialValues: { latitude: pointToSave.latitude, longitude: pointToSave.longitude },
+      });
+      loadLandmarkCollections();
+    },
+    [loadLandmarkCollections],
+  );
+
+  const reportGpsTrackActionError = useCallback(
+    (track: LocalGpsTrack, phase: 'gpx' | 'share' | 'upload', message: string, error: unknown) => {
+      console.warn('GPS track action failed.', {
+        phase,
+        trackId: track.id,
+        trackName: track.name,
+        pointCount: track.points.length,
+        uploadStatus: track.uploadStatus,
+        error: errorToLogDetails(error),
+      });
+      if (isMountedRef.current) showLandmarkToast(message, 'error');
+    },
+    [showLandmarkToast],
+  );
+
+  const prepareTrackGpxFile = useCallback(
+    async (track: LocalGpsTrack) => {
+      try {
+        return await controller.getTrackGpxFile(track);
+      } catch (error) {
+        reportGpsTrackActionError(track, 'gpx', 'Could not create the GPX file for this track.', error);
+        throw error;
+      }
+    },
+    [controller, reportGpsTrackActionError],
+  );
+
+  const handleShareTrack = useCallback(
+    (track: LocalGpsTrack) => {
+      void (async () => {
+        let gpxFile: Awaited<ReturnType<typeof prepareTrackGpxFile>>;
+        try {
+          gpxFile = await prepareTrackGpxFile(track);
+        } catch {
+          return;
+        }
+        try {
+          await gpxFileService.shareGpx({ ...gpxFile, title: track.name });
+        } catch (error) {
+          reportGpsTrackActionError(track, 'share', 'Could not share the GPX file.', error);
+        }
+      })();
+    },
+    [gpxFileService, prepareTrackGpxFile, reportGpsTrackActionError],
+  );
+
+  const handleUploadTrack = useCallback(
+    (track: LocalGpsTrack) => {
+      setUploadTarget(track);
+    },
+    [],
+  );
+
+  const handleCancelUploadTrack = useCallback(() => {
+    if (uploadBusy) return;
+    setUploadTarget(null);
+  }, [uploadBusy]);
+
+  const handleConfirmUploadTrack = useCallback(() => {
+    const target = uploadTarget;
+    if (!target || uploadBusy) return;
+    setUploadBusy(true);
+      void (async () => {
+        let gpxFile: Awaited<ReturnType<typeof prepareTrackGpxFile>>;
+        try {
+          gpxFile = await prepareTrackGpxFile(target);
+        } catch {
+          if (isMountedRef.current) {
+            setUploadTarget(null);
+            setUploadBusy(false);
+          }
+          return;
+        }
+        try {
+          const result = await controller.uploadGpsTrackFile(target.id, gpxFile);
+          if (!isMountedRef.current) return;
+          setUploadTarget(null);
+          if (!result) {
+            showLandmarkToast('Could not find that GPS track.', 'error');
+            return;
+          }
+          if (result.uploadStatus === 'uploaded') {
+            showLandmarkToast('Track uploaded to SpeleoDB', 'success');
+          } else if (result.uploadStatus === 'pending') {
+            showLandmarkToast('Offline — track will upload when reconnected', 'error');
+          } else if (result.uploadStatus === 'error') {
+            showLandmarkToast(result.uploadError ?? 'Upload failed', 'error');
+          }
+        } catch (error) {
+          if (isMountedRef.current) {
+            setUploadTarget(null);
+            reportGpsTrackActionError(target, 'upload', 'Could not upload the GPS track.', error);
+          }
+        } finally {
+          if (isMountedRef.current) setUploadBusy(false);
+        }
+      })();
+    },
+    [controller, prepareTrackGpxFile, reportGpsTrackActionError, showLandmarkToast, uploadBusy, uploadTarget],
+  );
+
+  const handleOpenRenameTrack = useCallback((track: LocalGpsTrack) => {
+    setRenameTarget(track);
+    setRenameValue(track.name);
+  }, []);
+
+  const handleConfirmRenameTrack = useCallback(() => {
+    const target = renameTarget;
+    if (!target) return;
+    const next = renameValue.trim();
+    setRenameTarget(null);
+    if (next && next !== target.name) {
+      void controller.renameGpsTrack(target.id, next);
+    }
+  }, [controller, renameTarget, renameValue]);
+
+  const handleDeleteTrack = useCallback(
+    (track: LocalGpsTrack) => {
+      void controller.deleteGpsTrack(track.id);
+    },
+    [controller],
+  );
+
   const handleCancelDeleteLandmark = useCallback(() => {
     if (landmarkDeleteBusy) return;
     setLandmarkDeleteTarget(null);
@@ -1944,6 +2289,25 @@ const Dashboard: React.FC<DashboardProps> = ({
                   </Source>
                 )}
 
+                {gpsRecordingState !== 'idle' && currentTrackFeatureCollection.features.length > 0 && (
+                  <Source
+                    id="gps-recording-track-source"
+                    type="geojson"
+                    data={currentTrackFeatureCollection}
+                  >
+                    <Layer
+                      id="gps-recording-track-line"
+                      type="line"
+                      layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+                      paint={{
+                        'line-color': '#ef4444',
+                        'line-width': 4,
+                        'line-opacity': 0.9,
+                      }}
+                    />
+                  </Source>
+                )}
+
                 {userLocation && (
                   <Source
                     id="user-location-source"
@@ -2069,6 +2433,101 @@ const Dashboard: React.FC<DashboardProps> = ({
             isOpen={isLandmarkPanelOpen}
           />
 
+          {/* ---- GPS panel ---- */}
+          <GpsPanel
+            isOpen={isGpsPanelOpen}
+            onClose={() => onGpsPanelChange(false)}
+            recordingState={gpsRecordingState}
+            currentPoints={currentTrackPoints}
+            tracks={gpsTracks}
+            measurementUnit={measurementUnit}
+            onOpenRecorder={handleOpenRecorder}
+            onCollectPoint={handleCollectPoint}
+            onShareTrack={handleShareTrack}
+            onUploadTrack={handleUploadTrack}
+            onRenameTrack={handleOpenRenameTrack}
+            onDeleteTrack={handleDeleteTrack}
+          />
+
+          {/* ---- GPS recording screen (full-screen, with a back button) ---- */}
+          <GpsRecordingScreen
+            isOpen={isRecorderOpen}
+            recordingState={gpsRecordingState}
+            recordingElapsedMs={gpsRecordingElapsedMs}
+            recordingElapsedUpdatedAt={gpsRecordingElapsedUpdatedAt}
+            currentPoints={currentTrackPoints}
+            measurementUnit={measurementUnit}
+            onBack={() => setIsRecorderOpen(false)}
+            onStart={handleStartRecording}
+            onPause={handlePauseRecording}
+            onResume={handleResumeRecording}
+            onStop={handleStopRecordingFromScreen}
+            onCancel={handleCancelRecording}
+            showBatteryOptimizationHint={showBatteryHint}
+            onFixBatteryOptimization={handleFixBatteryOptimization}
+            onDismissBatteryOptimizationHint={handleDismissBatteryHint}
+          />
+
+          <ConfirmDialog
+            isOpen={showRecordingCancelConfirm}
+            title="Discard recording"
+            message="This stops the current recording and discards the track. This cannot be undone."
+            confirmLabel="Discard"
+            cancelLabel="Keep recording"
+            danger
+            onConfirm={handleConfirmRecordingCancel}
+            onCancel={handleDismissRecordingCancel}
+            testId="gps-recording-cancel-confirm"
+          />
+
+          <GpsAveragingModal
+            isOpen={isAveragingOpen}
+            status={averaging.status}
+            result={averaging.result}
+            gnss={averaging.gnss}
+            measurementUnit={measurementUnit}
+            phase={averagingPhase}
+            onStart={handleStartAveraging}
+            onStop={handleStopAveraging}
+            onReset={handleRequestAveragingReset}
+            onCancel={handleCancelAveraging}
+            onSave={handleAveragingSave}
+          />
+
+          <ConfirmDialog
+            isOpen={showAveragingResetConfirm}
+            title="Reset GPS Point"
+            message="This clears all the GPS readings collected so far and starts the average over from zero."
+            confirmLabel="Reset"
+            cancelLabel="Cancel"
+            danger
+            onConfirm={handleConfirmAveragingReset}
+            onCancel={handleCancelAveragingReset}
+            testId="gps-averaging-reset-confirm"
+          />
+
+          <ConfirmDialog
+            isOpen={uploadTarget !== null}
+            title="Upload GPS Track"
+            message={
+              <>
+                Upload{' '}
+                <span className="font-semibold text-slate-100">
+                  {uploadTarget?.name ?? 'this track'}
+                </span>{' '}
+                to SpeleoDB?
+              </>
+            }
+            warning="This sends the GPX track to the active SpeleoDB instance. If you are offline, it will be queued and uploaded after reconnect."
+            confirmLabel="Upload"
+            cancelLabel="Cancel"
+            busy={uploadBusy}
+            busyLabel={'Uploading\u2026'}
+            onConfirm={handleConfirmUploadTrack}
+            onCancel={handleCancelUploadTrack}
+            testId="gps-upload-confirm"
+          />
+
           <OverlayMarkerDetailsModal
             detail={selectedOverlayMarkerDetail}
             onClose={handleDismissOverlayMarkerDetailsModal}
@@ -2115,6 +2574,52 @@ const Dashboard: React.FC<DashboardProps> = ({
             testId="delete-landmark-confirm"
           />
 
+          {renameTarget && (
+            <IonModal
+              isOpen
+              onDidDismiss={() => setRenameTarget(null)}
+            >
+              <IonContent className="ion-padding">
+                <div
+                  data-testid="gps-rename-modal"
+                  className="flex flex-col h-full justify-center max-w-sm mx-auto"
+                >
+                  <h2 className="text-xl font-semibold text-slate-100 mb-5 text-center">
+                    Rename Track
+                  </h2>
+                  <input
+                    type="text"
+                    value={renameValue}
+                    maxLength={120}
+                    autoFocus
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    data-testid="gps-rename-input"
+                    className="w-full px-4 py-2.5 text-sm text-slate-200 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-500"
+                    placeholder="Track name"
+                  />
+                  <div className="grid grid-cols-2 gap-3 mt-6">
+                    <button
+                      type="button"
+                      onClick={() => setRenameTarget(null)}
+                      data-testid="gps-rename-cancel"
+                      className="app-btn app-btn--secondary"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmRenameTrack}
+                      data-testid="gps-rename-save"
+                      className="app-btn app-btn--primary"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              </IonContent>
+            </IonModal>
+          )}
+
           {landmarkToast && (
             <div
               data-testid="landmark-toast"
@@ -2153,6 +2658,10 @@ const Dashboard: React.FC<DashboardProps> = ({
             onProjectPanelChange={onProjectPanelChange}
             isLandmarkPanelOpen={isLandmarkPanelOpen}
             onLandmarkPanelChange={onLandmarkPanelChange}
+            isGpsPanelOpen={isGpsPanelOpen}
+            onGpsPanelChange={onGpsPanelChange}
+            isGpsRecording={gpsRecordingState !== 'idle'}
+            onTabPress={closeGpsOverlays}
             pendingOpsCount={pendingOpsCount}
           />
         </div>

@@ -1,7 +1,8 @@
-import { Suspense, lazy, useState, type ReactNode } from 'react'
+import { Suspense, lazy, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { IonApp, setupIonicReact } from '@ionic/react'
 
+import { SpeleoDBContext } from './context/useSpeleoDB'
 import {
   getColorMode,
   getLayerOfflineSyncPreferences,
@@ -19,12 +20,14 @@ setupIonicReact({
 })
 
 function AuthenticatedRoutes(): ReactNode {
+  const speleo = useContext(SpeleoDBContext)
   const path = useLocation().pathname
   const isDashboard = path === '/dashboard'
   const isSettings = path === '/settings'
   const isPending = path === '/pending'
   const [isProjectPanelOpen, setIsProjectPanelOpen] = useState(false)
   const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = useState(false)
+  const [isGpsPanelOpen, setIsGpsPanelOpen] = useState(false)
   const [showLandmarks, setShowLandmarks] = useState(() => getShowLandmarks())
   const [colorMode, setColorMode] = useState(() => getColorMode())
   const [measurementUnit, setMeasurementUnit] = useState(() => getMeasurementUnit())
@@ -32,17 +35,49 @@ function AuthenticatedRoutes(): ReactNode {
   const [layerOfflineSync, setLayerOfflineSync] = useState(() =>
     getLayerOfflineSyncPreferences(),
   )
+  const [gpsErrorToast, setGpsErrorToast] = useState<string | null>(null)
+  const gpsRecordingError = speleo?.gpsRecordingError ?? null
+  const controller = speleo?.controller
 
-  // The project and landmark panels share the same left-edge slot, so opening
-  // one closes the other (they are mutually exclusive).
+  useEffect(() => {
+    if (!gpsRecordingError || !controller) return
+    const message = gpsRecordingError
+    queueMicrotask(() => {
+      setGpsErrorToast(message)
+      controller.clearGpsRecordingError()
+    })
+  }, [controller, gpsRecordingError])
+
+  useEffect(() => {
+    if (!gpsErrorToast) return
+    const timeout = window.setTimeout(() => setGpsErrorToast(null), 4000)
+    return () => window.clearTimeout(timeout)
+  }, [gpsErrorToast])
+
+  // The project, landmark, and GPS panels share the same left-edge slot, so
+  // opening one closes the others (they are mutually exclusive).
   const handleProjectPanelChange = (open: boolean) => {
     setIsProjectPanelOpen(open)
-    if (open) setIsLandmarkPanelOpen(false)
+    if (open) {
+      setIsLandmarkPanelOpen(false)
+      setIsGpsPanelOpen(false)
+    }
   }
 
   const handleLandmarkPanelChange = (open: boolean) => {
     setIsLandmarkPanelOpen(open)
-    if (open) setIsProjectPanelOpen(false)
+    if (open) {
+      setIsProjectPanelOpen(false)
+      setIsGpsPanelOpen(false)
+    }
+  }
+
+  const handleGpsPanelChange = (open: boolean) => {
+    setIsGpsPanelOpen(open)
+    if (open) {
+      setIsProjectPanelOpen(false)
+      setIsLandmarkPanelOpen(false)
+    }
   }
 
   return (
@@ -61,6 +96,8 @@ function AuthenticatedRoutes(): ReactNode {
             onProjectPanelChange={handleProjectPanelChange}
             isLandmarkPanelOpen={isLandmarkPanelOpen}
             onLandmarkPanelChange={handleLandmarkPanelChange}
+            isGpsPanelOpen={isGpsPanelOpen}
+            onGpsPanelChange={handleGpsPanelChange}
             showLandmarks={showLandmarks}
             colorMode={colorMode}
             measurementUnit={measurementUnit}
@@ -92,6 +129,8 @@ function AuthenticatedRoutes(): ReactNode {
             onProjectPanelChange={handleProjectPanelChange}
             isLandmarkPanelOpen={isLandmarkPanelOpen}
             onLandmarkPanelChange={handleLandmarkPanelChange}
+            isGpsPanelOpen={isGpsPanelOpen}
+            onGpsPanelChange={handleGpsPanelChange}
           />
         </Suspense>
       </div>
@@ -109,9 +148,19 @@ function AuthenticatedRoutes(): ReactNode {
             onProjectPanelChange={handleProjectPanelChange}
             isLandmarkPanelOpen={isLandmarkPanelOpen}
             onLandmarkPanelChange={handleLandmarkPanelChange}
+            isGpsPanelOpen={isGpsPanelOpen}
+            onGpsPanelChange={handleGpsPanelChange}
           />
         </Suspense>
       </div>
+      {gpsErrorToast && (
+        <div
+          data-testid="gps-recording-error-toast"
+          className="fixed left-1/2 bottom-24 z-[10000] -translate-x-1/2 rounded-lg bg-red-600 px-4 py-2 text-sm text-white shadow-lg"
+        >
+          {gpsErrorToast}
+        </div>
+      )}
     </>
   )
 }

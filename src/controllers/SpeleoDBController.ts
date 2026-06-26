@@ -11,14 +11,23 @@
 
 import {
   DEFAULT_MAP_LAYER_ID,
+  GPS,
   HTTP_STATUS,
   MAP_LAYERS,
   MAP_OVERLAYS,
   NETWORK,
   TILE_PREFETCH,
 } from '../constants';
-import type { SpeleoDBService } from '../services/SpeleoDBService';
+import type { GpxImportResponse, SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
+import { GpsTrackStore } from '../services/GpsTrackStore';
+import { MultipartPayloadError } from '../services/HttpClient';
+import {
+  CapacitorRecordingNotificationPermissionGuard,
+  type RecordingNotificationPermissionGuard,
+} from '../services/RecordingNotificationPermissionGuard';
+import type { LocationWatcher } from '../services/GeolocationWatcher';
+import { createRecordingLocationWatcher } from '../services/BackgroundGeolocationWatcher';
 import {
   clearCachedTilesRuntime,
   clearPrefetchJobsRuntime,
@@ -82,6 +91,14 @@ import type {
   OfflineConflictChoice,
   OfflineOpView,
 } from '../types/offlineOp';
+import type {
+  GpsRecordingState,
+  LocalGpsTrack,
+  RecordedPoint,
+} from '../types/gpsTrack';
+import { GpsTrackGpxService, EmptyGpxTrackError, type GpsTrackGpxFile } from '../services/GpsTrackGpxService';
+import { generateUuid } from '../utils/ids';
+import { shouldAcceptFix } from '../utils/gpsSampling';
 import { CancellationContext } from './CancellationContext';
 import { isAbortError } from '../utils/abort';
 import type {
@@ -147,6 +164,31 @@ function isClientErrorStatus(status: number): boolean {
   return status >= 400 && status < 500;
 }
 
+function isRetryableGpsUploadStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+/**
+ * A GPS watch error is *fatal* (recording cannot continue) only when the OS
+ * refuses location authorization: the background-geolocation plugin reports
+ * `code: 'NOT_AUTHORIZED'` (permission revoked / "Always" denied / location
+ * services off) and the web `GeolocationPositionError` uses `code === 1`
+ * (PERMISSION_DENIED). Everything else (a momentary "signal lost", timeout,
+ * etc.) is transient and must NOT stop an in-progress recording.
+ */
+function isFatalWatchError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  if (code === 'NOT_AUTHORIZED') return true;
+  if (code === 1 || code === '1') return true;
+  return false;
+}
+
+/** User-facing message when a recording stops because location was denied. */
+const GPS_RECORDING_PERMISSION_LOST_MESSAGE =
+  'Location access was denied, so GPS recording stopped. Allow location ' +
+  '(set to "Always" for background recording) and start again.';
+
 function hasAuthTokenResponse(data: unknown): data is AuthTokenResponse {
   if (!data || typeof data !== 'object') {
     return false;
@@ -181,6 +223,30 @@ export class SpeleoDBController {
   // replay/conflict resolution. See docs/offline-landmark-queue.md.
   private offlineQueue!: OfflineOpQueue;
   private _pendingOpsRevision = 0;
+  // ---- GPS tracks + recording -----------------------------------------------
+  // Recorded tracks (persisted in IndexedDB), the live recording state machine,
+  // and the in-progress point buffer. Uploads to SpeleoDB follow the same
+  // offline-first model as landmarks (record offline, upload on reconnect).
+  // See docs/gps-tracks.md.
+  private _gpsTracks: LocalGpsTrack[] = [];
+  private _gpsRecordingState: GpsRecordingState = 'idle';
+  private _currentTrackPoints: RecordedPoint[] = [];
+  private _gpsTracksRevision = 0;
+  // The in-progress recording is persisted incrementally (not just on stop) so
+  // a force-quit mid-recording recovers the captured points on next launch.
+  private _recordingTrackId: string | null = null;
+  private _recordingStartedAt = 0;
+  private _recordingActiveElapsedMs = 0;
+  private _recordingActiveStartedAt: number | null = null;
+  private _recordingWatchSessionStartedAt = 0;
+  private _recordingName = '';
+  private _gpsPersistGeneration = 0;
+  private _gpsPersistQueue: Promise<void> | null = null;
+  // Set when an active recording is forcibly stopped by a fatal location error
+  // (e.g. permission revoked / "Always" denied). The UI reads it once to show a
+  // toast, then clears it via `clearGpsRecordingError()`. Null in the normal
+  // case so a recording never appears broken silently.
+  private _gpsRecordingError: string | null = null;
   private _listeners = new Set<() => void>();
   private tilePrefetch!: TilePrefetchServiceLike;
   private tilePrefetchUnsubscribe: (() => void) | null = null;
@@ -210,6 +276,14 @@ export class SpeleoDBController {
   private _storageConsentRequestedSnapshot = this._storageConsentRequested;
   private _pendingOpsCountSnapshot = 0;
   private _pendingOpsRevisionSnapshot = this._pendingOpsRevision;
+  private _gpsTracksSnapshot: LocalGpsTrack[] = this._gpsTracks;
+  private _gpsRecordingStateSnapshot: GpsRecordingState = this._gpsRecordingState;
+  private _currentTrackPointsSnapshot: RecordedPoint[] = this._currentTrackPoints;
+  private _gpsTracksRevisionSnapshot: number = this._gpsTracksRevision;
+  private _gpsRecordingStartedAtSnapshot: number | null = null;
+  private _gpsRecordingElapsedMsSnapshot = 0;
+  private _gpsRecordingElapsedUpdatedAtSnapshot: number | null = null;
+  private _gpsRecordingErrorSnapshot: string | null = this._gpsRecordingError;
 
   constructor(
     private service: SpeleoDBService,
@@ -217,12 +291,34 @@ export class SpeleoDBController {
     private cache: ProjectCacheService,
     tilePrefetch?: TilePrefetchServiceLike,
     private offlineOpStore: OfflineOpStore = new OfflineOpStore(),
+    private gpsTrackStore: GpsTrackStore = new GpsTrackStore(),
+    private geolocationWatcher: LocationWatcher = createRecordingLocationWatcher(),
+    private recordingNotificationPermission: RecordingNotificationPermissionGuard =
+      new CapacitorRecordingNotificationPermissionGuard(),
+    private gpsTrackGpxService: GpsTrackGpxService = new GpsTrackGpxService(),
   ) {
     this.attachTilePrefetch(tilePrefetch ?? this.createTilePrefetchService());
     this.offlineQueue = this.buildOfflineQueue();
     this.restoreSession();
     this.restoreTileCacheOverLimitConsent();
     this.setOfflineLocked(false);
+    // Load persisted GPS tracks so the panel shows them on startup. Only notify
+    // when something was restored, so a clean start does not perturb revisions.
+    const gpsLoadGeneration = this.captureAsyncGeneration();
+    void this.gpsTrackStore
+      .list()
+      .then((tracks) => {
+        if (
+          tracks.length > 0 &&
+          this.isAsyncGenerationCurrent(gpsLoadGeneration) &&
+          this._authState.isAuthenticated &&
+          !this._isPurgingLocalData
+        ) {
+          this._gpsTracks = tracks;
+          this.bumpGpsTracksRevision();
+        }
+      })
+      .catch((error) => console.warn('Failed to load GPS tracks:', error));
     // Load persisted ops so the map folds them and the Pending tab appears on
     // startup (before any user action). Only refresh the UI when something was
     // actually restored, so a clean start does not perturb revisions.
@@ -334,6 +430,57 @@ export class SpeleoDBController {
     return this._pendingOpsRevisionSnapshot;
   }
 
+  /** Recorded GPS tracks (newest first). */
+  get gpsTracks(): LocalGpsTrack[] {
+    return this._gpsTracksSnapshot;
+  }
+
+  /** Current recording lifecycle (`idle` / `recording` / `paused`). */
+  get gpsRecordingState(): GpsRecordingState {
+    return this._gpsRecordingStateSnapshot;
+  }
+
+  /**
+   * Epoch ms when the current recording started (null when idle). Lets the UI
+   * tick a live duration from the moment Start is pressed -- before the first
+   * GPS fix arrives -- so recording feels immediate.
+   */
+  get gpsRecordingStartedAt(): number | null {
+    return this._gpsRecordingStartedAtSnapshot;
+  }
+
+  /** Active recording duration, excluding paused wall time, at the last snapshot. */
+  get gpsRecordingElapsedMs(): number {
+    return this._gpsRecordingElapsedMsSnapshot;
+  }
+
+  /**
+   * Epoch ms when `gpsRecordingElapsedMs` was measured. Non-null only while
+   * actively recording so the UI can tick locally without counting paused time.
+   */
+  get gpsRecordingElapsedUpdatedAt(): number | null {
+    return this._gpsRecordingElapsedUpdatedAtSnapshot;
+  }
+
+  /** Live point buffer of the in-progress recording (empty when idle). */
+  get currentTrackPoints(): RecordedPoint[] {
+    return this._currentTrackPointsSnapshot;
+  }
+
+  /**
+   * Set when an active recording was forcibly stopped by a fatal location error
+   * (permission denied/revoked). The UI surfaces it once then calls
+   * `clearGpsRecordingError()`. Null otherwise.
+   */
+  get gpsRecordingError(): string | null {
+    return this._gpsRecordingErrorSnapshot;
+  }
+
+  /** Bumped on any GPS track/recording change so the panel re-reads state. */
+  get gpsTracksRevision(): number {
+    return this._gpsTracksRevisionSnapshot;
+  }
+
   /** True when the user has approved letting tile prefetch exceed the cap. */
   get isTileCacheOverLimitApproved(): boolean {
     return this._tileCacheOverLimitApprovedSnapshot;
@@ -396,6 +543,17 @@ export class SpeleoDBController {
     this._storageConsentRequestedSnapshot = this._storageConsentRequested;
     this._pendingOpsCountSnapshot = this.offlineQueue ? this.offlineQueue.count : 0;
     this._pendingOpsRevisionSnapshot = this._pendingOpsRevision;
+    this._gpsTracksSnapshot = [...this._gpsTracks];
+    this._gpsRecordingStateSnapshot = this._gpsRecordingState;
+    const snapshotNow = Date.now();
+    this._gpsRecordingStartedAtSnapshot =
+      this._gpsRecordingState === 'idle' ? null : this._recordingStartedAt;
+    this._gpsRecordingElapsedMsSnapshot = this.recordingElapsedMsAt(snapshotNow);
+    this._gpsRecordingElapsedUpdatedAtSnapshot =
+      this._gpsRecordingState === 'recording' ? snapshotNow : null;
+    this._currentTrackPointsSnapshot = [...this._currentTrackPoints];
+    this._gpsTracksRevisionSnapshot = this._gpsTracksRevision;
+    this._gpsRecordingErrorSnapshot = this._gpsRecordingError;
     this._listeners.forEach((fn) => fn());
   }
 
@@ -460,6 +618,27 @@ export class SpeleoDBController {
   private async waitForTrackedOperations(): Promise<void> {
     if (this._trackedOperations.size === 0) return;
     await Promise.allSettled([...this._trackedOperations]);
+  }
+
+  private recordingElapsedMsAt(now: number): number {
+    if (this._gpsRecordingState === 'idle') return 0;
+    const activeSegmentMs =
+      this._gpsRecordingState === 'recording' && this._recordingActiveStartedAt !== null
+        ? Math.max(0, now - this._recordingActiveStartedAt)
+        : 0;
+    return this._recordingActiveElapsedMs + activeSegmentMs;
+  }
+
+  private freezeRecordingElapsed(now = Date.now()): void {
+    this._recordingActiveElapsedMs = this.recordingElapsedMsAt(now);
+    this._recordingActiveStartedAt = null;
+  }
+
+  private resetRecordingTiming(): void {
+    this._recordingStartedAt = 0;
+    this._recordingActiveElapsedMs = 0;
+    this._recordingActiveStartedAt = null;
+    this._recordingWatchSessionStartedAt = 0;
   }
 
   private attachTilePrefetch(service: TilePrefetchServiceLike): void {
@@ -743,7 +922,11 @@ export class SpeleoDBController {
     if (this._isOfflineLocked) {
       return 'network_error';
     }
-    return this.validateSessionAgainstServer();
+    const result = await this.validateSessionAgainstServer();
+    if (result === 'ok') {
+      void this.uploadPendingGpsTracks();
+    }
+    return result;
   }
 
   /**
@@ -766,6 +949,8 @@ export class SpeleoDBController {
       // hide the Go Online button immediately while the sync runs. syncProjects
       // tracks itself for logout teardown.
       void this.syncProjects();
+      // Drain any GPS track uploads that were queued while offline.
+      void this.uploadPendingGpsTracks();
     }
     return result;
   }
@@ -862,6 +1047,11 @@ export class SpeleoDBController {
         // Continue cleanup even if prefetch teardown fails.
       }
 
+      // Stop any active GPS recording so the watch is released and the buffer
+      // does not survive into the next session.
+      this._gpsPersistGeneration += 1;
+      await this.geolocationWatcher.stop();
+
       // Reset in-memory state first so UI reflects the wipe immediately.
       this._authState = { isAuthenticated: false, user: null, token: null };
       this._isOnline = false;
@@ -870,6 +1060,12 @@ export class SpeleoDBController {
       this._syncStatus = 'idle';
       this._lastSyncedAt = null;
       this._tilePrefetchJobs = [];
+      this._gpsTracks = [];
+      this._gpsRecordingState = 'idle';
+      this._currentTrackPoints = [];
+      this._recordingTrackId = null;
+      this.resetRecordingTiming();
+      this._gpsRecordingError = null;
       this._tileCacheOverLimitApproved = false;
       this._tileCacheOverLimitPromptAcknowledged = false;
       this._storageConsentRequested = false;
@@ -1204,6 +1400,493 @@ export class SpeleoDBController {
       }
     }
     await this.enqueueDelete(id);
+  }
+
+  // ---- GPS track recording + upload -----------------------------------------
+
+  /**
+   * Begin recording a GPS track. Requests location permission and starts the
+   * shared position watch (no watcher-level filters; gating is the shared
+   * `shouldAcceptFix` time gate). Throws if permission is denied so the UI can
+   * surface it. A no-op when already recording.
+   */
+  async startTrackRecording(): Promise<void> {
+    if (this._gpsRecordingState === 'recording') return;
+    if (this._gpsRecordingState === 'paused') {
+      await this.resumeTrackRecording();
+      return;
+    }
+    const permission = await this.geolocationWatcher.requestPermissions();
+    if (permission !== 'granted') {
+      throw new Error('Location permission is required to record a GPS track.');
+    }
+    // Best-effort: prompt for the Android 13+ notification permission so the
+    // foreground-service recording notification is visible. Recording does NOT
+    // depend on it -- the foreground service still runs if the user declines, the
+    // notification is just hidden -- so a denial must never block the core field
+    // feature. No-op on iOS/web (the guard returns 'granted'). See docs/gps-tracks.md.
+    await this.recordingNotificationPermission.requestPermission();
+    const now = Date.now();
+    this._recordingTrackId = generateUuid();
+    this._recordingStartedAt = now;
+    this._recordingActiveElapsedMs = 0;
+    this._recordingActiveStartedAt = now;
+    this._recordingWatchSessionStartedAt = now;
+    this._recordingName = this.defaultTrackName(now);
+    this._currentTrackPoints = [];
+    this._gpsRecordingState = 'recording';
+    this._gpsRecordingError = null;
+    // No record is written until the first fix arrives (see appendTrackPoint),
+    // which persists incrementally for crash recovery. Persisting an empty
+    // track up front would, on a force-quit during GPS warm-up, leave a useless
+    // 0-point "track" in the list that cannot be uploaded.
+    this.bumpGpsTracksRevision();
+    try {
+      await this.startGpsWatch();
+    } catch (error) {
+      await this.geolocationWatcher.stop();
+      this._currentTrackPoints = [];
+      this._recordingTrackId = null;
+      this.resetRecordingTiming();
+      this._recordingName = '';
+      this._gpsRecordingState = 'idle';
+      this.bumpGpsTracksRevision();
+      throw error;
+    }
+  }
+
+  /** Pause recording: stop the watch but keep the captured buffer. */
+  async pauseTrackRecording(): Promise<void> {
+    if (this._gpsRecordingState !== 'recording') return;
+    await this.geolocationWatcher.stop();
+    this.freezeRecordingElapsed();
+    this._gpsRecordingState = 'paused';
+    this.bumpGpsTracksRevision();
+  }
+
+  /** Resume a paused recording. */
+  async resumeTrackRecording(): Promise<void> {
+    if (this._gpsRecordingState !== 'paused') return;
+    // Best-effort notification permission (see startTrackRecording); a denial
+    // never blocks resuming -- the foreground service runs regardless.
+    await this.recordingNotificationPermission.requestPermission();
+    const previousSessionStartedAt = this._recordingWatchSessionStartedAt;
+    const previousActiveStartedAt = this._recordingActiveStartedAt;
+    this._gpsRecordingState = 'recording';
+    const now = Date.now();
+    this._recordingActiveStartedAt = now;
+    this._recordingWatchSessionStartedAt = now;
+    this.bumpGpsTracksRevision();
+    try {
+      await this.startGpsWatch();
+    } catch (error) {
+      this._gpsRecordingState = 'paused';
+      this._recordingWatchSessionStartedAt = previousSessionStartedAt;
+      this._recordingActiveStartedAt = previousActiveStartedAt;
+      this.bumpGpsTracksRevision();
+      throw error;
+    }
+  }
+
+  /**
+   * Stop recording and persist the captured points as a new track. Returns the
+   * saved track, or null when nothing was captured (the session is discarded).
+   */
+  async stopTrackRecording(name?: string): Promise<LocalGpsTrack | null> {
+    if (this._gpsRecordingState === 'idle') return null;
+    await this.geolocationWatcher.stop();
+    const points = this._currentTrackPoints;
+    const id = this._recordingTrackId;
+    const startedAt = this._recordingStartedAt;
+    const recordingName = this._recordingName;
+    this.freezeRecordingElapsed();
+    await this.waitForTrackedOperations();
+    this._currentTrackPoints = [];
+    this._recordingTrackId = null;
+    this.resetRecordingTiming();
+    this._recordingName = '';
+    this._gpsRecordingState = 'idle';
+
+    // Nothing captured: discard the empty in-progress record.
+    if (!id || points.length === 0) {
+      if (id) {
+        await this.gpsTrackStore.remove(id).catch((error) => {
+          console.warn('Failed to discard empty GPS track:', error);
+        });
+      }
+      this.bumpGpsTracksRevision();
+      return null;
+    }
+
+    const track = this.buildFinalizedTrack(id, name?.trim() || recordingName, points, startedAt);
+    await this.enqueueGpsTrackPersist(track);
+    this._gpsTracks = [track, ...this._gpsTracks];
+    this.bumpGpsTracksRevision();
+    return track;
+  }
+
+  /**
+   * Abandon the in-progress recording: stop the watch and delete the captured
+   * buffer without saving a track. Used by the recording screen's Cancel
+   * action. A no-op when not recording.
+   */
+  async discardTrackRecording(): Promise<void> {
+    if (this._gpsRecordingState === 'idle') return;
+    await this.geolocationWatcher.stop();
+    this._gpsPersistGeneration += 1;
+    await this.waitForTrackedOperations();
+    const id = this._recordingTrackId;
+    this._currentTrackPoints = [];
+    this._recordingTrackId = null;
+    this.resetRecordingTiming();
+    this._recordingName = '';
+    this._gpsRecordingState = 'idle';
+    if (id) {
+      await this.gpsTrackStore.remove(id).catch((error) => {
+        console.warn('Failed to discard GPS track recording:', error);
+      });
+    }
+    this.bumpGpsTracksRevision();
+  }
+
+  /** Snapshot of the current recorded tracks. */
+  getGpsTracks(): LocalGpsTrack[] {
+    return [...this._gpsTracks];
+  }
+
+  /**
+   * Serialize a track to a GPX document + file name for export / share. Reuses
+   * the same builder as upload so every consumer produces identical GPX.
+   */
+  async getTrackGpxFile(track: LocalGpsTrack): Promise<{ fileName: string; gpx: string }> {
+    return this.gpsTrackGpxService.buildFile(track);
+  }
+
+  /** Rename a recorded track. */
+  async renameGpsTrack(id: string, name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    await this.updateGpsTrack(id, { name: trimmed });
+  }
+
+  /** Delete a recorded track from local storage. */
+  async deleteGpsTrack(id: string): Promise<void> {
+    await this.gpsTrackStore.remove(id).catch((error) => {
+      console.warn('Failed to delete GPS track:', error);
+    });
+    this._gpsTracks = this._gpsTracks.filter((t) => t.id !== id);
+    this.bumpGpsTracksRevision();
+  }
+
+  /**
+   * Upload a recorded track to SpeleoDB as a GPX file. Classified like landmark
+   * mutations: online 2xx -> `uploaded`; offline-locked / transport / timeout /
+   * 5xx -> `pending` (and the app flips to offline); definitive 4xx -> `error`.
+   * The track is never silently dropped.
+   */
+  async uploadGpsTrack(id: string): Promise<LocalGpsTrack | null> {
+    const track = this._gpsTracks.find((t) => t.id === id);
+    if (!track) return null;
+
+    const credentials = this.getSyncCredentials();
+    if (!credentials) {
+      return this.updateGpsTrack(id, {
+        uploadStatus: 'error',
+        uploadError: 'You are not signed in.',
+      });
+    }
+    if (track.points.length === 0) {
+      return this.updateGpsTrack(id, {
+        uploadStatus: 'error',
+        uploadError: 'This track has no points to upload.',
+      });
+    }
+    if (!this.hasNetworkAccess()) {
+      return this.updateGpsTrack(id, { uploadStatus: 'pending', uploadError: null });
+    }
+
+    let gpxFile: GpsTrackGpxFile;
+    try {
+      gpxFile = await this.getTrackGpxFile(track);
+    } catch (error) {
+      // A track with no valid points can't be exported; mark it as an error and
+      // keep it for inspection instead of throwing (so a drain run can't abort
+      // on one bad track). Any other build failure propagates to the caller.
+      if (error instanceof EmptyGpxTrackError) {
+        return this.updateGpsTrack(id, { uploadStatus: 'error', uploadError: error.message });
+      }
+      throw error;
+    }
+    return this.uploadGpsTrackFile(id, gpxFile);
+  }
+
+  async uploadGpsTrackFile(id: string, gpxFile: GpsTrackGpxFile): Promise<LocalGpsTrack | null> {
+    const track = this._gpsTracks.find((t) => t.id === id);
+    if (!track) return null;
+
+    const credentials = this.getSyncCredentials();
+    if (!credentials) {
+      return this.updateGpsTrack(id, {
+        uploadStatus: 'error',
+        uploadError: 'You are not signed in.',
+      });
+    }
+    if (track.points.length === 0) {
+      return this.updateGpsTrack(id, {
+        uploadStatus: 'error',
+        uploadError: 'This track has no points to upload.',
+      });
+    }
+    if (!this.hasNetworkAccess()) {
+      return this.updateGpsTrack(id, { uploadStatus: 'pending', uploadError: null });
+    }
+
+    try {
+      const response = await this.service.uploadGpx(
+        credentials.instance,
+        credentials.token,
+        gpxFile.gpx,
+        gpxFile.fileName,
+      );
+      if (isSuccessfulStatus(response.status)) {
+        const data = (response.data ?? {}) as Partial<GpxImportResponse>;
+        return this.updateGpsTrack(id, {
+          uploadStatus: 'uploaded',
+          uploadError: null,
+          remoteLandmarksCreated: data.landmarks_created ?? 0,
+          remoteTracksCreated: data.gps_tracks_created ?? 0,
+        });
+      }
+      if (isRetryableGpsUploadStatus(response.status)) {
+        // Server unreachable -> treat as offline and keep the track pending.
+        if (response.status !== 429) this.enterOfflineMode();
+        return this.updateGpsTrack(id, { uploadStatus: 'pending', uploadError: null });
+      }
+      // Definitive 4xx: surface to the user, keep the track for inspection.
+      return this.updateGpsTrack(id, {
+        uploadStatus: 'error',
+        uploadError: this.parseGpxUploadError(response.data),
+      });
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      if (error instanceof MultipartPayloadError) {
+        return this.updateGpsTrack(id, {
+          uploadStatus: 'error',
+          uploadError: error.message,
+        });
+      }
+      this.enterOfflineMode();
+      return this.updateGpsTrack(id, { uploadStatus: 'pending', uploadError: null });
+    }
+  }
+
+  /**
+   * Upload every track still pending upload. Used by the reconnect path so a
+   * track recorded offline syncs automatically when connectivity returns.
+   * No-op while offline-locked or unauthenticated.
+   */
+  async uploadPendingGpsTracks(): Promise<void> {
+    if (!this.hasNetworkAccess() || !this.getSyncCredentials()) return;
+    const pending = this._gpsTracks.filter((t) => t.uploadStatus === 'pending');
+    for (const track of pending) {
+      // Stop draining if we dropped offline mid-run (request-driven model).
+      if (!this.hasNetworkAccess()) break;
+      await this.uploadGpsTrack(track.id);
+    }
+  }
+
+  private async startGpsWatch(): Promise<void> {
+    // Identical watch setup to the high-accuracy point collector: raw fixes,
+    // no watcher-level filters. All gating happens in appendTrackPoint via the
+    // shared shouldAcceptFix gate. (The old min-distance filter compared real
+    // fixes against the OS's replayed last-known location and silently dropped
+    // everything until the user moved >2 m, which delayed the first point by
+    // ~15-20 s when standing still.)
+    await this.geolocationWatcher.start(
+      { ...GPS.WATCH_OPTIONS },
+      (point) => this.appendTrackPoint(point),
+      (error) => this.handleRecordingWatchError(error),
+    );
+  }
+
+  /**
+   * Handle a watch error raised during recording. A fatal authorization error
+   * (permission denied/revoked, location off) stops the recording and surfaces
+   * a message -- otherwise the UI would sit at "Recording - 0 pts" forever.
+   * Captured points are never dropped: any already-buffered fixes are finalized
+   * into a saved track. A transient error (e.g. brief signal loss) keeps
+   * recording running.
+   */
+  private handleRecordingWatchError(error: unknown): void {
+    if (!isFatalWatchError(error)) {
+      console.warn('GPS watch error during recording:', error);
+      return;
+    }
+    if (this._gpsRecordingState === 'idle') return;
+    void this.geolocationWatcher.stop();
+    const points = this._currentTrackPoints;
+    const id = this._recordingTrackId;
+    const startedAt = this._recordingStartedAt;
+    const name = this._recordingName;
+    this.freezeRecordingElapsed();
+    this._currentTrackPoints = [];
+    this._recordingTrackId = null;
+    this.resetRecordingTiming();
+    this._recordingName = '';
+    this._gpsRecordingState = 'idle';
+    this._gpsRecordingError =
+      points.length > 0
+        ? `${GPS_RECORDING_PERMISSION_LOST_MESSAGE} Your ${points.length}-point track was saved.`
+        : GPS_RECORDING_PERMISSION_LOST_MESSAGE;
+
+    if (id && points.length > 0) {
+      // Keep what was captured: finalize the partial track so no fixes are lost.
+      const track = this.buildFinalizedTrack(id, name, points, startedAt);
+      void this.enqueueGpsTrackPersist(track);
+      this._gpsTracks = [track, ...this._gpsTracks];
+    } else if (id) {
+      void this.gpsTrackStore.remove(id).catch((removeError) => {
+        console.warn('Failed to discard empty GPS track:', removeError);
+      });
+    }
+    this.bumpGpsTracksRevision();
+  }
+
+  /** Clear the one-shot recording error after the UI has surfaced it. */
+  clearGpsRecordingError(): void {
+    if (this._gpsRecordingError === null) return;
+    this._gpsRecordingError = null;
+    this.notify();
+  }
+
+  private appendTrackPoint(point: RecordedPoint): void {
+    if (this._gpsRecordingState !== 'recording' || !this._recordingTrackId) return;
+    // Shared GPS gate (same as averaging): drop the OS's replayed pre-recording
+    // fix, then keep at most one fix per TRACK_SAMPLE_INTERVAL_MS (~15 s). The
+    // first real fix is kept immediately, so recording starts instantly.
+    const last = this._currentTrackPoints[this._currentTrackPoints.length - 1];
+    if (
+      !shouldAcceptFix(point.timestamp, {
+        sessionStartMs: this._recordingWatchSessionStartedAt - GPS.WATCH_START_STALE_FIX_GRACE_MS,
+        lastAcceptedMs: last ? last.timestamp : null,
+        minIntervalMs: GPS.TRACK_SAMPLE_INTERVAL_MS,
+      })
+    ) {
+      return;
+    }
+    this._currentTrackPoints = [...this._currentTrackPoints, point];
+    // Persist incrementally for crash recovery (fire-and-forget; the in-memory
+    // buffer is the source of truth for the live UI).
+    void this.enqueueGpsTrackPersist(this.buildRecordingTrack());
+    this.bumpGpsTracksRevision();
+  }
+
+  /** Build a finalized (saved) track record from captured points. */
+  private buildFinalizedTrack(
+    id: string,
+    name: string,
+    points: RecordedPoint[],
+    createdAt: number,
+  ): LocalGpsTrack {
+    return {
+      id,
+      name,
+      points,
+      createdAt,
+      updatedAt: Date.now(),
+      uploadStatus: 'local',
+      uploadError: null,
+    };
+  }
+
+  private buildRecordingTrack(): LocalGpsTrack {
+    return {
+      id: this._recordingTrackId as string,
+      name: this._recordingName,
+      points: this._currentTrackPoints,
+      createdAt: this._recordingStartedAt,
+      updatedAt: Date.now(),
+      uploadStatus: 'local',
+      uploadError: null,
+    };
+  }
+
+  private async persistGpsTrack(track: LocalGpsTrack): Promise<void> {
+    const generation = this._gpsPersistGeneration;
+    if (this._isPurgingLocalData || !this._authState.isAuthenticated) return;
+    try {
+      await this.gpsTrackStore.put(track);
+      if (
+        generation !== this._gpsPersistGeneration ||
+        this._isPurgingLocalData ||
+        !this._authState.isAuthenticated
+      ) {
+        await this.gpsTrackStore.remove(track.id).catch(() => {
+          // Best-effort cleanup of a write that finished after logout/discard.
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to persist GPS track:', error);
+    }
+  }
+
+  private enqueueGpsTrackPersist(track: LocalGpsTrack): Promise<void> {
+    const run = () => this.persistGpsTrack(track);
+    const queued = this._gpsPersistQueue ? this._gpsPersistQueue.then(run, run) : run();
+    const trackedQueue = queued.catch(() => {
+      // Keep the queue alive after a best-effort persistence failure.
+    }).finally(() => {
+      if (this._gpsPersistQueue === trackedQueue) this._gpsPersistQueue = null;
+    });
+    this._gpsPersistQueue = trackedQueue;
+    return this.trackOperation(queued);
+  }
+
+  private async updateGpsTrack(
+    id: string,
+    patch: Partial<LocalGpsTrack>,
+  ): Promise<LocalGpsTrack | null> {
+    const index = this._gpsTracks.findIndex((t) => t.id === id);
+    if (index === -1) return null;
+    const updated: LocalGpsTrack = {
+      ...this._gpsTracks[index],
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    await this.enqueueGpsTrackPersist(updated);
+    this._gpsTracks = [
+      ...this._gpsTracks.slice(0, index),
+      updated,
+      ...this._gpsTracks.slice(index + 1),
+    ];
+    this.bumpGpsTracksRevision();
+    return updated;
+  }
+
+  private bumpGpsTracksRevision(): void {
+    this._gpsTracksRevision += 1;
+    this.notify();
+  }
+
+  private defaultTrackName(timestamp: number): string {
+    const date = new Date(timestamp);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `Track ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  private parseGpxUploadError(data: unknown): string {
+    if (data && typeof data === 'object') {
+      const obj = data as Record<string, unknown>;
+      const direct = obj.error ?? obj.detail ?? obj.message;
+      if (typeof direct === 'string' && direct.trim()) return direct;
+      const errors = obj.errors;
+      if (errors && typeof errors === 'object') {
+        const first = Object.values(errors as Record<string, unknown>)[0];
+        if (Array.isArray(first) && typeof first[0] === 'string') return first[0];
+        if (typeof first === 'string') return first;
+      }
+    }
+    return 'The server could not import this GPS track.';
   }
 
   // ---- Offline enqueue helpers ----------------------------------------------

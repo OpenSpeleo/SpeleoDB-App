@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import { IonContent, IonModal } from '@ionic/react';
 import { Share } from '@capacitor/share';
 import type { OverlayMarkerDetails } from '../utils/overlayMarkerDetails';
+import { isShareCancellation } from '../utils/share';
 
 interface OverlayMarkerDetailsModalProps {
   detail: OverlayMarkerDetails | null;
@@ -25,17 +26,6 @@ const TITLE_BY_TYPE: Record<OverlayMarkerDetails['type'], string> = {
   projectPoint: 'Project Entry Point',
   mapLongPress: 'Map Point',
 };
-
-function isShareCancellation(error: unknown): boolean {
-  if (typeof error === 'string') {
-    return /cancel/i.test(error);
-  }
-  if (error && typeof error === 'object' && 'message' in error) {
-    const message = (error as { message?: unknown }).message;
-    return typeof message === 'string' && /cancel/i.test(message);
-  }
-  return false;
-}
 
 function buildShareText(detail: OverlayMarkerDetails): string {
   const title = TITLE_BY_TYPE[detail.type];

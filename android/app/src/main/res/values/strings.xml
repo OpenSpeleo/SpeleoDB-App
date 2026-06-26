@@ -4,4 +4,6 @@
     <string name="title_activity_main">SpeleoDB</string>
     <string name="package_name">org.speleodb.app</string>
     <string name="custom_url_scheme">org.speleodb.app</string>
+    <!-- Shown when the user long-presses the background GPS tracking notification. -->
+    <string name="capacitor_background_geolocation_notification_channel_name">GPS Track Recording</string>
 </resources>

@@ -6,7 +6,7 @@
  * - Knows the API contract (endpoints, request/response shapes) but nothing else.
  */
 
-import { API, HEADERS } from '../constants';
+import { API, GPS, HEADERS } from '../constants';
 import { getInstanceBaseUrl } from '../utils/url';
 import type { HttpClient, HttpResponse, HttpRequest } from './HttpClient';
 import type { AuthTokenResponse } from '../types';
@@ -25,6 +25,12 @@ export interface ServiceRequestOptions {
 /** Response envelope for a single landmark mutation. */
 export interface LandmarkMutationResponse {
   landmark: LandmarkApiObject;
+}
+
+/** Server response from a successful GPX import. */
+export interface GpxImportResponse {
+  landmarks_created: number;
+  gps_tracks_created: number;
 }
 
 export class SpeleoDBService {
@@ -192,6 +198,45 @@ export class SpeleoDBService {
       API.landmarkDetailEndpoint(id),
       options,
     );
+  }
+
+  // ==================== GPS tracks ====================
+
+  /**
+   * PUT /api/v2/import/gpx/  (with Token header, multipart/form-data)
+   *
+   * Uploads a GPX document. The backend converts waypoints to Landmarks and
+   * tracks to GPSTrack rows and returns the created counts. Uses the
+   * cross-platform multipart path so it works on native and web. An optional
+   * `collection` id targets a specific landmark collection for waypoints.
+   */
+  async uploadGpx(
+    instance: string,
+    token: string,
+    gpxText: string,
+    fileName: string,
+    collection?: string | null,
+    options: ServiceRequestOptions = {},
+  ): Promise<HttpResponse<GpxImportResponse | unknown>> {
+    const baseUrl = getInstanceBaseUrl(instance);
+    const url = baseUrl + API.GPX_IMPORT_ENDPOINT;
+
+    return this.http.request<GpxImportResponse | unknown>({
+      url,
+      method: 'PUT',
+      headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
+      multipart: {
+        fields: collection ? { collection } : undefined,
+        file: {
+          fieldName: 'file',
+          fileName,
+          contentType: GPS.GPX_CONTENT_TYPE,
+          content: gpxText,
+        },
+      },
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+    });
   }
 
   /**

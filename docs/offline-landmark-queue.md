@@ -268,6 +268,20 @@ state fresh against the current server rather than restoring a stale snapshot.
   "On the server" diff (only fields that differ) with two large choices. Built
   for non-technical users -- no ids, no jargon.
 
+## Reuse: averaged GPS points
+
+The GPS menu's "collect an averaged point and save it as a landmark" flow reuses
+this queue verbatim: it hands the averaged coordinates to the shared
+`LandmarkFormModal` and `controller.createLandmark`, so saving offline enqueues a
+`CreateLandmarkOp` and folds optimistically exactly like any other offline
+create. No GPS-specific queue logic exists. See `docs/gps-tracks.md`.
+
+Recorded GPS track uploads are separate from this landmark mutation queue. A
+track becomes `pending` only after the user attempts Upload and the request is
+offline/retryable; those pending uploads drain after successful startup
+validation or the explicit Go Online/Try Reconnect path. Untouched local tracks
+stay local until the user uploads them.
+
 ## Key APIs / source map
 
 - Types: `src/types/offlineOp.ts`.

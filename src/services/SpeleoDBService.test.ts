@@ -370,4 +370,62 @@ describe('SpeleoDBService', () => {
       expect(res.data).toEqual(body);
     });
   });
+
+  // ---- uploadGpx ------------------------------------------------------------
+
+  describe('uploadGpx', () => {
+    it('PUTs a multipart GPX file to /api/v2/import/gpx/ with auth', async () => {
+      http = createMockHttpClient({ status: 200, data: { landmarks_created: 2, gps_tracks_created: 1 } });
+      service = new SpeleoDBService(http);
+
+      const res = await service.uploadGpx(INSTANCE, TOKEN, '<gpx/>', 'track.gpx');
+
+      expect(res.status).toBe(200);
+      expect(res.data).toEqual({ landmarks_created: 2, gps_tracks_created: 1 });
+
+      const req = http.calls[0];
+      expect(req.method).toBe('PUT');
+      expect(req.url).toBe(INSTANCE + API.GPX_IMPORT_ENDPOINT);
+      expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
+      expect(req.multipart?.file).toMatchObject({
+        fieldName: 'file',
+        fileName: 'track.gpx',
+        contentType: 'application/gpx+xml',
+        content: '<gpx/>',
+      });
+      // No collection field unless explicitly provided.
+      expect(req.multipart?.fields).toBeUndefined();
+      // Must not set a JSON Content-Type; the transport owns the multipart boundary.
+      expect(req.headers?.[HEADERS.CONTENT_TYPE]).toBeUndefined();
+    });
+
+    it('includes the collection field when provided', async () => {
+      await service.uploadGpx(INSTANCE, TOKEN, '<gpx/>', 'track.gpx', 'col-123');
+      expect(http.calls[0].multipart?.fields).toEqual({ collection: 'col-123' });
+    });
+
+    it('omits the collection field when null', async () => {
+      await service.uploadGpx(INSTANCE, TOKEN, '<gpx/>', 'track.gpx', null);
+      expect(http.calls[0].multipart?.fields).toBeUndefined();
+    });
+
+    it('returns a definitive 4xx error body verbatim', async () => {
+      http = createMockHttpClient({ status: 400, data: { error: 'bad gpx' } });
+      service = new SpeleoDBService(http);
+
+      const res = await service.uploadGpx(INSTANCE, TOKEN, 'junk', 'track.gpx');
+      expect(res.status).toBe(400);
+      expect(res.data).toEqual({ error: 'bad gpx' });
+    });
+
+    it('forwards signal and timeout to the transport', async () => {
+      const ac = new AbortController();
+      await service.uploadGpx(INSTANCE, TOKEN, '<gpx/>', 'track.gpx', undefined, {
+        signal: ac.signal,
+        timeoutMs: 4242,
+      });
+      expect(http.calls[0].signal).toBe(ac.signal);
+      expect(http.calls[0].timeoutMs).toBe(4242);
+    });
+  });
 });

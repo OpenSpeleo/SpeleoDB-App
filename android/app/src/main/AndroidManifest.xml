@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -39,6 +39,13 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <service
+            android:name="com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location"
+            tools:replace="android:exported,android:foregroundServiceType" />
     </application>
 
     <!-- Permissions -->
@@ -46,4 +53,15 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Background GPS track recording (@capacitor-community/background-geolocation):
+         the plugin's own manifest contributes the FOREGROUND_SERVICE* permissions,
+         POST_NOTIFICATIONS, and the tracking service. POST_NOTIFICATIONS
+         (Android 13+) is requested before recording starts so the mandatory
+         persistent "recording" notification can be shown. See docs/app-permissions.md. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Optional reliability nudge: lets the user exempt SpeleoDB from battery
+         optimization so aggressive OEM power managers don't kill the recording
+         foreground service. Requested only on user action; recording works
+         without it. @capawesome-team/capacitor-android-battery-optimization. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 </manifest>

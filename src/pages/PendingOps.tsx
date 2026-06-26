@@ -28,6 +28,8 @@ interface PendingOpsProps {
   onProjectPanelChange: (open: boolean) => void;
   isLandmarkPanelOpen: boolean;
   onLandmarkPanelChange: (open: boolean) => void;
+  isGpsPanelOpen: boolean;
+  onGpsPanelChange: (open: boolean) => void;
 }
 
 const KIND_LABEL: Record<OfflineOpView['kind'], string> = {
@@ -52,9 +54,12 @@ const PendingOps: React.FC<PendingOpsProps> = ({
   onProjectPanelChange,
   isLandmarkPanelOpen,
   onLandmarkPanelChange,
+  isGpsPanelOpen,
+  onGpsPanelChange,
 }) => {
   const history = useHistory();
-  const { controller, pendingOpsCount, pendingOpsRevision, isOfflineLocked } = useSpeleoDB();
+  const { controller, pendingOpsCount, pendingOpsRevision, isOfflineLocked, gpsRecordingState } =
+    useSpeleoDB();
 
   // Re-read the list whenever the queue changes (revision bumps on any mutation).
   const ops = useMemo<OfflineOpView[]>(
@@ -362,6 +367,9 @@ const PendingOps: React.FC<PendingOpsProps> = ({
           onProjectPanelChange={onProjectPanelChange}
           isLandmarkPanelOpen={isLandmarkPanelOpen}
           onLandmarkPanelChange={onLandmarkPanelChange}
+          isGpsPanelOpen={isGpsPanelOpen}
+          onGpsPanelChange={onGpsPanelChange}
+          isGpsRecording={gpsRecordingState !== 'idle'}
           pendingOpsCount={pendingOpsCount}
         />
       </IonFooter>
