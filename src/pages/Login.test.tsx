@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
@@ -18,11 +18,13 @@ vi.mock('@capacitor/browser', () => ({
 
 // Mock the SpeleoDBProvider hook -- return a fake controller.
 const mockLogin = vi.fn();
+const mockLoginWithToken = vi.fn();
 
 vi.mock('../context/useSpeleoDB', () => ({
   useSpeleoDB: () => ({
     controller: {
       login: mockLogin,
+      loginWithToken: mockLoginWithToken,
     },
     authState: { isAuthenticated: false, user: null, token: null },
     isOnline: true,
@@ -44,25 +46,91 @@ function renderLogin() {
   return history;
 }
 
+function getOAuthTokenInput() {
+  return within(
+    screen.getByRole('tabpanel', { name: /oauth token/i }),
+  ).getByLabelText(/^oauth token$/i);
+}
+
 describe('Login page', () => {
   beforeEach(() => {
     mockLogin.mockReset();
+    mockLoginWithToken.mockReset();
     mockBrowserOpen.mockClear();
     clearPreferences();
   });
 
   it('renders email, password, and instance fields', () => {
     renderLogin();
-    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^email$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/speleodb instance/i)).toBeInTheDocument();
+  });
+
+  it('renders accessible login tabs and switches credential fields', async () => {
+    renderLogin();
+    const passwordTab = screen.getByRole('tab', { name: /email & password/i });
+    const tokenTab = screen.getByRole('tab', { name: /oauth token/i });
+
+    expect(passwordTab).toHaveAttribute('aria-selected', 'true');
+    expect(tokenTab).toHaveAttribute('aria-selected', 'false');
+
+    await userEvent.click(tokenTab);
+
+    expect(passwordTab).toHaveAttribute('aria-selected', 'false');
+    expect(tokenTab).toHaveAttribute('aria-selected', 'true');
+    expect(getOAuthTokenInput()).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^email$/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/forgot\?/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/token sign-in requires a connection/i)).toBeInTheDocument();
+  });
+
+  it('supports keyboard navigation between login tabs', async () => {
+    renderLogin();
+    const passwordTab = screen.getByRole('tab', { name: /email & password/i });
+    const tokenTab = screen.getByRole('tab', { name: /oauth token/i });
+
+    passwordTab.focus();
+    await userEvent.keyboard('{ArrowRight}');
+
+    expect(tokenTab).toHaveFocus();
+    expect(tokenTab).toHaveAttribute('aria-selected', 'true');
+    expect(getOAuthTokenInput()).toBeInTheDocument();
+  });
+
+  it('keeps entered credentials when switching login methods', async () => {
+    renderLogin();
+
+    await userEvent.type(screen.getByLabelText(/^email$/i), 'user@example.com');
+    await userEvent.type(screen.getByLabelText(/^password$/i), 'password');
+    await userEvent.click(screen.getByRole('tab', { name: /oauth token/i }));
+    await userEvent.type(getOAuthTokenInput(), 'oauth-token');
+    await userEvent.click(screen.getByRole('tab', { name: /email & password/i }));
+
+    expect(screen.getByLabelText(/^email$/i)).toHaveValue('user@example.com');
+    expect(screen.getByLabelText(/^password$/i)).toHaveValue('password');
+
+    await userEvent.click(screen.getByRole('tab', { name: /oauth token/i }));
+    expect(getOAuthTokenInput()).toHaveValue('oauth-token');
+  });
+
+  it('masks the OAuth token and disables browser autofill', async () => {
+    renderLogin();
+    await userEvent.click(screen.getByRole('tab', { name: /oauth token/i }));
+
+    const tokenInput = getOAuthTokenInput();
+    expect(tokenInput).toHaveAttribute('type', 'password');
+    expect(tokenInput).toHaveAttribute('autocomplete', 'off');
+    expect(tokenInput).toHaveAttribute('autocapitalize', 'none');
+    expect(tokenInput).toHaveAttribute('spellcheck', 'false');
   });
 
   it('uses native credential autofill semantics for login fields', () => {
     renderLogin();
 
-    expect(screen.getByLabelText(/email/i)).toHaveAttribute('autocomplete', 'username');
-    expect(screen.getByLabelText(/password/i)).toHaveAttribute('autocomplete', 'current-password');
+    expect(screen.getByLabelText(/^email$/i)).toHaveAttribute('autocomplete', 'username');
+    expect(screen.getByLabelText(/^password$/i)).toHaveAttribute('autocomplete', 'current-password');
     expect(
       screen.getByText(/native password autofill uses credentials saved for www\.speleodb\.org\./i),
     ).toBeInTheDocument();
@@ -86,8 +154,8 @@ describe('Login page', () => {
     mockLogin.mockResolvedValue({ success: true, message: 'Login successful' });
     const history = renderLogin();
 
-    await userEvent.type(screen.getByLabelText(/email/i), 'user@example.com');
-    await userEvent.type(screen.getByLabelText(/password/i), 'password');
+    await userEvent.type(screen.getByLabelText(/^email$/i), 'user@example.com');
+    await userEvent.type(screen.getByLabelText(/^password$/i), 'password');
     await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(
@@ -100,8 +168,8 @@ describe('Login page', () => {
     mockLogin.mockResolvedValue({ success: false, message: 'Invalid email or password' });
     const history = renderLogin();
 
-    await userEvent.type(screen.getByLabelText(/email/i), 'user@example.com');
-    await userEvent.type(screen.getByLabelText(/password/i), 'wrong');
+    await userEvent.type(screen.getByLabelText(/^email$/i), 'user@example.com');
+    await userEvent.type(screen.getByLabelText(/^password$/i), 'wrong');
     await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
@@ -117,8 +185,8 @@ describe('Login page', () => {
 
     await userEvent.clear(instanceInput);
     await userEvent.type(instanceInput, 'https://custom.speleodb.org');
-    await userEvent.type(screen.getByLabelText(/email/i), 'u@x.com');
-    await userEvent.type(screen.getByLabelText(/password/i), 'pass');
+    await userEvent.type(screen.getByLabelText(/^email$/i), 'u@x.com');
+    await userEvent.type(screen.getByLabelText(/^password$/i), 'pass');
     await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
@@ -128,6 +196,68 @@ describe('Login page', () => {
         instance: 'https://custom.speleodb.org',
       });
     });
+  });
+
+  it('passes the token and shared instance to controller.loginWithToken', async () => {
+    mockLoginWithToken.mockResolvedValue({ success: true, message: 'OK' });
+    renderLogin();
+    await userEvent.click(screen.getByRole('tab', { name: /oauth token/i }));
+
+    const instanceInput = screen.getByLabelText(/speleodb instance/i);
+    await userEvent.clear(instanceInput);
+    await userEvent.type(instanceInput, 'https://custom.speleodb.org');
+    await userEvent.type(getOAuthTokenInput(), 'oauth-token');
+    await userEvent.click(screen.getByRole('button', { name: /sign in with token/i }));
+
+    await waitFor(() => {
+      expect(mockLoginWithToken).toHaveBeenCalledWith({
+        token: 'oauth-token',
+        instance: 'https://custom.speleodb.org',
+      });
+    });
+    expect(mockLogin).not.toHaveBeenCalled();
+  });
+
+  it('shows token validation failures without redirecting', async () => {
+    mockLoginWithToken.mockResolvedValue({ success: false, message: 'Invalid OAuth token' });
+    const history = renderLogin();
+    await userEvent.click(screen.getByRole('tab', { name: /oauth token/i }));
+    await userEvent.type(getOAuthTokenInput(), 'invalid-token');
+    await userEvent.click(screen.getByRole('button', { name: /sign in with token/i }));
+
+    expect(await screen.findByText(/invalid oauth token/i)).toBeInTheDocument();
+    expect(history.location.pathname).not.toBe('/dashboard');
+  });
+
+  it('redirects after successful OAuth token login', async () => {
+    mockLoginWithToken.mockResolvedValue({ success: true, message: 'Login successful' });
+    const history = renderLogin();
+    await userEvent.click(screen.getByRole('tab', { name: /oauth token/i }));
+    await userEvent.type(getOAuthTokenInput(), 'oauth-token');
+    await userEvent.click(screen.getByRole('button', { name: /sign in with token/i }));
+
+    await waitFor(
+      () => { expect(history.location.pathname).toBe('/dashboard'); },
+      { timeout: 2000 },
+    );
+  });
+
+  it('disables login tabs and shows token-specific loading feedback while validating', async () => {
+    let resolveLogin!: (value: { success: boolean; message: string }) => void;
+    mockLoginWithToken.mockImplementation(() => new Promise((resolve) => {
+      resolveLogin = resolve;
+    }));
+    renderLogin();
+    await userEvent.click(screen.getByRole('tab', { name: /oauth token/i }));
+    await userEvent.type(getOAuthTokenInput(), 'oauth-token');
+    await userEvent.click(screen.getByRole('button', { name: /sign in with token/i }));
+
+    expect(await screen.findByRole('button', { name: /validating token/i })).toBeDisabled();
+    expect(screen.getByRole('tab', { name: /email & password/i })).toBeDisabled();
+    expect(screen.getByRole('tab', { name: /oauth token/i })).toBeDisabled();
+
+    resolveLogin({ success: false, message: 'Invalid OAuth token' });
+    expect(await screen.findByText(/invalid oauth token/i)).toBeInTheDocument();
   });
 
   it('opens forgot-password link via Browser.open', async () => {
@@ -171,6 +301,22 @@ describe('Login page', () => {
     await userEvent.click(screen.getByText(/sign up/i));
     expect(mockBrowserOpen).toHaveBeenCalledWith({
       url: 'https://custom.speleodb.org/signup/',
+    });
+  });
+
+  it('gives every app button a solid color variant with no background utility', () => {
+    const { container } = render(
+      <Router history={createMemoryHistory()}>
+        <Login />
+      </Router>,
+    );
+
+    const buttons = container.querySelectorAll('button.app-btn');
+    expect(buttons.length).toBeGreaterThan(0);
+    buttons.forEach((button) => {
+      const className = button.getAttribute('class') ?? '';
+      expect(/app-btn--(primary|secondary|danger|info|success)/.test(className)).toBe(true);
+      expect(/\bbg-/.test(className)).toBe(false);
     });
   });
 });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { useSpeleoDB } from '../context/useSpeleoDB';
 import { PREFERENCES } from '../constants';
@@ -7,11 +7,17 @@ import { getInstanceBaseUrl, INSTANCE_PATHS, openExternalUrl } from '../utils/ur
 import logoSvg from '../assets/media/logo.png';
 import authIllustrationSvg from '../assets/media/auth-illustration.svg';
 
+type LoginMethod = 'password' | 'token';
+
 const Login: React.FC = () => {
   const history = useHistory();
   const { controller } = useSpeleoDB();
+  const passwordTabRef = useRef<HTMLButtonElement>(null);
+  const tokenTabRef = useRef<HTMLButtonElement>(null);
+  const [loginMethod, setLoginMethod] = useState<LoginMethod>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [token, setToken] = useState('');
   const [instance, setInstance] = useState<string>(() =>
     getPreferences().instance ?? PREFERENCES.DEFAULT_INSTANCE,
   );
@@ -26,7 +32,9 @@ const Login: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const result = await controller.login({ email, password, instance });
+      const result = loginMethod === 'password'
+        ? await controller.login({ email, password, instance })
+        : await controller.loginWithToken({ token, instance });
       
       if (result.success) {
         setSuccess(result.message);
@@ -41,6 +49,32 @@ const Login: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const selectLoginMethod = (method: LoginMethod) => {
+    if (isLoading || method === loginMethod) return;
+    setLoginMethod(method);
+    setError('');
+    setSuccess('');
+  };
+
+  const handleTabKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    method: LoginMethod,
+  ) => {
+    let nextMethod: LoginMethod | null = null;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      nextMethod = method === 'password' ? 'token' : 'password';
+    } else if (event.key === 'Home') {
+      nextMethod = 'password';
+    } else if (event.key === 'End') {
+      nextMethod = 'token';
+    }
+    if (!nextMethod) return;
+
+    event.preventDefault();
+    selectLoginMethod(nextMethod);
+    (nextMethod === 'password' ? passwordTabRef : tokenTabRef).current?.focus();
   };
 
   const instanceBase = getInstanceBaseUrl(instance);
@@ -88,50 +122,122 @@ const Login: React.FC = () => {
                 </div>
               )}
 
+              <div
+                className="mb-6 grid grid-cols-2 gap-2"
+                role="tablist"
+                aria-label="Sign-in method"
+              >
+                <button
+                  ref={passwordTabRef}
+                  id="password-login-tab"
+                  className={`app-btn app-btn--compact ${
+                    loginMethod === 'password' ? 'app-btn--primary' : 'app-btn--secondary'
+                  }`}
+                  type="button"
+                  role="tab"
+                  aria-selected={loginMethod === 'password'}
+                  aria-controls="password-login-panel"
+                  tabIndex={loginMethod === 'password' ? 0 : -1}
+                  disabled={isLoading}
+                  onClick={() => selectLoginMethod('password')}
+                  onKeyDown={(event) => handleTabKeyDown(event, 'password')}
+                >
+                  Email &amp; Password
+                </button>
+                <button
+                  ref={tokenTabRef}
+                  id="token-login-tab"
+                  className={`app-btn app-btn--compact ${
+                    loginMethod === 'token' ? 'app-btn--primary' : 'app-btn--secondary'
+                  }`}
+                  type="button"
+                  role="tab"
+                  aria-selected={loginMethod === 'token'}
+                  aria-controls="token-login-panel"
+                  tabIndex={loginMethod === 'token' ? 0 : -1}
+                  disabled={isLoading}
+                  onClick={() => selectLoginMethod('token')}
+                  onKeyDown={(event) => handleTabKeyDown(event, 'token')}
+                >
+                  OAuth Token
+                </button>
+              </div>
+
               <form onSubmit={handleSubmit}>
                 <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm text-slate-300 font-medium mb-1" htmlFor="email">
-                      Email
-                    </label>
-                    <input
-                      id="email"
-                      name="email"
-                      className="w-full px-4 py-2.5 text-sm text-slate-300 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-500"
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                      autoComplete="username"
-                    />
-                  </div>
-                  <div>
-                    <div className="flex justify-between">
-                      <label className="block text-sm text-slate-300 font-medium mb-1" htmlFor="password">
-                        Password
-                      </label>
-                      <a
-                        href={forgotPasswordUrl}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          openExternalUrl(forgotPasswordUrl);
-                        }}
-                        className="text-sm font-medium text-purple-500 hover:text-purple-400 transition-colors"
-                      >
-                        Forgot?
-                      </a>
+                  {loginMethod === 'password' ? (
+                    <div
+                      id="password-login-panel"
+                      className="space-y-6"
+                      role="tabpanel"
+                      aria-labelledby="password-login-tab"
+                    >
+                      <div>
+                        <label className="block text-sm text-slate-300 font-medium mb-1" htmlFor="email">
+                          Email
+                        </label>
+                        <input
+                          id="email"
+                          name="email"
+                          className="w-full px-4 py-2.5 text-sm text-slate-300 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-500"
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          required
+                          autoComplete="username"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between">
+                          <label className="block text-sm text-slate-300 font-medium mb-1" htmlFor="password">
+                            Password
+                          </label>
+                          <a
+                            href={forgotPasswordUrl}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              openExternalUrl(forgotPasswordUrl);
+                            }}
+                            className="text-sm font-medium text-purple-500 hover:text-purple-400 transition-colors"
+                          >
+                            Forgot?
+                          </a>
+                        </div>
+                        <input
+                          id="password"
+                          name="password"
+                          className="w-full px-4 py-2.5 text-sm text-slate-300 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-500"
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          required
+                          autoComplete="current-password"
+                        />
+                      </div>
                     </div>
-                    <input
-                      id="password"
-                      name="password"
-                      className="w-full px-4 py-2.5 text-sm text-slate-300 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-500"
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                      autoComplete="current-password"
-                    />
-                  </div>
+                  ) : (
+                    <div
+                      id="token-login-panel"
+                      role="tabpanel"
+                      aria-labelledby="token-login-tab"
+                    >
+                      <label className="block text-sm text-slate-300 font-medium mb-1" htmlFor="oauth-token">
+                        OAuth token
+                      </label>
+                      <input
+                        id="oauth-token"
+                        name="oauth-token"
+                        className="w-full px-4 py-2.5 text-sm text-slate-300 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-500"
+                        type="password"
+                        value={token}
+                        onChange={(e) => setToken(e.target.value)}
+                        required
+                        autoComplete="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                      />
+                    </div>
+                  )}
                   <div className="pt-2">
                     <label className="block text-sm text-slate-300 font-medium mb-1" htmlFor="instance">
                       SpeleoDB instance
@@ -144,11 +250,18 @@ const Login: React.FC = () => {
                       value={instance}
                       onChange={(e) => setInstance(e.target.value)}
                       placeholder={PREFERENCES.DEFAULT_INSTANCE}
+                      required
                       autoComplete="url"
                     />
-                    <p className="mt-2 text-xs text-slate-500">
-                      Native password autofill uses credentials saved for www.speleodb.org.
-                    </p>
+                    {loginMethod === 'password' ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Native password autofill uses credentials saved for www.speleodb.org.
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Token sign-in requires a connection so the token can be verified.
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="mt-6">
@@ -158,10 +271,10 @@ const Login: React.FC = () => {
                     disabled={isLoading}
                   >
                     {isLoading ? (
-                      'Signing In...'
+                      loginMethod === 'token' ? 'Validating Token...' : 'Signing In...'
                     ) : (
                       <>
-                        Sign In 
+                        {loginMethod === 'token' ? 'Sign In with Token' : 'Sign In'}{' '}
                         <span className="ml-1 text-purple-300 group-hover:translate-x-0.5 transition-transform duration-150">→</span>
                       </>
                     )}
@@ -186,11 +299,13 @@ const Login: React.FC = () => {
               </div>
 
               {/* Offline auth note */}
-              <div className="mt-8 text-center">
-                <p className="text-xs text-slate-500">
-                  Offline sign-in is available with locally stored credentials.
-                </p>
-              </div>
+              {loginMethod === 'password' && (
+                <div className="mt-8 text-center">
+                  <p className="text-xs text-slate-500">
+                    Offline sign-in is available with locally stored credentials.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>

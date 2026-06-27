@@ -49,6 +49,7 @@ import type {
   AuthState,
   AuthTokenResponse,
   LoginCredentials,
+  OAuthTokenCredentials,
   User,
 } from '../types';
 import type { Project } from '../types/project';
@@ -205,6 +206,23 @@ function hasAuthTokenResponse(data: unknown): data is AuthTokenResponse {
 
   return typeof (data as { token?: unknown }).token === 'string'
     && (data as { token: string }).token.trim().length > 0;
+}
+
+function extractAuthErrorMessage(data: unknown): string | undefined {
+  if (!data || typeof data !== 'object') return undefined;
+
+  const body = data as {
+    detail?: unknown;
+    message?: unknown;
+    errors?: { non_field_errors?: unknown };
+  };
+  if (typeof body.detail === 'string' && body.detail.trim()) return body.detail;
+  if (typeof body.message === 'string' && body.message.trim()) return body.message;
+  if (Array.isArray(body.errors?.non_field_errors)) {
+    const firstError = body.errors.non_field_errors[0];
+    if (typeof firstError === 'string' && firstError.trim()) return firstError;
+  }
+  return undefined;
 }
 
 // ==================== Controller ====================
@@ -951,30 +969,26 @@ export class SpeleoDBController {
         const response = await this.service.authenticate(instance, email, password);
 
         if (isSuccessfulStatus(response.status) && hasAuthTokenResponse(response.data)) {
+          const authToken = response.data.token.trim();
           const userEmail = typeof response.data.user === 'string' && response.data.user.trim()
             ? response.data.user
             : email;
-          const user: User = { id: 'auth', email: userEmail, name: userEmail };
-          this.invalidateAsyncOperations();
-          this._authState = { isAuthenticated: true, user, token: response.data.token };
-          this._isOnline = true;
-          this.prefs.setPreferences({ email: userEmail, token: response.data.token, instance: instance.trim() });
-          this.notify();
-          return { success: true, message: 'Login successful', user, token: response.data.token };
+          const user = this.establishAuthenticatedSession(
+            authToken,
+            instance,
+            userEmail,
+          );
+          return {
+            success: true,
+            message: 'Login successful',
+            user: user ?? undefined,
+            token: authToken,
+          };
         }
 
         // Error response from server
-        const body = response.data as
-          | {
-              detail?: string;
-              message?: string;
-              errors?: { non_field_errors?: string[] };
-            }
-          | undefined;
         const message =
-          body?.detail ??
-          body?.message ??
-          body?.errors?.non_field_errors?.[0] ??
+          extractAuthErrorMessage(response.data) ??
           (response.status === HTTP_STATUS.UNAUTHORIZED ? 'Invalid email or password' : 'Login failed');
         return { success: false, message };
       } catch (error) {
@@ -985,6 +999,51 @@ export class SpeleoDBController {
 
     // Offline fallback
     return this.offlineLogin(email, password, instance);
+  }
+
+  /**
+   * Login with a user-supplied OAuth token. The token must be validated by the
+   * selected instance before it is persisted; there is intentionally no
+   * offline fallback for this flow.
+   */
+  async loginWithToken(credentials: OAuthTokenCredentials): Promise<AuthResponse> {
+    const token = credentials.token?.trim();
+    const instance = credentials.instance?.trim();
+
+    if (!token) {
+      return { success: false, message: 'OAuth token is required' };
+    }
+    if (!instance) {
+      return { success: false, message: 'SpeleoDB instance URL is required' };
+    }
+
+    try {
+      const response = await this.service.validateToken(instance, token);
+
+      if (isSuccessfulStatus(response.status)) {
+        this.establishAuthenticatedSession(token, instance);
+        return { success: true, message: 'Login successful', token };
+      }
+
+      if (isClientErrorStatus(response.status)) {
+        return {
+          success: false,
+          message: extractAuthErrorMessage(response.data) ?? 'Invalid OAuth token',
+        };
+      }
+
+      return {
+        success: false,
+        message:
+          extractAuthErrorMessage(response.data) ??
+          'Unable to validate OAuth token. Please try again.',
+      };
+    } catch {
+      return {
+        success: false,
+        message: 'Unable to validate OAuth token. Check your connection and try again.',
+      };
+    }
   }
 
   /**
@@ -3169,10 +3228,10 @@ export class SpeleoDBController {
         return;
       }
       if (prefs.token && prefs.instance) {
-        const email = prefs.email ?? '';
+        const email = prefs.email?.trim() ?? '';
         this._authState = {
           isAuthenticated: true,
-          user: { id: 'restored', email, name: email },
+          user: email ? { id: 'restored', email, name: email } : null,
           token: prefs.token,
         };
         if (
@@ -3199,6 +3258,32 @@ export class SpeleoDBController {
     } catch (error) {
       console.warn('Failed to persist lastSyncedAt:', error);
     }
+  }
+
+  /** Publish and persist a validated online session from either login method. */
+  private establishAuthenticatedSession(
+    token: string,
+    instance: string,
+    email?: string,
+  ): User | null {
+    const normalizedToken = token.trim();
+    const normalizedInstance = instance.trim();
+    const normalizedEmail = email?.trim() ?? '';
+    const user: User | null = normalizedEmail
+      ? { id: 'auth', email: normalizedEmail, name: normalizedEmail }
+      : null;
+
+    this.invalidateAsyncOperations();
+    this._authState = { isAuthenticated: true, user, token: normalizedToken };
+    this._isOnline = true;
+    this.setOfflineLocked(false);
+    this.prefs.setPreferences({
+      email: normalizedEmail,
+      token: normalizedToken,
+      instance: normalizedInstance,
+    });
+    this.notify();
+    return user;
   }
 
   /** Attempt login against the local users DB (offline). */

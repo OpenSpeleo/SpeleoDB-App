@@ -396,6 +396,137 @@ describe('SpeleoDBController', () => {
     });
   });
 
+  // ---- OAuth token login ---------------------------------------------------
+
+  describe('loginWithToken', () => {
+    it('validates a trimmed token and establishes an identity-free session on any 2xx', async () => {
+      service = createMockService({
+        validateToken: vi.fn(async () => ({ status: 204, data: null }) as HttpResponse<unknown>),
+      });
+      controller = new SpeleoDBController(service, prefs, cache);
+
+      const result = await controller.loginWithToken({
+        token: '  oauth-token  ',
+        instance: '  https://custom.speleodb.org/  ',
+      });
+
+      expect(result).toEqual({
+        success: true,
+        message: 'Login successful',
+        token: 'oauth-token',
+      });
+      expect(service.validateToken).toHaveBeenCalledWith(
+        'https://custom.speleodb.org/',
+        'oauth-token',
+      );
+      expect(controller.isAuthenticated()).toBe(true);
+      expect(controller.currentUser).toBeNull();
+      expect(controller.isOnline).toBe(true);
+      expect(prefs.setPreferences).toHaveBeenCalledWith({
+        email: '',
+        token: 'oauth-token',
+        instance: 'https://custom.speleodb.org/',
+      });
+    });
+
+    it('requires a token without calling the service', async () => {
+      const result = await controller.loginWithToken({
+        token: '   ',
+        instance: validCreds.instance,
+      });
+
+      expect(result).toEqual({ success: false, message: 'OAuth token is required' });
+      expect(service.validateToken).not.toHaveBeenCalled();
+      expect(prefs.setPreferences).not.toHaveBeenCalled();
+    });
+
+    it('requires an instance without calling the service', async () => {
+      const result = await controller.loginWithToken({ token: 'oauth-token', instance: '   ' });
+
+      expect(result).toEqual({
+        success: false,
+        message: 'SpeleoDB instance URL is required',
+      });
+      expect(service.validateToken).not.toHaveBeenCalled();
+      expect(prefs.setPreferences).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a 4xx token error without authenticating or persisting', async () => {
+      service = createMockService({
+        validateToken: vi.fn(async () => ({
+          status: 401,
+          data: { detail: 'This token has expired.' },
+        }) as HttpResponse<unknown>),
+      });
+      controller = new SpeleoDBController(service, prefs, cache);
+
+      const result = await controller.loginWithToken({
+        token: 'expired-token',
+        instance: validCreds.instance,
+      });
+
+      expect(result).toEqual({ success: false, message: 'This token has expired.' });
+      expect(controller.isAuthenticated()).toBe(false);
+      expect(prefs.setPreferences).not.toHaveBeenCalled();
+    });
+
+    it('uses the invalid-token fallback for a 4xx response without a message', async () => {
+      service = createMockService({
+        validateToken: vi.fn(async () => ({ status: 403, data: {} }) as HttpResponse<unknown>),
+      });
+      controller = new SpeleoDBController(service, prefs, cache);
+
+      const result = await controller.loginWithToken({
+        token: 'invalid-token',
+        instance: validCreds.instance,
+      });
+
+      expect(result).toEqual({ success: false, message: 'Invalid OAuth token' });
+      expect(controller.isAuthenticated()).toBe(false);
+      expect(prefs.setPreferences).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-4xx server failure without persisting the token', async () => {
+      service = createMockService({
+        validateToken: vi.fn(async () => ({ status: 503, data: {} }) as HttpResponse<unknown>),
+      });
+      controller = new SpeleoDBController(service, prefs, cache);
+
+      const result = await controller.loginWithToken({
+        token: 'oauth-token',
+        instance: validCreds.instance,
+      });
+
+      expect(result).toEqual({
+        success: false,
+        message: 'Unable to validate OAuth token. Please try again.',
+      });
+      expect(controller.isAuthenticated()).toBe(false);
+      expect(controller.isOfflineLocked).toBe(false);
+      expect(prefs.setPreferences).not.toHaveBeenCalled();
+    });
+
+    it('rejects a transport failure without persisting the token or entering offline mode', async () => {
+      service = createMockService({
+        validateToken: vi.fn(async () => { throw new Error('Network failure'); }),
+      });
+      controller = new SpeleoDBController(service, prefs, cache);
+
+      const result = await controller.loginWithToken({
+        token: 'oauth-token',
+        instance: validCreds.instance,
+      });
+
+      expect(result).toEqual({
+        success: false,
+        message: 'Unable to validate OAuth token. Check your connection and try again.',
+      });
+      expect(controller.isAuthenticated()).toBe(false);
+      expect(controller.isOfflineLocked).toBe(false);
+      expect(prefs.setPreferences).not.toHaveBeenCalled();
+    });
+  });
+
   // ---- logout ---------------------------------------------------------------
 
   describe('logout', () => {
@@ -517,6 +648,20 @@ describe('SpeleoDBController', () => {
 
       expect(fresh.isAuthenticated()).toBe(true);
       expect(fresh.currentUser?.email).toBe('restored@example.com');
+    });
+
+    it('restores a token-authenticated session without inventing a user identity', () => {
+      const restoredPrefs = createMockPrefs({
+        email: '',
+        token: 'saved-token',
+        instance: 'https://www.speleodb.org',
+      });
+
+      const fresh = new SpeleoDBController(service, restoredPrefs, cache);
+
+      expect(fresh.isAuthenticated()).toBe(true);
+      expect(fresh.currentUser).toBeNull();
+      expect(fresh.authState.token).toBe('saved-token');
     });
 
     it('stays unauthenticated when preferences are empty', () => {

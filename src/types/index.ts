@@ -26,6 +26,11 @@ export interface LoginCredentials {
   instance: string;
 }
 
+export interface OAuthTokenCredentials {
+  token: string;
+  instance: string;
+}
+
 export interface AuthResponse {
   success: boolean;
   message: string;

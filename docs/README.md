@@ -4,6 +4,7 @@ This folder contains product and engineering documentation for core app behavior
 
 ## Available docs
 
+- `authentication.md`: email/password and OAuth-token login flows, session persistence, identity handling, security boundaries, and offline behavior.
 - `offline-mode.md`: how offline mode works, startup auth timeout behavior, logout rules, and test expectations.
 - `logout-behavior.md`: when logout/cache purge happens and what data is cleared.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.

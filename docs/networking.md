@@ -57,6 +57,12 @@ The app enters offline mode only as a result of a failed server probe, never fro
 
 ## Auth and logout
 
+- A user-supplied OAuth token is persisted only after `GET /api/v2/user/auth-token/`
+  returns `2xx`. A `4xx`, timeout, transport error, or other server failure
+  leaves the app on the login page without creating an offline session.
+- Pre-login token validation failure does not purge local data. It never
+  established a session, so it returns a form error rather than calling the
+  stored-session logout path.
 - `4xx` from auth validation means token/session is invalid and must trigger logout + local purge.
 - Network errors, timeouts, and non-`4xx` failures must preserve session and local cache.
 - Logout invalidates and cancels in-flight startup/sync work before cache purge, so stale validation or sync completions cannot re-lock offline mode or repopulate cache after logout.
@@ -69,7 +75,7 @@ All `/api/v2/*` endpoints return the raw payload on success and a flat error obj
   - `GET /api/v2/projects/geojson/` -> `Project[]`
   - `GET /api/v2/landmarks/geojson/`, `stations/{subsurface,surface}/geojson/`, `exploration-leads/geojson/`, `cylinder-installs/geojson/` -> `GeoJSON.FeatureCollection`
   - `POST /api/v2/user/auth-token/` -> `{ user, token }`
-  - `GET /api/v2/user/auth-token/` (validate) -> `2xx` with arbitrary body (treated as opaque)
+  - `GET /api/v2/user/auth-token/` (validate a stored or user-supplied token) -> `2xx` with arbitrary body (treated as opaque)
 - Error bodies (status `4xx` / `5xx`): flat object such as `{ detail: '...' }`, `{ message: '...' }`, or `{ errors: { non_field_errors: ['...'] } }`. The same fields existed under v1 alongside the envelope; only the envelope was removed.
 
 Implementation notes:
@@ -80,6 +86,9 @@ Implementation notes:
 - Background GeoJSON cache writes validate the downloaded body before persisting it. Non-`2xx` or malformed GeoJSON payloads are skipped so stale cache is preserved instead of being overwritten with garbage.
 - Service/cache IO now accepts cancellation signals from controller-owned run contexts. Web `fetch` aborts transport immediately; native requests are best-effort at the transport level but still must not publish stale state or cache writes after abort/logout.
 - Login error parsing in `SpeleoDBController.login` reads `detail` / `message` / `errors.non_field_errors` directly off `response.data` (already v2-shaped).
+- Direct token login reuses `SpeleoDBService.validateToken`; `2xx` establishes
+  an identity-free session, while every failure remains unauthenticated and
+  never falls back offline.
 - Endpoint URLs and the v2 base path live in `src/constants.ts` (`API.BASE_PATH = '/api/v2'`).
 
 ## Implementation expectations
@@ -116,6 +125,7 @@ connectivity listener. Recording itself makes no network calls. See
 See also:
 
 - `docs/offline-mode.md`
+- `docs/authentication.md`
 - `docs/offline-op-queue.md`
 - `docs/gps-tracks.md`
 - `docs/logout-behavior.md`

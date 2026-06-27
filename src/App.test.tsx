@@ -41,7 +41,7 @@ describe('App', () => {
 
   it('shows login page by default when not authenticated', async () => {
     render(<App />);
-    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/^email$/i)).toBeInTheDocument();
   });
 
   it('hides the native splash on the default route', async () => {

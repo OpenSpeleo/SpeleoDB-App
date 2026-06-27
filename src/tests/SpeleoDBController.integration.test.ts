@@ -91,6 +91,22 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
       expect(result.success).toBe(false);
       expect(controller.isAuthenticated()).toBe(false);
     }, TEST_ENV.timeoutMs);
+
+    it('authenticates with a configured OAuth token and persists an identity-free session', async () => {
+      const result = await controller.loginWithToken({ token: oauthToken, instance });
+
+      expect(result.success).toBe(true);
+      expect(result.token).toBe(oauthToken);
+      expect(result.user).toBeUndefined();
+      expect(controller.isAuthenticated()).toBe(true);
+      expect(controller.currentUser).toBeNull();
+      expect(controller.isOnline).toBe(true);
+
+      const saved = prefs.getPreferences();
+      expect(saved.token).toBe(oauthToken);
+      expect(saved.email).toBe('');
+      expect(saved.instance).toBe(instance.trim());
+    }, TEST_ENV.timeoutMs);
   });
 
   // ---- validateSession ------------------------------------------------------
