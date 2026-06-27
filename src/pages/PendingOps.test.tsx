@@ -129,6 +129,22 @@ describe('PendingOps', () => {
     expect(screen.getByTestId('pending-count')).toHaveTextContent('1 pending change');
   });
 
+  it('lists a pending GPS-track op alongside landmark ops', () => {
+    const gpsOp: OfflineOpView = {
+      id: 'op-gps',
+      entityType: 'gpsTrack',
+      kind: 'create',
+      status: 'pending',
+      createdAt: Date.now(),
+      title: 'Surface Walk',
+      summary: 'Upload GPS track',
+      changes: [],
+    };
+    setup({ ops: [gpsOp] });
+    expect(screen.getByTestId('pending-op-op-gps')).toHaveTextContent('Surface Walk');
+    expect(screen.getByTestId('pending-op-op-gps')).toHaveTextContent('Upload GPS track');
+  });
+
   it('renders pending ops in the controller-provided newest-first order', () => {
     const older = { ...createOp, id: 'op-old', title: 'Older Camp', createdAt: 1000 };
     const newer = { ...createOp, id: 'op-new', title: 'Newer Camp', createdAt: 2000 };

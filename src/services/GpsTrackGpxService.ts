@@ -72,7 +72,6 @@ export class GpsTrackGpxService {
         pointCount: track.points.length,
         createdAt: track.createdAt,
         updatedAt: track.updatedAt,
-        uploadStatus: track.uploadStatus,
         fileName,
         error: errorToLogDetails(error),
       });

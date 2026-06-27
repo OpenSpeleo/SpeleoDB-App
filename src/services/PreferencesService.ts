@@ -25,6 +25,12 @@ export interface UserPreferences {
   countryCollapsed?: Record<string, boolean>;
   landmarkCollectionVisibility?: Record<string, boolean>;
   landmarkCollectionCollapsed?: Record<string, boolean>;
+  /**
+   * Per-GPS-track map visibility. Unlike projects/landmarks, GPS tracks default
+   * to HIDDEN: a missing key means NOT visible, so only tracks the user has
+   * explicitly toggled on are drawn.
+   */
+  gpsTrackVisibility?: Record<string, boolean>;
   hasCompletedGuidedTour?: boolean;
   showLandmarks?: boolean;
   colorMode?: MapColorMode;
@@ -76,6 +82,7 @@ const normalizeProjectVisibility = normalizeBooleanRecord;
 const normalizeCountryVisibility = normalizeBooleanRecord;
 const normalizeCountryCollapsed = normalizeBooleanRecord;
 const normalizeLandmarkCollectionVisibility = normalizeBooleanRecord;
+const normalizeGpsTrackVisibility = normalizeBooleanRecord;
 const normalizeLandmarkCollectionCollapsed = normalizeBooleanRecord;
 
 function normalizeGuidedTourCompletion(value: unknown): boolean | undefined {
@@ -124,6 +131,7 @@ function emptyPreferences(): UserPreferences {
     countryCollapsed: {},
     landmarkCollectionVisibility: {},
     landmarkCollectionCollapsed: {},
+    gpsTrackVisibility: {},
     hasCompletedGuidedTour: undefined,
     showLandmarks: undefined,
     colorMode: undefined,
@@ -166,6 +174,7 @@ function readRawPreferences(): UserPreferences {
       landmarkCollectionCollapsed: normalizeLandmarkCollectionCollapsed(
         parsed.landmarkCollectionCollapsed,
       ),
+      gpsTrackVisibility: normalizeGpsTrackVisibility(parsed.gpsTrackVisibility),
       hasCompletedGuidedTour: normalizeGuidedTourCompletion(parsed.hasCompletedGuidedTour),
       showLandmarks: normalizeShowLandmarks(parsed.showLandmarks),
       colorMode: normalizeColorMode(parsed.colorMode),
@@ -220,6 +229,7 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
         landmarkCollectionCollapsed: normalizeLandmarkCollectionCollapsed(
           mutated.landmarkCollectionCollapsed,
         ),
+        gpsTrackVisibility: normalizeGpsTrackVisibility(mutated.gpsTrackVisibility),
         hasCompletedGuidedTour: normalizeGuidedTourCompletion(mutated.hasCompletedGuidedTour),
         showLandmarks: normalizeShowLandmarks(mutated.showLandmarks),
         colorMode: normalizeColorMode(mutated.colorMode),
@@ -275,6 +285,10 @@ export function setPreferences(prefs: Partial<UserPreferences>): void {
       prefs.landmarkCollectionCollapsed === undefined
         ? current.landmarkCollectionCollapsed
         : normalizeLandmarkCollectionCollapsed(prefs.landmarkCollectionCollapsed),
+    gpsTrackVisibility:
+      prefs.gpsTrackVisibility === undefined
+        ? current.gpsTrackVisibility
+        : normalizeGpsTrackVisibility(prefs.gpsTrackVisibility),
     hasCompletedGuidedTour:
       prefs.hasCompletedGuidedTour === undefined
         ? current.hasCompletedGuidedTour
@@ -447,6 +461,27 @@ export function setLandmarkCollectionVisibilityPreferences(
     landmarkCollectionVisibility: {
       ...(current.landmarkCollectionVisibility ?? {}),
       ...safeUpdates,
+    },
+  }));
+}
+
+/**
+ * Read persisted GPS-track visibility map. Unlike projects/landmarks, missing
+ * keys imply HIDDEN (false): GPS tracks default to off and are only drawn once
+ * the user explicitly toggles them on.
+ */
+export function getGpsTrackVisibilityPreferences(): Record<string, boolean> {
+  return { ...(getPreferences().gpsTrackVisibility ?? {}) };
+}
+
+/** Persist visibility for one GPS track id. */
+export function setGpsTrackVisibilityPreference(trackId: string, visible: boolean): void {
+  if (!trackId) return;
+  enqueuePreferencesMutation((current) => ({
+    ...current,
+    gpsTrackVisibility: {
+      ...(current.gpsTrackVisibility ?? {}),
+      [trackId]: visible,
     },
   }));
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SpeleoDBController, type PreferencesPort } from './SpeleoDBController';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
-import { MultipartPayloadError, type HttpResponse } from '../services/HttpClient';
+import { type HttpResponse } from '../services/HttpClient';
 import type { AuthTokenResponse } from '../types';
 import { TilePrefetchService } from '../services/TilePrefetchService';
 import type { Project } from '../types/project';
@@ -104,6 +104,9 @@ function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBServic
       data: { type: 'FeatureCollection', features: [] },
     }) as HttpResponse<GeoJSON.FeatureCollection>),
     getLandmarkCollections: vi.fn(async () => ({ status: 200, data: [] }) as HttpResponse<unknown>),
+    getGpsTracks: vi.fn(async () => ({ status: 200, data: [] }) as HttpResponse<unknown>),
+    updateGpsTrack: vi.fn(async () => ({ status: 200, data: {} }) as HttpResponse<unknown>),
+    deleteGpsTrack: vi.fn(async () => ({ status: 200, data: { message: 'deleted' } }) as HttpResponse<unknown>),
     downloadJSON: vi.fn(async () => ({
       status: 200,
       data: {
@@ -138,6 +141,9 @@ function createMockPrefs(initial?: StoredPrefs): PreferencesPort {
 }
 
 function createMockCache(): ProjectCacheService {
+  // Stateful GPS-track caches so applyGpsTrackUpsert/Removal + sync reflect back.
+  let gpsTracks: unknown[] | null = null;
+  const gpsGeo = new Map<string, unknown>();
   return {
     getProjects: vi.fn(async () => null),
     setProjects: vi.fn(async () => true),
@@ -148,6 +154,19 @@ function createMockCache(): ProjectCacheService {
     getCachedCommitId: vi.fn(async () => null),
     getLandmarkCollections: vi.fn(async () => null),
     setLandmarkCollections: vi.fn(async () => true),
+    getGpsTracks: vi.fn(async () => gpsTracks),
+    setGpsTracks: vi.fn(async (tracks: unknown[]) => {
+      gpsTracks = tracks;
+      return true;
+    }),
+    getGpsTrackGeoJSON: vi.fn(async (id: string) => gpsGeo.get(id) ?? null),
+    setGpsTrackGeoJSON: vi.fn(async (id: string, data: unknown) => {
+      gpsGeo.set(id, data);
+      return true;
+    }),
+    removeGpsTrackGeoJSON: vi.fn(async (id: string) => {
+      gpsGeo.delete(id);
+    }),
     clearAll: vi.fn(async () => {}),
   } as unknown as ProjectCacheService;
 }
@@ -2975,6 +2994,12 @@ function gpsControllerWith(opts: {
   store?: ReturnType<typeof createMemoryGpsStore>;
   watcher?: ReturnType<typeof createFakeWatcher>;
   notificationPermission?: 'granted' | 'denied';
+  /** Pre-seed the cache ground truth with server tracks (parsed shape). */
+  remoteTracks?: Record<string, unknown>[];
+  /** Make token validation fail so validateSession() locks the app offline. */
+  failValidate?: boolean;
+  /** Inject a specific tile-prefetch service (e.g. a controllable one). */
+  tilePrefetch?: TilePrefetchService;
 } = {}) {
   const store = opts.store ?? createMemoryGpsStore();
   const watcher = opts.watcher ?? createFakeWatcher();
@@ -2982,9 +3007,15 @@ function gpsControllerWith(opts: {
     uploadGpx:
       opts.uploadGpx ??
       (vi.fn(async () => ({ status: 200, data: { landmarks_created: 1, gps_tracks_created: 1 } })) as never),
+    ...(opts.failValidate
+      ? { validateToken: vi.fn(async () => { throw new Error('timeout'); }) as never }
+      : {}),
   });
   const prefs = createMockPrefs({ ...GPS_PREFS });
   const cache = createMockCache();
+  if (opts.remoteTracks) {
+    void cache.setGpsTracks(opts.remoteTracks as never);
+  }
   const notificationGuard = {
     requestPermission: vi.fn(async () => opts.notificationPermission ?? 'granted'),
   } as RecordingNotificationPermissionGuard & { requestPermission: ReturnType<typeof vi.fn> };
@@ -2992,7 +3023,7 @@ function gpsControllerWith(opts: {
     service,
     prefs,
     cache,
-    createMockTilePrefetch(),
+    opts.tilePrefetch ?? createMockTilePrefetch(),
     createMemoryOpStore(),
     store,
     watcher,
@@ -3043,7 +3074,7 @@ describe('SpeleoDBController GPS tracks', () => {
       expect(track!.name).toBe('My Track');
       expect(track!.points).toHaveLength(2);
       expect(controller.gpsRecordingState).toBe('idle');
-      expect(controller.getGpsTracks().map((t) => t.id)).toContain(track!.id);
+      expect(controller.gpsTracks.map((t) => t.id)).toContain(track!.id);
       // Finalized track is durably stored.
       expect(store.records.get(track!.id)?.points).toHaveLength(2);
     });
@@ -3135,7 +3166,7 @@ describe('SpeleoDBController GPS tracks', () => {
       const { controller, store, watcher } = gpsControllerWith();
       const result = await recordTrack(controller, watcher, []);
       expect(result).toBeNull();
-      expect(controller.getGpsTracks()).toHaveLength(0);
+      expect(controller.gpsTracks).toHaveLength(0);
       expect(store.records.size).toBe(0);
     });
 
@@ -3243,7 +3274,7 @@ describe('SpeleoDBController GPS tracks', () => {
       await controller.discardTrackRecording();
 
       expect(controller.gpsRecordingState).toBe('idle');
-      expect(controller.getGpsTracks()).toHaveLength(0);
+      expect(controller.gpsTracks).toHaveLength(0);
       expect(store.records.size).toBe(0);
     });
 
@@ -3260,7 +3291,7 @@ describe('SpeleoDBController GPS tracks', () => {
       expect(watcher.stop).toHaveBeenCalled();
       expect(controller.currentTrackPoints).toHaveLength(0);
       // Nothing saved, and the in-progress record is removed from storage.
-      expect(controller.getGpsTracks()).toHaveLength(0);
+      expect(controller.gpsTracks).toHaveLength(0);
       expect(store.records.size).toBe(0);
     });
 
@@ -3333,7 +3364,7 @@ describe('SpeleoDBController GPS tracks', () => {
       expect(controller.gpsRecordingError).toBeTruthy();
       expect(watcher.stop).toHaveBeenCalled();
       // Nothing was captured, so no track is left behind.
-      expect(controller.getGpsTracks()).toHaveLength(0);
+      expect(controller.gpsTracks).toHaveLength(0);
       expect(store.records.size).toBe(0);
 
       // The error is one-shot: the UI clears it after surfacing it.
@@ -3353,9 +3384,9 @@ describe('SpeleoDBController GPS tracks', () => {
       expect(controller.gpsRecordingError).toBeTruthy();
       expect(controller.gpsRecordingError).toMatch(/track was saved/i);
       // The two captured fixes are kept as a finalized track, not dropped.
-      const tracks = controller.getGpsTracks();
+      const tracks = controller.gpsTracks;
       expect(tracks).toHaveLength(1);
-      expect(tracks[0].points).toHaveLength(2);
+      expect(tracks[0].pointCount).toBe(2);
       await vi.waitFor(() => expect(store.records.get(tracks[0].id)?.points).toHaveLength(2));
     });
   });
@@ -3378,9 +3409,9 @@ describe('SpeleoDBController GPS tracks', () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      const tracks = controller2.getGpsTracks();
+      const tracks = controller2.gpsTracks;
       expect(tracks).toHaveLength(1);
-      expect(tracks[0].points).toHaveLength(2);
+      expect(tracks[0].pointCount).toBe(2);
       expect(controller2.gpsRecordingState).toBe('idle');
       expect(controller2.currentTrackPoints).toHaveLength(0);
     });
@@ -3425,315 +3456,319 @@ describe('SpeleoDBController GPS tracks', () => {
           new GpsTrackStore(),
           createFakeWatcher(),
         );
-        await vi.waitFor(() => expect(controller2.getGpsTracks()).toHaveLength(1));
-        const recovered = controller2.getGpsTracks()[0];
-        expect(recovered.points).toHaveLength(2);
-        expect(recovered.uploadStatus).toBe('local');
+        await vi.waitFor(() => expect(controller2.gpsTracks).toHaveLength(1));
+        const recovered = controller2.gpsTracks[0];
+        expect(recovered.pointCount).toBe(2);
+        expect(recovered.origin).toBe('local');
+        expect(recovered.pending).toBeUndefined();
 
-        const result = await controller2.uploadGpsTrack(recovered.id);
-        expect(result?.uploadStatus).toBe('uploaded');
+        // Online upload: GPX is sent, the local copy is deleted, the list re-syncs.
+        await controller2.uploadGpsTrack(recovered.id);
         expect(uploadGpx).toHaveBeenCalledTimes(1);
         const gpxBody = (uploadGpx.mock.calls[0] as unknown[])[2] as string;
         expect(gpxBody).toContain('<gpx');
         expect(gpxBody).toContain('<trkpt');
+        // The recovered local recording is removed once the server accepted it.
+        await vi.waitFor(async () => {
+          expect(await new GpsTrackStore().get(recovered.id)).toBeNull();
+        });
       } finally {
         await realStore.clear();
       }
     });
   });
 
-  describe('rename + delete', () => {
-    it('renames a track', async () => {
-      const { controller, store, watcher } = gpsControllerWith();
+  // Seed a server-stored track into the controller's ground truth via a sync.
+  const SERVER_TRACK = {
+    id: 'srv-1',
+    name: 'Server Track',
+    color: '#377eb8',
+    file: 'https://files.test/srv-1.geojson',
+    sha256_hash: 'abc',
+    creation_date: '2024-01-01T00:00:00Z',
+    modified_date: '2024-01-01T00:00:00Z',
+  };
+  async function seedRemoteTrack(
+    controller: SpeleoDBController,
+    service: ReturnType<typeof createMockService>,
+    track: Record<string, unknown> = SERVER_TRACK,
+  ) {
+    (service.getGpsTracks as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ status: 200, data: [track] });
+    await controller.syncGpsTracks();
+  }
+
+  describe('edit + delete (local recordings)', () => {
+    it('edits a local track name + color in place (no network)', async () => {
+      const { controller, store, watcher, service } = gpsControllerWith();
       const track = await recordTrack(controller, watcher, [point(1, 2, 0)]);
-      await controller.renameGpsTrack(track!.id, 'Renamed');
-      expect(controller.getGpsTracks()[0].name).toBe('Renamed');
+      await controller.editGpsTrack(track!.id, { name: 'Renamed', color: '#4daf4a' });
+      const item = controller.gpsTracks.find((t) => t.id === track!.id)!;
+      expect(item.name).toBe('Renamed');
+      expect(item.color).toBe('#4daf4a');
       expect(store.records.get(track!.id)?.name).toBe('Renamed');
+      expect(service.updateGpsTrack).not.toHaveBeenCalled();
     });
 
-    it('ignores an empty rename', async () => {
-      const { controller, watcher } = gpsControllerWith();
-      const track = await recordTrack(controller, watcher, [point(1, 2, 0)], 'Keep');
-      await controller.renameGpsTrack(track!.id, '   ');
-      expect(controller.getGpsTracks()[0].name).toBe('Keep');
-    });
-
-    it('deletes a track from state and storage', async () => {
+    it('deletes a local track from state and storage', async () => {
       const { controller, store, watcher } = gpsControllerWith();
       const track = await recordTrack(controller, watcher, [point(1, 2, 0)]);
-      await controller.deleteGpsTrack(track!.id);
-      expect(controller.getGpsTracks()).toHaveLength(0);
+      await controller.removeGpsTrack(track!.id);
+      expect(controller.gpsTracks).toHaveLength(0);
       expect(store.records.has(track!.id)).toBe(false);
     });
   });
 
-  describe('upload classification', () => {
-    async function trackToUpload(uploadGpx: SpeleoDBService['uploadGpx']) {
-      const { controller, watcher, store } = gpsControllerWith({ uploadGpx });
-      const track = await recordTrack(controller, watcher, [point(1, 2, 0), point(1.001, 2, 15_000)]);
-      return { controller, store, id: track!.id };
+  describe('unified list snapshot identity (perf)', () => {
+    it('keeps gpsTracks referentially stable across a GPS-neutral notify, and rebuilds on a GPS change', async () => {
+      const tile = createControllableTilePrefetch();
+      const { controller, watcher } = gpsControllerWith({ tilePrefetch: tile.service });
+      const track = await recordTrack(controller, watcher, [point(1, 2, 0)]);
+
+      const before = controller.gpsTracks;
+      expect(before).toHaveLength(1);
+
+      // A GPS-neutral notify (tile prefetch progress) must NOT rebuild the list:
+      // the reference stays identical so the Dashboard's gps-tracks map source
+      // is not re-fed on every prefetch tick.
+      tile.emit([blockedLandmarkJob()]);
+      expect(controller.gpsTracks).toBe(before);
+
+      // An actual GPS change DOES produce a new reference + content.
+      await controller.editGpsTrack(track!.id, { name: 'Renamed' });
+      expect(controller.gpsTracks).not.toBe(before);
+      expect(controller.gpsTracks.find((t) => t.id === track!.id)?.name).toBe('Renamed');
+    });
+  });
+
+  describe('server track geometry', () => {
+    const TRACK_GEOJSON = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: [[-73, 45], [-73.01, 45.01]] },
+        },
+      ],
+    };
+
+    it('downloads + parses a server track for display', async () => {
+      const { controller, service } = gpsControllerWith();
+      await seedRemoteTrack(controller, service);
+      (service.downloadJSON as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+        data: TRACK_GEOJSON,
+      });
+      const points = await controller.getGpsTrackPoints('srv-1');
+      expect(points).toHaveLength(2);
+      expect(points[0]).toMatchObject({ latitude: 45, longitude: -73 });
+    });
+
+    it('parses a stringified geojson body (native transport returns a string)', async () => {
+      // CapacitorHttp hands `application/geo+json` back as a raw string; the
+      // controller must normalize it (parse) so the track still renders.
+      const { controller, service } = gpsControllerWith();
+      await seedRemoteTrack(controller, service);
+      (service.downloadJSON as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 200,
+        data: JSON.stringify(TRACK_GEOJSON),
+      });
+      const points = await controller.getGpsTrackPoints('srv-1');
+      expect(points).toHaveLength(2);
+    });
+  });
+
+  describe('edit + delete (server tracks)', () => {
+    it('lists a synced server track as a remote item', async () => {
+      const { controller, service } = gpsControllerWith();
+      await seedRemoteTrack(controller, service);
+      const item = controller.gpsTracks.find((t) => t.id === 'srv-1');
+      expect(item?.origin).toBe('remote');
+      expect(item?.name).toBe('Server Track');
+    });
+
+    it('edits a server track via PATCH when online', async () => {
+      const { controller, service } = gpsControllerWith();
+      await seedRemoteTrack(controller, service);
+      await controller.editGpsTrack('srv-1', { name: 'New Name', color: '#984ea3' });
+      expect(service.updateGpsTrack).toHaveBeenCalledWith('https://api.test', 'tok', 'srv-1', {
+        name: 'New Name',
+        color: '#984ea3',
+      });
+      const item = controller.gpsTracks.find((t) => t.id === 'srv-1')!;
+      expect(item.name).toBe('New Name');
+      expect(item.color).toBe('#984ea3');
+    });
+
+    it('deletes a server track via DELETE when online', async () => {
+      const { controller, service } = gpsControllerWith();
+      await seedRemoteTrack(controller, service);
+      await controller.removeGpsTrack('srv-1');
+      expect(service.deleteGpsTrack).toHaveBeenCalledWith('https://api.test', 'tok', 'srv-1');
+      expect(controller.gpsTracks.find((t) => t.id === 'srv-1')).toBeUndefined();
+    });
+
+    it('queues an offline edit of a server track and folds it optimistically', async () => {
+      const remote = {
+        id: 'srv-1', name: 'Server Track', color: '#377eb8',
+        fileUrl: 'https://files.test/srv-1.geojson', sha256: 'abc', createdAt: 1, updatedAt: 1,
+      };
+      const { controller, service } = gpsControllerWith({ remoteTracks: [remote], failValidate: true });
+      await flushPromises(3);
+      await controller.validateSession();
+      expect(controller.isOfflineLocked).toBe(true);
+
+      await controller.editGpsTrack('srv-1', { name: 'Offline Edit' });
+      expect(service.updateGpsTrack).not.toHaveBeenCalled();
+      expect(controller.pendingOpsCount).toBe(1);
+      const item = controller.gpsTracks.find((t) => t.id === 'srv-1')!;
+      expect(item.name).toBe('Offline Edit');
+      expect(item.pending).toBe('update');
+    });
+
+    it('queues an offline delete of a server track (optimistically hidden)', async () => {
+      const remote = {
+        id: 'srv-1', name: 'Server Track', color: '#377eb8',
+        fileUrl: 'https://files.test/srv-1.geojson', sha256: 'abc', createdAt: 1, updatedAt: 1,
+      };
+      const { controller, service } = gpsControllerWith({ remoteTracks: [remote], failValidate: true });
+      await flushPromises(3);
+      await controller.validateSession();
+      expect(controller.isOfflineLocked).toBe(true);
+
+      await controller.removeGpsTrack('srv-1');
+      expect(service.deleteGpsTrack).not.toHaveBeenCalled();
+      expect(controller.pendingOpsCount).toBe(1);
+      // Optimistically removed from the unified list (shown on the Pending page).
+      expect(controller.gpsTracks.find((t) => t.id === 'srv-1')).toBeUndefined();
+    });
+  });
+
+  describe('upload (create op)', () => {
+    async function recordedTrack(uploadGpx: SpeleoDBService['uploadGpx']) {
+      const ctx = gpsControllerWith({ uploadGpx });
+      const track = await recordTrack(ctx.controller, ctx.watcher, [point(1, 2, 0), point(1.001, 2, 15_000)]);
+      return { ...ctx, id: track!.id };
     }
 
-    it('marks uploaded on a 2xx, records counts, persists status, and sends real GPX', async () => {
+    it('uploads online: sends real GPX, deletes the local copy, re-syncs the list', async () => {
       const uploadGpx = vi.fn(async () => ({ status: 200, data: { landmarks_created: 2, gps_tracks_created: 1 } })) as never;
-      const { controller, store, id } = await trackToUpload(uploadGpx);
+      const { controller, store, service, id } = await recordedTrack(uploadGpx);
 
-      const result = await controller.uploadGpsTrack(id);
-      expect(result?.uploadStatus).toBe('uploaded');
-      expect(result?.remoteLandmarksCreated).toBe(2);
-      expect(result?.remoteTracksCreated).toBe(1);
-      expect(uploadGpx).toHaveBeenCalledTimes(1);
-      // The uploaded status is persisted durably (not just held in memory).
-      expect(store.records.get(id)?.uploadStatus).toBe('uploaded');
-      // The body is real GPX built from the recorded points, not empty/garbage.
+      await controller.uploadGpsTrack(id);
+
       expect(uploadGpx).toHaveBeenCalledWith(
         'https://api.test',
         'tok',
         expect.stringContaining('<trkpt'),
         expect.stringMatching(/\.gpx$/),
       );
+      // Local copy deleted + a tracks-only sync triggered (delete + replace).
+      expect(store.records.has(id)).toBe(false);
+      expect(controller.gpsTracks.find((t) => t.id === id)).toBeUndefined();
+      expect(service.getGpsTracks).toHaveBeenCalled();
+      expect(controller.pendingOpsCount).toBe(0);
     });
 
-    it('uploads a prebuilt GPX file through the upload-only path', async () => {
-      const uploadGpx = vi.fn(async () => ({ status: 200, data: { landmarks_created: 0, gps_tracks_created: 1 } })) as never;
-      const { controller, id } = await trackToUpload(uploadGpx);
-
-      const result = await controller.uploadGpsTrackFile(id, {
-        fileName: 'prepared.gpx',
-        gpx: '<gpx>prepared</gpx>',
-      });
-
-      expect(result?.uploadStatus).toBe('uploaded');
-      expect(uploadGpx).toHaveBeenLastCalledWith(
-        'https://api.test',
-        'tok',
-        '<gpx>prepared</gpx>',
-        'prepared.gpx',
-      );
-    });
-
-    it('marks error (kept, persisted, NOT offline-locked) on a definitive 4xx', async () => {
+    it('throws on a definitive 4xx without enqueuing or going offline', async () => {
       const uploadGpx = vi.fn(async () => ({ status: 400, data: { error: 'bad gpx' } })) as never;
-      const { controller, store, id } = await trackToUpload(uploadGpx);
+      const { controller, store, id } = await recordedTrack(uploadGpx);
 
-      const result = await controller.uploadGpsTrack(id);
-      expect(result?.uploadStatus).toBe('error');
-      expect(result?.uploadError).toBe('bad gpx');
-      // Still present for inspection/retry, and the error is persisted.
-      expect(controller.getGpsTracks().find((t) => t.id === id)).toBeDefined();
-      expect(store.records.get(id)?.uploadStatus).toBe('error');
-      // A definitive client error must NOT flip the app into offline mode.
+      await expect(controller.uploadGpsTrack(id)).rejects.toThrow(/bad gpx/);
       expect(controller.isOfflineLocked).toBe(false);
+      expect(controller.pendingOpsCount).toBe(0);
+      // The local recording is kept for retry.
+      expect(store.records.has(id)).toBe(true);
     });
 
-    it('marks pending + enters offline on a 5xx and persists pending', async () => {
+    it('enqueues a create op + enters offline on a 5xx', async () => {
       const uploadGpx = vi.fn(async () => ({ status: 503, data: {} })) as never;
-      const { controller, store, id } = await trackToUpload(uploadGpx);
+      const { controller, id } = await recordedTrack(uploadGpx);
 
-      const result = await controller.uploadGpsTrack(id);
-      expect(result?.uploadStatus).toBe('pending');
+      await controller.uploadGpsTrack(id);
       expect(controller.isOfflineLocked).toBe(true);
-      expect(store.records.get(id)?.uploadStatus).toBe('pending');
+      expect(controller.pendingOpsCount).toBe(1);
+      const item = controller.gpsTracks.find((t) => t.id === id)!;
+      expect(item.pending).toBe('create');
     });
 
-    it('keeps retryable upload statuses pending without treating the GPX as bad', async () => {
-      const uploadGpx = vi.fn(async () => ({ status: 408, data: {} })) as never;
-      const { controller, id } = await trackToUpload(uploadGpx);
-
-      const result = await controller.uploadGpsTrack(id);
-      expect(result?.uploadStatus).toBe('pending');
-      expect(result?.uploadError).toBeNull();
+    it('enqueues a create op on a transport error', async () => {
+      const uploadGpx = vi.fn(async () => { throw new Error('network down'); }) as never;
+      const { controller, id } = await recordedTrack(uploadGpx);
+      await controller.uploadGpsTrack(id);
       expect(controller.isOfflineLocked).toBe(true);
+      expect(controller.pendingOpsCount).toBe(1);
     });
 
-    it('keeps rate-limited uploads pending without flipping the app offline', async () => {
-      const uploadGpx = vi.fn(async () => ({ status: 429, data: {} })) as never;
-      const { controller, id } = await trackToUpload(uploadGpx);
-
-      const result = await controller.uploadGpsTrack(id);
-      expect(result?.uploadStatus).toBe('pending');
-      expect(result?.uploadError).toBeNull();
-      expect(controller.isOfflineLocked).toBe(false);
-    });
-
-    it('marks pending + enters offline on a transport error', async () => {
-      const uploadGpx = vi.fn(async () => {
-        throw new Error('network down');
-      }) as never;
-      const { controller, id } = await trackToUpload(uploadGpx);
-
-      const result = await controller.uploadGpsTrack(id);
-      expect(result?.uploadStatus).toBe('pending');
-      expect(controller.isOfflineLocked).toBe(true);
-    });
-
-    it('marks error without entering offline for local multipart serialization failures', async () => {
-      const uploadGpx = vi.fn(async () => {
-        throw new MultipartPayloadError('Multipart content contains the generated boundary.');
-      }) as never;
-      const { controller, id } = await trackToUpload(uploadGpx);
-
-      const result = await controller.uploadGpsTrack(id);
-      expect(result?.uploadStatus).toBe('error');
-      expect(result?.uploadError).toMatch(/multipart content/i);
-      expect(controller.isOfflineLocked).toBe(false);
-    });
-
-    it('marks error (drain-safe) when a track has no valid coordinates instead of "uploading" empty GPX', async () => {
-      const uploadGpx = vi.fn(async () => ({ status: 200, data: { gps_tracks_created: 1 } })) as never;
-      const { controller, watcher, store } = gpsControllerWith({ uploadGpx });
+    it('throws when the track has no valid coordinates (empty GPX), without enqueuing', async () => {
+      const uploadGpx = vi.fn(async () => ({ status: 200, data: {} })) as never;
+      const { controller, watcher } = gpsControllerWith({ uploadGpx });
       const invalid: RecordedPoint = {
-        latitude: Number.NaN,
-        longitude: 200,
-        altitude: null,
-        accuracy: 5,
-        altitudeAccuracy: 8,
+        latitude: Number.NaN, longitude: 200, altitude: null, accuracy: 5, altitudeAccuracy: 8,
         timestamp: POINT_TS_BASE,
       };
       const track = await recordTrack(controller, watcher, [invalid]);
 
-      const result = await controller.uploadGpsTrack(track!.id);
-
-      // The empty-GPX guard must mark it error (not silently "uploaded") and must
-      // NOT throw -- a drain run iterating pending tracks can't abort on one bad
-      // track.
-      expect(result?.uploadStatus).toBe('error');
-      expect(result?.uploadError).toMatch(/no valid gps points/i);
+      await expect(controller.uploadGpsTrack(track!.id)).rejects.toThrow(/no valid gps points/i);
       expect(uploadGpx).not.toHaveBeenCalled();
       expect(controller.isOfflineLocked).toBe(false);
-      expect(store.records.get(track!.id)?.uploadStatus).toBe('error');
+      expect(controller.pendingOpsCount).toBe(0);
     });
 
-    it('queues as pending without calling the network while offline-locked', async () => {
+    it('queues a create op without the network while offline-locked', async () => {
       const uploadGpx = vi.fn(async () => ({ status: 200, data: {} })) as never;
-      const watcher = createFakeWatcher();
-      const failingService = createMockService({
-        uploadGpx,
-        validateToken: vi.fn(async () => {
-          throw new Error('timeout');
-        }),
-      });
-      const controller = new SpeleoDBController(
-        failingService,
-        createMockPrefs({ ...GPS_PREFS }),
-        createMockCache(),
-        createMockTilePrefetch(),
-        createMemoryOpStore(),
-        createMemoryGpsStore(),
-        watcher,
-      );
+      const { controller, watcher } = gpsControllerWith({ uploadGpx, failValidate: true });
       await controller.validateSession();
       expect(controller.isOfflineLocked).toBe(true);
 
       const track = await recordTrack(controller, watcher, [point(1, 2, 0)]);
-      const result = await controller.uploadGpsTrack(track!.id);
-      expect(result?.uploadStatus).toBe('pending');
+      await controller.uploadGpsTrack(track!.id);
       expect(uploadGpx).not.toHaveBeenCalled();
+      expect(controller.pendingOpsCount).toBe(1);
     });
 
-    it('marks error when not signed in', async () => {
-      const watcher = createFakeWatcher();
-      const controller = new SpeleoDBController(
-        createMockService(),
-        createMockPrefs({}),
-        createMockCache(),
-        createMockTilePrefetch(),
-        createMemoryOpStore(),
-        createMemoryGpsStore(),
-        watcher,
-      );
-      const track = await recordTrack(controller, watcher, [point(1, 2, 0)]);
-      const result = await controller.uploadGpsTrack(track!.id);
-      expect(result?.uploadStatus).toBe('error');
-      expect(result?.uploadError).toMatch(/signed in/i);
-    });
-
-    it('returns null when the track id is unknown', async () => {
+    it('is a no-op for an unknown track id', async () => {
       const { controller } = gpsControllerWith();
-      expect(await controller.uploadGpsTrack('nope')).toBeNull();
+      await expect(controller.uploadGpsTrack('nope')).resolves.toBeUndefined();
     });
   });
 
-  describe('uploadPendingGpsTracks (reconnect drain)', () => {
-    it('drains a pending track once back online', async () => {
-      const uploadGpx = vi.fn(async () => ({ status: 200, data: { landmarks_created: 0, gps_tracks_created: 1 } }));
-      const { controller, store, watcher } = gpsControllerWith({ uploadGpx: uploadGpx as never });
+  describe('offline upload drain (Pending page sync)', () => {
+    it('replays a queued create op on syncOfflineOps: uploads + deletes local', async () => {
+      const uploadGpx = vi.fn(async () => ({ status: 503, data: {} }));
+      const { controller, store, service, watcher } = gpsControllerWith({ uploadGpx: uploadGpx as never });
+      const track = await recordTrack(controller, watcher, [point(1, 2, 0), point(1.001, 2, 15_000)]);
 
-      const track = await recordTrack(controller, watcher, [point(1, 2, 0)]);
-      // First upload hits a 5xx -> pending + offline-locked.
-      uploadGpx.mockResolvedValueOnce({ status: 503, data: {} } as never);
-      await controller.uploadGpsTrack(track!.id);
-      expect(controller.getGpsTracks()[0].uploadStatus).toBe('pending');
+      await controller.uploadGpsTrack(track!.id); // 5xx -> pending create op + offline
+      expect(controller.pendingOpsCount).toBe(1);
       expect(controller.isOfflineLocked).toBe(true);
 
-      // Reconnect clears the lock and launches the pending-track drain itself.
+      // Reconnect (validateToken 200) clears the lock; the user then syncs Pending.
       await controller.attemptReconnect();
-      await vi.waitFor(() => expect(uploadGpx).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(controller.isOfflineLocked).toBe(false));
+      uploadGpx.mockResolvedValue({ status: 200, data: { gps_tracks_created: 1 } } as never);
 
-      await vi.waitFor(() => expect(controller.getGpsTracks()[0].uploadStatus).toBe('uploaded'));
-      // The lock is cleared and the uploaded status is persisted durably.
-      expect(controller.isOfflineLocked).toBe(false);
-      await vi.waitFor(() => expect(store.records.get(track!.id)?.uploadStatus).toBe('uploaded'));
+      const summary = await controller.syncOfflineOps();
+      expect(summary.succeeded).toBe(1);
+      expect(controller.pendingOpsCount).toBe(0);
+      // Local recording removed after the confirmed upload; list re-synced.
+      expect(store.records.has(track!.id)).toBe(false);
+      expect(service.getGpsTracks).toHaveBeenCalled();
     });
 
-    it('drains pending GPS uploads after successful startup validation', async () => {
-      const pendingTrack: LocalGpsTrack = {
-        id: 'trk-pending',
-        name: 'Pending',
-        points: [point(1, 2, 0)],
-        createdAt: 1,
-        updatedAt: 1,
-        uploadStatus: 'pending',
-        uploadError: null,
-      };
-      const uploadGpx = vi.fn(async () => ({ status: 200, data: { landmarks_created: 0, gps_tracks_created: 1 } }));
-      const { controller } = gpsControllerWith({
-        store: createMemoryGpsStore([pendingTrack]),
-        uploadGpx: uploadGpx as never,
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-
-      await controller.validateSession();
-
-      await vi.waitFor(() => expect(uploadGpx).toHaveBeenCalledTimes(1));
-      await vi.waitFor(() => expect(controller.getGpsTracks()[0].uploadStatus).toBe('uploaded'));
-    });
-
-    it('skips tracks that are already uploaded or local', async () => {
-      const uploadGpx = vi.fn(async () => ({ status: 200, data: {} }));
+    it('does NOT auto-drain GPS uploads on reconnect (Pending page is the sync surface)', async () => {
+      const uploadGpx = vi.fn(async () => ({ status: 503, data: {} }));
       const { controller, watcher } = gpsControllerWith({ uploadGpx: uploadGpx as never });
-      await recordTrack(controller, watcher, [point(1, 2, 0)]); // local, never uploaded
-      uploadGpx.mockClear();
-
-      await controller.uploadPendingGpsTracks();
-      expect(uploadGpx).not.toHaveBeenCalled();
-    });
-
-    it('is a no-op while offline-locked', async () => {
-      const uploadGpx = vi.fn(async () => ({ status: 200, data: {} }));
-      const watcher = createFakeWatcher();
-      const controller = new SpeleoDBController(
-        createMockService({
-          uploadGpx: uploadGpx as never,
-          validateToken: vi.fn(async () => {
-            throw new Error('timeout');
-          }),
-        }),
-        createMockPrefs({ ...GPS_PREFS }),
-        createMockCache(),
-        createMockTilePrefetch(),
-        createMemoryOpStore(),
-        createMemoryGpsStore(),
-        watcher,
-      );
-      await controller.validateSession();
       const track = await recordTrack(controller, watcher, [point(1, 2, 0)]);
-      await controller.uploadGpsTrack(track!.id); // pending (offline)
+      await controller.uploadGpsTrack(track!.id); // 5xx -> pending + offline
+      expect(controller.pendingOpsCount).toBe(1);
       uploadGpx.mockClear();
 
-      await controller.uploadPendingGpsTracks();
+      await controller.attemptReconnect();
+      await flushPromises(4);
+      // Reconnect refreshes data but never replays the queue automatically.
       expect(uploadGpx).not.toHaveBeenCalled();
+      expect(controller.pendingOpsCount).toBe(1);
     });
   });
 
@@ -3746,7 +3781,7 @@ describe('SpeleoDBController GPS tracks', () => {
       await controller.logout();
 
       expect(controller.gpsRecordingState).toBe('idle');
-      expect(controller.getGpsTracks()).toHaveLength(0);
+      expect(controller.gpsTracks).toHaveLength(0);
       expect(controller.currentTrackPoints).toHaveLength(0);
       expect(watcher.stop).toHaveBeenCalled();
     });
@@ -3768,18 +3803,17 @@ describe('SpeleoDBController GPS tracks', () => {
       await logoutPromise;
 
       expect(store.records.size).toBe(0);
-      expect(controller.getGpsTracks()).toHaveLength(0);
+      expect(controller.gpsTracks).toHaveLength(0);
     });
 
     it('ignores a stale startup GPS load that resolves after logout', async () => {
       const recoveredTrack: LocalGpsTrack = {
         id: 'recovered',
         name: 'Recovered',
+        color: '#e41a1c',
         points: [point(1, 2, 0)],
         createdAt: 1,
         updatedAt: 1,
-        uploadStatus: 'local',
-        uploadError: null,
       };
       const listGate = deferred<LocalGpsTrack[]>();
       const store = createMemoryGpsStore([recoveredTrack]);
@@ -3791,7 +3825,7 @@ describe('SpeleoDBController GPS tracks', () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(controller.getGpsTracks()).toHaveLength(0);
+      expect(controller.gpsTracks).toHaveLength(0);
     });
   });
 });

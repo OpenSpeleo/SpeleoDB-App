@@ -18,7 +18,7 @@ import {
   NETWORK,
   TILE_PREFETCH,
 } from '../constants';
-import type { GpxImportResponse, SpeleoDBService } from '../services/SpeleoDBService';
+import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import { GpsTrackStore } from '../services/GpsTrackStore';
 import { MultipartPayloadError } from '../services/HttpClient';
@@ -93,12 +93,21 @@ import type {
 } from '../types/offlineOp';
 import type {
   GpsRecordingState,
+  GpsTrackListItem,
+  GpsTrackSnapshot,
   LocalGpsTrack,
   RecordedPoint,
+  RemoteGpsTrack,
 } from '../types/gpsTrack';
+import type { GpsTrackUpdateInput } from '../services/SpeleoDBService';
 import { GpsTrackGpxService, EmptyGpxTrackError, type GpsTrackGpxFile } from '../services/GpsTrackGpxService';
 import { generateUuid } from '../utils/ids';
 import { shouldAcceptFix } from '../utils/gpsSampling';
+import { summarizeTrack } from '../utils/gpsTrackStats';
+import { normalizeHexColor, randomTrackColor } from '../utils/gpsTrackColors';
+import { snapshotFromRemote } from '../offline/gpsTrackSnapshot';
+import { parseRemoteGpsTrack, parseRemoteGpsTracks } from '../utils/remoteGpsTrack';
+import { gpsTrackGeoJsonToPoints } from '../utils/gpsTrackGeoJson';
 import { CancellationContext } from './CancellationContext';
 import { isAbortError } from '../utils/abort';
 import type {
@@ -220,7 +229,7 @@ export class SpeleoDBController {
   private _warnedStuckWhileApproved = false;
   // Offline mutation queue (landmark create/edit/delete made while offline or
   // after a "not reachable" failure). Owns persistence + optimistic fold +
-  // replay/conflict resolution. See docs/offline-landmark-queue.md.
+  // replay/conflict resolution. See docs/offline-op-queue.md.
   private offlineQueue!: OfflineOpQueue;
   private _pendingOpsRevision = 0;
   // ---- GPS tracks + recording -----------------------------------------------
@@ -229,8 +238,14 @@ export class SpeleoDBController {
   // offline-first model as landmarks (record offline, upload on reconnect).
   // See docs/gps-tracks.md.
   private _gpsTracks: LocalGpsTrack[] = [];
+  // Server-stored tracks (metadata) synced like projects/landmarks. The unified
+  // list folds pending offline ops over these and merges in local recordings.
+  private _remoteGpsTracks: RemoteGpsTrack[] = [];
   private _gpsRecordingState: GpsRecordingState = 'idle';
   private _currentTrackPoints: RecordedPoint[] = [];
+  // Color assigned to the in-progress recording (palette pick), persisted onto
+  // the finalized local track so its map line is colored and editable.
+  private _recordingColor = '';
   private _gpsTracksRevision = 0;
   // The in-progress recording is persisted incrementally (not just on stop) so
   // a force-quit mid-recording recovers the captured points on next launch.
@@ -276,7 +291,13 @@ export class SpeleoDBController {
   private _storageConsentRequestedSnapshot = this._storageConsentRequested;
   private _pendingOpsCountSnapshot = 0;
   private _pendingOpsRevisionSnapshot = this._pendingOpsRevision;
-  private _gpsTracksSnapshot: LocalGpsTrack[] = this._gpsTracks;
+  private _gpsTracksSnapshot: GpsTrackListItem[] = [];
+  /**
+   * The `_gpsTracksRevision` the current `_gpsTracksSnapshot` was built from.
+   * Lets `notify()` rebuild the unified list only when GPS data actually
+   * changed, so `gpsTracks` keeps a stable reference across unrelated notifies.
+   */
+  private _builtGpsTracksRevision = -1;
   private _gpsRecordingStateSnapshot: GpsRecordingState = this._gpsRecordingState;
   private _currentTrackPointsSnapshot: RecordedPoint[] = this._currentTrackPoints;
   private _gpsTracksRevisionSnapshot: number = this._gpsTracksRevision;
@@ -319,6 +340,22 @@ export class SpeleoDBController {
         }
       })
       .catch((error) => console.warn('Failed to load GPS tracks:', error));
+    // Load cached server tracks so the unified list renders offline at launch.
+    void this.cache
+      .getGpsTracks()
+      .then((tracks) => {
+        if (
+          tracks &&
+          tracks.length > 0 &&
+          this.isAsyncGenerationCurrent(gpsLoadGeneration) &&
+          this._authState.isAuthenticated &&
+          !this._isPurgingLocalData
+        ) {
+          this._remoteGpsTracks = tracks;
+          this.bumpGpsTracksRevision();
+        }
+      })
+      .catch((error) => console.warn('Failed to load cached GPS tracks:', error));
     // Load persisted ops so the map folds them and the Pending tab appears on
     // startup (before any user action). Only refresh the UI when something was
     // actually restored, so a clean start does not perturb revisions.
@@ -357,6 +394,28 @@ export class SpeleoDBController {
       },
       applyUpsert: (landmark) => this.applyLandmarkUpsert(landmark),
       applyRemoval: (id) => this.applyLandmarkRemoval(id),
+      uploadGpsTrack: async (localTrackId) => {
+        const track = this._gpsTracks.find((t) => t.id === localTrackId);
+        // Already gone (e.g. deleted after a prior partial success): the upload
+        // is moot. Report success so the op resolves and is removed.
+        if (!track) return { status: 200, data: {} };
+        return this.performGpsUpload(track);
+      },
+      patchGpsTrack: (id, input) => {
+        const credentials = this.requireQueueCredentials();
+        return this.service.updateGpsTrack(credentials.instance, credentials.token, id, input);
+      },
+      deleteGpsTrackRemote: (id) => {
+        const credentials = this.requireQueueCredentials();
+        return this.service.deleteGpsTrack(credentials.instance, credentials.token, id);
+      },
+      fetchGpsTracks: () => {
+        const credentials = this.requireQueueCredentials();
+        return this.service.getGpsTracks(credentials.instance, credentials.token);
+      },
+      applyGpsTrackUpsert: (track) => this.applyGpsTrackUpsert(track),
+      applyGpsTrackRemoval: (id) => this.applyGpsTrackRemoval(id),
+      onGpsTrackCreated: (localTrackId) => this.finalizeGpsUpload(localTrackId),
     };
     return new OfflineOpQueue(this.offlineOpStore, port, () => this.handleOfflineQueueChange());
   }
@@ -370,10 +429,14 @@ export class SpeleoDBController {
   }
 
   private handleOfflineQueueChange(): void {
-    // A queue change can alter the optimistic fold, so refresh both the map
-    // (landmarksRevision) and the pending list (pendingOpsRevision).
+    // A queue change can alter the optimistic fold, so refresh the map
+    // (landmarksRevision), the pending list (pendingOpsRevision), and the
+    // unified GPS list (gpsTracksRevision -- a GPS op enqueue/replay/conflict
+    // changes the derived pending chips + the folded server tracks; notify()
+    // now only rebuilds that list when this revision changes).
     this._landmarksRevision += 1;
     this._pendingOpsRevision += 1;
+    this._gpsTracksRevision += 1;
     this.notify();
   }
 
@@ -430,8 +493,11 @@ export class SpeleoDBController {
     return this._pendingOpsRevisionSnapshot;
   }
 
-  /** Recorded GPS tracks (newest first). */
-  get gpsTracks(): LocalGpsTrack[] {
+  /**
+   * Unified GPS track list (newest first): local recordings + server tracks,
+   * with pending offline-op state folded in. `origin` distinguishes the two.
+   */
+  get gpsTracks(): GpsTrackListItem[] {
     return this._gpsTracksSnapshot;
   }
 
@@ -543,7 +609,16 @@ export class SpeleoDBController {
     this._storageConsentRequestedSnapshot = this._storageConsentRequested;
     this._pendingOpsCountSnapshot = this.offlineQueue ? this.offlineQueue.count : 0;
     this._pendingOpsRevisionSnapshot = this._pendingOpsRevision;
-    this._gpsTracksSnapshot = [...this._gpsTracks];
+    // Rebuild the unified GPS list only when the GPS revision actually changed.
+    // Frequent unrelated notifies (tile prefetch progress, online/sync status)
+    // would otherwise re-run summarizeTrack over every local recording and hand
+    // `gpsTracks` a fresh array reference, churning the Dashboard's gps-tracks
+    // map source on every tick. Gating keeps the reference stable when nothing
+    // GPS-related changed.
+    if (this._gpsTracksRevision !== this._builtGpsTracksRevision) {
+      this._gpsTracksSnapshot = this.buildUnifiedGpsTracks();
+      this._builtGpsTracksRevision = this._gpsTracksRevision;
+    }
     this._gpsRecordingStateSnapshot = this._gpsRecordingState;
     const snapshotNow = Date.now();
     this._gpsRecordingStartedAtSnapshot =
@@ -922,11 +997,7 @@ export class SpeleoDBController {
     if (this._isOfflineLocked) {
       return 'network_error';
     }
-    const result = await this.validateSessionAgainstServer();
-    if (result === 'ok') {
-      void this.uploadPendingGpsTracks();
-    }
-    return result;
+    return this.validateSessionAgainstServer();
   }
 
   /**
@@ -947,10 +1018,9 @@ export class SpeleoDBController {
     if (result === 'ok') {
       // Fire-and-forget: the offline lock is already cleared, so the UI can
       // hide the Go Online button immediately while the sync runs. syncProjects
-      // tracks itself for logout teardown.
+      // tracks itself for logout teardown and refreshes the GPS track list.
+      // Pending GPS ops drain from the Pending page, exactly like landmarks.
       void this.syncProjects();
-      // Drain any GPS track uploads that were queued while offline.
-      void this.uploadPendingGpsTracks();
     }
     return result;
   }
@@ -1061,9 +1131,14 @@ export class SpeleoDBController {
       this._lastSyncedAt = null;
       this._tilePrefetchJobs = [];
       this._gpsTracks = [];
+      this._remoteGpsTracks = [];
+      // Bump so notify()'s revision-gated rebuild clears the unified GPS list
+      // (logout calls notify() directly rather than via bumpGpsTracksRevision).
+      this._gpsTracksRevision += 1;
       this._gpsRecordingState = 'idle';
       this._currentTrackPoints = [];
       this._recordingTrackId = null;
+      this._recordingColor = '';
       this.resetRecordingTiming();
       this._gpsRecordingError = null;
       this._tileCacheOverLimitApproved = false;
@@ -1210,6 +1285,8 @@ export class SpeleoDBController {
           ) {
             this.bumpLandmarksRevision();
           }
+          // Refresh the server GPS-track list (best-effort; mirrors overlays).
+          await this.syncGpsTracksPhase(context, credentials.instance, credentials.token);
           result.phases.tilePrefetch = await this.scheduleTilePrefetchPhase(
             context,
             refreshOutcome.projects,
@@ -1433,6 +1510,7 @@ export class SpeleoDBController {
     this._recordingActiveStartedAt = now;
     this._recordingWatchSessionStartedAt = now;
     this._recordingName = this.defaultTrackName(now);
+    this._recordingColor = randomTrackColor();
     this._currentTrackPoints = [];
     this._gpsRecordingState = 'recording';
     this._gpsRecordingError = null;
@@ -1447,6 +1525,7 @@ export class SpeleoDBController {
       await this.geolocationWatcher.stop();
       this._currentTrackPoints = [];
       this._recordingTrackId = null;
+      this._recordingColor = '';
       this.resetRecordingTiming();
       this._recordingName = '';
       this._gpsRecordingState = 'idle';
@@ -1549,149 +1628,406 @@ export class SpeleoDBController {
     this.bumpGpsTracksRevision();
   }
 
-  /** Snapshot of the current recorded tracks. */
-  getGpsTracks(): LocalGpsTrack[] {
-    return [...this._gpsTracks];
+  /**
+   * Build the unified GPS-track list the panel + map consume: server tracks
+   * (ground truth with pending update/delete ops folded over them) plus local
+   * recordings, each annotated with derived pending state from the queue.
+   */
+  private buildUnifiedGpsTracks(): GpsTrackListItem[] {
+    const pending = this.offlineQueue
+      ? this.offlineQueue.gpsPendingBySubject()
+      : new Map<string, { state: GpsTrackListItem['pending']; error?: string | null }>();
+    const items: GpsTrackListItem[] = [];
+
+    for (const track of this._gpsTracks) {
+      const summary = summarizeTrack(track.points);
+      const p = pending.get(track.id);
+      items.push({
+        id: track.id,
+        name: track.name,
+        color: track.color,
+        origin: 'local',
+        createdAt: track.createdAt,
+        updatedAt: track.updatedAt,
+        pointCount: summary.pointCount,
+        distanceMeters: summary.distanceMeters,
+        durationMs: summary.durationMs,
+        pending: p?.state,
+        pendingError: p?.error ?? null,
+      });
+    }
+
+    const remote = this.offlineQueue
+      ? this.offlineQueue.foldGpsTracks(this._remoteGpsTracks)
+      : this._remoteGpsTracks;
+    for (const track of remote) {
+      const p = pending.get(track.id);
+      items.push({
+        id: track.id,
+        name: track.name,
+        color: track.color,
+        origin: 'remote',
+        createdAt: track.createdAt,
+        updatedAt: track.updatedAt,
+        pending: p?.state,
+        pendingError: p?.error ?? null,
+      });
+    }
+
+    return items.sort((a, b) => b.createdAt - a.createdAt);
   }
 
   /**
-   * Serialize a track to a GPX document + file name for export / share. Reuses
-   * the same builder as upload so every consumer produces identical GPX.
+   * Serialize a unified track to a GPX document + file name for export / share.
+   * Works for local recordings (in-memory points) and server tracks (geometry
+   * downloaded + cached on demand). Reuses the same builder as upload.
    */
-  async getTrackGpxFile(track: LocalGpsTrack): Promise<{ fileName: string; gpx: string }> {
-    return this.gpsTrackGpxService.buildFile(track);
+  async buildGpxFileForTrack(item: GpsTrackListItem): Promise<GpsTrackGpxFile> {
+    const local = this._gpsTracks.find((t) => t.id === item.id);
+    if (local) return this.gpsTrackGpxService.buildFile(local);
+    const points = await this.getGpsTrackPoints(item.id);
+    const synthetic: LocalGpsTrack = {
+      id: item.id,
+      name: item.name,
+      color: item.color,
+      points,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    };
+    return this.gpsTrackGpxService.buildFile(synthetic);
   }
 
-  /** Rename a recorded track. */
-  async renameGpsTrack(id: string, name: string): Promise<void> {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    await this.updateGpsTrack(id, { name: trimmed });
+  /**
+   * Points for a track, for map display + GPX export. Local recordings return
+   * their in-memory buffer; server tracks download + cache their GeoJSON.
+   */
+  async getGpsTrackPoints(id: string): Promise<RecordedPoint[]> {
+    const local = this._gpsTracks.find((t) => t.id === id);
+    if (local) return [...local.points];
+    const geojson = await this.getGpsTrackGeoJSON(id);
+    return geojson ? gpsTrackGeoJsonToPoints(geojson) : [];
   }
 
-  /** Delete a recorded track from local storage. */
-  async deleteGpsTrack(id: string): Promise<void> {
+  /**
+   * Cache-first GeoJSON geometry for a server track (downloaded from its signed
+   * URL on first use). Returns null for a local track (use its points) or when
+   * unavailable offline.
+   */
+  async getGpsTrackGeoJSON(id: string): Promise<GeoJSON.FeatureCollection | null> {
+    if (this._gpsTracks.some((t) => t.id === id)) return null;
+    const cached = await this.cache.getGpsTrackGeoJSON(id);
+    if (cached) {
+      const normalizedCache = normalizeGeoJSON(cached);
+      if (normalizedCache) return normalizedCache;
+    }
+    const remote = this._remoteGpsTracks.find((t) => t.id === id);
+    if (!remote || !remote.fileUrl || !this.hasNetworkAccess()) return null;
+    try {
+      const response = await this.service.downloadJSON(remote.fileUrl);
+      if (!isSuccessfulStatus(response.status)) return null;
+      // The signed URL serves `application/geo+json`; native transports
+      // (CapacitorHttp) hand that back as a raw string rather than parsed JSON,
+      // so normalize it (parse + unwrap) exactly like project geojson before
+      // caching. Without this the track downloads but renders no line on device.
+      const normalized = normalizeGeoJSON(response.data);
+      if (!normalized) return null;
+      await this.cache.setGpsTrackGeoJSON(id, normalized);
+      return normalized;
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      console.warn(`Failed to download GPS track GeoJSON ${id}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Upload a recorded local track (the "create" mutation). Mirrors
+   * `createLandmark`: an online 2xx deletes the local copy and re-syncs the
+   * server list; an unreachable failure flips offline and enqueues a
+   * `CreateGpsTrackOp` (drained from the Pending page); a definitive 4xx throws.
+   */
+  async uploadGpsTrack(id: string): Promise<void> {
+    const track = this._gpsTracks.find((t) => t.id === id);
+    if (!track) return;
+    if (track.points.length === 0) {
+      throw new Error('This track has no points to upload.');
+    }
+    if (this.hasNetworkAccess() && this.getSyncCredentials()) {
+      let response: { status: number; data: unknown };
+      try {
+        response = await this.performGpsUpload(track);
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        this.enterOfflineMode();
+        await this.enqueueGpsCreate(track);
+        return;
+      }
+      if (isSuccessfulStatus(response.status)) {
+        await this.finalizeGpsUpload(id);
+        return;
+      }
+      if (isRetryableGpsUploadStatus(response.status)) {
+        if (response.status !== 429) this.enterOfflineMode();
+        await this.enqueueGpsCreate(track);
+        return;
+      }
+      // Definitive 4xx: surface to the user; do not enqueue.
+      throw new Error(this.parseGpxUploadError(response.data));
+    }
+    await this.enqueueGpsCreate(track);
+  }
+
+  /**
+   * Edit a track's name/color. A local recording is edited in place (no
+   * network; any pending upload op is updated to match). A server track follows
+   * the landmark online-attempt-then-enqueue model (PATCH; enqueue on
+   * unreachable; throw on definitive 4xx).
+   */
+  async editGpsTrack(id: string, input: { name?: string; color?: string }): Promise<void> {
+    const local = this._gpsTracks.find((t) => t.id === id);
+    if (local) {
+      const name = input.name?.trim() ? input.name.trim() : local.name;
+      const color = input.color !== undefined ? normalizeHexColor(input.color, local.color) : local.color;
+      await this.updateGpsTrack(id, { name, color });
+      if (this.offlineQueue.hasGpsCreateFor(id)) {
+        await this.offlineQueue.enqueueGpsCreate({ id, name, color });
+      }
+      return;
+    }
+
+    const baseline = this.currentGpsTrackSnapshot(id);
+    const next: GpsTrackSnapshot = {
+      name: input.name?.trim() ? input.name.trim() : baseline?.name ?? '',
+      color: input.color !== undefined ? normalizeHexColor(input.color, baseline?.color) : baseline?.color ?? normalizeHexColor(undefined),
+    };
+    const patch: GpsTrackUpdateInput = { name: next.name, color: next.color };
+
+    if (this.hasNetworkAccess() && this.getSyncCredentials()) {
+      const credentials = this.getSyncCredentials()!;
+      let response: { status: number; data: unknown };
+      try {
+        response = await this.service.updateGpsTrack(credentials.instance, credentials.token, id, patch);
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        this.enterOfflineMode();
+        await this.enqueueGpsUpdate(id, baseline, next);
+        return;
+      }
+      if (isSuccessfulStatus(response.status)) {
+        await this.applyGpsTrackUpsert(this.mergeRemoteTrack(id, next, response.data));
+        return;
+      }
+      if (isRetryableGpsUploadStatus(response.status)) {
+        if (response.status !== 429) this.enterOfflineMode();
+        await this.enqueueGpsUpdate(id, baseline, next);
+        return;
+      }
+      throw new Error(this.parseGpxUploadError(response.data));
+    }
+    await this.enqueueGpsUpdate(id, baseline, next);
+  }
+
+  /**
+   * Delete a track. A local recording is removed from this device (and any
+   * pending upload op discarded). A server track follows the landmark model
+   * (DELETE; enqueue on unreachable; throw on definitive 4xx).
+   */
+  async removeGpsTrack(id: string): Promise<void> {
+    const local = this._gpsTracks.find((t) => t.id === id);
+    if (local) {
+      await this.offlineQueue.discardGpsTrackOpsForSubject(id);
+      await this.removeLocalGpsTrack(id);
+      return;
+    }
+
+    const baseline = this.currentGpsTrackSnapshot(id);
+    if (this.hasNetworkAccess() && this.getSyncCredentials()) {
+      const credentials = this.getSyncCredentials()!;
+      let response: { status: number; data: unknown };
+      try {
+        response = await this.service.deleteGpsTrack(credentials.instance, credentials.token, id);
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        this.enterOfflineMode();
+        await this.enqueueGpsDelete(id, baseline);
+        return;
+      }
+      if (isSuccessfulStatus(response.status) || response.status === 404) {
+        await this.applyGpsTrackRemoval(id);
+        return;
+      }
+      if (isRetryableGpsUploadStatus(response.status)) {
+        if (response.status !== 429) this.enterOfflineMode();
+        await this.enqueueGpsDelete(id, baseline);
+        return;
+      }
+      throw new Error(this.parseGpxUploadError(response.data));
+    }
+    await this.enqueueGpsDelete(id, baseline);
+  }
+
+  /** Refresh the server GPS-track list (used after an upload + standalone). */
+  async syncGpsTracks(): Promise<void> {
+    if (!this.hasNetworkAccess()) return;
+    const credentials = this.getSyncCredentials();
+    if (!credentials) return;
+    try {
+      const response = await this.service.getGpsTracks(credentials.instance, credentials.token);
+      if (!isSuccessfulStatus(response.status)) return;
+      const tracks = parseRemoteGpsTracks(response.data);
+      await this.cache.setGpsTracks(tracks);
+      this._remoteGpsTracks = tracks;
+      this.bumpGpsTracksRevision();
+    } catch (error) {
+      if (isAbortError(error)) return;
+      console.warn('syncGpsTracks failed:', error);
+    }
+  }
+
+  // ---- GPS track offline helpers --------------------------------------------
+
+  /** Build + upload the GPX for a local track. Build errors map to a 4xx-shape. */
+  private async performGpsUpload(track: LocalGpsTrack): Promise<{ status: number; data: unknown }> {
+    const credentials = this.getSyncCredentials();
+    if (!credentials) return { status: 401, data: { error: 'You are not signed in.' } };
+    let gpxFile: GpsTrackGpxFile;
+    try {
+      gpxFile = await this.gpsTrackGpxService.buildFile(track);
+    } catch (error) {
+      if (error instanceof EmptyGpxTrackError || error instanceof MultipartPayloadError) {
+        return { status: 422, data: { error: error.message } };
+      }
+      throw error;
+    }
+    const response = await this.service.uploadGpx(
+      credentials.instance,
+      credentials.token,
+      gpxFile.gpx,
+      gpxFile.fileName,
+    );
+    return { status: response.status, data: response.data };
+  }
+
+  /** After a confirmed upload: delete the local recording and re-sync the list. */
+  private async finalizeGpsUpload(localTrackId: string): Promise<void> {
+    await this.removeLocalGpsTrack(localTrackId);
+    await this.syncGpsTracks();
+  }
+
+  /** Remove a local recording from the store + in-memory list. */
+  private async removeLocalGpsTrack(id: string): Promise<void> {
     await this.gpsTrackStore.remove(id).catch((error) => {
       console.warn('Failed to delete GPS track:', error);
     });
+    const before = this._gpsTracks.length;
     this._gpsTracks = this._gpsTracks.filter((t) => t.id !== id);
+    if (this._gpsTracks.length !== before) this.bumpGpsTracksRevision();
+  }
+
+  private async enqueueGpsCreate(track: LocalGpsTrack): Promise<void> {
+    try {
+      await this.offlineQueue.enqueueGpsCreate({ id: track.id, name: track.name, color: track.color });
+    } catch (error) {
+      this.throwOfflineQueuePersistenceError(error);
+    }
+  }
+
+  private async enqueueGpsUpdate(
+    id: string,
+    baseline: GpsTrackSnapshot | null,
+    next: GpsTrackSnapshot,
+  ): Promise<void> {
+    try {
+      await this.offlineQueue.enqueueGpsUpdate(id, baseline, next);
+    } catch (error) {
+      this.throwOfflineQueuePersistenceError(error);
+    }
+  }
+
+  private async enqueueGpsDelete(id: string, baseline: GpsTrackSnapshot | null): Promise<void> {
+    try {
+      await this.offlineQueue.enqueueGpsDelete(id, baseline);
+    } catch (error) {
+      this.throwOfflineQueuePersistenceError(error);
+    }
+  }
+
+  /** Last known server state of a track (ground truth), or null when unknown. */
+  private currentGpsTrackSnapshot(id: string): GpsTrackSnapshot | null {
+    const track = this._remoteGpsTracks.find((t) => t.id === id);
+    return track ? snapshotFromRemote(track) : null;
+  }
+
+  /** Merge a PATCH result into a `RemoteGpsTrack`, preserving fileUrl/sha256. */
+  private mergeRemoteTrack(id: string, next: GpsTrackSnapshot, responseData: unknown): RemoteGpsTrack {
+    const parsed = parseRemoteGpsTrack(responseData);
+    const existing = this._remoteGpsTracks.find((t) => t.id === id) ?? null;
+    const base: RemoteGpsTrack = existing ?? {
+      id,
+      name: next.name,
+      color: next.color,
+      fileUrl: '',
+      sha256: '',
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    return {
+      ...base,
+      id,
+      name: next.name,
+      color: next.color,
+      fileUrl: base.fileUrl || parsed?.fileUrl || '',
+      sha256: base.sha256 || parsed?.sha256 || '',
+      updatedAt: parsed?.updatedAt || Date.now(),
+    };
+  }
+
+  /** Write a confirmed server track into the ground-truth cache. */
+  private async applyGpsTrackUpsert(track: RemoteGpsTrack): Promise<void> {
+    const list = (await this.cache.getGpsTracks()) ?? [];
+    const index = list.findIndex((t) => t.id === track.id);
+    const next =
+      index === -1
+        ? [track, ...list]
+        : [...list.slice(0, index), { ...list[index], ...track }, ...list.slice(index + 1)];
+    await this.cache.setGpsTracks(next);
+    this._remoteGpsTracks = next;
+    this.bumpGpsTracksRevision();
+  }
+
+  /** Remove a confirmed-deleted server track from the ground-truth cache. */
+  private async applyGpsTrackRemoval(id: string): Promise<void> {
+    const list = (await this.cache.getGpsTracks()) ?? [];
+    const next = list.filter((t) => t.id !== id);
+    await this.cache.setGpsTracks(next);
+    this._remoteGpsTracks = next;
+    await this.cache.removeGpsTrackGeoJSON(id);
     this.bumpGpsTracksRevision();
   }
 
   /**
-   * Upload a recorded track to SpeleoDB as a GPX file. Classified like landmark
-   * mutations: online 2xx -> `uploaded`; offline-locked / transport / timeout /
-   * 5xx -> `pending` (and the app flips to offline); definitive 4xx -> `error`.
-   * The track is never silently dropped.
+   * Refresh the server GPS-track list as a sync phase (abort-aware). Best-effort:
+   * a failure never fails the overall sync.
    */
-  async uploadGpsTrack(id: string): Promise<LocalGpsTrack | null> {
-    const track = this._gpsTracks.find((t) => t.id === id);
-    if (!track) return null;
-
-    const credentials = this.getSyncCredentials();
-    if (!credentials) {
-      return this.updateGpsTrack(id, {
-        uploadStatus: 'error',
-        uploadError: 'You are not signed in.',
-      });
-    }
-    if (track.points.length === 0) {
-      return this.updateGpsTrack(id, {
-        uploadStatus: 'error',
-        uploadError: 'This track has no points to upload.',
-      });
-    }
-    if (!this.hasNetworkAccess()) {
-      return this.updateGpsTrack(id, { uploadStatus: 'pending', uploadError: null });
-    }
-
-    let gpxFile: GpsTrackGpxFile;
+  private async syncGpsTracksPhase(
+    context: CancellationContext,
+    instance: string,
+    token: string,
+  ): Promise<void> {
+    if (!this.hasNetworkAccess()) return;
     try {
-      gpxFile = await this.getTrackGpxFile(track);
-    } catch (error) {
-      // A track with no valid points can't be exported; mark it as an error and
-      // keep it for inspection instead of throwing (so a drain run can't abort
-      // on one bad track). Any other build failure propagates to the caller.
-      if (error instanceof EmptyGpxTrackError) {
-        return this.updateGpsTrack(id, { uploadStatus: 'error', uploadError: error.message });
-      }
-      throw error;
-    }
-    return this.uploadGpsTrackFile(id, gpxFile);
-  }
-
-  async uploadGpsTrackFile(id: string, gpxFile: GpsTrackGpxFile): Promise<LocalGpsTrack | null> {
-    const track = this._gpsTracks.find((t) => t.id === id);
-    if (!track) return null;
-
-    const credentials = this.getSyncCredentials();
-    if (!credentials) {
-      return this.updateGpsTrack(id, {
-        uploadStatus: 'error',
-        uploadError: 'You are not signed in.',
-      });
-    }
-    if (track.points.length === 0) {
-      return this.updateGpsTrack(id, {
-        uploadStatus: 'error',
-        uploadError: 'This track has no points to upload.',
-      });
-    }
-    if (!this.hasNetworkAccess()) {
-      return this.updateGpsTrack(id, { uploadStatus: 'pending', uploadError: null });
-    }
-
-    try {
-      const response = await this.service.uploadGpx(
-        credentials.instance,
-        credentials.token,
-        gpxFile.gpx,
-        gpxFile.fileName,
-      );
-      if (isSuccessfulStatus(response.status)) {
-        const data = (response.data ?? {}) as Partial<GpxImportResponse>;
-        return this.updateGpsTrack(id, {
-          uploadStatus: 'uploaded',
-          uploadError: null,
-          remoteLandmarksCreated: data.landmarks_created ?? 0,
-          remoteTracksCreated: data.gps_tracks_created ?? 0,
-        });
-      }
-      if (isRetryableGpsUploadStatus(response.status)) {
-        // Server unreachable -> treat as offline and keep the track pending.
-        if (response.status !== 429) this.enterOfflineMode();
-        return this.updateGpsTrack(id, { uploadStatus: 'pending', uploadError: null });
-      }
-      // Definitive 4xx: surface to the user, keep the track for inspection.
-      return this.updateGpsTrack(id, {
-        uploadStatus: 'error',
-        uploadError: this.parseGpxUploadError(response.data),
-      });
+      const response = await this.service.getGpsTracks(instance, token, { signal: context.signal });
+      context.throwIfAborted();
+      if (!this.isSyncContextCurrent(context)) return;
+      if (!isSuccessfulStatus(response.status)) return;
+      const tracks = parseRemoteGpsTracks(response.data);
+      await this.cache.setGpsTracks(tracks);
+      context.throwIfAborted();
+      this._remoteGpsTracks = tracks;
+      this.bumpGpsTracksRevision();
     } catch (error) {
       if (isAbortError(error)) throw error;
-      if (error instanceof MultipartPayloadError) {
-        return this.updateGpsTrack(id, {
-          uploadStatus: 'error',
-          uploadError: error.message,
-        });
-      }
-      this.enterOfflineMode();
-      return this.updateGpsTrack(id, { uploadStatus: 'pending', uploadError: null });
-    }
-  }
-
-  /**
-   * Upload every track still pending upload. Used by the reconnect path so a
-   * track recorded offline syncs automatically when connectivity returns.
-   * No-op while offline-locked or unauthenticated.
-   */
-  async uploadPendingGpsTracks(): Promise<void> {
-    if (!this.hasNetworkAccess() || !this.getSyncCredentials()) return;
-    const pending = this._gpsTracks.filter((t) => t.uploadStatus === 'pending');
-    for (const track of pending) {
-      // Stop draining if we dropped offline mid-run (request-driven model).
-      if (!this.hasNetworkAccess()) break;
-      await this.uploadGpsTrack(track.id);
+      console.warn('syncGpsTracksPhase failed:', error);
     }
   }
 
@@ -1791,11 +2127,10 @@ export class SpeleoDBController {
     return {
       id,
       name,
+      color: this._recordingColor || randomTrackColor(),
       points,
       createdAt,
       updatedAt: Date.now(),
-      uploadStatus: 'local',
-      uploadError: null,
     };
   }
 
@@ -1803,11 +2138,10 @@ export class SpeleoDBController {
     return {
       id: this._recordingTrackId as string,
       name: this._recordingName,
+      color: this._recordingColor || randomTrackColor(),
       points: this._currentTrackPoints,
       createdAt: this._recordingStartedAt,
       updatedAt: Date.now(),
-      uploadStatus: 'local',
-      uploadError: null,
     };
   }
 
@@ -1980,7 +2314,7 @@ export class SpeleoDBController {
   /**
    * Footprint of a landmark's last known server state, read from the
    * ground-truth cache. Returns `null` when the landmark is not in the ground
-   * truth (see the footprint rules in docs/offline-landmark-queue.md).
+   * truth (see the footprint rules in docs/offline-op-queue.md).
    */
   private async currentLandmarkSnapshot(id: string): Promise<LandmarkSnapshot | null> {
     const fc = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks'));

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LocalGpsTrack, RecordedPoint } from '../types/gpsTrack';
 import {
-  gpsTracksToFeatureCollection,
   recordedPointToPointFeature,
   trackPointsToFeatureCollection,
   trackPointsToLineStringFeature,
@@ -20,11 +19,10 @@ function track(overrides: Partial<LocalGpsTrack> = {}): LocalGpsTrack {
   return {
     id: 'trk-1',
     name: 'Track 1',
+    color: '#e41a1c',
     points: [pt(), pt({ latitude: 45.1, longitude: -73.1, timestamp: 2000 })],
     createdAt: 1,
     updatedAt: 2,
-    uploadStatus: 'local',
-    uploadError: null,
     ...overrides,
   };
 }
@@ -78,17 +76,9 @@ describe('gpsTrackGeoJson', () => {
     });
   });
 
-  it('builds feature collections for live points and saved tracks', () => {
+  it('builds a feature collection for live recording points', () => {
     const live = trackPointsToFeatureCollection(track().points, { name: 'Live' });
     expect(live.features).toHaveLength(1);
     expect(live.features[0].properties.name).toBe('Live');
-
-    const saved = gpsTracksToFeatureCollection([track(), track({ id: 'empty', points: [] })]);
-    expect(saved.features).toHaveLength(1);
-    expect(saved.features[0].properties).toMatchObject({
-      id: 'trk-1',
-      name: 'Track 1',
-      uploadStatus: 'local',
-    });
   });
 });

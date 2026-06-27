@@ -31,7 +31,7 @@
  * Network replay + HTTP details are injected via `OfflineReplayPort` so the
  * queue is fully testable with a fake port.
  *
- * See docs/offline-landmark-queue.md.
+ * See docs/offline-op-queue.md.
  */
 
 import type {
@@ -39,6 +39,11 @@ import type {
   LandmarkCreateInput,
   LandmarkUpdateInput,
 } from '../types/landmark';
+import type {
+  GpsTrackPendingState,
+  GpsTrackSnapshot,
+  RemoteGpsTrack,
+} from '../types/gpsTrack';
 import type {
   LandmarkSnapshot,
   OfflineConflictChoice,
@@ -59,16 +64,27 @@ import {
   snapshotFromFeature,
   snapshotsEqual,
 } from './landmarkSnapshot';
+import {
+  conflictRows as gpsConflictRows,
+  findRemoteTrack,
+  snapshotFromRemote,
+  snapshotsEqual as gpsSnapshotsEqual,
+} from './gpsTrackSnapshot';
+import { parseRemoteGpsTrack, parseRemoteGpsTracks } from '../utils/remoteGpsTrack';
 import { OfflineOpStore } from './OfflineOpStore';
 import { isLocalLandmarkId, OfflineOp } from './ops/OfflineOp';
 import { CreateLandmarkOp } from './ops/CreateLandmarkOp';
 import { UpdateLandmarkOp } from './ops/UpdateLandmarkOp';
 import { DeleteLandmarkOp } from './ops/DeleteLandmarkOp';
+import { CreateGpsTrackOp } from './ops/CreateGpsTrackOp';
+import { UpdateGpsTrackOp } from './ops/UpdateGpsTrackOp';
+import { DeleteGpsTrackOp } from './ops/DeleteGpsTrackOp';
 import { deserializeOfflineOp } from './ops/deserialize';
 
 /** Network + ground-truth seam the queue depends on (all injected/testable). */
 export interface OfflineReplayPort {
   hasNetworkAccess(): boolean;
+  // ---- landmarks ----
   postLandmark(input: LandmarkCreateInput): Promise<{ status: number; data: unknown }>;
   patchLandmark(id: string, input: LandmarkUpdateInput): Promise<{ status: number; data: unknown }>;
   deleteLandmark(id: string): Promise<{ status: number; data: unknown }>;
@@ -77,6 +93,18 @@ export interface OfflineReplayPort {
   applyUpsert(landmark: LandmarkApiObject): Promise<void>;
   /** Remove a confirmed-deleted landmark from the ground-truth cache. */
   applyRemoval(id: string): Promise<void>;
+  // ---- gps tracks ----
+  /** Upload a recorded local track as GPX. A local build error returns a 4xx-shaped result. */
+  uploadGpsTrack(localTrackId: string): Promise<{ status: number; data: unknown }>;
+  patchGpsTrack(id: string, input: { name: string; color: string }): Promise<{ status: number; data: unknown }>;
+  deleteGpsTrackRemote(id: string): Promise<{ status: number; data: unknown }>;
+  fetchGpsTracks(): Promise<{ status: number; data: unknown }>;
+  /** Write a confirmed server track into the ground-truth cache. */
+  applyGpsTrackUpsert(track: RemoteGpsTrack): Promise<void>;
+  /** Remove a confirmed-deleted server track from the ground-truth cache. */
+  applyGpsTrackRemoval(id: string): Promise<void>;
+  /** After a confirmed upload: delete the local recording and sync the server list. */
+  onGpsTrackCreated(localTrackId: string): Promise<void>;
 }
 
 export type OfflineSyncReason =
@@ -116,8 +144,15 @@ export class OfflineOpPersistenceError extends Error {
 }
 
 interface ConflictContext {
-  server: LandmarkSnapshot | null;
+  /** Server snapshot (LandmarkSnapshot or GpsTrackSnapshot), or null when removed. */
+  server: unknown | null;
   serverFeature: GeoJSON.Feature | null;
+}
+
+/** Server snapshots pulled once per replay run, per entity type. */
+interface ReplayServerSnapshots {
+  landmarks: GeoJSON.FeatureCollection;
+  gpsTracks: RemoteGpsTrack[];
 }
 
 export class OfflineOpQueue {
@@ -180,14 +215,43 @@ export class OfflineOpQueue {
     return this.replaying;
   }
 
-  /** Fold all pending ops over a base FeatureCollection, in chronological order. */
+  /** Fold all pending landmark ops over a base FeatureCollection, in order. */
   foldOver(base: GeoJSON.FeatureCollection | null | undefined): GeoJSON.FeatureCollection {
     let collection: GeoJSON.FeatureCollection =
       base && Array.isArray(base.features) ? base : emptyCollection();
     for (const op of this.ordered()) {
+      if (op.entityType !== 'landmark') continue;
       collection = op.applyTo(collection);
     }
     return collection;
+  }
+
+  /** Fold all pending GPS-track ops over the cached server track list, in order. */
+  foldGpsTracks(base: readonly RemoteGpsTrack[] | null | undefined): RemoteGpsTrack[] {
+    let tracks: RemoteGpsTrack[] = Array.isArray(base) ? [...base] : [];
+    for (const op of this.ordered()) {
+      if (op.entityType !== 'gpsTrack') continue;
+      tracks = op.applyToTrackList(tracks);
+    }
+    return tracks;
+  }
+
+  /**
+   * Per-subject pending state for GPS tracks (keyed by the op's subject id:
+   * the recorded local track id for an upload, or the server track id for an
+   * edit/delete). Lets the controller annotate the unified track list.
+   */
+  gpsPendingBySubject(): Map<string, { state: GpsTrackPendingState; error?: string | null }> {
+    const map = new Map<string, { state: GpsTrackPendingState; error?: string | null }>();
+    for (const op of this.ordered()) {
+      if (op.entityType !== 'gpsTrack') continue;
+      let state: GpsTrackPendingState;
+      if (op.status === 'conflict') state = 'conflict';
+      else if (op.status === 'error') state = 'error';
+      else state = op.kind as GpsTrackPendingState;
+      map.set(op.subjectId(), { state, error: op.lastError ?? null });
+    }
+    return map;
   }
 
   /** View models for the pending list, newest first. */
@@ -205,6 +269,7 @@ export class OfflineOpQueue {
     const description = op.describe();
     const view: OfflineOpView = {
       id: op.id,
+      entityType: op.entityType,
       kind: op.kind,
       status: op.status,
       createdAt: op.createdAt,
@@ -223,21 +288,47 @@ export class OfflineOpQueue {
     const context = this.conflicts.get(op.id);
     const server = context?.server ?? null;
     if (op instanceof UpdateLandmarkOp) {
+      const serverSnapshot = (server as LandmarkSnapshot | null) ?? null;
       return {
         kind: 'update',
+        entityLabel: 'landmark',
         title: op.next.name || op.baseline?.name || '',
         local: op.next,
         server,
-        rows: conflictRows(op.next, server),
+        rows: conflictRows(op.next, serverSnapshot),
       };
     }
     if (op instanceof DeleteLandmarkOp) {
+      const serverSnapshot = (server as LandmarkSnapshot | null) ?? null;
       return {
         kind: 'delete',
+        entityLabel: 'landmark',
         title: op.baseline?.name ?? '',
         local: null,
         server,
-        rows: conflictRows(op.baseline, server),
+        rows: conflictRows(op.baseline, serverSnapshot),
+      };
+    }
+    if (op instanceof UpdateGpsTrackOp) {
+      const serverSnapshot = (server as GpsTrackSnapshot | null) ?? null;
+      return {
+        kind: 'update',
+        entityLabel: 'GPS track',
+        title: op.next.name || op.baseline?.name || '',
+        local: op.next,
+        server,
+        rows: gpsConflictRows(op.next, serverSnapshot),
+      };
+    }
+    if (op instanceof DeleteGpsTrackOp) {
+      const serverSnapshot = (server as GpsTrackSnapshot | null) ?? null;
+      return {
+        kind: 'delete',
+        entityLabel: 'GPS track',
+        title: op.baseline?.name ?? '',
+        local: null,
+        server,
+        rows: gpsConflictRows(op.baseline, serverSnapshot),
       };
     }
     return { kind: 'update', title: '', local: null, server, rows: [] };
@@ -384,6 +475,126 @@ export class OfflineOpQueue {
     this.emitChange();
   }
 
+  // ---- GPS track enqueue (with coalescing) ----------------------------------
+
+  async enqueueGpsCreate(track: { id: string; name: string; color: string }): Promise<CreateGpsTrackOp> {
+    await this.load();
+    // Re-uploading the same recorded track replaces the pending upload in place.
+    const existing = this.findOp(
+      (op): op is CreateGpsTrackOp => op instanceof CreateGpsTrackOp && op.localTrackId === track.id,
+    );
+    if (existing) {
+      existing.name = track.name;
+      existing.color = track.color;
+      existing.status = 'pending';
+      existing.lastError = undefined;
+      await this.persist(existing);
+      this.emitChange();
+      return existing;
+    }
+    const op = new CreateGpsTrackOp({
+      id: this.genId(),
+      seq: this.nextSeq(),
+      createdAt: Date.now(),
+      localTrackId: track.id,
+      name: track.name,
+      color: track.color,
+    });
+    await this.persist(op);
+    this.ops.push(op);
+    this.emitChange();
+    return op;
+  }
+
+  async enqueueGpsUpdate(
+    targetId: string,
+    baseline: GpsTrackSnapshot | null,
+    next: GpsTrackSnapshot,
+  ): Promise<void> {
+    await this.load();
+
+    // Replace an existing pending edit (keep its original server baseline).
+    const existingUpdate = this.findOp(
+      (op): op is UpdateGpsTrackOp => op instanceof UpdateGpsTrackOp && op.targetId === targetId,
+    );
+    if (existingUpdate) {
+      existingUpdate.next = next;
+      existingUpdate.status = 'pending';
+      existingUpdate.lastError = undefined;
+      this.conflicts.delete(existingUpdate.id);
+      await this.persist(existingUpdate);
+      this.emitChange();
+      return;
+    }
+
+    // Editing after a pending delete flips intent back to "keep it"; replace the
+    // delete with an update so the queue keeps exactly one op per track.
+    const existingDelete = this.findOp(
+      (op): op is DeleteGpsTrackOp => op instanceof DeleteGpsTrackOp && op.targetId === targetId,
+    );
+    const effectiveBaseline = existingDelete ? existingDelete.baseline : baseline;
+
+    const op = new UpdateGpsTrackOp({
+      id: this.genId(),
+      seq: this.nextSeq(),
+      createdAt: Date.now(),
+      targetId,
+      baseline: effectiveBaseline,
+      next,
+    });
+    await this.persist(op);
+    if (existingDelete) {
+      await this.removeOp(existingDelete.id);
+    }
+    this.ops.push(op);
+    this.emitChange();
+  }
+
+  async enqueueGpsDelete(targetId: string, baseline: GpsTrackSnapshot | null): Promise<void> {
+    await this.load();
+
+    // A delete supersedes any pending edit for the same track; keep the edit's
+    // original baseline (the true last-known server state).
+    const existingUpdate = this.findOp(
+      (op): op is UpdateGpsTrackOp => op instanceof UpdateGpsTrackOp && op.targetId === targetId,
+    );
+    const effectiveBaseline = existingUpdate ? existingUpdate.baseline : baseline;
+    if (existingUpdate) {
+      await this.removeOp(existingUpdate.id);
+    }
+
+    const op = new DeleteGpsTrackOp({
+      id: this.genId(),
+      seq: this.nextSeq(),
+      createdAt: Date.now(),
+      targetId,
+      baseline: effectiveBaseline,
+    });
+    await this.persist(op);
+    this.ops.push(op);
+    this.emitChange();
+  }
+
+  /** True when a recorded local track has a pending upload (create) op. */
+  hasGpsCreateFor(localTrackId: string): boolean {
+    return this.ops.some(
+      (op) => op instanceof CreateGpsTrackOp && op.localTrackId === localTrackId,
+    );
+  }
+
+  /** Discard every queued op whose subject is `subjectId` (any GPS-track op). */
+  async discardGpsTrackOpsForSubject(subjectId: string): Promise<void> {
+    await this.load();
+    const ids = this.ops
+      .filter((op) => op.entityType === 'gpsTrack' && op.subjectId() === subjectId)
+      .map((op) => op.id);
+    if (ids.length === 0) return;
+    for (const id of ids) {
+      await this.removeOp(id);
+    }
+    this.emitChange();
+  }
+
   /** Discard a pending op (the map reverts via re-fold). */
   async discard(id: string): Promise<void> {
     await this.load();
@@ -426,9 +637,14 @@ export class OfflineOpQueue {
     }
 
     this.replaying = true;
-    let server: GeoJSON.FeatureCollection;
+    // Pull only the server snapshots the targeted ops actually need; a mixed
+    // run (landmark + GPS ops) pulls both. A failed pull aborts the whole run.
+    const needsLandmarks = targets.some((op) => op.entityType === 'landmark');
+    const needsGpsTracks = targets.some((op) => op.entityType === 'gpsTrack');
+    const snapshots: ReplayServerSnapshots = { landmarks: emptyCollection(), gpsTracks: [] };
     try {
-      server = await this.fetchServerLandmarks();
+      if (needsLandmarks) snapshots.landmarks = await this.fetchServerLandmarks();
+      if (needsGpsTracks) snapshots.gpsTracks = await this.fetchServerGpsTracks();
     } catch {
       summary.reason = 'pull_failed';
       this.replaying = false;
@@ -439,9 +655,10 @@ export class OfflineOpQueue {
     try {
       for (const op of targets) {
         if (!this.ops.includes(op)) continue;
-        const subject = op.subjectId();
+        // Namespace by entity so a landmark id can never block a track id.
+        const subject = `${op.entityType}:${op.subjectId()}`;
         if (blockedSubjects.has(subject)) continue;
-        const outcome = await this.replayOne(op, server);
+        const outcome = await this.replayOne(op, snapshots);
         if (outcome === 'success') {
           summary.succeeded += 1;
         } else if (outcome === 'conflict') {
@@ -468,11 +685,14 @@ export class OfflineOpQueue {
 
   private async replayOne(
     op: OfflineOp,
-    server: GeoJSON.FeatureCollection,
+    snapshots: ReplayServerSnapshots,
   ): Promise<'success' | 'conflict' | 'error'> {
-    if (op instanceof CreateLandmarkOp) return this.replayCreate(op, server);
-    if (op instanceof UpdateLandmarkOp) return this.replayUpdate(op, server);
-    if (op instanceof DeleteLandmarkOp) return this.replayDelete(op, server);
+    if (op instanceof CreateLandmarkOp) return this.replayCreate(op, snapshots.landmarks);
+    if (op instanceof UpdateLandmarkOp) return this.replayUpdate(op, snapshots.landmarks);
+    if (op instanceof DeleteLandmarkOp) return this.replayDelete(op, snapshots.landmarks);
+    if (op instanceof CreateGpsTrackOp) return this.replayGpsCreate(op);
+    if (op instanceof UpdateGpsTrackOp) return this.replayGpsUpdate(op, snapshots.gpsTracks);
+    if (op instanceof DeleteGpsTrackOp) return this.replayGpsDelete(op, snapshots.gpsTracks);
     return 'error';
   }
 
@@ -603,6 +823,102 @@ export class OfflineOpQueue {
     return this.markError(op, parseLandmarkMutationError(response.status, response.data).message);
   }
 
+  // ---- GPS track replay -----------------------------------------------------
+
+  private async replayGpsCreate(
+    op: CreateGpsTrackOp,
+  ): Promise<'success' | 'conflict' | 'error'> {
+    let response: { status: number; data: unknown };
+    try {
+      response = await this.port.uploadGpsTrack(op.localTrackId);
+    } catch {
+      throw new OfflineNetworkInterruption();
+    }
+    if (isSuccessfulStatus(response.status)) {
+      // The server dedupes GPX imports by file sha256, so re-uploading the same
+      // recording is idempotent (it just returns zero counts) -- still success.
+      await this.port.onGpsTrackCreated(op.localTrackId);
+      await this.removeOp(op.id);
+      return 'success';
+    }
+    if (response.status >= 500) throw new OfflineNetworkInterruption();
+    return this.markError(op, parseLandmarkMutationError(response.status, response.data).message);
+  }
+
+  private async replayGpsUpdate(
+    op: UpdateGpsTrackOp,
+    server: RemoteGpsTrack[],
+  ): Promise<'success' | 'conflict' | 'error'> {
+    const serverTrack = findRemoteTrack(server, op.targetId);
+    // Idempotent replay: if the server is already at our intended end state,
+    // adopt it and drop the op (covers a force-quit after the PATCH committed).
+    if (serverTrack) {
+      const serverSnapshot = snapshotFromRemote(serverTrack);
+      if (gpsSnapshotsEqual(serverSnapshot, op.next)) {
+        await this.port.applyGpsTrackUpsert(serverTrack);
+        await this.removeOp(op.id);
+        return 'success';
+      }
+    }
+    if (op.baseline !== null) {
+      if (!serverTrack) {
+        // Deleted on the server while the user edited it locally -> conflict.
+        return this.markConflict(op, null, null);
+      }
+      const serverSnapshot = snapshotFromRemote(serverTrack);
+      if (!gpsSnapshotsEqual(serverSnapshot, op.baseline)) {
+        return this.markConflict(op, serverSnapshot, null);
+      }
+    }
+
+    let response: { status: number; data: unknown };
+    try {
+      response = await this.port.patchGpsTrack(op.targetId, { name: op.next.name, color: op.next.color });
+    } catch {
+      throw new OfflineNetworkInterruption();
+    }
+    if (isSuccessfulStatus(response.status)) {
+      await this.port.applyGpsTrackUpsert(this.buildRemoteTrack(op.targetId, op.next, serverTrack, response.data));
+      await this.removeOp(op.id);
+      return 'success';
+    }
+    if (response.status >= 500) throw new OfflineNetworkInterruption();
+    return this.markError(op, parseLandmarkMutationError(response.status, response.data).message);
+  }
+
+  private async replayGpsDelete(
+    op: DeleteGpsTrackOp,
+    server: RemoteGpsTrack[],
+  ): Promise<'success' | 'conflict' | 'error'> {
+    const serverTrack = findRemoteTrack(server, op.targetId);
+    if (!serverTrack) {
+      // Already gone server-side: the delete is satisfied.
+      await this.port.applyGpsTrackRemoval(op.targetId);
+      await this.removeOp(op.id);
+      return 'success';
+    }
+    if (op.baseline !== null) {
+      const serverSnapshot = snapshotFromRemote(serverTrack);
+      if (!gpsSnapshotsEqual(serverSnapshot, op.baseline)) {
+        return this.markConflict(op, serverSnapshot, null);
+      }
+    }
+
+    let response: { status: number; data: unknown };
+    try {
+      response = await this.port.deleteGpsTrackRemote(op.targetId);
+    } catch {
+      throw new OfflineNetworkInterruption();
+    }
+    if (isSuccessfulStatus(response.status) || response.status === 404) {
+      await this.port.applyGpsTrackRemoval(op.targetId);
+      await this.removeOp(op.id);
+      return 'success';
+    }
+    if (response.status >= 500) throw new OfflineNetworkInterruption();
+    return this.markError(op, parseLandmarkMutationError(response.status, response.data).message);
+  }
+
   // ---- Conflict resolution --------------------------------------------------
 
   async resolveConflict(id: string, choice: OfflineConflictChoice): Promise<OfflineSyncSummary> {
@@ -680,11 +996,59 @@ export class OfflineOpQueue {
       if (response.status >= 500) throw new OfflineNetworkInterruption();
       return this.markError(op, parseLandmarkMutationError(response.status, response.data).message);
     }
+    if (op instanceof UpdateGpsTrackOp) {
+      let response: { status: number; data: unknown };
+      try {
+        response = await this.port.patchGpsTrack(op.targetId, { name: op.next.name, color: op.next.color });
+      } catch {
+        throw new OfflineNetworkInterruption();
+      }
+      if (isSuccessfulStatus(response.status)) {
+        await this.port.applyGpsTrackUpsert(this.buildRemoteTrack(op.targetId, op.next, null, response.data));
+        await this.removeOp(op.id);
+        return 'success';
+      }
+      if (response.status >= 500) throw new OfflineNetworkInterruption();
+      return this.markError(op, parseLandmarkMutationError(response.status, response.data).message);
+    }
+    if (op instanceof DeleteGpsTrackOp) {
+      let response: { status: number; data: unknown };
+      try {
+        response = await this.port.deleteGpsTrackRemote(op.targetId);
+      } catch {
+        throw new OfflineNetworkInterruption();
+      }
+      if (isSuccessfulStatus(response.status) || response.status === 404) {
+        await this.port.applyGpsTrackRemoval(op.targetId);
+        await this.removeOp(op.id);
+        return 'success';
+      }
+      if (response.status >= 500) throw new OfflineNetworkInterruption();
+      return this.markError(op, parseLandmarkMutationError(response.status, response.data).message);
+    }
     return 'error';
   }
 
   /** Use the server's version: discard the local op and adopt current server state. */
   private async adoptServer(op: OfflineOp): Promise<void> {
+    if (op.entityType === 'gpsTrack') {
+      let server: RemoteGpsTrack[];
+      try {
+        server = await this.fetchServerGpsTracks();
+      } catch {
+        throw new OfflineNetworkInterruption();
+      }
+      const targetId = op.subjectId();
+      const serverTrack = findRemoteTrack(server, targetId);
+      if (serverTrack) {
+        await this.port.applyGpsTrackUpsert(serverTrack);
+      } else {
+        await this.port.applyGpsTrackRemoval(targetId);
+      }
+      await this.removeOp(op.id);
+      return;
+    }
+
     let server: GeoJSON.FeatureCollection;
     try {
       const response = await this.port.fetchLandmarksGeoJSON();
@@ -727,7 +1091,7 @@ export class OfflineOpQueue {
 
   private async markConflict(
     op: OfflineOp,
-    server: LandmarkSnapshot | null,
+    server: unknown | null,
     serverFeature: GeoJSON.Feature | null,
   ): Promise<'conflict'> {
     op.status = 'conflict';
@@ -807,6 +1171,47 @@ export class OfflineOpQueue {
       throw new OfflineNetworkInterruption();
     }
     return normalizeGeoJSON(response.data) ?? emptyCollection();
+  }
+
+  private async fetchServerGpsTracks(): Promise<RemoteGpsTrack[]> {
+    const response = await this.port.fetchGpsTracks();
+    if (!isSuccessfulStatus(response.status)) {
+      throw new OfflineNetworkInterruption();
+    }
+    return parseRemoteGpsTracks(response.data);
+  }
+
+  /**
+   * Build the confirmed `RemoteGpsTrack` to cache after a successful PATCH.
+   * Prefers the PATCH response, falls back to the previous server entry (to keep
+   * `fileUrl`/`sha256`), and always applies the intended name/color.
+   */
+  private buildRemoteTrack(
+    id: string,
+    next: GpsTrackSnapshot,
+    existing: RemoteGpsTrack | null,
+    responseData: unknown,
+  ): RemoteGpsTrack {
+    const parsed = parseRemoteGpsTrack(responseData);
+    const base: RemoteGpsTrack = existing ?? {
+      id,
+      name: next.name,
+      color: next.color,
+      fileUrl: '',
+      sha256: '',
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    return {
+      ...base,
+      id,
+      name: next.name,
+      color: next.color,
+      // Keep a known file URL/hash; the PATCH response omits them.
+      fileUrl: base.fileUrl || parsed?.fileUrl || '',
+      sha256: base.sha256 || parsed?.sha256 || '',
+      updatedAt: parsed?.updatedAt || Date.now(),
+    };
   }
 
   private async persist(op: OfflineOp): Promise<void> {

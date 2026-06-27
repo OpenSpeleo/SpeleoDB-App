@@ -9,6 +9,7 @@ import { CacheStore } from './CacheStore';
 import type { Project } from '../types/project';
 import type { MapOverlayId } from '../types/mapOverlay';
 import type { LandmarkCollection } from '../types/landmark';
+import type { RemoteGpsTrack } from '../types/gpsTrack';
 import { isAbortError, throwIfAborted } from '../utils/abort';
 
 // ==================== Internal keys ====================
@@ -22,6 +23,14 @@ const OVERLAY_KEY_PREFIX = 'overlay:';
  * rest of the cache on logout.
  */
 const LANDMARK_COLLECTIONS_KEY = 'landmark-collections';
+/**
+ * Server GPS-track metadata list cached during sync (in the `projects` store)
+ * so the unified track list still renders offline. Mirrors the landmark
+ * collections key; the per-track GeoJSON geometry is cached separately under
+ * `gps-track:<id>` in the `geojson` store.
+ */
+const GPS_TRACKS_KEY = 'gps-tracks';
+const GPS_TRACK_GEOJSON_KEY_PREFIX = 'gps-track:';
 
 // ==================== Service ====================
 
@@ -202,6 +211,84 @@ export class ProjectCacheService {
     }
   }
 
+  // ---- Server GPS tracks (synced list + lazy geometry) ------------------------
+
+  /** Read the cached server GPS-track metadata list, or null if none cached. */
+  async getGpsTracks(): Promise<RemoteGpsTrack[] | null> {
+    try {
+      const entry = await this.store.get<RemoteGpsTrack[]>('projects', GPS_TRACKS_KEY);
+      return entry?.data ?? null;
+    } catch (error) {
+      console.error('ProjectCacheService.getGpsTracks failed:', error);
+      return null;
+    }
+  }
+
+  /** Cache the server GPS-track metadata list (overwrites). */
+  async setGpsTracks(tracks: RemoteGpsTrack[]): Promise<boolean> {
+    try {
+      await this.store.set('projects', GPS_TRACKS_KEY, {
+        data: tracks,
+        cachedAt: Date.now(),
+      });
+      return true;
+    } catch (error) {
+      console.error('ProjectCacheService.setGpsTracks failed:', error);
+      return false;
+    }
+  }
+
+  /** Read a cached GPS-track GeoJSON geometry by track id, or null. */
+  async getGpsTrackGeoJSON(
+    trackId: string,
+    options: CacheOperationOptions = {},
+  ): Promise<unknown | null> {
+    throwIfAborted(options.signal)
+    try {
+      const entry = await this.store.get('geojson', this.getGpsTrackGeoJSONKey(trackId));
+      throwIfAborted(options.signal)
+      return entry?.data ?? null;
+    } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) {
+        throwIfAborted(options.signal)
+      }
+      console.error(`ProjectCacheService.getGpsTrackGeoJSON(${trackId}) failed:`, error);
+      return null;
+    }
+  }
+
+  /** Cache a GPS-track GeoJSON geometry by track id. */
+  async setGpsTrackGeoJSON(
+    trackId: string,
+    data: unknown,
+    options: CacheOperationOptions = {},
+  ): Promise<boolean> {
+    throwIfAborted(options.signal)
+    try {
+      await this.store.set('geojson', this.getGpsTrackGeoJSONKey(trackId), {
+        data,
+        cachedAt: Date.now(),
+      });
+      throwIfAborted(options.signal)
+      return true
+    } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) {
+        throwIfAborted(options.signal)
+      }
+      console.error(`ProjectCacheService.setGpsTrackGeoJSON(${trackId}) failed:`, error);
+      return false
+    }
+  }
+
+  /** Remove a cached GPS-track GeoJSON geometry by track id (best-effort). */
+  async removeGpsTrackGeoJSON(trackId: string): Promise<void> {
+    try {
+      await this.store.delete('geojson', this.getGpsTrackGeoJSONKey(trackId));
+    } catch (error) {
+      console.error(`ProjectCacheService.removeGpsTrackGeoJSON(${trackId}) failed:`, error);
+    }
+  }
+
   // ---- Housekeeping -----------------------------------------------------------
 
   /**
@@ -217,5 +304,9 @@ export class ProjectCacheService {
 
   private getOverlayCacheKey(overlayId: MapOverlayId): string {
     return `${OVERLAY_KEY_PREFIX}${overlayId}`;
+  }
+
+  private getGpsTrackGeoJSONKey(trackId: string): string {
+    return `${GPS_TRACK_GEOJSON_KEY_PREFIX}${trackId}`;
   }
 }

@@ -22,8 +22,7 @@ function track(overrides: Partial<LocalGpsTrack> = {}): LocalGpsTrack {
     ],
     createdAt: 1000,
     updatedAt: 16_000,
-    uploadStatus: 'local',
-    uploadError: null,
+    color: '#e41a1c',
     ...overrides,
   };
 }

@@ -428,4 +428,35 @@ describe('SpeleoDBService', () => {
       expect(http.calls[0].timeoutMs).toBe(4242);
     });
   });
+
+  describe('GPS track list / update / delete', () => {
+    it('GETs the GPS track list with auth', async () => {
+      http = createMockHttpClient({ status: 200, data: [{ id: 'g1', name: 'T' }] });
+      service = new SpeleoDBService(http);
+
+      const res = await service.getGpsTracks(INSTANCE, TOKEN);
+      expect(res.status).toBe(200);
+      const req = http.calls[0];
+      expect(req.method).toBe('GET');
+      expect(req.url).toBe(INSTANCE + API.GPS_TRACKS_ENDPOINT);
+      expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
+    });
+
+    it('PATCHes a GPS track name/color to its detail endpoint', async () => {
+      await service.updateGpsTrack(INSTANCE, TOKEN, 'g1', { name: 'New', color: '#377eb8' });
+      const req = http.calls[0];
+      expect(req.method).toBe('PATCH');
+      expect(req.url).toBe(INSTANCE + API.gpsTrackDetailEndpoint('g1'));
+      expect(req.data).toEqual({ name: 'New', color: '#377eb8' });
+      expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
+    });
+
+    it('DELETEs a GPS track via its detail endpoint', async () => {
+      await service.deleteGpsTrack(INSTANCE, TOKEN, 'g1');
+      const req = http.calls[0];
+      expect(req.method).toBe('DELETE');
+      expect(req.url).toBe(INSTANCE + API.gpsTrackDetailEndpoint('g1'));
+      expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
+    });
+  });
 });

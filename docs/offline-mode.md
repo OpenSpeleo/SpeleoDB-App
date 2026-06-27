@@ -64,14 +64,14 @@ Both paths are explicit and user-initiated. The app still does **not** subscribe
 - Landmark create/edit/delete are the exception to "read-only offline": they are
   captured as persistent offline ops, folded optimistically over the cached
   overlay, and replayed on the next sync. No outbound request is made while
-  offline-locked; the op simply queues. See `docs/offline-landmark-queue.md`.
+  offline-locked; the op simply queues. See `docs/offline-op-queue.md`.
 - GPS track recording is fully local (no network) and persists captured fixes so
-  a force-quit recovers the partial local track. A track upload attempted while
-  offline (or that fails as retryable/unreachable) is marked `pending` and
-  re-uploaded by `uploadPendingGpsTracks()` after successful startup validation
-  or on the explicit reconnect path. Untouched `local` tracks do not auto-upload.
-  An averaged point saved as a landmark while offline queues a normal
-  `CreateLandmarkOp`. See `docs/gps-tracks.md`.
+  a force-quit recovers the partial local track. Track create (upload), edit, and
+  delete made while offline (or that fail as retryable/unreachable) queue an
+  `OfflineOp` in the same queue as landmarks and replay from the **Pending** page
+  (no GPS-specific auto-drain). An averaged point saved as a landmark while
+  offline queues a normal `CreateLandmarkOp`. See `docs/gps-tracks.md` and
+  `docs/offline-op-queue.md`.
 - Explicit reconnect attempts are limited to the app relaunch recovery path, the Settings **Go Online** button, and the Pending Changes **Try Reconnect** button above.
 - The Settings **Resync** button calls `syncProjects()` only and is disabled while offline-locked. It does not attempt offline reconnect.
 - The app does not use passive `online`/`offline` browser listeners. Connectivity changes alone do not trigger reconnect or modal state changes.

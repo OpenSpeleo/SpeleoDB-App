@@ -3,19 +3,38 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import GpsPanel, { type GpsPanelProps } from './GpsPanel';
-import type { LocalGpsTrack } from '../types/gpsTrack';
+import type { GpsTrackListItem } from '../types/gpsTrack';
 
-function track(overrides: Partial<LocalGpsTrack> = {}): LocalGpsTrack {
+// Mirror ProjectPanel.test: render IonToggle as a label + checkbox so the
+// visibility switch is testable via querySelector('input') in jsdom.
+vi.mock('@ionic/react', () => ({
+  IonToggle: ({ checked, disabled, onIonChange, ...rest }: {
+    checked?: boolean;
+    disabled?: boolean;
+    onIonChange?: (e: { detail: { checked: boolean } }) => void;
+  } & Record<string, unknown>) => (
+    <label data-testid={rest['data-testid'] as string} aria-label={rest['aria-label'] as string}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onIonChange?.({ detail: { checked: e.target.checked } })}
+      />
+    </label>
+  ),
+}));
+
+function track(overrides: Partial<GpsTrackListItem> = {}): GpsTrackListItem {
   return {
     id: 'trk-1',
     name: 'Morning Walk',
-    points: [
-      { latitude: 45, longitude: -73, timestamp: 0 },
-      { latitude: 45.001, longitude: -73, timestamp: 60_000 },
-    ],
+    color: '#e41a1c',
+    origin: 'local',
     createdAt: 1000,
     updatedAt: 1000,
-    uploadStatus: 'local',
+    pointCount: 2,
+    distanceMeters: 100,
+    durationMs: 60_000,
     ...overrides,
   };
 }
@@ -28,11 +47,15 @@ function renderPanel(overrides: Partial<GpsPanelProps> = {}) {
     currentPoints: [],
     tracks: [],
     measurementUnit: 'meters',
+    trackVisibility: {},
+    loadingTrackIds: new Set<string>(),
     onOpenRecorder: vi.fn(),
     onCollectPoint: vi.fn(),
+    onTrackTap: vi.fn(),
+    onToggleTrackVisibility: vi.fn(),
     onShareTrack: vi.fn(),
     onUploadTrack: vi.fn(),
-    onRenameTrack: vi.fn(),
+    onEditTrack: vi.fn(),
     onDeleteTrack: vi.fn(),
     ...overrides,
   };
@@ -47,20 +70,8 @@ describe('GpsPanel', () => {
     const record = screen.getByTestId('gps-open-recorder');
     expect(record).toHaveTextContent('GPS Track Recording');
     expect(screen.getByTestId('gps-collect-point')).toBeInTheDocument();
-    // The actual recording controls live on the dedicated screen, not the panel.
     expect(screen.queryByTestId('gps-pause-recording')).not.toBeInTheDocument();
     expect(screen.queryByTestId('gps-stop-recording')).not.toBeInTheDocument();
-  });
-
-  it('keeps the same "GPS Track Recording" label while a recording is active', () => {
-    renderPanel({
-      recordingState: 'recording',
-      currentPoints: [
-        { latitude: 45, longitude: -73, timestamp: 0 },
-        { latitude: 45.001, longitude: -73, timestamp: 30_000 },
-      ],
-    });
-    expect(screen.getByTestId('gps-open-recorder')).toHaveTextContent('GPS Track Recording');
   });
 
   it('fires open-recorder + collect callbacks', async () => {
@@ -84,35 +95,48 @@ describe('GpsPanel', () => {
     expect(screen.getByTestId('gps-recording-stats')).toHaveTextContent('2 pts');
   });
 
+  it('renders the GPS Tools header and Recorded Tracks section', () => {
+    renderPanel({ tracks: [track()] });
+    expect(screen.getByRole('heading', { name: 'GPS Tools' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Recorded Tracks' })).toBeInTheDocument();
+  });
+
   it('renders an empty state with no tracks', () => {
     renderPanel();
-    expect(screen.getByText('No recorded tracks yet')).toBeInTheDocument();
+    expect(screen.getByText(/Tracks you record in the app or upload to SpeleoDB/i)).toBeInTheDocument();
   });
 
-  it('renders a track row with stats, status chip and actions', () => {
+  it('marks a clean local track "Local" with Upload + Edit + Delete actions', () => {
     renderPanel({ tracks: [track()] });
     expect(screen.getByTestId('gps-track-trk-1')).toBeInTheDocument();
-    expect(screen.getByTestId('gps-track-status-trk-1')).toHaveTextContent('Not uploaded');
-    expect(screen.getByTestId('gps-track-share-trk-1')).toBeInTheDocument();
-    expect(screen.getByTestId('gps-track-upload-trk-1')).toBeInTheDocument();
+    expect(screen.getByTestId('gps-track-status-trk-1')).toHaveTextContent('Local');
     expect(screen.getByTestId('gps-track-share-trk-1')).toHaveClass('app-btn--success');
-    expect(screen.getByTestId('gps-track-rename-trk-1')).toHaveClass('app-btn--info');
+    expect(screen.getByTestId('gps-track-upload-trk-1')).toBeInTheDocument();
+    expect(screen.getByTestId('gps-track-edit-trk-1')).toHaveClass('app-btn--info');
+    expect(screen.getByTestId('gps-track-delete-trk-1')).toHaveClass('app-btn--danger');
   });
 
-  it('keeps top GPS actions full-width and track actions half-width', () => {
-    renderPanel({ tracks: [track()] });
-    expect(screen.getByTestId('gps-collect-point').parentElement).toHaveClass('grid-cols-1');
-    expect(screen.getByTestId('gps-collect-point')).toHaveClass('w-full');
-    expect(screen.getByTestId('gps-open-recorder')).toHaveClass('w-full');
-    expect(screen.getByTestId('gps-track-share-trk-1').parentElement).toHaveClass('grid-cols-2');
-    for (const id of [
-      'gps-track-share-trk-1',
-      'gps-track-upload-trk-1',
-      'gps-track-rename-trk-1',
-      'gps-track-delete-trk-1',
-    ]) {
-      expect(screen.getByTestId(id)).toHaveClass('w-full');
-    }
+  it('shows no badge for a clean server track, with no Upload action', () => {
+    renderPanel({ tracks: [track({ id: 'trk-r', origin: 'remote', pointCount: null })] });
+    expect(screen.queryByTestId('gps-track-status-trk-r')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('gps-track-upload-trk-r')).not.toBeInTheDocument();
+    expect(screen.getByTestId('gps-track-edit-trk-r')).toBeInTheDocument();
+    expect(screen.getByTestId('gps-track-delete-trk-r')).toBeInTheDocument();
+  });
+
+  it('shows a filled color disk when the track is visible', () => {
+    renderPanel({ tracks: [track({ color: '#377eb8' })], trackVisibility: { 'trk-1': true } });
+    const dot = screen.getByTestId('gps-track-color-trk-1');
+    expect(dot).toHaveStyle({ backgroundColor: 'rgb(55, 126, 184)' });
+    expect(dot.style.borderWidth).toBe('0px');
+  });
+
+  it('shows a hollow colored ring when the track is hidden (default OFF)', () => {
+    renderPanel({ tracks: [track({ color: '#377eb8' })], trackVisibility: {} });
+    const dot = screen.getByTestId('gps-track-color-trk-1');
+    expect(dot.style.backgroundColor).toBe('transparent');
+    expect(dot.style.borderColor).toBe('rgb(55, 126, 184)');
+    expect(dot.style.borderWidth).toBe('2px');
   });
 
   it('fires track action callbacks', async () => {
@@ -120,37 +144,64 @@ describe('GpsPanel', () => {
     const { props } = renderPanel({ tracks: [track()] });
     await user.click(screen.getByTestId('gps-track-share-trk-1'));
     await user.click(screen.getByTestId('gps-track-upload-trk-1'));
-    await user.click(screen.getByTestId('gps-track-rename-trk-1'));
+    await user.click(screen.getByTestId('gps-track-edit-trk-1'));
     await user.click(screen.getByTestId('gps-track-delete-trk-1'));
     expect(props.onShareTrack).toHaveBeenCalledTimes(1);
     expect(props.onUploadTrack).toHaveBeenCalledTimes(1);
-    expect(props.onRenameTrack).toHaveBeenCalledTimes(1);
+    expect(props.onEditTrack).toHaveBeenCalledTimes(1);
     expect(props.onDeleteTrack).toHaveBeenCalledTimes(1);
   });
 
-  it('disables Upload and labels it Uploaded for an uploaded track', () => {
-    renderPanel({ tracks: [track({ uploadStatus: 'uploaded' })] });
-    const btn = screen.getByTestId('gps-track-upload-trk-1');
-    expect(btn).toBeDisabled();
-    expect(btn).toHaveTextContent('Uploaded');
-    expect(screen.getByTestId('gps-track-status-trk-1')).toHaveTextContent('Uploaded');
+  it('toggles visibility (default OFF) and fires the callback', async () => {
+    const user = userEvent.setup();
+    const { props } = renderPanel({ tracks: [track()], trackVisibility: {} });
+    const checkbox = screen
+      .getByTestId('gps-track-visibility-trk-1')
+      .querySelector('input') as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+    await user.click(checkbox);
+    expect(props.onToggleTrackVisibility).toHaveBeenCalledWith(track(), true);
   });
 
-  it('shows the upload error for a failed track', () => {
-    renderPanel({ tracks: [track({ uploadStatus: 'error', uploadError: 'bad gpx' })] });
-    expect(screen.getByTestId('gps-track-error-trk-1')).toHaveTextContent('bad gpx');
+  it('shows the checkbox checked when the track is visible', () => {
+    renderPanel({ tracks: [track()], trackVisibility: { 'trk-1': true } });
+    const checkbox = screen
+      .getByTestId('gps-track-visibility-trk-1')
+      .querySelector('input') as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
   });
 
-  it('shows the pending chip', () => {
-    renderPanel({ tracks: [track({ uploadStatus: 'pending' })] });
+  it('fires onTrackTap (zoom to track) when the row body is tapped', async () => {
+    const user = userEvent.setup();
+    const { props } = renderPanel({ tracks: [track()] });
+    await user.click(screen.getByTestId('gps-track-zoom-trk-1'));
+    expect(props.onTrackTap).toHaveBeenCalledWith(track());
+  });
+
+  it('shows a loading spinner + disabled toggle while geometry downloads', () => {
+    renderPanel({ tracks: [track({ origin: 'remote' })], loadingTrackIds: new Set(['trk-1']) });
+    expect(screen.getByTestId('gps-track-loading-trk-1')).toBeInTheDocument();
+    const checkbox = screen
+      .getByTestId('gps-track-visibility-trk-1')
+      .querySelector('input') as HTMLInputElement;
+    expect(checkbox.disabled).toBe(true);
+  });
+
+  it('shows pending chips derived from the offline queue', () => {
+    renderPanel({ tracks: [track({ pending: 'create' })] });
     expect(screen.getByTestId('gps-track-status-trk-1')).toHaveTextContent('Pending upload');
+  });
+
+  it('shows the pending error message', () => {
+    renderPanel({ tracks: [track({ pending: 'error', pendingError: 'bad gpx' })] });
+    expect(screen.getByTestId('gps-track-error-trk-1')).toHaveTextContent('bad gpx');
   });
 
   it('every app-btn carries a solid color variant (no bare-text buttons)', () => {
     const { container } = renderPanel({
       recordingState: 'recording',
       currentPoints: [{ latitude: 1, longitude: 2, timestamp: 0 }],
-      tracks: [track()],
+      tracks: [track(), track({ id: 'trk-2', origin: 'remote' })],
     });
     const buttons = container.querySelectorAll('button.app-btn');
     expect(buttons.length).toBeGreaterThan(0);

@@ -8,7 +8,7 @@
  * Kept free of React/network/storage so it is trivially testable and reused by
  * the ops, the queue, and the conflict UI.
  *
- * See docs/offline-landmark-queue.md.
+ * See docs/offline-op-queue.md.
  */
 
 import type { LandmarkApiObject } from '../types/landmark';

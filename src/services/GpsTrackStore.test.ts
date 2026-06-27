@@ -7,10 +7,10 @@ function makeTrack(overrides: Partial<LocalGpsTrack> = {}): LocalGpsTrack {
   return {
     id: 'trk-1',
     name: 'Track 1',
+    color: '#e41a1c',
     points: [{ latitude: 1, longitude: 2, timestamp: 0 }],
     createdAt: 1000,
     updatedAt: 1000,
-    uploadStatus: 'local',
     ...overrides,
   };
 }
@@ -44,10 +44,10 @@ describe('GpsTrackStore', () => {
 
   it('replaces an existing track on put', async () => {
     await store.put(makeTrack({ name: 'Old' }));
-    await store.put(makeTrack({ name: 'New', uploadStatus: 'uploaded' }));
+    await store.put(makeTrack({ name: 'New', color: '#377eb8' }));
     const got = await store.get('trk-1');
     expect(got?.name).toBe('New');
-    expect(got?.uploadStatus).toBe('uploaded');
+    expect(got?.color).toBe('#377eb8');
   });
 
   it('removes a track by id', async () => {

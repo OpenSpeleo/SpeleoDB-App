@@ -33,6 +33,12 @@ export interface GpxImportResponse {
   gps_tracks_created: number;
 }
 
+/** Editable fields of a server GPS track (PATCH body). */
+export interface GpsTrackUpdateInput {
+  name?: string;
+  color?: string;
+}
+
 export class SpeleoDBService {
   constructor(private http: HttpClient) {}
 
@@ -201,6 +207,66 @@ export class SpeleoDBService {
   }
 
   // ==================== GPS tracks ====================
+
+  /**
+   * GET /api/v2/gps_tracks/  (with Token header)
+   *
+   * Returns the user's server-stored GPS tracks as a bare array of
+   * `{ id, name, color, file, sha256_hash, creation_date, modified_date }`
+   * (`file` is a pre-signed GeoJSON URL). Synced like projects/landmarks.
+   */
+  async getGpsTracks(
+    instance: string,
+    token: string,
+    options: ServiceRequestOptions = {},
+  ): Promise<HttpResponse<unknown>> {
+    return this.getAuthorized<unknown>(
+      instance,
+      token,
+      API.GPS_TRACKS_ENDPOINT,
+      options,
+    );
+  }
+
+  /**
+   * PATCH /api/v2/gps_tracks/<id>/  (with Token header)
+   *
+   * Edits a server GPS track's name and/or color. Returns the updated object
+   * `{ id, name, color, creation_date, modified_date }`.
+   */
+  async updateGpsTrack(
+    instance: string,
+    token: string,
+    id: string,
+    input: GpsTrackUpdateInput,
+    options: ServiceRequestOptions = {},
+  ): Promise<HttpResponse<unknown>> {
+    return this.authorizedRequest(
+      'PATCH',
+      instance,
+      token,
+      API.gpsTrackDetailEndpoint(id),
+      { ...options, data: input },
+    );
+  }
+
+  /**
+   * DELETE /api/v2/gps_tracks/<id>/  (with Token header)
+   */
+  async deleteGpsTrack(
+    instance: string,
+    token: string,
+    id: string,
+    options: ServiceRequestOptions = {},
+  ): Promise<HttpResponse<unknown>> {
+    return this.authorizedRequest(
+      'DELETE',
+      instance,
+      token,
+      API.gpsTrackDetailEndpoint(id),
+      options,
+    );
+  }
 
   /**
    * PUT /api/v2/import/gpx/  (with Token header, multipart/form-data)

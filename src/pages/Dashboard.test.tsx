@@ -7,7 +7,7 @@ import { createMemoryHistory } from 'history';
 import Dashboard from './Dashboard';
 import { MAP } from '../constants';
 import type { Project } from '../types/project';
-import type { LocalGpsTrack } from '../types/gpsTrack';
+import type { GpsTrackListItem } from '../types/gpsTrack';
 import { LandmarkMutationError } from '../types/landmark';
 import { allowConsoleWarn } from '../test/consoleGuard';
 
@@ -354,6 +354,8 @@ const {
   mockSetLandmarkCollectionVisibilityPreferences,
   mockGetLandmarkCollectionCollapsedPreferences,
   mockSetLandmarkCollectionCollapsedPreference,
+  mockGetGpsTrackVisibilityPreferences,
+  mockSetGpsTrackVisibilityPreference,
   mockGetShowLandmarks,
   mockSetShowLandmarks,
   mockSetSelectedMapLayerId,
@@ -371,6 +373,8 @@ const {
   mockSetLandmarkCollectionVisibilityPreferences: vi.fn(),
   mockGetLandmarkCollectionCollapsedPreferences: vi.fn(() => ({}) as Record<string, boolean>),
   mockSetLandmarkCollectionCollapsedPreference: vi.fn(),
+  mockGetGpsTrackVisibilityPreferences: vi.fn(() => ({}) as Record<string, boolean>),
+  mockSetGpsTrackVisibilityPreference: vi.fn(),
   mockGetShowLandmarks: vi.fn(() => true),
   mockSetShowLandmarks: vi.fn(),
   mockSetSelectedMapLayerId: vi.fn(),
@@ -394,6 +398,8 @@ vi.mock('../services/PreferencesService', () => ({
   setLandmarkCollectionVisibilityPreferences: mockSetLandmarkCollectionVisibilityPreferences,
   getLandmarkCollectionCollapsedPreferences: mockGetLandmarkCollectionCollapsedPreferences,
   setLandmarkCollectionCollapsedPreference: mockSetLandmarkCollectionCollapsedPreference,
+  getGpsTrackVisibilityPreferences: mockGetGpsTrackVisibilityPreferences,
+  setGpsTrackVisibilityPreference: mockSetGpsTrackVisibilityPreference,
   getShowLandmarks: mockGetShowLandmarks,
   setShowLandmarks: mockSetShowLandmarks,
   setSelectedMapLayerId: mockSetSelectedMapLayerId,
@@ -418,7 +424,7 @@ let mockProjects: Project[] = [];
 let mockLandmarksRevision = 0;
 let mockLastSyncedAt: number | null = null;
 let mockGpsRecordingState: 'idle' | 'recording' | 'paused' = 'idle';
-let mockGpsTracks: LocalGpsTrack[] = [];
+let mockGpsTracks: GpsTrackListItem[] = [];
 const mockController = {
   syncProjects: mockSyncProjects,
   getProjectGeoJSON: mockGetProjectGeoJSON,
@@ -436,11 +442,13 @@ const mockController = {
   resumeTrackRecording: vi.fn().mockResolvedValue(undefined),
   stopTrackRecording: vi.fn().mockResolvedValue(null),
   discardTrackRecording: vi.fn().mockResolvedValue(undefined),
-  deleteGpsTrack: vi.fn().mockResolvedValue(undefined),
-  renameGpsTrack: vi.fn().mockResolvedValue(undefined),
-  uploadGpsTrack: vi.fn().mockResolvedValue(null),
-  uploadGpsTrackFile: vi.fn().mockResolvedValue(null),
-  getTrackGpxFile: vi.fn().mockReturnValue({ fileName: 'track.gpx', gpx: '<gpx/>' }),
+  removeGpsTrack: vi.fn().mockResolvedValue(undefined),
+  editGpsTrack: vi.fn().mockResolvedValue(undefined),
+  uploadGpsTrack: vi.fn().mockResolvedValue(undefined),
+  syncGpsTracks: vi.fn().mockResolvedValue(undefined),
+  buildGpxFileForTrack: vi.fn().mockResolvedValue({ fileName: 'track.gpx', gpx: '<gpx/>' }),
+  getGpsTrackPoints: vi.fn().mockResolvedValue([]),
+  isOfflineLocked: false,
 };
 
 vi.mock('../context/useSpeleoDB', () => ({
@@ -531,6 +539,23 @@ function getMapTouchSurface(): Element {
   const el = document.querySelector('.dashboard-map-touch-surface');
   if (!el) throw new Error('.dashboard-map-touch-surface not found');
   return el;
+}
+
+/**
+ * Drain Dashboard's in-flight async geojson/overlay loaders inside act().
+ *
+ * Those effects do `await controller.getProjectGeoJSON(...)` then setState
+ * (Dashboard.tsx setGeoJsonData / setActiveProjectIds / setOverlayGeoJsonData).
+ * `await waitFor('.dashboard-map-touch-surface')` returns as soon as the surface
+ * mounts -- before those microtask chains resolve -- so their setState can land
+ * outside act() and trip the console guard. A single macrotask turn (real timer)
+ * flushes the whole microtask chain; wrapping it in act() captures the updates.
+ * Call this on REAL timers, before switching to fake timers.
+ */
+async function settleAsyncEffects(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 function makeProject(overrides: Partial<Project> = {}): Project {
@@ -1730,7 +1755,6 @@ describe('Dashboard', () => {
   });
 
   it('does not open GPS modal before long press duration completes', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mockProjects = [makeProject({ id: 'p1', name: 'Long Press Boundary Project' })];
       mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
@@ -1743,6 +1767,9 @@ describe('Dashboard', () => {
 
       const surface = getMapTouchSurface();
 
+      // Fake timers ONLY for the synchronous long-press window (see note above).
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       fireEvent.pointerDown(surface, {
         pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
       });
@@ -1758,7 +1785,6 @@ describe('Dashboard', () => {
   });
 
   it('opens GPS coordinate modal after long press on the map', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mockProjects = [makeProject({ id: 'p1', name: 'Long Press Project' })];
       mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
@@ -1771,6 +1797,9 @@ describe('Dashboard', () => {
 
       const surface = getMapTouchSurface();
 
+      // Fake timers ONLY for the synchronous long-press window (see note above).
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       fireEvent.pointerDown(surface, {
         pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
       });
@@ -1793,7 +1822,6 @@ describe('Dashboard', () => {
   });
 
   it('does not open GPS modal when long press is below minimum zoom', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mockMapGetZoom.mockReturnValue(MAP.MARKER_INTERACTION_MIN_ZOOM - 1);
       mockProjects = [makeProject({ id: 'p1', name: 'Low Zoom Long Press Project' })];
@@ -1806,6 +1834,9 @@ describe('Dashboard', () => {
       });
 
       const surface = getMapTouchSurface();
+      // Fake timers ONLY for the synchronous long-press window (see note above).
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       fireEvent.pointerDown(surface, {
         pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
       });
@@ -1821,7 +1852,6 @@ describe('Dashboard', () => {
   });
 
   it('allows a long press on survey line geometry', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mockProjects = [makeProject({ id: 'p1', name: 'Line Hit Long Press Project' })];
       mockGetProjectGeoJSON.mockResolvedValue(lineFeatureCollection());
@@ -1846,6 +1876,9 @@ describe('Dashboard', () => {
       mockQueryRenderedFeatures.mockImplementation(queryWithLineHit);
 
       const surface = getMapTouchSurface();
+      // Fake timers ONLY for the synchronous long-press window (see note above).
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       fireEvent.pointerDown(surface, {
         pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
       });
@@ -1863,7 +1896,6 @@ describe('Dashboard', () => {
   });
 
   it('allows a long press on the GPS location dot', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       renderDashboard();
       await waitFor(() => {
@@ -1883,6 +1915,9 @@ describe('Dashboard', () => {
       mockQueryRenderedFeatures.mockImplementation(queryWithLocationDot);
 
       const surface = getMapTouchSurface();
+      // Fake timers ONLY for the synchronous long-press window (see note above).
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       fireEvent.pointerDown(surface, {
         pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
       });
@@ -1900,7 +1935,6 @@ describe('Dashboard', () => {
   });
 
   it('does not open GPS modal if finger moves before long press completes', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mockProjects = [makeProject({ id: 'p1', name: 'Long Press Move Project' })];
       mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
@@ -1913,6 +1947,10 @@ describe('Dashboard', () => {
 
       const surface = getMapTouchSurface();
 
+      // Fake timers ONLY for the synchronous long-press window (see note above).
+      // The await inside is a microtask flush, so no real time is needed.
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       await act(async () => {
         fireEvent.pointerDown(surface, {
           pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
@@ -1933,7 +1971,6 @@ describe('Dashboard', () => {
   });
 
   it('does not open GPS modal if pointer is released before long press completes', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mockProjects = [makeProject({ id: 'p1', name: 'Long Press Release Project' })];
       mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
@@ -1950,6 +1987,9 @@ describe('Dashboard', () => {
 
       const surface = getMapTouchSurface();
 
+      // Fake timers ONLY for the synchronous long-press window (see note above).
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       act(() => {
         fireEvent.pointerDown(surface, {
           pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
@@ -1968,7 +2008,6 @@ describe('Dashboard', () => {
   });
 
   it('does not open GPS modal when second touch arrives (multi-touch)', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mockProjects = [makeProject({ id: 'p1', name: 'Multi Touch Project' })];
       mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
@@ -1981,6 +2020,9 @@ describe('Dashboard', () => {
 
       const surface = getMapTouchSurface();
 
+      // Fake timers ONLY for the synchronous long-press window (see note above).
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       fireEvent.pointerDown(surface, {
         pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
       });
@@ -2678,7 +2720,6 @@ describe('Dashboard -- Landmark CRUD', () => {
   // ---- long-press ring ------------------------------------------------------
 
   it('delays the circular loading ring while holding and removes it on release', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       renderDashboard();
       await waitFor(() => {
@@ -2686,6 +2727,12 @@ describe('Dashboard -- Landmark CRUD', () => {
       });
       const surface = getMapTouchSurface();
 
+      // Fake timers ONLY for the synchronous long-press window; render + waitFor
+      // above run on real timers. vitest fake timers cannot drive RTL waitFor
+      // without `shouldAdvanceTime`, whose background tick fires timer callbacks
+      // OUTSIDE act() and made this suite flaky under parallel load.
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
       expect(screen.queryByTestId('long-press-ring')).not.toBeInTheDocument();
 
@@ -2700,7 +2747,6 @@ describe('Dashboard -- Landmark CRUD', () => {
   });
 
   it('does not flash the loading ring for a quick tap', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       renderDashboard();
       await waitFor(() => {
@@ -2712,6 +2758,9 @@ describe('Dashboard -- Landmark CRUD', () => {
       await act(async () => {});
       const surface = getMapTouchSurface();
 
+      // Fake timers ONLY for the synchronous long-press window (see note above).
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       act(() => {
         fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
         fireEvent.pointerUp(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
@@ -2725,7 +2774,6 @@ describe('Dashboard -- Landmark CRUD', () => {
   });
 
   it('removes the ring when the finger moves past the tap threshold', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       renderDashboard();
       await waitFor(() => {
@@ -2733,6 +2781,9 @@ describe('Dashboard -- Landmark CRUD', () => {
       });
       const surface = getMapTouchSurface();
 
+      // Fake timers ONLY for the synchronous long-press window (see note above).
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       act(() => {
         fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
         vi.advanceTimersByTime(MAP.LONG_PRESS_RING_REVEAL_DELAY_MS);
@@ -2768,7 +2819,6 @@ describe('Dashboard -- Landmark CRUD', () => {
   });
 
   it('still requires an empty spot: a long press on a marker does not open Map Point', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       renderDashboard();
       await waitFor(() => {
@@ -2776,6 +2826,9 @@ describe('Dashboard -- Landmark CRUD', () => {
       });
       const surface = getMapTouchSurface();
 
+      // Fake timers ONLY for the synchronous long-press window (see note above).
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
       // The spot is occupied by a marker when the ring would normally appear.
       const markerHit = [
@@ -2799,7 +2852,6 @@ describe('Dashboard -- Landmark CRUD', () => {
   // ---- create flow ----------------------------------------------------------
 
   it('opens the create form from a long-press map point and creates a landmark', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       renderDashboard();
       await waitFor(() => {
@@ -2807,8 +2859,14 @@ describe('Dashboard -- Landmark CRUD', () => {
       });
       const surface = getMapTouchSurface();
 
+      // Fake timers ONLY for the synchronous long-press window (see note above);
+      // the modal + create flow below runs back on real timers so its async
+      // awaits and the toast auto-dismiss timer never fire outside act().
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
       act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+      vi.useRealTimers();
 
       // Map Point modal now offers Create Landmark.
       expect(screen.getByTestId('create-landmark-button')).toBeInTheDocument();
@@ -2836,7 +2894,6 @@ describe('Dashboard -- Landmark CRUD', () => {
   });
 
   it('keeps the create form open and shows the error when offline', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mockCreateLandmark.mockRejectedValue(
         new LandmarkMutationError('offline', 'Landmark changes are not available offline yet.'),
@@ -2847,8 +2904,13 @@ describe('Dashboard -- Landmark CRUD', () => {
       });
       const surface = getMapTouchSurface();
 
+      // Fake timers ONLY for the synchronous long-press window (see note above);
+      // the create flow below runs back on real timers.
+      await settleAsyncEffects();
+      vi.useFakeTimers();
       fireEvent.pointerDown(surface, { pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80 });
       act(() => { vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS); });
+      vi.useRealTimers();
       fireEvent.click(screen.getByTestId('create-landmark-button'));
       fireEvent.change(screen.getByTestId('landmark-name-input'), { target: { value: 'New Spot' } });
       fireEvent.click(screen.getByTestId('landmark-form-submit'));
@@ -3081,21 +3143,16 @@ describe('Dashboard GPS panel', () => {
       {
         id: 'trk-upload',
         name: 'Surface Walk',
-        points: [
-          { latitude: 45, longitude: -73, timestamp: 1000 },
-          { latitude: 45.001, longitude: -73.001, timestamp: 16_000 },
-        ],
+        color: '#e41a1c',
+        origin: 'local',
         createdAt: 1000,
         updatedAt: 16_000,
-        uploadStatus: 'local',
-        uploadError: null,
+        pointCount: 2,
+        distanceMeters: 10,
+        durationMs: 15_000,
       },
     ];
-    mockController.getTrackGpxFile.mockResolvedValueOnce({ fileName: 'surface_walk.gpx', gpx: '<gpx>track</gpx>' });
-    mockController.uploadGpsTrackFile.mockResolvedValueOnce({
-      ...mockGpsTracks[0],
-      uploadStatus: 'uploaded',
-    });
+    mockController.uploadGpsTrack.mockResolvedValueOnce(undefined);
     renderDashboard();
     await screen.findByTestId('app-tab-bar');
 
@@ -3104,37 +3161,33 @@ describe('Dashboard GPS panel', () => {
 
     expect(screen.getByTestId('gps-upload-confirm')).toBeInTheDocument();
     expect(screen.getByTestId('gps-upload-confirm')).toHaveTextContent('Surface Walk');
-    expect(mockController.uploadGpsTrackFile).not.toHaveBeenCalled();
+    expect(mockController.uploadGpsTrack).not.toHaveBeenCalled();
 
     await user.click(screen.getByTestId('gps-upload-confirm-confirm'));
 
     await waitFor(() =>
-      expect(mockController.uploadGpsTrackFile).toHaveBeenCalledWith('trk-upload', {
-        fileName: 'surface_walk.gpx',
-        gpx: '<gpx>track</gpx>',
-      }),
+      expect(mockController.uploadGpsTrack).toHaveBeenCalledWith('trk-upload'),
     );
     expect(await screen.findByTestId('landmark-toast')).toHaveTextContent('Track uploaded to SpeleoDB');
   });
 
-  it('shows a GPX conversion error before upload execution', async () => {
+  it('surfaces an error when an upload fails', async () => {
     const user = userEvent.setup();
     mockGpsTracks = [
       {
         id: 'trk-bad-gpx',
         name: 'Broken Track',
-        points: [
-          { latitude: 45, longitude: -73, timestamp: 1000 },
-          { latitude: 45.001, longitude: -73.001, timestamp: 16_000 },
-        ],
+        color: '#377eb8',
+        origin: 'local',
         createdAt: 1000,
         updatedAt: 16_000,
-        uploadStatus: 'local',
-        uploadError: null,
+        pointCount: 2,
+        distanceMeters: 10,
+        durationMs: 15_000,
       },
     ];
-    mockController.getTrackGpxFile.mockRejectedValueOnce(new Error('GPX build failed'));
-    allowConsoleWarn('GPS track action failed.', expect.objectContaining({ phase: 'gpx' }));
+    mockController.uploadGpsTrack.mockRejectedValueOnce(new Error('Upload failed'));
+    allowConsoleWarn('GPS track action failed.', expect.objectContaining({ phase: 'upload' }));
     renderDashboard();
     await screen.findByTestId('app-tab-bar');
 
@@ -3142,10 +3195,65 @@ describe('Dashboard GPS panel', () => {
     await user.click(screen.getByTestId('gps-track-upload-trk-bad-gpx'));
     await user.click(screen.getByTestId('gps-upload-confirm-confirm'));
 
-    expect(mockController.uploadGpsTrackFile).not.toHaveBeenCalled();
     expect(await screen.findByTestId('landmark-toast')).toHaveTextContent(
-      'Could not create the GPX file for this track.',
+      'Could not upload the GPS track.',
     );
+  });
+
+  it('toggles a track onto the map and loads its geometry', async () => {
+    const user = userEvent.setup();
+    mockGpsTracks = [
+      {
+        id: 'trk-visible',
+        name: 'Resurgence',
+        color: '#4daf4a',
+        origin: 'remote',
+        createdAt: 2000,
+        updatedAt: 2000,
+      },
+    ];
+    mockController.getGpsTrackPoints.mockResolvedValueOnce([
+      { latitude: 45, longitude: -73, timestamp: 0 },
+      { latitude: 45.001, longitude: -73.001, timestamp: 0 },
+    ]);
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    const toggle = screen.getByTestId('gps-track-visibility-trk-visible').querySelector('input')!;
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(mockController.getGpsTrackPoints).toHaveBeenCalledWith('trk-visible'),
+    );
+  });
+
+  it('zooms the map to a track when its row is tapped', async () => {
+    const user = userEvent.setup();
+    mockGpsTracks = [
+      {
+        id: 'trk-zoom',
+        name: 'Traverse',
+        color: '#984ea3',
+        origin: 'remote',
+        createdAt: 3000,
+        updatedAt: 3000,
+      },
+    ];
+    mockController.getGpsTrackPoints.mockResolvedValue([
+      { latitude: 45, longitude: -73, timestamp: 0 },
+      { latitude: 45.01, longitude: -73.02, timestamp: 0 },
+    ]);
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-track-zoom-trk-zoom'));
+
+    await waitFor(() =>
+      expect(mockController.getGpsTrackPoints).toHaveBeenCalledWith('trk-zoom'),
+    );
+    await waitFor(() => expect(mockMapFitBounds).toHaveBeenCalled());
   });
 
   it('collapses the recording screen when a bottom tab is pressed', async () => {

@@ -23,8 +23,8 @@ This folder contains product and engineering documentation for core app behavior
 - `deep-linking.md`: custom URL scheme (`speleodb://`), Universal Links / App Links setup, server `.well-known/` files, and fallback behavior.
 - `map-layers.md`: changeable map tile layers (ESRI satellite + hillshade), the layer switcher, per-layer offline sync + prioritized prefetch, magic-hash missing-tile detection, offline gating, and storage-cap interaction.
 - `landmark-crud.md`: online create/edit/delete of landmarks from the map, the collection picker, permission gating, long-press loading ring, the single cache-write seam, and the offline-ready architecture.
-- `offline-landmark-queue.md`: offline create/edit/delete -- the persistent op queue, optimistic ground-truth-plus-fold model, idempotent replay, conflict diff resolution, and the Pending tab/page.
-- `gps-tracks.md`: the GPS menu -- track recording (force-quit safe), GPS averaging + confidence model, GPX export/share, and SpeleoDB upload (native multipart + offline drain on reconnect).
+- `offline-op-queue.md`: THE canonical offline-mutation pattern -- the single persistent op queue shared by landmarks and GPS tracks, optimistic ground-truth-plus-fold model, idempotent replay, conflict diff resolution, and the Pending tab/page.
+- `gps-tracks.md`: the GPS menu -- track recording (force-quit safe), GPS averaging + confidence model, GPX export/share, server sync of tracks, the unified local+remote track list, default-OFF per-track map display, and create/edit/delete routed through the shared offline op queue (see `offline-op-queue.md`).
 
 ## Maintainer note
 

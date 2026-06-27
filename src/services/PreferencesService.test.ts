@@ -16,6 +16,8 @@ import {
   setLandmarkCollectionVisibilityPreferences,
   getLandmarkCollectionCollapsedPreferences,
   setLandmarkCollectionCollapsedPreference,
+  getGpsTrackVisibilityPreferences,
+  setGpsTrackVisibilityPreference,
   getHasCompletedGuidedTour,
   setHasCompletedGuidedTour,
   getShowLandmarks,
@@ -529,6 +531,27 @@ describe('PreferencesService', () => {
       setLandmarkCollectionVisibilityPreference('col-1', false);
       setPreferences({ token: 'tok', instance: 'https://example.org' });
       expect(getLandmarkCollectionVisibilityPreferences()).toEqual({ 'col-1': false });
+    });
+
+    it('GPS track visibility defaults to empty (hidden = missing key)', () => {
+      expect(getGpsTrackVisibilityPreferences()).toEqual({});
+    });
+
+    it('persists GPS track visibility per id', () => {
+      seedValidAuth();
+      setGpsTrackVisibilityPreference('g1', true);
+      expect(getGpsTrackVisibilityPreferences()).toEqual({ g1: true });
+      setGpsTrackVisibilityPreference('g1', false);
+      expect(getGpsTrackVisibilityPreferences()).toEqual({ g1: false });
+    });
+
+    it('ignores an empty GPS track id and survives unrelated updates', () => {
+      seedValidAuth();
+      setGpsTrackVisibilityPreference('', true);
+      expect(getGpsTrackVisibilityPreferences()).toEqual({});
+      setGpsTrackVisibilityPreference('g2', true);
+      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      expect(getGpsTrackVisibilityPreferences()).toEqual({ g2: true });
     });
   });
 

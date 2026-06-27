@@ -120,7 +120,7 @@ Single seam: `createLandmark` / `updateLandmark` / `deleteLandmark` in
 `SpeleoDBController` are the only place that (1) call the service, (2) apply a
 pure mutation to the cached `overlay:landmarks` `FeatureCollection`, (3) bump
 `landmarksRevision`, and (4) `notify()`. The offline queue wraps step (1) with
-an enqueue + later replay (see `docs/offline-landmark-queue.md`); steps (2)-(4)
+an enqueue + later replay (see `docs/offline-op-queue.md`); steps (2)-(4)
 are unchanged, and `getOverlayGeoJSON('landmarks')` folds pending ops over the
 cached collection so the optimistic view needs no extra UI wiring.
 
@@ -188,7 +188,7 @@ created/edited landmarks.
   folding it over the cached overlay, and replay it on the next sync. Definitive
   failures (4xx) still throw the typed `LandmarkMutationError`. The old
   "not available offline yet" rejection is gone. See
-  `docs/offline-landmark-queue.md` for the queue, replay, and conflict design.
+  `docs/offline-op-queue.md` for the queue, replay, and conflict design.
 - The cached landmarks GeoJSON, the writable-collections list (now cached during
   sync so the offline create picker works), and the pending offline queue are
   all cleared with the rest of the caches on logout.

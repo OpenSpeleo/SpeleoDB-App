@@ -4,7 +4,7 @@ import type { SyncStatus } from '../controllers/SpeleoDBController';
 import type { AuthState } from '../types';
 import type { Project } from '../types/project';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
-import type { GpsRecordingState, LocalGpsTrack } from '../types/gpsTrack';
+import type { GpsRecordingState, GpsTrackListItem } from '../types/gpsTrack';
 
 export interface SpeleoDBContextValue {
   controller: SpeleoDBController;
@@ -27,8 +27,8 @@ export interface SpeleoDBContextValue {
   isTileCacheOverLimit: boolean;
   /** User approved letting prefetch exceed the cache cap. */
   isTileCacheOverLimitApproved: boolean;
-  /** Recorded GPS tracks (newest first). */
-  gpsTracks: LocalGpsTrack[];
+  /** Unified GPS track list (local recordings + server tracks, newest first). */
+  gpsTracks: GpsTrackListItem[];
   /** Live GPS recording lifecycle. */
   gpsRecordingState: GpsRecordingState;
   /** Epoch ms the current recording started (null when idle). */

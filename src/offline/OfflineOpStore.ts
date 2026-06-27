@@ -9,7 +9,7 @@
  * The store deals in serialized op records; rehydration into concrete op
  * classes is the queue's job (via `deserializeOfflineOp`).
  *
- * See docs/offline-landmark-queue.md.
+ * See docs/offline-op-queue.md.
  */
 
 import { CacheStore } from '../services/CacheStore';

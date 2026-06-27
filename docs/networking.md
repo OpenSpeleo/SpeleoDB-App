@@ -96,25 +96,27 @@ enqueued as a persistent offline op (a 4xx is a definitive answer and is surface
 to the user, not queued). Replaying the queue is a side-effect of an explicit,
 user-initiated action (the Pending page's Sync Now / per-row Sync, or a
 controller sync); it never runs from a passive connectivity listener. See
-`docs/offline-landmark-queue.md`.
+`docs/offline-op-queue.md`.
 
-## GPS track uploads and the offline drain
+## GPS track mutations
 
-GPS track uploads follow the same request-driven model as landmark mutations. An
-upload that hits a transport error, timeout, `408`, `429`, or `5xx` marks the
-track `pending` (never dropped); reachability failures also flip the app offline
-(`enterOfflineMode`). A definitive `4xx` is surfaced as an `error`. Pending
-track uploads are drained by `SpeleoDBController.uploadPendingGpsTracks()`, which
-is wired into successful startup validation and the explicit reconnect path
-(`attemptReconnect()` -> Settings **Go Online** / Pending **Try Reconnect**). It
-never runs from a passive connectivity listener. Only tracks already marked
-`pending` drain automatically; untouched `local` tracks require an explicit
-Upload tap. Recording itself makes no network calls. See `docs/gps-tracks.md`.
+GPS track create (= GPX upload), edit (name/color), and delete follow the exact
+same request-driven model as landmark mutations because they go through the
+**same** offline op queue (`docs/offline-op-queue.md`). A mutation that hits a
+transport error, timeout, `408`, or `5xx` is enqueued and flips the app offline
+(`enterOfflineMode`); `429` keeps it pending without going offline; a definitive
+`4xx` is surfaced as a thrown error and not enqueued. Pending GPS ops are
+replayed from the **Pending** page (`Sync Now` / per-row `Sync`) — uniform with
+landmarks. Reconnect (`attemptReconnect()` / successful startup validation)
+clears the offline lock and refreshes the server track list via `syncProjects()`
+but does **not** auto-replay the queue, and never runs from a passive
+connectivity listener. Recording itself makes no network calls. See
+`docs/gps-tracks.md`.
 
 See also:
 
 - `docs/offline-mode.md`
-- `docs/offline-landmark-queue.md`
+- `docs/offline-op-queue.md`
 - `docs/gps-tracks.md`
 - `docs/logout-behavior.md`
 - `docs/implementation-guidelines.md`

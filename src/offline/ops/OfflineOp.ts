@@ -13,7 +13,7 @@
  * so the ops stay free of HTTP and are trivially testable. The queue switches
  * on `kind` and uses each op's `subjectId()` / baseline to drive replay.
  *
- * See docs/offline-landmark-queue.md.
+ * See docs/offline-op-queue.md.
  */
 
 import type {
@@ -23,6 +23,7 @@ import type {
   OfflineOpStatus,
   SerializedOfflineOp,
 } from '../../types/offlineOp';
+import type { RemoteGpsTrack } from '../../types/gpsTrack';
 
 /** Temp id prefix for a landmark created offline (no server id yet). */
 export const LOCAL_ID_PREFIX = 'local:';
@@ -76,7 +77,7 @@ export abstract class OfflineOp {
     this.lastError = init.lastError;
   }
 
-  /** The landmark id this op concerns (temp `local:` id for an offline create). */
+  /** The entity id this op concerns (temp `local:` id for an offline create). */
   abstract subjectId(): string;
 
   /** True when the subject is a landmark created offline (not yet on the server). */
@@ -84,8 +85,21 @@ export abstract class OfflineOp {
     return isLocalLandmarkId(this.subjectId());
   }
 
-  /** Immutably fold this op over a landmarks FeatureCollection. */
-  abstract applyTo(collection: GeoJSON.FeatureCollection): GeoJSON.FeatureCollection;
+  /**
+   * Immutably fold this op over a landmarks FeatureCollection. Landmark ops
+   * override this; non-landmark ops are a no-op on the landmark overlay.
+   */
+  applyTo(collection: GeoJSON.FeatureCollection): GeoJSON.FeatureCollection {
+    return collection;
+  }
+
+  /**
+   * Immutably fold this op over the server GPS-track list. GPS-track ops
+   * override this; other ops are a no-op on the track list.
+   */
+  applyToTrackList(tracks: RemoteGpsTrack[]): RemoteGpsTrack[] {
+    return tracks;
+  }
 
   /** Human-readable summary for the pending list. */
   abstract describe(): OfflineOpDescription;

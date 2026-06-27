@@ -36,7 +36,9 @@ import {
   setCountryVisibilityPreferences,
   getCountryCollapsedPreferences,
   setCountryCollapsedPreference,
+  getGpsTrackVisibilityPreferences,
   getLandmarkCollectionVisibilityPreferences,
+  setGpsTrackVisibilityPreference,
   setLandmarkCollectionVisibilityPreference,
   setLandmarkCollectionVisibilityPreferences,
   getLandmarkCollectionCollapsedPreferences,
@@ -52,7 +54,8 @@ import AppTabBar from '../components/AppTabBar';
 import { useGpsAveraging } from '../hooks/useGpsAveraging';
 import { GpxFileService } from '../services/GpxFileService';
 import { errorToLogDetails } from '../utils/errorDiagnostics';
-import type { LocalGpsTrack } from '../types/gpsTrack';
+import type { GpsTrackListItem, RecordedPoint } from '../types/gpsTrack';
+import { TRACK_COLOR_PALETTE } from '../utils/gpsTrackColors';
 import {
   buildLandmarkCollectionGroups,
   type LandmarkListItem,
@@ -71,7 +74,7 @@ import { LandmarkMutationError } from '../types/landmark';
 import { ensureLandmarkPropertyIds, type NormalizedLandmarkInput } from '../utils/landmarkMutations';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { createProjectColorState, getProjectColor } from '../utils/projectColors';
-import { trackPointsToFeatureCollection } from '../utils/gpsTrackGeoJson';
+import { trackPointsToFeatureCollection, trackPointsToLineStringFeature } from '../utils/gpsTrackGeoJson';
 import type { MapColorMode } from '../types/mapColorMode';
 import type { MeasurementUnit } from '../types/measurementUnit';
 import {
@@ -412,6 +415,36 @@ function computeBounds(
   ];
 }
 
+/** Bounds enclosing a set of recorded GPS points, or null when none are valid. */
+function boundsFromPoints(points: readonly RecordedPoint[]): LngLatBoundsLike | null {
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let hasCoords = false;
+
+  for (const point of points) {
+    const { latitude: lat, longitude: lng } = point;
+    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+    hasCoords = true;
+  }
+
+  if (!hasCoords) return null;
+
+  const lngPad = Math.max((maxLng - minLng) * 0.1, 0.0005);
+  const latPad = Math.max((maxLat - minLat) * 0.1, 0.0005);
+
+  return [
+    [minLng - lngPad, minLat - latPad],
+    [maxLng + lngPad, maxLat + latPad],
+  ];
+}
+
 /** Walk every coordinate in a GeoJSON geometry. */
 function visitCoords(
   geometry: GeoJSON.Geometry,
@@ -545,10 +578,21 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [showAveragingResetConfirm, setShowAveragingResetConfirm] = useState(false);
   // Confirm before abandoning an in-progress recording via the Cancel button.
   const [showRecordingCancelConfirm, setShowRecordingCancelConfirm] = useState(false);
-  const [renameTarget, setRenameTarget] = useState<LocalGpsTrack | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [uploadTarget, setUploadTarget] = useState<LocalGpsTrack | null>(null);
+  // Edit (name + color) modal for a unified track. Replaces the old rename modal.
+  const [editTarget, setEditTarget] = useState<GpsTrackListItem | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState('');
+  const [editBusy, setEditBusy] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<GpsTrackListItem | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<GpsTrackListItem | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  // Per-track map visibility (default OFF) + lazily-loaded geometry for display.
+  const [gpsTrackVisibility, setGpsTrackVisibility] = useState<Record<string, boolean>>(
+    () => getGpsTrackVisibilityPreferences(),
+  );
+  const [gpsTrackPoints, setGpsTrackPoints] = useState<Record<string, RecordedPoint[]>>({});
+  const [loadingTrackIds, setLoadingTrackIds] = useState<Set<string>>(() => new Set<string>());
   // Android-only nudge to exempt the app from battery optimization so OEM power
   // managers don't kill the recording service. Dismissal is per-session.
   const [showBatteryHint, setShowBatteryHint] = useState(false);
@@ -570,6 +614,22 @@ const Dashboard: React.FC<DashboardProps> = ({
     () => trackPointsToFeatureCollection(currentTrackPoints, { name: 'Current GPS recording' }),
     [currentTrackPoints],
   );
+  // Saved/server tracks the user has toggled on: one dotted, data-driven-color
+  // line per track. Geometry is loaded lazily into `gpsTrackPoints`.
+  const savedTrackFeatureCollection = useMemo<GeoJSON.FeatureCollection>(() => {
+    const features = gpsTracks.flatMap((track) => {
+      if (gpsTrackVisibility[track.id] !== true) return [];
+      const points = gpsTrackPoints[track.id];
+      if (!points || points.length < 2) return [];
+      const feature = trackPointsToLineStringFeature(points, {
+        id: track.id,
+        name: track.name,
+        color: track.color,
+      });
+      return feature ? [feature as GeoJSON.Feature] : [];
+    });
+    return { type: 'FeatureCollection', features };
+  }, [gpsTracks, gpsTrackVisibility, gpsTrackPoints]);
   const [mapViewMetrics, setMapViewMetrics] = useState<{ zoom: number; latitude: number }>(() => ({
     zoom: MAP.DEFAULT_ZOOM,
     latitude: MAP.DEFAULT_CENTER[1],
@@ -1684,13 +1744,12 @@ const Dashboard: React.FC<DashboardProps> = ({
   );
 
   const reportGpsTrackActionError = useCallback(
-    (track: LocalGpsTrack, phase: 'gpx' | 'share' | 'upload', message: string, error: unknown) => {
+    (track: GpsTrackListItem, phase: 'gpx' | 'share' | 'upload' | 'edit' | 'delete', message: string, error: unknown) => {
       console.warn('GPS track action failed.', {
         phase,
         trackId: track.id,
         trackName: track.name,
-        pointCount: track.points.length,
-        uploadStatus: track.uploadStatus,
+        origin: track.origin,
         error: errorToLogDetails(error),
       });
       if (isMountedRef.current) showLandmarkToast(message, 'error');
@@ -1699,9 +1758,9 @@ const Dashboard: React.FC<DashboardProps> = ({
   );
 
   const prepareTrackGpxFile = useCallback(
-    async (track: LocalGpsTrack) => {
+    async (track: GpsTrackListItem) => {
       try {
-        return await controller.getTrackGpxFile(track);
+        return await controller.buildGpxFileForTrack(track);
       } catch (error) {
         reportGpsTrackActionError(track, 'gpx', 'Could not create the GPX file for this track.', error);
         throw error;
@@ -1711,7 +1770,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   );
 
   const handleShareTrack = useCallback(
-    (track: LocalGpsTrack) => {
+    (track: GpsTrackListItem) => {
       void (async () => {
         let gpxFile: Awaited<ReturnType<typeof prepareTrackGpxFile>>;
         try {
@@ -1729,12 +1788,88 @@ const Dashboard: React.FC<DashboardProps> = ({
     [gpxFileService, prepareTrackGpxFile, reportGpsTrackActionError],
   );
 
-  const handleUploadTrack = useCallback(
-    (track: LocalGpsTrack) => {
-      setUploadTarget(track);
+  /** Load a track's geometry into the points cache (local: instant; remote: download). */
+  const loadGpsTrackPoints = useCallback(
+    async (id: string) => {
+      setLoadingTrackIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      try {
+        const points = await controller.getGpsTrackPoints(id);
+        if (!isMountedRef.current) return;
+        setGpsTrackPoints((prev) => ({ ...prev, [id]: points }));
+      } catch (error) {
+        console.warn('Failed to load GPS track geometry.', { id, error: errorToLogDetails(error) });
+      } finally {
+        if (isMountedRef.current) {
+          setLoadingTrackIds((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }
+      }
     },
-    [],
+    [controller],
   );
+
+  const handleToggleGpsTrack = useCallback(
+    (track: GpsTrackListItem, visible: boolean) => {
+      setGpsTrackVisibility((prev) => ({ ...prev, [track.id]: visible }));
+      setGpsTrackVisibilityPreference(track.id, visible);
+      if (visible && !gpsTrackPoints[track.id]) {
+        void loadGpsTrackPoints(track.id);
+      }
+    },
+    [gpsTrackPoints, loadGpsTrackPoints],
+  );
+
+  // Tapping a track row shows it on the map (turning it on if needed) and zooms
+  // to fit its geometry, then closes the panel so the map is fully visible.
+  const handleZoomToTrack = useCallback(
+    (track: GpsTrackListItem) => {
+      if (gpsTrackVisibility[track.id] !== true) {
+        setGpsTrackVisibility((prev) => ({ ...prev, [track.id]: true }));
+        setGpsTrackVisibilityPreference(track.id, true);
+      }
+      void (async () => {
+        let points = gpsTrackPoints[track.id];
+        if (!points) {
+          setLoadingTrackIds((prev) => new Set(prev).add(track.id));
+          try {
+            points = await controller.getGpsTrackPoints(track.id);
+            if (isMountedRef.current && points) {
+              const loaded = points;
+              setGpsTrackPoints((prev) => ({ ...prev, [track.id]: loaded }));
+            }
+          } catch (error) {
+            console.warn('Failed to load GPS track geometry.', { id: track.id, error: errorToLogDetails(error) });
+          } finally {
+            if (isMountedRef.current) {
+              setLoadingTrackIds((prev) => {
+                const next = new Set(prev);
+                next.delete(track.id);
+                return next;
+              });
+            }
+          }
+        }
+        if (!isMountedRef.current || !points || points.length === 0) return;
+        const bounds = boundsFromPoints(points);
+        if (bounds && mapRef.current) {
+          mapRef.current.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 800 });
+          onGpsPanelChange(false);
+        }
+      })();
+    },
+    [controller, gpsTrackPoints, gpsTrackVisibility, onGpsPanelChange],
+  );
+
+  const handleUploadTrack = useCallback((track: GpsTrackListItem) => {
+    setUploadTarget(track);
+  }, []);
 
   const handleCancelUploadTrack = useCallback(() => {
     if (uploadBusy) return;
@@ -1745,66 +1880,126 @@ const Dashboard: React.FC<DashboardProps> = ({
     const target = uploadTarget;
     if (!target || uploadBusy) return;
     setUploadBusy(true);
-      void (async () => {
-        let gpxFile: Awaited<ReturnType<typeof prepareTrackGpxFile>>;
-        try {
-          gpxFile = await prepareTrackGpxFile(target);
-        } catch {
-          if (isMountedRef.current) {
-            setUploadTarget(null);
-            setUploadBusy(false);
-          }
-          return;
-        }
-        try {
-          const result = await controller.uploadGpsTrackFile(target.id, gpxFile);
-          if (!isMountedRef.current) return;
+    void (async () => {
+      try {
+        await controller.uploadGpsTrack(target.id);
+        if (!isMountedRef.current) return;
+        setUploadTarget(null);
+        showLandmarkToast(
+          controller.isOfflineLocked
+            ? 'Offline — upload queued in Pending changes'
+            : 'Track uploaded to SpeleoDB',
+          controller.isOfflineLocked ? 'error' : 'success',
+        );
+      } catch (error) {
+        if (isMountedRef.current) {
           setUploadTarget(null);
-          if (!result) {
-            showLandmarkToast('Could not find that GPS track.', 'error');
-            return;
-          }
-          if (result.uploadStatus === 'uploaded') {
-            showLandmarkToast('Track uploaded to SpeleoDB', 'success');
-          } else if (result.uploadStatus === 'pending') {
-            showLandmarkToast('Offline — track will upload when reconnected', 'error');
-          } else if (result.uploadStatus === 'error') {
-            showLandmarkToast(result.uploadError ?? 'Upload failed', 'error');
-          }
-        } catch (error) {
-          if (isMountedRef.current) {
-            setUploadTarget(null);
-            reportGpsTrackActionError(target, 'upload', 'Could not upload the GPS track.', error);
-          }
-        } finally {
-          if (isMountedRef.current) setUploadBusy(false);
+          reportGpsTrackActionError(target, 'upload', 'Could not upload the GPS track.', error);
         }
-      })();
-    },
-    [controller, prepareTrackGpxFile, reportGpsTrackActionError, showLandmarkToast, uploadBusy, uploadTarget],
-  );
+      } finally {
+        if (isMountedRef.current) setUploadBusy(false);
+      }
+    })();
+  }, [controller, reportGpsTrackActionError, showLandmarkToast, uploadBusy, uploadTarget]);
 
-  const handleOpenRenameTrack = useCallback((track: LocalGpsTrack) => {
-    setRenameTarget(track);
-    setRenameValue(track.name);
+  const handleEditTrack = useCallback((track: GpsTrackListItem) => {
+    setEditTarget(track);
+    setEditName(track.name);
+    setEditColor(track.color);
   }, []);
 
-  const handleConfirmRenameTrack = useCallback(() => {
-    const target = renameTarget;
-    if (!target) return;
-    const next = renameValue.trim();
-    setRenameTarget(null);
-    if (next && next !== target.name) {
-      void controller.renameGpsTrack(target.id, next);
-    }
-  }, [controller, renameTarget, renameValue]);
+  const handleCancelEditTrack = useCallback(() => {
+    if (editBusy) return;
+    setEditTarget(null);
+  }, [editBusy]);
 
-  const handleDeleteTrack = useCallback(
-    (track: LocalGpsTrack) => {
-      void controller.deleteGpsTrack(track.id);
-    },
-    [controller],
-  );
+  const handleConfirmEditTrack = useCallback(() => {
+    const target = editTarget;
+    if (!target || editBusy) return;
+    const name = editName.trim();
+    const color = editColor;
+    if (!name || (name === target.name && color === target.color)) {
+      setEditTarget(null);
+      return;
+    }
+    setEditBusy(true);
+    void (async () => {
+      try {
+        await controller.editGpsTrack(target.id, { name, color });
+        if (isMountedRef.current) setEditTarget(null);
+      } catch (error) {
+        if (isMountedRef.current) {
+          setEditTarget(null);
+          reportGpsTrackActionError(target, 'edit', 'Could not save the track changes.', error);
+        }
+      } finally {
+        if (isMountedRef.current) setEditBusy(false);
+      }
+    })();
+  }, [controller, editBusy, editColor, editName, editTarget, reportGpsTrackActionError]);
+
+  // Ensure geometry is loaded for every track currently toggled on (covers
+  // visibility restored from preferences and tracks that appear after a sync).
+  // Deferred past the synchronous effect body so the loader's setState does not
+  // run inline (avoids a cascading render).
+  useEffect(() => {
+    const pending = gpsTracks
+      .filter(
+        (track) =>
+          gpsTrackVisibility[track.id] === true &&
+          !gpsTrackPoints[track.id] &&
+          !loadingTrackIds.has(track.id),
+      )
+      .map((track) => track.id);
+    if (pending.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      await Promise.resolve();
+      for (const id of pending) {
+        if (cancelled) return;
+        await loadGpsTrackPoints(id);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gpsTracks, gpsTrackVisibility, gpsTrackPoints, loadingTrackIds, loadGpsTrackPoints]);
+
+  const handleDeleteTrack = useCallback((track: GpsTrackListItem) => {
+    setDeleteTarget(track);
+  }, []);
+
+  const handleCancelDeleteTrack = useCallback(() => {
+    if (deleteBusy) return;
+    setDeleteTarget(null);
+  }, [deleteBusy]);
+
+  const handleConfirmDeleteTrack = useCallback(() => {
+    const target = deleteTarget;
+    if (!target || deleteBusy) return;
+    setDeleteBusy(true);
+    void (async () => {
+      try {
+        await controller.removeGpsTrack(target.id);
+        if (!isMountedRef.current) return;
+        setDeleteTarget(null);
+        // Drop any loaded geometry/visibility for the removed track.
+        setGpsTrackPoints((prev) => {
+          if (!(target.id in prev)) return prev;
+          const next = { ...prev };
+          delete next[target.id];
+          return next;
+        });
+      } catch (error) {
+        if (isMountedRef.current) {
+          setDeleteTarget(null);
+          reportGpsTrackActionError(target, 'delete', 'Could not delete the GPS track.', error);
+        }
+      } finally {
+        if (isMountedRef.current) setDeleteBusy(false);
+      }
+    })();
+  }, [controller, deleteBusy, deleteTarget, reportGpsTrackActionError]);
 
   const handleCancelDeleteLandmark = useCallback(() => {
     if (landmarkDeleteBusy) return;
@@ -2289,6 +2484,29 @@ const Dashboard: React.FC<DashboardProps> = ({
                   </Source>
                 )}
 
+                {savedTrackFeatureCollection.features.length > 0 && (
+                  <Source
+                    id="gps-tracks-source"
+                    type="geojson"
+                    data={savedTrackFeatureCollection}
+                  >
+                    <Layer
+                      id="gps-tracks-line"
+                      type="line"
+                      layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+                      paint={{
+                        'line-color': ['coalesce', ['get', 'color'], '#38bdf8'],
+                        'line-width': ['interpolate', ['linear'], ['zoom'], 6, 3, 14, 5, 18, 7],
+                        'line-opacity': 1,
+                        // Dashed pattern distinguishes GPS tracks from solid survey
+                        // lines. Units are line-widths; keep these clearly visible
+                        // (sub-pixel dashes render invisibly in the Android WebView).
+                        'line-dasharray': [2, 2],
+                      }}
+                    />
+                  </Source>
+                )}
+
                 {gpsRecordingState !== 'idle' && currentTrackFeatureCollection.features.length > 0 && (
                   <Source
                     id="gps-recording-track-source"
@@ -2441,11 +2659,15 @@ const Dashboard: React.FC<DashboardProps> = ({
             currentPoints={currentTrackPoints}
             tracks={gpsTracks}
             measurementUnit={measurementUnit}
+            trackVisibility={gpsTrackVisibility}
+            loadingTrackIds={loadingTrackIds}
             onOpenRecorder={handleOpenRecorder}
             onCollectPoint={handleCollectPoint}
+            onTrackTap={handleZoomToTrack}
+            onToggleTrackVisibility={handleToggleGpsTrack}
             onShareTrack={handleShareTrack}
             onUploadTrack={handleUploadTrack}
-            onRenameTrack={handleOpenRenameTrack}
+            onEditTrack={handleEditTrack}
             onDeleteTrack={handleDeleteTrack}
           />
 
@@ -2574,45 +2796,93 @@ const Dashboard: React.FC<DashboardProps> = ({
             testId="delete-landmark-confirm"
           />
 
-          {renameTarget && (
+          <ConfirmDialog
+            isOpen={deleteTarget !== null}
+            title="Delete GPS Track"
+            message={
+              <>
+                Are you sure you want to delete{' '}
+                <span className="font-semibold text-slate-100">
+                  {deleteTarget?.name ?? 'this track'}
+                </span>
+                {deleteTarget?.origin === 'remote' ? ' from SpeleoDB' : ''}?
+              </>
+            }
+            warning={
+              deleteTarget?.origin === 'remote'
+                ? 'This removes the track from SpeleoDB. If you are offline it is queued in Pending changes.'
+                : 'This removes the recording from this device. This action cannot be undone.'
+            }
+            confirmLabel="Delete"
+            cancelLabel="Cancel"
+            danger
+            busy={deleteBusy}
+            busyLabel={'Deleting\u2026'}
+            onConfirm={handleConfirmDeleteTrack}
+            onCancel={handleCancelDeleteTrack}
+            testId="gps-delete-confirm"
+          />
+
+          {editTarget && (
             <IonModal
               isOpen
-              onDidDismiss={() => setRenameTarget(null)}
+              onDidDismiss={() => { if (!editBusy) setEditTarget(null); }}
             >
               <IonContent className="ion-padding">
                 <div
-                  data-testid="gps-rename-modal"
+                  data-testid="gps-edit-modal"
                   className="flex flex-col h-full justify-center max-w-sm mx-auto"
                 >
                   <h2 className="text-xl font-semibold text-slate-100 mb-5 text-center">
-                    Rename Track
+                    Edit Track
                   </h2>
+                  <label className="text-xs font-medium text-slate-400 mb-1">Name</label>
                   <input
                     type="text"
-                    value={renameValue}
+                    value={editName}
                     maxLength={120}
                     autoFocus
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    data-testid="gps-rename-input"
+                    onChange={(e) => setEditName(e.target.value)}
+                    data-testid="gps-edit-name-input"
                     className="w-full px-4 py-2.5 text-sm text-slate-200 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-500"
                     placeholder="Track name"
                   />
+                  <label className="text-xs font-medium text-slate-400 mt-4 mb-2">Color</label>
+                  <div className="grid grid-cols-10 gap-2" data-testid="gps-edit-color-swatches">
+                    {TRACK_COLOR_PALETTE.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        aria-label={`Color ${color}`}
+                        aria-pressed={editColor.toLowerCase() === color.toLowerCase()}
+                        onClick={() => setEditColor(color)}
+                        data-testid={`gps-edit-color-${color}`}
+                        className={`h-6 w-6 rounded-full border-2 transition-transform ${
+                          editColor.toLowerCase() === color.toLowerCase()
+                            ? 'border-white scale-110'
+                            : 'border-transparent'
+                        }`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
                   <div className="grid grid-cols-2 gap-3 mt-6">
                     <button
                       type="button"
-                      onClick={() => setRenameTarget(null)}
-                      data-testid="gps-rename-cancel"
+                      onClick={handleCancelEditTrack}
+                      data-testid="gps-edit-cancel"
                       className="app-btn app-btn--secondary"
                     >
                       Cancel
                     </button>
                     <button
                       type="button"
-                      onClick={handleConfirmRenameTrack}
-                      data-testid="gps-rename-save"
+                      onClick={handleConfirmEditTrack}
+                      disabled={editBusy}
+                      data-testid="gps-edit-save"
                       className="app-btn app-btn--primary"
                     >
-                      Save
+                      {editBusy ? 'Saving\u2026' : 'Save'}
                     </button>
                   </div>
                 </div>

@@ -41,8 +41,26 @@ limitations, and the test strategy.
   improve, then saves the point as a landmark (online or offline) with
   name/description.
 - **Export / share** a recorded track as a standard GPX 1.1 file.
-- **Upload** a track to SpeleoDB (waypoints become Landmarks, tracks become
-  GPSTrack rows) when online; queue it when offline and upload on reconnect.
+- **One unified track list** mixing tracks recorded **on this device** and
+  tracks stored **on SpeleoDB**. Device recordings are flagged with a "Local"
+  badge; a clean server track shows no badge (only a pending/conflict state
+  does). Server tracks sync at launch / manual refresh like projects/landmarks.
+- **Display tracks on the map** — every panel row has an **`IonToggle` switch**
+  (like the project panel), **OFF by default**; a track is only drawn (a dashed,
+  track-colored line) once turned on. **Tapping the row body zooms** the map to
+  fit the track (turning it on + closing the panel). The remote geometry is
+  downloaded lazily on first toggle/tap and cached. The live recording line is
+  always shown while recording and updates on every kept fix (~15 s).
+- **Create / edit / delete via the shared offline op queue.** Every track
+  mutation is an `OfflineOp` in the same queue as landmarks and shows on the
+  **Pending** page (see `docs/offline-op-queue.md`):
+  - **Create = upload the GPX.** On a confirmed success the local recording is
+    **deleted** and the server track list re-syncs (the local copy is replaced
+    by the server track). Offline, it queues a `CreateGpsTrackOp`.
+  - **Edit = change name and/or color.** Local recordings edit in place (no
+    network); server tracks `PATCH /api/v2/gps_tracks/<id>/` (queued offline).
+  - **Delete** (behind a confirmation modal): local recordings are removed from
+    the device; server tracks `DELETE` (queued offline).
 
 ## Where it lives (source map)
 
@@ -51,7 +69,9 @@ limitations, and the test strategy.
 | Types | `src/types/gpsTrack.ts`, `src/types/gnss.ts` |
 | GNSS satellite status provider | `src/services/GnssStatusProvider.ts` (default "unsupported"; Android plugin is a follow-up) |
 | GPX export/upload builder | `src/utils/gpx.ts` (`gpx-builder` adapter) |
-| GPS track GeoJSON construction | `src/utils/gpsTrackGeoJson.ts` (`@turf/helpers` adapter) |
+| GPS track GeoJSON construction + geojson->points | `src/utils/gpsTrackGeoJson.ts` (`@turf/helpers` adapter) |
+| Track colors (palette, validate, random) | `src/utils/gpsTrackColors.ts` |
+| Server track parsing | `src/utils/remoteGpsTrack.ts` (`parseRemoteGpsTracks`) |
 | Averaging math + confidence (pure) | `src/utils/gpsAveraging.ts` |
 | Shared GPS fix gate (pre-session drop + throttle, pure) | `src/utils/gpsSampling.ts` |
 | Track stats: distance/duration (pure) | `src/utils/gpsTrackStats.ts` |
@@ -61,10 +81,13 @@ limitations, and the test strategy.
 | Foreground position watch (averaging/web) | `src/services/GeolocationWatcher.ts` (`LocationWatcher` iface) |
 | Background-capable watch (recording, native) | `src/services/BackgroundGeolocationWatcher.ts` (+ `createRecordingLocationWatcher`) |
 | Battery-optimization nudge (Android) | `src/services/BatteryOptimizationGuard.ts` |
-| Track persistence (IndexedDB) | `src/services/GpsTrackStore.ts` (+ `gps_tracks` store in `src/services/CacheStore.ts`) |
+| Local recording persistence (IndexedDB) | `src/services/GpsTrackStore.ts` (+ `gps_tracks` store in `src/services/CacheStore.ts`) |
+| Server track cache (list + per-track geojson) | `src/services/ProjectCacheService.ts` (`gps-tracks` key + `gps-track:<id>` keys) |
 | Shared track -> GPX preparation | `src/services/GpsTrackGpxService.ts` (`gpx-builder` adapter) |
 | GPX file write + share | `src/services/GpxFileService.ts` |
-| Upload transport | `src/services/SpeleoDBService.ts` (`uploadGpx`) + `src/services/HttpClient.ts` (native multipart) |
+| Transport | `src/services/SpeleoDBService.ts` (`uploadGpx`, `getGpsTracks`, `updateGpsTrack`, `deleteGpsTrack`) + `src/services/HttpClient.ts` (native multipart) |
+| Offline op queue (create/edit/delete) | `src/offline/OfflineOpQueue.ts`, `src/offline/ops/{Create,Update,Delete}GpsTrackOp.ts`, `src/offline/gpsTrackSnapshot.ts` (see `docs/offline-op-queue.md`) |
+| Per-track visibility preference (default OFF) | `src/services/PreferencesService.ts` (`gpsTrackVisibility`) |
 | State + business logic | `src/controllers/SpeleoDBController.ts` |
 | React bridge | `src/context/useSpeleoDB.ts`, `src/context/SpeleoDBStoreProvider.tsx` |
 | Averaging session hook | `src/hooks/useGpsAveraging.ts` |
@@ -89,16 +112,29 @@ flowchart TD
   form --> queue["OfflineOpQueue / CreateLandmarkOp (reuse)"]
   panel --> gpx["GpsTrackGpxService -> buildGpx (gpx-builder)"]
   gpx --> share["GpxFileService: Filesystem + Share"]
-  gpx --> up["controller.uploadGpsTrackFile -> SpeleoDBService.uploadGpx"]
-  up --> http["HttpClient (native multipart)"]
-  ctrl["controller.attemptReconnect"] -. drains .-> drain["uploadPendingGpsTracks"]
+  panel --> mut["controller upload/edit/remove GPS track"]
+  mut --> q["OfflineOpQueue: Create/Update/DeleteGpsTrackOp"]
+  q --> pend["Pending page (shared)"]
+  sync["syncProjects -> syncGpsTracksPhase / syncGpsTracks"] --> gt["cache gps-tracks ground truth (RemoteGpsTrack[])"]
+  gt --> list["controller.gpsTracks (fold ops over remote + local recordings)"]
+  list --> rows["GpsPanel unified rows (local/remote badge + toggle)"]
+  rows -->|"toggle ON"| dl["controller.getGpsTrackPoints (lazy download + cache)"]
+  dl --> tline["Dashboard gps-tracks-line (dashed, data-driven color)"]
 ```
 
 State ownership follows `docs/implementation-guidelines.md`: `SpeleoDBController`
-owns the recording state machine, the track list, and upload classification;
-`GeolocationWatcher`/`GpsTrackStore`/`GpxFileService` perform side effects;
-`GpsPanel`/`GpsAveragingModal` are presentational; `useGpsAveraging` isolates
+owns the recording state machine, the unified track list, server sync, and the
+GPS replay-port wiring; `GeolocationWatcher`/`GpsTrackStore`/`GpxFileService`
+perform side effects; `GpsPanel`/`GpsAveragingModal` are presentational;
+`useGpsAveraging` isolates
 the averaging session's side effects from the modal.
+
+The unified `controller.gpsTracks` snapshot is **rebuilt only when
+`gpsTracksRevision` changes** (a recording/edit/delete/sync or a queue change),
+not on every `notify()`. Unrelated notifies (tile-prefetch progress,
+online/sync status) reuse the same array reference, so the Dashboard's
+`gps-tracks` map source is not recomputed/re-fed on every tick and
+`summarizeTrack` does not run over every local recording each time.
 
 ## Shared GPS reading gate (one path, two cadences)
 
@@ -149,8 +185,10 @@ browser-safe polyfills because `gpx-builder`'s XML dependency graph imports them
 After that shared preparation step, the flows intentionally split:
 
 - `GpxFileService.shareGpx` writes/shares the prepared file.
-- `SpeleoDBController.uploadGpsTrackFile` uploads the prepared file through
-  `SpeleoDBService.uploadGpx`.
+- The `CreateGpsTrackOp` replay (and the controller's online attempt) build the
+  GPX via the same `GpsTrackGpxService` and PUT it through
+  `SpeleoDBService.uploadGpx`. `controller.buildGpxFileForTrack` is the shared
+  share/export seam (it loads a remote track's points on demand for re-export).
 
 This keeps GPX conversion diagnostics consistent across share and upload while
 keeping sharing and uploading modular.
@@ -162,25 +200,61 @@ The app does not store, parse, or render GPX. The canonical live buffer is still
 GeoJSON with **`@turf/helpers`**:
 
 - `trackPointsToLineStringFeature` maps valid recorded points to a GeoJSON
-  `LineString` using `[longitude, latitude, altitude?]` coordinates.
+  `LineString` using `[longitude, latitude, altitude?]` coordinates (the
+  `properties` carry `id`, `name`, `color`, `origin`).
 - `trackPointsToFeatureCollection` feeds the Dashboard live recording source.
-- `gpsTracksToFeatureCollection` is available for saved-track map display.
+- The Dashboard builds one shared `gps-tracks-source` FeatureCollection of all
+  *visible* tracks (a `trackPointsToLineStringFeature` per track) and renders it
+  with a single dashed `gps-tracks-line` layer colored by `['get','color']`
+  (`line-dasharray: [2, 2]` — kept clearly visible; sub-pixel dashes render
+  invisibly in the Android WebView).
+- `gpsTrackGeoJsonToPoints` flattens a downloaded server-track GeoJSON
+  (LineString/MultiLineString features) back into `RecordedPoint[]` for display
+  and GPX re-export of a remote track.
 
-This avoids GPX -> GeoJSON conversion entirely. GPX remains an
+Server tracks are delivered as a pre-signed GeoJSON URL (`file`) and downloaded
+lazily on first toggle (`controller.getGpsTrackPoints` -> cache-first
+`getGpsTrackGeoJSON`), exactly like project geojson. GPX remains an
 interchange/export/upload format generated on demand from `RecordedPoint[]`.
 
-## Upload contract (SpeleoDB)
+## Server contracts (SpeleoDB)
 
-Uploading a track reuses the backend's GPX import endpoint:
+**Sync the list** (like projects/landmarks):
 
-- `PUT /api/v2/import/gpx/`
-- `Authorization: Token <token>`
-- `multipart/form-data` with field `file` (the `.gpx` document) and optional
-  `collection` (a landmark-collection id for any waypoints).
-- Success `2xx` body: `{ landmarks_created: number, gps_tracks_created: number }`.
-- The backend turns GPX waypoints into Landmarks and GPX tracks into `GPSTrack`
-  rows, deduping on identity, so re-importing the same GPX is idempotent
-  (returns zeros).
+- `GET /api/v2/gps_tracks/` -> a bare array of
+  `{ id, name, color, file, sha256_hash, creation_date, modified_date }`, where
+  `file` is a pre-signed GeoJSON URL. The v2 API is not envelope-wrapped, so
+  `response.data` is the array directly (`parseRemoteGpsTracks`). Cached as the
+  `gps-tracks` ground truth in `ProjectCacheService`.
+
+**Create = upload** reuses the backend's GPX import endpoint:
+
+- `PUT /api/v2/import/gpx/`, `Authorization: Token <token>`,
+  `multipart/form-data` field `file` (the `.gpx` document).
+- Success `2xx` body: `{ landmarks_created, gps_tracks_created }`.
+- The backend turns GPX tracks into `GPSTrack` rows (default a random palette
+  `color`) and dedupes on the file **sha256**, so re-importing the same GPX is
+  idempotent (returns zeros) -- which is what makes the create-op replay safe.
+- On a confirmed success the controller **deletes the local recording** and
+  calls `syncGpsTracks()` so the server copy replaces it.
+- **Force-quit window (online create).** The online path runs
+  `upload -> delete local -> re-sync` without enqueuing an op. A crash *between*
+  the confirmed upload and the local delete leaves the local recording on the
+  device while the server already has the track, so the unified list briefly
+  shows both (the local one keeps its "Local" badge). This is **not** data loss
+  and self-heals: re-uploading is idempotent (the backend dedupes by file
+  sha256, returns `gps_tracks_created: 0`), and that success deletes the
+  stranded local copy. The queued create path (offline) is fully self-healing on
+  its own because the op survives the crash and replays. We accept the tiny
+  online-create window rather than always routing create through the queue,
+  which would trade immediate feedback for a Pending-page round-trip.
+
+**Edit / delete**:
+
+- `PATCH /api/v2/gps_tracks/<id>/` with `{ name?, color? }` -> updated object.
+- `DELETE /api/v2/gps_tracks/<id>/`.
+- Both are routed through the offline op queue (online attempt, enqueue on
+  unreachable, throw on definitive 4xx). See `docs/offline-op-queue.md`.
 
 ### Native multipart (important)
 
@@ -236,7 +310,7 @@ Constants live in the `GPS` block of `src/constants.ts`
 Saving an averaged point **reuses** the shared `LandmarkFormModal` +
 `controller.createLandmark` seam, so it works online (POST) and offline (queued
 `CreateLandmarkOp`) with zero extra wiring. See `docs/landmark-crud.md` and
-`docs/offline-landmark-queue.md`.
+`docs/offline-op-queue.md`.
 
 ### Session controls (stopwatch semantics)
 
@@ -341,33 +415,42 @@ GPS work mirrors the landmark offline model (`docs/networking.md`,
   on a force-quit during GPS warm-up, leave a useless 0-point "track" that can't
   be uploaded; `GpsTrackStore.list()` additionally drops (and self-heals) any
   0-point record left by older builds.
-- **Track upload** is classified exactly like a landmark mutation:
-  - `2xx` -> `uploaded` (stores the server's created counts).
-  - offline-locked, transport error / timeout / `5xx`, `408`, or `429` ->
-    `pending`; the app flips to offline mode (`enterOfflineMode`) for runtime
-    reachability failures except rate limiting. The track is **never** dropped.
-  - definitive `4xx` or local GPX/multipart serialization failure -> `error`
-    with the message, kept for inspection and retry.
-- **Draining**: `uploadPendingGpsTracks()` re-uploads every `pending` track and
-  is wired into both successful startup validation and
-  `controller.attemptReconnect()` (the Settings **Go Online** / Pending **Try
-  Reconnect** path). Only tracks whose upload was attempted and marked
-  `pending` auto-drain; untouched `local` tracks require the user to tap Upload.
-  It is a no-op while offline-locked or unauthenticated and stops mid-run if the
-  app drops offline again.
+- **Create / edit / delete go through the shared offline op queue** — the exact
+  same mechanism as landmarks (`docs/offline-op-queue.md`). There is **no**
+  GPS-specific `uploadStatus` field and **no** GPS-specific auto-drain anymore;
+  the per-track pending state shown in the panel is *derived* from the queue
+  (`OfflineOpQueue.gpsPendingBySubject()`).
+  - Online success: create deletes the local copy + re-syncs; edit/delete write
+    the server ground truth.
+  - offline-locked / transport / timeout / `5xx` / `408` -> the mutation is
+    enqueued (`CreateGpsTrackOp` / `UpdateGpsTrackOp` / `DeleteGpsTrackOp`) and
+    the app flips offline (except `429` rate limiting). Never dropped.
+  - definitive `4xx` (incl. an empty/invalid GPX) -> a typed error is thrown and
+    surfaced as a toast; nothing is enqueued.
+- **Draining is user-initiated from the Pending page** (`Sync Now` / per-row
+  `Sync`), uniform with landmarks. Reconnect (`attemptReconnect` / successful
+  startup validation) clears the offline lock and refreshes the server track
+  list via `syncProjects()` -> `syncGpsTracksPhase`, but does **not** auto-replay
+  the queue.
 - **Averaged landmark save** uses the existing offline landmark queue, so saving
   offline queues a `CreateLandmarkOp` and folds optimistically over the map.
-- All recorded tracks are cleared on logout via `ProjectCacheService.clearAll()`
-  (the `gps_tracks` store), alongside projects, geojson, and the offline queue.
+- All track data is cleared on logout via `ProjectCacheService.clearAll()`: the
+  `gps_tracks` store (local recordings), the `gps-tracks` key + `gps-track:<id>`
+  geojson keys (server ground truth), and the `offline_ops` queue.
 
 ## Persistence
 
-Tracks live in a dedicated `gps_tracks` IndexedDB object store, added in
-`CacheStore` **v3** via an additive `createObjectStore` migration
-(`projects`/`geojson`/`offline_ops` data is preserved with zero loss). Each
-track is one record keyed by id, so a force-quit can only ever affect the single
-track being written. `GpsTrackStore` is a dumb persistence layer (no network, no
+Local recordings live in a dedicated `gps_tracks` IndexedDB object store, added
+in `CacheStore` **v3** via an additive `createObjectStore` migration. Each track
+is one record keyed by id, so a force-quit can only ever affect the single track
+being written. `GpsTrackStore` is a dumb persistence layer (no network, no
 business decisions).
+
+Server tracks reuse the **existing** `projects` + `geojson` stores (no schema
+bump): the metadata list under the `gps-tracks` key (like `landmark-collections`)
+and each downloaded track GeoJSON under `gps-track:<id>` (like `overlay:<id>`),
+both via `ProjectCacheService`. The shared offline op queue persists to the
+existing `offline_ops` store. No new IndexedDB version was required.
 
 ## Background recording (screen off / app backgrounded)
 
@@ -469,37 +552,48 @@ left the recorder sitting at "Recording - 0 pts" forever with no feedback.
 
 ## Tests
 
-- Pure/services: `src/utils/gpx.test.ts`, `src/utils/gpsTrackGeoJson.test.ts`,
+- Pure/services: `src/utils/gpx.test.ts`, `src/utils/gpsTrackGeoJson.test.ts`
+  (incl. geojson->points), `src/utils/gpsTrackColors.test.ts`,
+  `src/utils/remoteGpsTrack.test.ts`, `src/offline/gpsTrackSnapshot.test.ts`,
   `src/services/GpsTrackGpxService.test.ts`, `src/utils/gpsAveraging.test.ts`,
-  `src/utils/gpsSampling.test.ts` (shared fix gate: pre-session drop + both
-  cadences), `src/utils/gpsTrackStats.test.ts`,
+  `src/utils/gpsSampling.test.ts`, `src/utils/gpsTrackStats.test.ts`,
   `src/utils/measurementUnits.test.ts`, `src/utils/share.test.ts`.
 - Services: `src/services/HttpClient.test.ts` (native multipart + web FormData),
-  `src/services/SpeleoDBService.test.ts` (`uploadGpx`),
-  `src/services/GpsTrackStore.test.ts` (CRUD + additive migration + logout
-  purge), `src/services/GeolocationWatcher.test.ts` (filters, permission, watch
-  errors), `src/services/GpxFileService.test.ts` (web fallback, native share,
-  cancellation, write failure), `src/services/GnssStatusProvider.test.ts`.
-- Hook: `src/hooks/useGpsAveraging.test.ts` (incl. Reset/restartNonce + GNSS
-  provider subscribe/stop).
+  `src/services/SpeleoDBService.test.ts` (`uploadGpx`, `getGpsTracks`,
+  `updateGpsTrack`, `deleteGpsTrack`), `src/services/ProjectCacheService.test.ts`
+  (gps-tracks list + per-track geojson + clearAll),
+  `src/services/PreferencesService.test.ts` (`gpsTrackVisibility` default OFF),
+  `src/services/GpsTrackStore.test.ts`, `src/services/GpxFileService.test.ts`,
+  `src/services/GnssStatusProvider.test.ts`.
+- Offline queue: `src/offline/OfflineOpQueue.test.ts` — GPS create/update/delete
+  replay, optimistic fold, conflict detection, coalescing, mixed-entity runs,
+  persistence round-trip.
+- Hook: `src/hooks/useGpsAveraging.test.ts`.
 - Controller (incl. chaos): `src/controllers/SpeleoDBController.test.ts` —
-  recording lifecycle, default track naming, **instant first fix + 15 s throttle**,
-  permission denial, empty recording discard, cancel/discard, pause/resume,
-  serialized incremental persistence,
-  **force-quit mid-recording recovery**, rename/delete, upload classification
-  (2xx/4xx/5xx/transport/offline/unauthenticated), reconnect drain, watch-error
-  resilience, and logout teardown.
-- UI: `src/components/AppTabBar.test.tsx` (GPS tab placement + recording dot),
-  `src/components/GpsPanel.test.tsx`, `src/components/GpsAveragingModal.test.tsx`
-  (both include a solid button-variant guard), and `src/pages/Dashboard.test.tsx`
-  GPS wiring.
+  recording lifecycle, **instant first fix + 15 s throttle**, permission denial,
+  cancel/discard, pause/resume, serialized incremental persistence,
+  **force-quit mid-recording recovery**, the unified local+remote list, edit +
+  delete (local in-place vs server PATCH/DELETE, online + offline + conflict),
+  upload-as-create-op (online delete+resync, 4xx throw, 5xx/transport enqueue,
+  empty-GPX throw), Pending-page drain, the no-auto-drain-on-reconnect guarantee,
+  watch-error resilience, and logout teardown.
+- UI: `src/components/AppTabBar.test.tsx`, `src/components/GpsPanel.test.tsx`
+  (local/remote badge, visibility toggle, edit/delete, button-variant guard),
+  `src/components/GpsAveragingModal.test.tsx`, `src/pages/PendingOps.test.tsx`
+  (GPS op rendering), and `src/pages/Dashboard.test.tsx` (GPS wiring + track
+  toggle/lazy load + edit/delete-confirm).
 
 ## Change checklist (GPS)
 
-1. Keep the controller the source of truth for recording/upload state.
-2. Preserve the offline-first guarantees (no silent data loss; pending drains on
-   reconnect only; no passive listeners).
-3. Every `.app-btn` must carry a solid `app-btn--*` variant (see
+1. Keep the controller the source of truth for the recording state machine and
+   the unified track list; ground truth (local store + server cache) is written
+   only by confirmed results.
+2. Route **every** track mutation through the shared offline op queue
+   (`docs/offline-op-queue.md`) — never add a GPS-specific offline mechanism.
+3. Preserve the offline-first guarantees (no silent data loss; the Pending page
+   is the sync surface; no passive listeners).
+4. Per-track visibility defaults OFF; the live recording line is always shown.
+5. Every `.app-btn` must carry a solid `app-btn--*` variant (see
    `docs/coding-rules.md`).
-4. Update this document when behavior changes; run the targeted tests above plus
+6. Update this document when behavior changes; run the targeted tests above plus
    `npm run build`.

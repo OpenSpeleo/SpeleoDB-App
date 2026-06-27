@@ -28,6 +28,7 @@ const OfflineOpConflictModal: React.FC<OfflineOpConflictModalProps> = ({
 }) => {
   const isDelete = conflict?.kind === 'delete';
   const serverGone = conflict ? conflict.server === null : false;
+  const noun = conflict?.entityLabel || 'landmark';
 
   return (
     <IonModal
@@ -53,10 +54,10 @@ const OfflineOpConflictModal: React.FC<OfflineOpConflictModalProps> = ({
               </svg>
             </span>
             <h2 className="text-xl font-semibold text-slate-100 mb-1">
-              This landmark changed
+              This {noun} changed
             </h2>
             <p className="text-sm text-slate-300">
-              {conflict?.title ? `"${conflict.title}" ` : 'This landmark '}
+              {conflict?.title ? `"${conflict.title}" ` : `This ${noun} `}
               was {serverGone ? 'removed' : 'changed'} on the server while you were offline.
               {isDelete
                 ? ' You chose to delete it. Which version do you want to keep?'
@@ -70,7 +71,7 @@ const OfflineOpConflictModal: React.FC<OfflineOpConflictModalProps> = ({
                 className="rounded-xl border border-slate-600/60 bg-slate-800/60 p-4 text-sm text-slate-300"
                 data-testid="conflict-server-gone"
               >
-                The landmark no longer exists on the server. Keeping your change will
+                The {noun} no longer exists on the server. Keeping your change will
                 {isDelete ? ' confirm the deletion' : ' re-create it'}; using the server
                 version will discard your offline change.
               </div>

@@ -8,6 +8,7 @@ import { OfflineOpStore } from './OfflineOpStore';
 import { snapshotFromApi } from './landmarkSnapshot';
 import type { LandmarkApiObject } from '../types/landmark';
 import type { LandmarkSnapshot, SerializedOfflineOp } from '../types/offlineOp';
+import type { GpsTrackSnapshot, RemoteGpsTrack } from '../types/gpsTrack';
 
 // ---- Fakes ----------------------------------------------------------------
 
@@ -82,6 +83,13 @@ function createPort(overrides: Partial<OfflineReplayPort> = {}): OfflineReplayPo
     fetchLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: fc([]) })),
     applyUpsert: vi.fn(async () => {}),
     applyRemoval: vi.fn(async () => {}),
+    uploadGpsTrack: vi.fn(async () => ({ status: 200, data: { gps_tracks_created: 1 } })),
+    patchGpsTrack: vi.fn(async () => ({ status: 200, data: {} })),
+    deleteGpsTrackRemote: vi.fn(async () => ({ status: 200, data: { message: 'deleted' } })),
+    fetchGpsTracks: vi.fn(async () => ({ status: 200, data: [] })),
+    applyGpsTrackUpsert: vi.fn(async () => {}),
+    applyGpsTrackRemoval: vi.fn(async () => {}),
+    onGpsTrackCreated: vi.fn(async () => {}),
     ...overrides,
   };
 }
@@ -281,8 +289,8 @@ describe('OfflineOpQueue replay', () => {
     expect(port.patchLandmark).not.toHaveBeenCalled();
     const view = queue.views()[0];
     expect(view.status).toBe('conflict');
-    expect(view.conflict?.local?.name).toBe('Mine');
-    expect(view.conflict?.server?.name).toBe('Server Name');
+    expect((view.conflict?.local as LandmarkSnapshot | undefined)?.name).toBe('Mine');
+    expect((view.conflict?.server as LandmarkSnapshot | undefined)?.name).toBe('Server Name');
   });
 
   it('pushes an edit without claiming a conflict when the baseline is unknown (null footprint)', async () => {
@@ -554,5 +562,241 @@ describe('OfflineOpQueue chaos', () => {
     const summary = await queue.syncAll();
     expect(summary.reason).toBe('nothing_to_sync');
     expect(port.postLandmark).not.toHaveBeenCalled();
+  });
+});
+
+// ---- GPS track ops --------------------------------------------------------
+
+function remoteTrack(overrides: Partial<RemoteGpsTrack> = {}): RemoteGpsTrack {
+  return {
+    id: 'g1',
+    name: 'Server Track',
+    color: '#377eb8',
+    fileUrl: 'https://files.test/g1.geojson',
+    sha256: 'abc',
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
+describe('OfflineOpQueue GPS tracks', () => {
+  let store: OfflineOpStore;
+  beforeEach(() => {
+    ({ store } = createMemoryStore());
+  });
+
+  it('replays a create op as a GPX upload, then deletes the local copy', async () => {
+    const port = createPort();
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueGpsCreate({ id: 'local-1', name: 'Walk', color: '#e41a1c' });
+    expect(queue.count).toBe(1);
+
+    const summary = await queue.syncAll();
+    expect(summary.succeeded).toBe(1);
+    expect(port.uploadGpsTrack).toHaveBeenCalledWith('local-1');
+    expect(port.onGpsTrackCreated).toHaveBeenCalledWith('local-1');
+    expect(queue.count).toBe(0);
+  });
+
+  it('keeps a create op pending on a 5xx upload', async () => {
+    const port = createPort({ uploadGpsTrack: vi.fn(async () => ({ status: 503, data: {} })) });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueGpsCreate({ id: 'local-1', name: 'Walk', color: '#e41a1c' });
+
+    const summary = await queue.syncAll();
+    expect(summary.reason).toBe('pull_failed');
+    expect(queue.count).toBe(1);
+    expect(port.onGpsTrackCreated).not.toHaveBeenCalled();
+  });
+
+  it('folds a pending update over the server track list (optimistic name/color)', async () => {
+    const port = createPort();
+    const queue = new OfflineOpQueue(store, port);
+    const baseline: GpsTrackSnapshot = { name: 'Server Track', color: '#377eb8' };
+    await queue.enqueueGpsUpdate('g1', baseline, { name: 'Renamed', color: '#4daf4a' });
+
+    const folded = queue.foldGpsTracks([remoteTrack()]);
+    expect(folded[0]).toMatchObject({ id: 'g1', name: 'Renamed', color: '#4daf4a' });
+    expect(queue.gpsPendingBySubject().get('g1')?.state).toBe('update');
+  });
+
+  it('folds a pending delete by removing the track from the list', async () => {
+    const port = createPort();
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueGpsDelete('g1', { name: 'Server Track', color: '#377eb8' });
+    expect(queue.foldGpsTracks([remoteTrack()])).toHaveLength(0);
+    expect(queue.gpsPendingBySubject().get('g1')?.state).toBe('delete');
+  });
+
+  it('replays an update via PATCH when the server still matches the baseline', async () => {
+    const port = createPort({
+      fetchGpsTracks: vi.fn(async () => ({ status: 200, data: [{
+        id: 'g1', name: 'Server Track', color: '#377eb8',
+        file: 'https://files.test/g1.geojson', sha256_hash: 'abc',
+        creation_date: '2024-01-01T00:00:00Z', modified_date: '2024-01-01T00:00:00Z',
+      }] })),
+    });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueGpsUpdate('g1', { name: 'Server Track', color: '#377eb8' }, { name: 'New', color: '#984ea3' });
+
+    const summary = await queue.syncAll();
+    expect(summary.succeeded).toBe(1);
+    expect(port.patchGpsTrack).toHaveBeenCalledWith('g1', { name: 'New', color: '#984ea3' });
+    expect(port.applyGpsTrackUpsert).toHaveBeenCalled();
+    expect(queue.count).toBe(0);
+  });
+
+  it('raises a conflict when the server track drifted from the update baseline', async () => {
+    const port = createPort({
+      fetchGpsTracks: vi.fn(async () => ({ status: 200, data: [{
+        id: 'g1', name: 'Server Changed', color: '#377eb8',
+        file: 'https://files.test/g1.geojson', sha256_hash: 'abc',
+        creation_date: '2024-01-01T00:00:00Z', modified_date: '2024-01-01T00:00:00Z',
+      }] })),
+    });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueGpsUpdate('g1', { name: 'Server Track', color: '#377eb8' }, { name: 'Mine', color: '#984ea3' });
+
+    const summary = await queue.syncAll();
+    expect(summary.conflicted).toBe(1);
+    expect(port.patchGpsTrack).not.toHaveBeenCalled();
+    const view = queue.views()[0];
+    expect(view.entityType).toBe('gpsTrack');
+    expect(view.conflict?.entityLabel).toBe('GPS track');
+    expect(view.conflict?.rows.some((r) => r.field === 'name')).toBe(true);
+  });
+
+  it('treats a missing server track as a satisfied delete (idempotent)', async () => {
+    const port = createPort({ fetchGpsTracks: vi.fn(async () => ({ status: 200, data: [] })) });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueGpsDelete('g1', { name: 'Server Track', color: '#377eb8' });
+
+    const summary = await queue.syncAll();
+    expect(summary.succeeded).toBe(1);
+    expect(port.applyGpsTrackRemoval).toHaveBeenCalledWith('g1');
+    expect(queue.count).toBe(0);
+  });
+
+  it('coalesces a second edit and lets a delete supersede an edit', async () => {
+    const port = createPort();
+    const queue = new OfflineOpQueue(store, port);
+    const baseline: GpsTrackSnapshot = { name: 'Server Track', color: '#377eb8' };
+    await queue.enqueueGpsUpdate('g1', baseline, { name: 'Edit1', color: '#377eb8' });
+    await queue.enqueueGpsUpdate('g1', baseline, { name: 'Edit2', color: '#377eb8' });
+    expect(queue.count).toBe(1);
+    await queue.enqueueGpsDelete('g1', baseline);
+    expect(queue.count).toBe(1);
+    expect(queue.gpsPendingBySubject().get('g1')?.state).toBe('delete');
+  });
+
+  it('round-trips a gps op through persistence (deserialize)', async () => {
+    const port = createPort();
+    const queue1 = new OfflineOpQueue(store, port);
+    await queue1.enqueueGpsUpdate('g1', { name: 'A', color: '#111111' }, { name: 'B', color: '#222222' });
+
+    const queue2 = new OfflineOpQueue(store, port);
+    await queue2.load();
+    expect(queue2.count).toBe(1);
+    expect(queue2.foldGpsTracks([remoteTrack()])[0]).toMatchObject({ name: 'B', color: '#222222' });
+  });
+
+  it('runs a mixed landmark + gps queue, pulling both server snapshots', async () => {
+    const port = createPort();
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueCreate(optimisticCreate('local:lm'));
+    await queue.enqueueGpsCreate({ id: 'local-g', name: 'Walk', color: '#e41a1c' });
+
+    const summary = await queue.syncAll();
+    expect(summary.succeeded).toBe(2);
+    expect(port.postLandmark).toHaveBeenCalled();
+    expect(port.uploadGpsTrack).toHaveBeenCalledWith('local-g');
+    expect(queue.count).toBe(0);
+  });
+
+  // ---- GPS conflict resolution (forceLocal + adoptServer) -----------------
+  // The server drifted (`Server Changed`) from the op's baseline (`Server
+  // Track`), so syncAll raises a conflict; the user then resolves it.
+  const driftedServerRaw = {
+    id: 'g1', name: 'Server Changed', color: '#377eb8',
+    file: 'https://files.test/g1.geojson', sha256_hash: 'abc',
+    creation_date: '2024-01-01T00:00:00Z', modified_date: '2024-01-02T00:00:00Z',
+  };
+  const gpsBaseline: GpsTrackSnapshot = { name: 'Server Track', color: '#377eb8' };
+
+  it('keep-local resolves a GPS edit conflict by forcing the PATCH', async () => {
+    const port = createPort({ fetchGpsTracks: vi.fn(async () => ({ status: 200, data: [driftedServerRaw] })) });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueGpsUpdate('g1', gpsBaseline, { name: 'Mine', color: '#984ea3' });
+    const { conflictIds } = await queue.syncAll();
+    expect(conflictIds).toHaveLength(1);
+
+    const summary = await queue.resolveConflict(conflictIds[0], 'local');
+    expect(summary.succeeded).toBe(1);
+    expect(port.patchGpsTrack).toHaveBeenCalledWith('g1', { name: 'Mine', color: '#984ea3' });
+    expect(port.applyGpsTrackUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'g1', name: 'Mine', color: '#984ea3' }),
+    );
+    expect(queue.count).toBe(0);
+  });
+
+  it('use-server resolves a GPS edit conflict by adopting the server track', async () => {
+    const port = createPort({ fetchGpsTracks: vi.fn(async () => ({ status: 200, data: [driftedServerRaw] })) });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueGpsUpdate('g1', gpsBaseline, { name: 'Mine', color: '#984ea3' });
+    const { conflictIds } = await queue.syncAll();
+
+    const summary = await queue.resolveConflict(conflictIds[0], 'server');
+    expect(summary.succeeded).toBe(1);
+    expect(port.patchGpsTrack).not.toHaveBeenCalled();
+    expect(port.applyGpsTrackUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'g1', name: 'Server Changed' }),
+    );
+    expect(queue.count).toBe(0);
+  });
+
+  it('reports a failed keep-local GPS edit when the forced PATCH gets a 4xx', async () => {
+    const port = createPort({
+      fetchGpsTracks: vi.fn(async () => ({ status: 200, data: [driftedServerRaw] })),
+      patchGpsTrack: vi.fn(async () => ({ status: 403, data: { detail: 'No permission' } })),
+    });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueGpsUpdate('g1', gpsBaseline, { name: 'Mine', color: '#984ea3' });
+    const { conflictIds } = await queue.syncAll();
+
+    const summary = await queue.resolveConflict(conflictIds[0], 'local');
+    expect(summary.failed).toBe(1);
+    expect(summary.succeeded).toBe(0);
+    expect(queue.count).toBe(1);
+    expect(queue.views()[0].status).toBe('error');
+  });
+
+  it('keep-local resolves a GPS delete conflict by forcing the DELETE', async () => {
+    const port = createPort({ fetchGpsTracks: vi.fn(async () => ({ status: 200, data: [driftedServerRaw] })) });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueGpsDelete('g1', gpsBaseline);
+    const { conflictIds } = await queue.syncAll();
+    expect(conflictIds).toHaveLength(1);
+
+    const summary = await queue.resolveConflict(conflictIds[0], 'local');
+    expect(summary.succeeded).toBe(1);
+    expect(port.deleteGpsTrackRemote).toHaveBeenCalledWith('g1');
+    expect(port.applyGpsTrackRemoval).toHaveBeenCalledWith('g1');
+    expect(queue.count).toBe(0);
+  });
+
+  it('use-server resolves a GPS delete conflict by keeping the changed server track', async () => {
+    const port = createPort({ fetchGpsTracks: vi.fn(async () => ({ status: 200, data: [driftedServerRaw] })) });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueGpsDelete('g1', gpsBaseline);
+    const { conflictIds } = await queue.syncAll();
+
+    const summary = await queue.resolveConflict(conflictIds[0], 'server');
+    expect(summary.succeeded).toBe(1);
+    expect(port.deleteGpsTrackRemote).not.toHaveBeenCalled();
+    expect(port.applyGpsTrackUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'g1', name: 'Server Changed' }),
+    );
+    expect(queue.count).toBe(0);
   });
 });

@@ -1,14 +1,16 @@
 import { featureCollection, lineString, point } from '@turf/helpers';
 import type { Feature, FeatureCollection, LineString, Point } from 'geojson';
-import type { GpsTrackUploadStatus, LocalGpsTrack, RecordedPoint } from '../types/gpsTrack';
+import type { GpsTrackOrigin, RecordedPoint } from '../types/gpsTrack';
 import { isValidLatLng } from './coordinates';
 
 export interface GpsTrackLineProperties {
   id?: string;
   name?: string;
+  /** Hex color used for the map line (data-driven `line-color`). */
+  color?: string;
+  origin?: GpsTrackOrigin;
   createdAt?: number;
   updatedAt?: number;
-  uploadStatus?: GpsTrackUploadStatus;
   pointCount: number;
 }
 
@@ -55,33 +57,55 @@ export function trackPointsToLineStringFeature(
   });
 }
 
-export function gpsTrackToLineStringFeature(
-  track: LocalGpsTrack,
-): Feature<LineString, GpsTrackLineProperties> | null {
-  return trackPointsToLineStringFeature(track.points, {
-    id: track.id,
-    name: track.name,
-    createdAt: track.createdAt,
-    updatedAt: track.updatedAt,
-    uploadStatus: track.uploadStatus,
-  });
-}
-
-export function gpsTracksToFeatureCollection(
-  tracks: readonly LocalGpsTrack[],
-): FeatureCollection<LineString, GpsTrackLineProperties> {
-  return featureCollection(
-    tracks.flatMap((track) => {
-      const feature = gpsTrackToLineStringFeature(track);
-      return feature ? [feature] : [];
-    }),
-  );
-}
-
 export function trackPointsToFeatureCollection(
   points: readonly RecordedPoint[],
   properties: Partial<Omit<GpsTrackLineProperties, 'pointCount'>> = {},
 ): FeatureCollection<LineString, GpsTrackLineProperties> {
   const feature = trackPointsToLineStringFeature(points, properties);
   return featureCollection(feature ? [feature] : []);
+}
+
+function pushLineStringPoints(coordinates: unknown, out: RecordedPoint[]): void {
+  if (!Array.isArray(coordinates)) return;
+  for (const position of coordinates) {
+    if (!Array.isArray(position) || position.length < 2) continue;
+    const [lon, lat, ele] = position;
+    if (typeof lon !== 'number' || typeof lat !== 'number') continue;
+    if (!isValidLatLng(lat, lon)) continue;
+    out.push({
+      latitude: lat,
+      longitude: lon,
+      altitude: typeof ele === 'number' && Number.isFinite(ele) ? ele : null,
+      timestamp: 0,
+    });
+  }
+}
+
+/**
+ * Flatten a downloaded GPS-track GeoJSON FeatureCollection (one or more
+ * LineString / MultiLineString features) into `RecordedPoint[]`. Server tracks
+ * carry no per-point timestamps, so timestamps are 0; this is used for map
+ * display, distance stats and GPX re-export of a remote track.
+ */
+export function gpsTrackGeoJsonToPoints(geojson: unknown): RecordedPoint[] {
+  const points: RecordedPoint[] = [];
+  if (!geojson || typeof geojson !== 'object') return points;
+  const collection = geojson as { type?: unknown; features?: unknown; geometry?: unknown };
+  const features = Array.isArray(collection.features) ? collection.features : [];
+  const geometries =
+    features.length > 0
+      ? features.map((f) => (f && typeof f === 'object' ? (f as { geometry?: unknown }).geometry : null))
+      : [collection.geometry ?? null];
+  for (const geometry of geometries) {
+    if (!geometry || typeof geometry !== 'object') continue;
+    const geom = geometry as { type?: unknown; coordinates?: unknown };
+    if (geom.type === 'LineString') {
+      pushLineStringPoints(geom.coordinates, points);
+    } else if (geom.type === 'MultiLineString' && Array.isArray(geom.coordinates)) {
+      for (const segment of geom.coordinates) {
+        pushLineStringPoints(segment, points);
+      }
+    }
+  }
+  return points;
 }
