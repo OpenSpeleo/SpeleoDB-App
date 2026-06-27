@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { GpsTrackStore } from './GpsTrackStore';
 import { ProjectCacheService } from './ProjectCacheService';
+import { isValidHexColor } from '../utils/gpsTrackColors';
 import type { LocalGpsTrack } from '../types/gpsTrack';
 
 function makeTrack(overrides: Partial<LocalGpsTrack> = {}): LocalGpsTrack {
@@ -93,6 +94,28 @@ describe('GpsTrackStore', () => {
 
     expect(await store.get('empty')).toBeNull();
     expect(await store.get('empty')).toBeNull();
+  });
+
+  it('backfills a valid color for records persisted without one (older build)', async () => {
+    // `color` was added to LocalGpsTrack by the GPS-sync feature, so a track
+    // recorded by an older build has no `color`. Loading it must never yield
+    // `undefined` (the edit modal calls `color.toLowerCase()` and would crash).
+    const colorless = {
+      id: 'legacy',
+      name: 'Legacy Track',
+      points: [{ latitude: 1, longitude: 2, timestamp: 0 }],
+      createdAt: 100,
+      updatedAt: 100,
+    } as unknown as LocalGpsTrack;
+    await store.put(colorless);
+
+    const listed = (await store.list()).find((t) => t.id === 'legacy');
+    expect(listed).toBeDefined();
+    expect(isValidHexColor(listed!.color)).toBe(true);
+
+    const fetched = await store.get('legacy');
+    expect(fetched).not.toBeNull();
+    expect(isValidHexColor(fetched!.color)).toBe(true);
   });
 });
 

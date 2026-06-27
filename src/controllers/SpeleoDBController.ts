@@ -1645,7 +1645,10 @@ export class SpeleoDBController {
       items.push({
         id: track.id,
         name: track.name,
-        color: track.color,
+        // Guarantee a valid hex even for tracks recorded by an older build that
+        // predates `LocalGpsTrack.color` (otherwise editing one feeds `undefined`
+        // into the edit modal's `color.toLowerCase()` and crashes the app).
+        color: normalizeHexColor(track.color),
         origin: 'local',
         createdAt: track.createdAt,
         updatedAt: track.updatedAt,

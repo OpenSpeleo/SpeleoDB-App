@@ -13,8 +13,21 @@
 
 import { CacheStore } from './CacheStore';
 import type { LocalGpsTrack } from '../types/gpsTrack';
+import { normalizeHexColor } from '../utils/gpsTrackColors';
 
 const STORE_NAME = 'gps_tracks';
+
+/**
+ * Heal a loaded record: `color` was added to `LocalGpsTrack` by the GPS-sync
+ * feature, so tracks recorded by an older build are persisted WITHOUT it.
+ * Backfilling a valid hex here keeps the in-memory invariant "every track has a
+ * color" so the panel dot, map line, and (critically) the edit modal's
+ * `color.toLowerCase()` never see `undefined`.
+ */
+function withSafeColor(track: LocalGpsTrack): LocalGpsTrack {
+  const safe = normalizeHexColor(track.color);
+  return safe === track.color ? track : { ...track, color: safe };
+}
 
 export class GpsTrackStore {
   private store: CacheStore;
@@ -39,7 +52,7 @@ export class GpsTrackStore {
     const tracks: LocalGpsTrack[] = [];
     for (const track of valid) {
       if (Array.isArray(track.points) && track.points.length > 0) {
-        tracks.push(track);
+        tracks.push(withSafeColor(track));
       } else {
         void this.remove(track.id).catch(() => {
           // Best-effort cleanup; never block listing on it.
@@ -54,7 +67,7 @@ export class GpsTrackStore {
     const entry = await this.store.get<LocalGpsTrack>(STORE_NAME, id);
     const track = entry?.data ?? null;
     if (!track) return null;
-    if (Array.isArray(track.points) && track.points.length > 0) return track;
+    if (Array.isArray(track.points) && track.points.length > 0) return withSafeColor(track);
     await this.remove(id).catch(() => {
       // Best-effort cleanup; callers should not see unusable empty tracks.
     });

@@ -55,7 +55,7 @@ import { useGpsAveraging } from '../hooks/useGpsAveraging';
 import { GpxFileService } from '../services/GpxFileService';
 import { errorToLogDetails } from '../utils/errorDiagnostics';
 import type { GpsTrackListItem, RecordedPoint } from '../types/gpsTrack';
-import { TRACK_COLOR_PALETTE } from '../utils/gpsTrackColors';
+import { TRACK_COLOR_PALETTE, readableInkColor } from '../utils/gpsTrackColors';
 import {
   buildLandmarkCollectionGroups,
   type LandmarkListItem,
@@ -2829,12 +2829,19 @@ const Dashboard: React.FC<DashboardProps> = ({
               onDidDismiss={() => { if (!editBusy) setEditTarget(null); }}
             >
               <IonContent className="ion-padding">
+                {/* Top-anchored (NOT vertically centered): when the keyboard
+                    opens, IonContent shrinks; a `justify-center` layout would
+                    re-center the now-shorter form and make everything lurch.
+                    Anchoring to the top keeps the Name field steady. */}
                 <div
                   data-testid="gps-edit-modal"
-                  className="flex flex-col h-full justify-center max-w-sm mx-auto"
+                  className="flex flex-col h-full max-w-sm mx-auto"
+                  // Clear the device safe area (notch/status bar) plus a generous
+                  // gap so "Edit Track" never sits against the top "danger area".
+                  style={{ paddingTop: 'calc(3.5rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)))' }}
                 >
                   <h2 className="text-xl font-semibold text-slate-100 mb-5 text-center">
-                    Edit Track
+                    Edit GPS Track
                   </h2>
                   <label className="text-xs font-medium text-slate-400 mb-1">Name</label>
                   <input
@@ -2848,23 +2855,51 @@ const Dashboard: React.FC<DashboardProps> = ({
                     placeholder="Track name"
                   />
                   <label className="text-xs font-medium text-slate-400 mt-4 mb-2">Color</label>
-                  <div className="grid grid-cols-10 gap-2" data-testid="gps-edit-color-swatches">
-                    {TRACK_COLOR_PALETTE.map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        aria-label={`Color ${color}`}
-                        aria-pressed={editColor.toLowerCase() === color.toLowerCase()}
-                        onClick={() => setEditColor(color)}
-                        data-testid={`gps-edit-color-${color}`}
-                        className={`h-6 w-6 rounded-full border-2 transition-transform ${
-                          editColor.toLowerCase() === color.toLowerCase()
-                            ? 'border-white scale-110'
-                            : 'border-transparent'
-                        }`}
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
+                  <div className="grid grid-cols-10 gap-2.5" data-testid="gps-edit-color-swatches">
+                    {TRACK_COLOR_PALETTE.map((color) => {
+                      // `String(...)` guards against a track recorded by an older
+                      // build whose persisted record has no `color` (undefined),
+                      // which would otherwise throw on `.toLowerCase()`.
+                      const selected = String(editColor).toLowerCase() === color.toLowerCase();
+                      return (
+                        <button
+                          key={color}
+                          type="button"
+                          aria-label={`Color ${color}`}
+                          aria-pressed={selected}
+                          onClick={() => setEditColor(color)}
+                          data-testid={`gps-edit-color-${color}`}
+                          className="relative flex aspect-square w-full items-center justify-center rounded-full transition-transform"
+                          style={{
+                            backgroundColor: color,
+                            // Selection cue that works on ANY swatch (dark or
+                            // light): a contrasting checkmark inside, plus a
+                            // dark-gap + white outer ring drawn with box-shadow
+                            // (reliable on old Android WebViews, unlike a same-
+                            // color border that vanishes on light swatches).
+                            transform: selected ? 'scale(1.12)' : undefined,
+                            boxShadow: selected
+                              ? '0 0 0 2px #0f172a, 0 0 0 4px #f8fafc'
+                              : undefined,
+                          }}
+                        >
+                          {selected && (
+                            <svg
+                              viewBox="0 0 24 24"
+                              className="h-3.5 w-3.5"
+                              fill="none"
+                              stroke={readableInkColor(color)}
+                              strokeWidth={3.5}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                   <div className="grid grid-cols-2 gap-3 mt-6">
                     <button

@@ -3256,6 +3256,77 @@ describe('Dashboard GPS panel', () => {
     await waitFor(() => expect(mockMapFitBounds).toHaveBeenCalled());
   });
 
+  it('marks the selected color in the edit modal with a contrasting checkmark', async () => {
+    const user = userEvent.setup();
+    // A light swatch -> the contrasting cue must use BLACK ink (a white border
+    // would be invisible here; that was the bug).
+    mockGpsTracks = [
+      {
+        id: 'trk-edit',
+        name: 'Sump',
+        color: '#ffff33',
+        origin: 'remote',
+        createdAt: 4000,
+        updatedAt: 4000,
+      },
+    ];
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-track-edit-trk-edit'));
+
+    expect(screen.getByTestId('gps-edit-modal')).toBeInTheDocument();
+    const selected = screen.getByTestId('gps-edit-color-#ffff33');
+    expect(selected).toHaveAttribute('aria-pressed', 'true');
+    // Selection cue is an overlaid checkmark (works on any swatch), black on a
+    // light color for contrast.
+    const check = selected.querySelector('svg');
+    expect(check).not.toBeNull();
+    expect(check?.getAttribute('stroke')).toBe('#000000');
+    // Unselected swatches show no checkmark.
+    expect(
+      screen.getByTestId('gps-edit-color-#377eb8').querySelector('svg'),
+    ).toBeNull();
+
+    // Selecting a dark swatch moves the cue and switches the ink to white.
+    await user.click(screen.getByTestId('gps-edit-color-#377eb8'));
+    const darkSelected = screen.getByTestId('gps-edit-color-#377eb8');
+    expect(darkSelected.querySelector('svg')?.getAttribute('stroke')).toBe('#ffffff');
+    expect(screen.getByTestId('gps-edit-color-#ffff33').querySelector('svg')).toBeNull();
+  });
+
+  it('opens the edit modal without crashing for a track missing a color (older build)', async () => {
+    const user = userEvent.setup();
+    // A track recorded before `color` existed loads with color === undefined.
+    // Previously the modal's `editColor.toLowerCase()` threw and the whole app
+    // fell back to the error boundary ("Something went wrong").
+    mockGpsTracks = [
+      {
+        id: 'trk-legacy',
+        name: 'Legacy',
+        color: undefined as unknown as string,
+        origin: 'local',
+        createdAt: 5000,
+        updatedAt: 5000,
+        pointCount: 2,
+        distanceMeters: 10,
+        durationMs: 15_000,
+      },
+    ];
+    renderDashboard();
+    await screen.findByTestId('app-tab-bar');
+
+    await user.click(screen.getByTestId('gps-tab'));
+    await user.click(screen.getByTestId('gps-track-edit-trk-legacy'));
+
+    // The modal renders (no crash) with no swatch selected.
+    expect(screen.getByTestId('gps-edit-modal')).toBeInTheDocument();
+    const swatches = screen.getAllByTestId(/^gps-edit-color-#/);
+    expect(swatches.length).toBeGreaterThan(0);
+    expect(swatches.every((s) => s.getAttribute('aria-pressed') === 'false')).toBe(true);
+  });
+
   it('collapses the recording screen when a bottom tab is pressed', async () => {
     const user = userEvent.setup();
     renderDashboard();

@@ -59,6 +59,11 @@ limitations, and the test strategy.
     by the server track). Offline, it queues a `CreateGpsTrackOp`.
   - **Edit = change name and/or color.** Local recordings edit in place (no
     network); server tracks `PATCH /api/v2/gps_tracks/<id>/` (queued offline).
+    The edit modal is **top-anchored** (not vertically centered) so the on-screen
+    keyboard does not re-center and lurch the form when the Name field focuses;
+    the selected color is shown with a **contrasting checkmark** (`readableInkColor`,
+    black on light swatches / white on dark) plus a dark-gap + white ring, which
+    stays visible on every palette color (a same-color border did not).
   - **Delete** (behind a confirmation modal): local recordings are removed from
     the device; server tracks `DELETE` (queued offline).
 
@@ -70,7 +75,7 @@ limitations, and the test strategy.
 | GNSS satellite status provider | `src/services/GnssStatusProvider.ts` (default "unsupported"; Android plugin is a follow-up) |
 | GPX export/upload builder | `src/utils/gpx.ts` (`gpx-builder` adapter) |
 | GPS track GeoJSON construction + geojson->points | `src/utils/gpsTrackGeoJson.ts` (`@turf/helpers` adapter) |
-| Track colors (palette, validate, random) | `src/utils/gpsTrackColors.ts` |
+| Track colors (palette, validate, random, readable ink) | `src/utils/gpsTrackColors.ts` |
 | Server track parsing | `src/utils/remoteGpsTrack.ts` (`parseRemoteGpsTracks`) |
 | Averaging math + confidence (pure) | `src/utils/gpsAveraging.ts` |
 | Shared GPS fix gate (pre-session drop + throttle, pure) | `src/utils/gpsSampling.ts` |
@@ -444,7 +449,11 @@ Local recordings live in a dedicated `gps_tracks` IndexedDB object store, added
 in `CacheStore` **v3** via an additive `createObjectStore` migration. Each track
 is one record keyed by id, so a force-quit can only ever affect the single track
 being written. `GpsTrackStore` is a dumb persistence layer (no network, no
-business decisions).
+business decisions), with one data-hygiene exception that mirrors its 0-point
+self-heal: on read it **backfills a valid `color`** (`normalizeHexColor`) for
+records persisted by an older build before `LocalGpsTrack.color` existed, so the
+panel dot, map line, and the edit modal's `color.toLowerCase()` never receive
+`undefined`.
 
 Server tracks reuse the **existing** `projects` + `geojson` stores (no schema
 bump): the metadata list under the `gps-tracks` key (like `landmark-collections`)

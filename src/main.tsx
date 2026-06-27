@@ -49,7 +49,7 @@ const container = document.getElementById('root');
 const root = createRoot(container!);
 root.render(
   <React.StrictMode>
-    <AppErrorBoundary fallback={<div>Something went wrong.</div>}>
+    <AppErrorBoundary>
       <App />
     </AppErrorBoundary>
   </React.StrictMode>
