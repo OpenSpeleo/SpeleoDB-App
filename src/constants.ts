@@ -253,6 +253,28 @@ export const MAP_LAYERS: readonly MapLayerDefinition[] = [
 
 export const DEFAULT_MAP_LAYER_ID = 'esri-satellite';
 
+// ==================== PROJECT GEOJSON VALIDATION ====================
+
+/**
+ * Safety boundary for project survey GeoJSON. Bounds are measured before map
+ * or tile padding. A file is quarantined when either dimension exceeds its
+ * limit or analysis does not finish before the worker deadline.
+ */
+export const PROJECT_GEOJSON_VALIDATION = {
+  MAX_WIDTH_KM: 100,
+  MAX_HEIGHT_KM: 100,
+  // A physically compact polar survey can still expand to a world-scale
+  // Web-Mercator footprint. Apply the same safety envelope to the projected
+  // consumer span before map display or tile planning is allowed.
+  // Web Mercator uses a slightly larger spherical radius than the geodesic
+  // measurement below. The 0.12 km allowance preserves an exact 100 km raw
+  // equatorial bbox while still rejecting projection-amplified polar spans.
+  MAX_MERCATOR_X_SPAN_KM: 100.12,
+  MAX_MERCATOR_Y_SPAN_KM: 100.12,
+  TIMEOUT_MS: 500,
+  CACHE_SCHEMA_VERSION: 2,
+} as const;
+
 // ==================== TILE PREFETCH ====================
 // Offline satellite tile pre-caching policy. Each "request" describes the zoom
 // range + padding used to turn locations into the set of {z,x,y} tiles to

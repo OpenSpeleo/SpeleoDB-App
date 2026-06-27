@@ -24,6 +24,12 @@ import { useSpeleoDB } from '../context/useSpeleoDB';
 import { COLORS, DEFAULT_MAP_LAYER_ID, MAP, MAP_LAYERS, MAP_OVERLAYS, PROJECT_LAYERS } from '../constants';
 import type { MapOverlayGeoJsonRecord, MapOverlayId, MapOverlaySizes } from '../types/mapOverlay';
 import type { MapLayerId } from '../types/mapLayer';
+import type { ProjectGeoJSONBounds } from '../types/projectGeoJSON';
+import {
+  WEB_MERCATOR_MAX_LATITUDE,
+  clampWebMercatorLatitude,
+  mergeLongitudeIntervals,
+} from '../utils/geographicBounds';
 import { registerTileCacheProtocol, getCachedLayerStyle } from '../services/TileCacheService';
 import MapLayerControl from '../components/map/MapLayerControl';
 import {
@@ -124,6 +130,13 @@ const LANDMARK_COLLECTION_HALO_EXPRESSION = [
 // ==================== GeoJSON type alias ====================
 
 type GeoJsonRecord = Record<string, GeoJSON.FeatureCollection>;
+interface LoadedProjectMapData {
+  commitId: string;
+  featureCollection: GeoJSON.FeatureCollection;
+  bounds: ProjectGeoJSONBounds;
+}
+type ProjectMapDataRecord = Record<string, LoadedProjectMapData>;
+type ProjectBoundsRecord = Record<string, ProjectGeoJSONBounds>;
 type OverlayIconId =
   | 'biology-station-icon'
   | 'bone-station-icon'
@@ -379,39 +392,36 @@ async function loadMapImage(
 
 /** Compute combined bounding box for the given project IDs. */
 function computeBounds(
-  geoJsonData: GeoJsonRecord,
+  projectBounds: ProjectBoundsRecord,
   ids: Set<string>,
 ): LngLatBoundsLike | null {
-  let minLng = Infinity;
-  let maxLng = -Infinity;
+  const intervals: ProjectGeoJSONBounds[] = [];
   let minLat = Infinity;
   let maxLat = -Infinity;
-  let hasCoords = false;
 
   for (const id of ids) {
-    const fc = geoJsonData[id];
-    if (!fc?.features) continue;
-
-    for (const feature of fc.features) {
-      if (!feature.geometry) continue;
-      visitCoords(feature.geometry, (lng: number, lat: number) => {
-        if (lng < minLng) minLng = lng;
-        if (lng > maxLng) maxLng = lng;
-        if (lat < minLat) minLat = lat;
-        if (lat > maxLat) maxLat = lat;
-        hasCoords = true;
-      });
-    }
+    const bounds = projectBounds[id];
+    if (!bounds) continue;
+    intervals.push(bounds);
+    minLat = Math.min(minLat, bounds.south);
+    maxLat = Math.max(maxLat, bounds.north);
   }
 
-  if (!hasCoords) return null;
+  if (intervals.length === 0) return null;
+
+  const merged = mergeLongitudeIntervals(intervals);
+  if (!merged) return null;
+  const minLng = merged.west;
+  const maxLng = merged.crossesDateline ? merged.east + 360 : merged.east;
 
   const lngPad = Math.max((maxLng - minLng) * 0.1, 0.01);
   const latPad = Math.max((maxLat - minLat) * 0.1, 0.01);
+  const paddedSouth = clampWebMercatorLatitude(minLat - latPad);
+  const paddedNorth = clampWebMercatorLatitude(maxLat + latPad);
 
   return [
-    [minLng - lngPad, minLat - latPad],
-    [maxLng + lngPad, maxLat + latPad],
+    [minLng - lngPad, Math.max(-WEB_MERCATOR_MAX_LATITUDE, paddedSouth)],
+    [maxLng + lngPad, Math.min(WEB_MERCATOR_MAX_LATITUDE, paddedNorth)],
   ];
 }
 
@@ -443,35 +453,6 @@ function boundsFromPoints(points: readonly RecordedPoint[]): LngLatBoundsLike | 
     [minLng - lngPad, minLat - latPad],
     [maxLng + lngPad, maxLat + latPad],
   ];
-}
-
-/** Walk every coordinate in a GeoJSON geometry. */
-function visitCoords(
-  geometry: GeoJSON.Geometry,
-  fn: (lng: number, lat: number) => void,
-): void {
-  switch (geometry.type) {
-    case 'Point':
-      fn(geometry.coordinates[0], geometry.coordinates[1]);
-      break;
-    case 'MultiPoint':
-    case 'LineString':
-      for (const c of geometry.coordinates) fn(c[0], c[1]);
-      break;
-    case 'MultiLineString':
-    case 'Polygon':
-      for (const ring of geometry.coordinates)
-        for (const c of ring) fn(c[0], c[1]);
-      break;
-    case 'MultiPolygon':
-      for (const poly of geometry.coordinates)
-        for (const ring of poly)
-          for (const c of ring) fn(c[0], c[1]);
-      break;
-    case 'GeometryCollection':
-      for (const g of geometry.geometries) visitCoords(g, fn);
-      break;
-  }
 }
 
 type OrientationLockMap = {
@@ -532,7 +513,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     tilePrefetchJobs,
     isOfflineLocked,
     landmarksRevision,
-    lastSyncedAt,
+    mapDataRevision,
     pendingOpsCount,
     gpsTracks,
     gpsRecordingState,
@@ -542,6 +523,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   } = useSpeleoDB();
   const didSyncRef = useRef(false);
   const didFitRef = useRef(false);
+  const knownVisibilityProjectIdsRef = useRef<Set<string>>(new Set());
   const mapRef = useRef<MapRef>(null);
   const mapPointerTapCandidateRef = useRef<MapPointerTapCandidate | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -655,8 +637,9 @@ const Dashboard: React.FC<DashboardProps> = ({
     Record<string, boolean>
   >(() => getLandmarkCollectionCollapsedPreferences());
 
-  // Loaded GeoJSON keyed by project ID
-  const [geoJsonData, setGeoJsonData] = useState<GeoJsonRecord>({});
+  // Loaded, commit-identified project map artifacts. Consumers derive their
+  // GeoJSON and bounds from the same atomic record so commits cannot mix.
+  const [projectMapData, setProjectMapData] = useState<ProjectMapDataRecord>({});
   const [overlayGeoJsonData, setOverlayGeoJsonData] = useState<MapOverlayGeoJsonRecord>({});
   const [overlayIconAvailability, setOverlayIconAvailability] = useState<OverlayIconAvailability>(
     DEFAULT_OVERLAY_ICON_AVAILABILITY,
@@ -665,9 +648,6 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // Map style (loaded from cache/network)
   const [mapStyle, setMapStyle] = useState<Record<string, unknown> | null>(null);
-
-  // Monotonic counter -- incremented after each sync to trigger a reload.
-  const [loadTrigger, setLoadTrigger] = useState(0);
 
   // ---- Auth guard -----------------------------------------------------------
 
@@ -706,20 +686,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     if (!didSyncRef.current) {
       didSyncRef.current = true;
-      let cancelled = false;
-      controller.syncProjects()
-        .then((result) => {
-          if (cancelled) return;
-          if (result.status === 'aborted') return;
-          setLoadTrigger((n) => n + 1);
-        })
-        .finally(() => {
-          if (cancelled) return;
-        });
-
-      return () => {
-        cancelled = true;
-      };
+      void controller.syncProjects();
     }
   }, [controller]);
 
@@ -733,6 +700,37 @@ const Dashboard: React.FC<DashboardProps> = ({
     () => sortedProjects.filter((p) => !p.exclude_geojson && Boolean(p.geojson_file)),
     [sortedProjects],
   );
+  useEffect(() => {
+    const currentIds = new Set(geoJsonProjects.map((project) => project.id));
+    const preferences = getProjectVisibilityPreferences();
+    setActiveProjectIds((previous) => {
+      const next = new Set([...previous].filter((id) => currentIds.has(id)));
+      for (const project of geoJsonProjects) {
+        if (
+          !knownVisibilityProjectIdsRef.current.has(project.id)
+          && preferences[project.id] !== false
+        ) {
+          next.add(project.id);
+        }
+      }
+      return next;
+    });
+    knownVisibilityProjectIdsRef.current = currentIds;
+  }, [geoJsonProjects]);
+  const currentProjectMapData = useMemo<ProjectMapDataRecord>(() => {
+    const next: ProjectMapDataRecord = {};
+    for (const project of geoJsonProjects) {
+      const loaded = projectMapData[project.id];
+      if (loaded?.commitId === project.latest_commit.id) next[project.id] = loaded;
+    }
+    return next;
+  }, [geoJsonProjects, projectMapData]);
+  const geoJsonData = useMemo<GeoJsonRecord>(() => Object.fromEntries(
+    Object.entries(currentProjectMapData).map(([id, data]) => [id, data.featureCollection]),
+  ), [currentProjectMapData]);
+  const projectBounds = useMemo<ProjectBoundsRecord>(() => Object.fromEntries(
+    Object.entries(currentProjectMapData).map(([id, data]) => [id, data.bounds]),
+  ), [currentProjectMapData]);
   const panelProjects = useMemo(
     () => sortedProjects.filter((p) => Boolean(geoJsonData[p.id])),
     [sortedProjects, geoJsonData],
@@ -753,22 +751,25 @@ const Dashboard: React.FC<DashboardProps> = ({
     const next = new Set<string>();
     for (const project of sortedProjects) {
       if (!activeProjectIds.has(project.id)) continue;
+      if (!geoJsonData[project.id]) continue;
       const country = project.country || 'Unknown';
       if (countryVisibility[country] === false) continue;
       next.add(project.id);
     }
     return next;
-  }, [sortedProjects, activeProjectIds, countryVisibility]);
+  }, [sortedProjects, activeProjectIds, countryVisibility, geoJsonData]);
   // Project panel progress reflects the satellite layer only (extra layers have
   // their own per-layer progress in Settings).
   const tilePrefetchByProject = useMemo(
     () =>
       Object.fromEntries(
         tilePrefetchJobs
-          .filter((job) => job.layerId === DEFAULT_MAP_LAYER_ID)
+          .filter((job) =>
+            job.layerId === DEFAULT_MAP_LAYER_ID
+            && Boolean(currentProjectMapData[job.projectId]))
           .map((job) => [job.projectId, job] as const),
       ),
-    [tilePrefetchJobs],
+    [currentProjectMapData, tilePrefetchJobs],
   );
   const loadOverlayIcons = useCallback(async () => {
     const map = mapRef.current?.getMap() as unknown as OverlayImageMap | undefined;
@@ -785,26 +786,34 @@ const Dashboard: React.FC<DashboardProps> = ({
   }, []);
 
   useEffect(() => {
-    // Only load when triggered (after sync completes)
-    if (loadTrigger === 0) return;
+    // Only load after a controller-owned map-data sync reaches a terminal state.
+    if (mapDataRevision === 0) return;
 
     let stale = false;
 
     (async () => {
-      const newData: GeoJsonRecord = {};
+      const newData: ProjectMapDataRecord = {};
 
       // When geoJsonProjects is empty, the loop is a no-op and newData stays {},
-      // which clears any previously-loaded data via the setGeoJsonData call below.
+      // which clears any previously-loaded data via the atomic state swap below.
       // Setting state inside this async callback avoids the cascading-render
       // cost of calling setState synchronously in the effect body.
       for (const project of geoJsonProjects) {
         try {
-          const raw = await controller.getProjectGeoJSON(project.id);
+          const mapData = await controller.getProjectMapData(project.id);
           if (stale) return;
 
-          const fc = normalizeGeoJSON(raw);
-          if (fc && fc.features.length > 0) {
-            newData[project.id] = attachDepthToFeatureCollection(fc, DEPTH_PROPERTY_KEY);
+          const fc = normalizeGeoJSON(mapData?.featureCollection);
+          if (
+            fc
+            && fc.features.length > 0
+            && mapData?.commitId === project.latest_commit.id
+          ) {
+            newData[project.id] = {
+              commitId: mapData.commitId,
+              featureCollection: attachDepthToFeatureCollection(fc, DEPTH_PROPERTY_KEY),
+              bounds: mapData.bounds,
+            };
           }
         } catch (err) {
           console.warn(`Failed to load GeoJSON for ${project.id}:`, err);
@@ -813,26 +822,14 @@ const Dashboard: React.FC<DashboardProps> = ({
 
       if (stale) return;
 
-      setGeoJsonData(newData);
-
-      // On first meaningful load, restore persisted visibility per project.
-      setActiveProjectIds((prev) => {
-        if (prev.size === 0) {
-          const visibilityPrefs = getProjectVisibilityPreferences();
-          const visibleIds = Object.keys(newData).filter(
-            (projectId) => visibilityPrefs[projectId] !== false,
-          );
-          return new Set(visibleIds);
-        }
-        return prev;
-      });
+      setProjectMapData(newData);
     })();
 
     return () => { stale = true; };
-  }, [loadTrigger, controller, geoJsonProjects]);
+  }, [mapDataRevision, controller, geoJsonProjects]);
 
   useEffect(() => {
-    if (loadTrigger === 0) return;
+    if (mapDataRevision === 0) return;
 
     let stale = false;
     (async () => {
@@ -863,10 +860,10 @@ const Dashboard: React.FC<DashboardProps> = ({
       stale = true;
     };
     // `landmarksRevision` bumps after a landmark create/edit/delete writes the
-    // cached overlay; `lastSyncedAt` changes after any sync/resync rewrites the
-    // overlay cache (e.g. a landmark deleted on the web). Re-read on either so
-    // the map + panel always reflect the latest cached overlays.
-  }, [controller, loadTrigger, landmarksRevision, lastSyncedAt]);
+    // cached overlay; mapDataRevision changes only after a sync/resync finishes
+    // its map-data phases. Re-read on either so the map + panel always reflect
+    // the latest cached overlays.
+  }, [controller, mapDataRevision, landmarksRevision]);
 
   const visibleOverlayGeoJsonData = useMemo(() => {
     const nextData: MapOverlayGeoJsonRecord = {};
@@ -913,12 +910,12 @@ const Dashboard: React.FC<DashboardProps> = ({
     if (didFitRef.current) return;
     if (effectiveActiveProjectIds.size === 0 || Object.keys(geoJsonData).length === 0) return;
 
-    const bounds = computeBounds(geoJsonData, effectiveActiveProjectIds);
+    const bounds = computeBounds(projectBounds, effectiveActiveProjectIds);
     if (bounds && mapRef.current) {
       didFitRef.current = true;
       mapRef.current.fitBounds(bounds, { padding: 50, maxZoom: 14, duration: 800 });
     }
-  }, [effectiveActiveProjectIds, geoJsonData]);
+  }, [effectiveActiveProjectIds, geoJsonData, projectBounds]);
 
   // ---- Handlers -------------------------------------------------------------
 
@@ -1329,25 +1326,17 @@ const Dashboard: React.FC<DashboardProps> = ({
     // Step 1: Close the panel so the map is unobstructed before animating.
     onProjectPanelChange(false);
 
-    // Step 2: Zoom to this project's bounds — read geoJsonData from the
-    // latest state via a functional update trick so we always operate on
-    // the current snapshot.
+    // Step 2: Zoom using the persisted bounds validated during project sync.
     setTimeout(() => {
       const map = mapRef.current;
       if (!map) return;
 
-      setGeoJsonData((current) => {
-        const fc = current[projectId];
-        if (fc) {
-          const bounds = computeBounds(current, new Set([projectId]));
-          if (bounds) {
-            map.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 800 });
-          }
-        }
-        return current;
-      });
+      const bounds = computeBounds(projectBounds, new Set([projectId]));
+      if (bounds) {
+        map.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 800 });
+      }
     }, 0);
-  }, [onProjectPanelChange, sortedProjects, countryVisibility]);
+  }, [onProjectPanelChange, sortedProjects, countryVisibility, projectBounds]);
 
   const handleMapLoad = useCallback(() => {
     lockMapOrientation(mapRef.current);

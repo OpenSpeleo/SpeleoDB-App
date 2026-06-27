@@ -10,7 +10,18 @@ import type { Project } from '../types/project';
 import type { MapOverlayId } from '../types/mapOverlay';
 import type { LandmarkCollection } from '../types/landmark';
 import type { RemoteGpsTrack } from '../types/gpsTrack';
+import { PROJECT_GEOJSON_VALIDATION } from '../constants';
+import type {
+  ProjectGeoJSONAnalysis,
+  ProjectGeoJSONCacheRecord,
+  ProjectGeoJSONFailureDiagnostics,
+  ProjectGeoJSONFileFailureReason,
+} from '../types/projectGeoJSON';
 import { isAbortError, throwIfAborted } from '../utils/abort';
+import {
+  longitudeIntervalSpanDegrees,
+  webMercatorSpanKm,
+} from '../utils/geographicBounds';
 
 // ==================== Internal keys ====================
 
@@ -31,6 +42,144 @@ const LANDMARK_COLLECTIONS_KEY = 'landmark-collections';
  */
 const GPS_TRACKS_KEY = 'gps-tracks';
 const GPS_TRACK_GEOJSON_KEY_PREFIX = 'gps-track:';
+const GEOJSON_STATE_META_KEY = 'projectGeoJSONState';
+const GEOJSON_VALIDATION_VERSION_META_KEY = 'projectGeoJSONValidationVersion';
+const GEOJSON_ANALYSIS_META_KEY = 'projectGeoJSONAnalysis';
+const GEOJSON_FAILURE_DIAGNOSTICS_META_KEY = 'projectGeoJSONFailureDiagnostics';
+const GEOJSON_FAILURE_REASON_META_KEY = 'projectGeoJSONFailureReason';
+const GEOJSON_WARNING_ACKNOWLEDGED_META_KEY = 'projectGeoJSONWarningAcknowledged';
+
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function isBounds(value: unknown): value is ProjectGeoJSONAnalysis['bounds'] {
+  if (!value || typeof value !== 'object') return false;
+  const bounds = value as Partial<ProjectGeoJSONAnalysis['bounds']>;
+  if (
+    typeof bounds.west !== 'number' || !Number.isFinite(bounds.west)
+    || bounds.west < -180 || bounds.west > 180
+    || typeof bounds.east !== 'number' || !Number.isFinite(bounds.east)
+    || bounds.east < -180 || bounds.east > 180
+    || typeof bounds.south !== 'number' || !Number.isFinite(bounds.south)
+    || bounds.south < -90 || bounds.south > 90
+    || typeof bounds.north !== 'number' || !Number.isFinite(bounds.north)
+    || bounds.north < -90 || bounds.north > 90
+    || bounds.south > bounds.north
+    || typeof bounds.crossesDateline !== 'boolean'
+  ) {
+    return false;
+  }
+  const validBounds = bounds as ProjectGeoJSONAnalysis['bounds'];
+  return validBounds.crossesDateline
+    ? validBounds.west > validBounds.east
+      && longitudeIntervalSpanDegrees(validBounds) > 0
+    : validBounds.west <= validBounds.east;
+}
+
+function isAnalysis(value: unknown): value is ProjectGeoJSONAnalysis {
+  if (!value || typeof value !== 'object') return false;
+  const analysis = value as Partial<ProjectGeoJSONAnalysis>;
+  return isBounds(analysis.bounds)
+    && isNonNegativeFiniteNumber(analysis.widthKm)
+    && analysis.widthKm <= PROJECT_GEOJSON_VALIDATION.MAX_WIDTH_KM
+    && isNonNegativeFiniteNumber(analysis.heightKm)
+    && analysis.heightKm <= PROJECT_GEOJSON_VALIDATION.MAX_HEIGHT_KM
+    && isNonNegativeFiniteNumber(analysis.durationMs)
+    && analysis.durationMs <= PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS
+    && isProjectedFootprintSafe(analysis.bounds);
+}
+
+function isProjectedFootprintSafe(bounds: ProjectGeoJSONAnalysis['bounds']): boolean {
+  const { xKm, yKm } = webMercatorSpanKm(bounds);
+  return Number.isFinite(xKm)
+    && xKm >= 0
+    && xKm <= PROJECT_GEOJSON_VALIDATION.MAX_MERCATOR_X_SPAN_KM
+    && Number.isFinite(yKm)
+    && yKm >= 0
+    && yKm <= PROJECT_GEOJSON_VALIDATION.MAX_MERCATOR_Y_SPAN_KM;
+}
+
+function parseAnalysis(value: string | undefined): ProjectGeoJSONAnalysis | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isAnalysis(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isFileFailureReason(value: string | undefined): value is ProjectGeoJSONFileFailureReason {
+  return value === 'bbox_too_large'
+    || value === 'bbox_timeout'
+    || value === 'invalid_geojson'
+    || value === 'no_coordinates'
+    || value === 'bbox_error';
+}
+
+function isNullableMetric(value: unknown): value is number | null {
+  return value === null || isNonNegativeFiniteNumber(value);
+}
+
+function isFailureDiagnostics(value: unknown): value is ProjectGeoJSONFailureDiagnostics {
+  if (!value || typeof value !== 'object') return false;
+  const diagnostics = value as Partial<ProjectGeoJSONFailureDiagnostics>;
+  return (diagnostics.bounds === null || isBounds(diagnostics.bounds))
+    && isNullableMetric(diagnostics.widthKm)
+    && isNullableMetric(diagnostics.heightKm)
+    && isNullableMetric(diagnostics.durationMs);
+}
+
+function isFailureDiagnosticsForReason(
+  reason: ProjectGeoJSONFileFailureReason,
+  diagnostics: ProjectGeoJSONFailureDiagnostics,
+): boolean {
+  if (reason === 'bbox_too_large') {
+    return diagnostics.bounds !== null
+      && diagnostics.widthKm !== null
+      && diagnostics.heightKm !== null
+      && diagnostics.durationMs !== null
+      && (
+        diagnostics.widthKm > PROJECT_GEOJSON_VALIDATION.MAX_WIDTH_KM
+        || diagnostics.heightKm > PROJECT_GEOJSON_VALIDATION.MAX_HEIGHT_KM
+      );
+  }
+  if (reason === 'bbox_timeout') {
+    return diagnostics.durationMs !== null
+      && diagnostics.durationMs >= PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS;
+  }
+  return true;
+}
+
+function parseFailureDiagnostics(value: string | undefined): ProjectGeoJSONFailureDiagnostics | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isFailureDiagnostics(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseAcknowledged(value: string | undefined): boolean | null {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
+}
+
+function isCommitId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isFeatureCollection(value: unknown): value is GeoJSON.FeatureCollection {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && (value as { type?: unknown }).type === 'FeatureCollection'
+    && Array.isArray((value as { features?: unknown }).features),
+  );
+}
 
 // ==================== Service ====================
 
@@ -70,7 +219,7 @@ export class ProjectCacheService {
       await this.store.set('projects', PROJECTS_LIST_KEY, {
         data: projects,
         cachedAt: Date.now(),
-      });
+      }, options);
       throwIfAborted(options.signal)
       return true
     } catch (error) {
@@ -113,7 +262,7 @@ export class ProjectCacheService {
         data,
         cachedAt: Date.now(),
         meta: { commitId },
-      });
+      }, options);
       throwIfAborted(options.signal)
       return true
     } catch (error) {
@@ -122,6 +271,186 @@ export class ProjectCacheService {
       }
       console.error(`ProjectCacheService.setGeoJSON(${projectId}) failed:`, error);
       return false
+    }
+  }
+
+  /** Read the complete validation state for one project GeoJSON cache entry. */
+  async getProjectGeoJSONRecord(
+    projectId: string,
+    options: CacheOperationOptions = {},
+  ): Promise<ProjectGeoJSONCacheRecord> {
+    throwIfAborted(options.signal);
+    try {
+      const entry = await this.store.get('geojson', projectId);
+      throwIfAborted(options.signal);
+      if (!entry) return { state: 'missing', commitId: null, data: null };
+
+      const rawCommitId = entry.meta?.commitId;
+      const commitId = isCommitId(rawCommitId) ? rawCommitId : null;
+      const version = entry.meta?.[GEOJSON_VALIDATION_VERSION_META_KEY];
+      const state = entry.meta?.[GEOJSON_STATE_META_KEY];
+      if (version !== String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION) || !commitId) {
+        return { state: 'legacy', commitId, data: entry.data };
+      }
+
+      const analysis = parseAnalysis(entry.meta?.[GEOJSON_ANALYSIS_META_KEY]);
+      if (state === 'active' && analysis && isFeatureCollection(entry.data)) {
+        return { state: 'active', commitId, data: entry.data, analysis };
+      }
+
+      const reason = entry.meta?.[GEOJSON_FAILURE_REASON_META_KEY];
+      const diagnostics = parseFailureDiagnostics(
+        entry.meta?.[GEOJSON_FAILURE_DIAGNOSTICS_META_KEY],
+      );
+      const warningAcknowledged = parseAcknowledged(
+        entry.meta?.[GEOJSON_WARNING_ACKNOWLEDGED_META_KEY],
+      );
+      if (
+        state === 'quarantined'
+        && entry.data === null
+        && isFileFailureReason(reason)
+        && diagnostics
+        && isFailureDiagnosticsForReason(reason, diagnostics)
+        && warningAcknowledged !== null
+      ) {
+        return {
+          state: 'quarantined',
+          commitId,
+          data: null,
+          reason,
+          diagnostics,
+          warningAcknowledged,
+        };
+      }
+
+      // Corrupt/incomplete validation metadata is never trusted as active.
+      return { state: 'legacy', commitId, data: entry.data };
+    } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) {
+        throwIfAborted(options.signal);
+      }
+      throw error;
+    }
+  }
+
+  /** Persist normalized GeoJSON together with its validated, unpadded bounds. */
+  async setValidatedProjectGeoJSON(
+    projectId: string,
+    data: GeoJSON.FeatureCollection,
+    commitId: string,
+    analysis: ProjectGeoJSONAnalysis,
+    options: CacheOperationOptions = {},
+  ): Promise<boolean> {
+    throwIfAborted(options.signal);
+    if (!isCommitId(commitId) || !isFeatureCollection(data) || !isAnalysis(analysis)) {
+      return false;
+    }
+    try {
+      await this.store.set('geojson', projectId, {
+        data,
+        cachedAt: Date.now(),
+        meta: {
+          commitId,
+          [GEOJSON_STATE_META_KEY]: 'active',
+          [GEOJSON_VALIDATION_VERSION_META_KEY]:
+            String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION),
+          [GEOJSON_ANALYSIS_META_KEY]: JSON.stringify(analysis),
+        },
+      }, options);
+      throwIfAborted(options.signal);
+      return true;
+    } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
+      console.error(`ProjectCacheService.setValidatedProjectGeoJSON(${projectId}) failed:`, error);
+      return false;
+    }
+  }
+
+  /** Replace unsafe GeoJSON bytes with a durable, per-commit quarantine marker. */
+  async setQuarantinedProjectGeoJSON(
+    projectId: string,
+    commitId: string,
+    reason: ProjectGeoJSONFileFailureReason,
+    diagnostics: ProjectGeoJSONFailureDiagnostics,
+    options: CacheOperationOptions = {},
+  ): Promise<boolean> {
+    throwIfAborted(options.signal);
+    if (
+      !isCommitId(commitId)
+      || !isFileFailureReason(reason)
+      || !isFailureDiagnostics(diagnostics)
+      || !isFailureDiagnosticsForReason(reason, diagnostics)
+    ) {
+      return false;
+    }
+    try {
+      await this.store.set('geojson', projectId, {
+        data: null,
+        cachedAt: Date.now(),
+        meta: {
+          commitId,
+          [GEOJSON_STATE_META_KEY]: 'quarantined',
+          [GEOJSON_VALIDATION_VERSION_META_KEY]:
+            String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION),
+          [GEOJSON_FAILURE_REASON_META_KEY]: reason,
+          [GEOJSON_FAILURE_DIAGNOSTICS_META_KEY]: JSON.stringify(diagnostics),
+          [GEOJSON_WARNING_ACKNOWLEDGED_META_KEY]: 'false',
+        },
+      }, options);
+      throwIfAborted(options.signal);
+      return true;
+    } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
+      console.error(`ProjectCacheService.setQuarantinedProjectGeoJSON(${projectId}) failed:`, error);
+      return false;
+    }
+  }
+
+  /** Acknowledge only the quarantine version the user actually saw. */
+  async acknowledgeProjectGeoJSONQuarantine(
+    projectId: string,
+    commitId: string,
+    options: CacheOperationOptions = {},
+  ): Promise<boolean> {
+    throwIfAborted(options.signal);
+    try {
+      return await this.store.update('geojson', projectId, (entry) => {
+        const reason = entry?.meta?.[GEOJSON_FAILURE_REASON_META_KEY];
+        const diagnostics = parseFailureDiagnostics(
+          entry?.meta?.[GEOJSON_FAILURE_DIAGNOSTICS_META_KEY],
+        );
+        const acknowledged = parseAcknowledged(
+          entry?.meta?.[GEOJSON_WARNING_ACKNOWLEDGED_META_KEY],
+        );
+        if (
+          !entry
+          || entry.data !== null
+          || entry.meta?.commitId !== commitId
+          || entry.meta?.[GEOJSON_STATE_META_KEY] !== 'quarantined'
+          || entry.meta?.[GEOJSON_VALIDATION_VERSION_META_KEY]
+            !== String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION)
+          || !isFileFailureReason(reason)
+          || !diagnostics
+          || !isFailureDiagnosticsForReason(reason, diagnostics)
+          || acknowledged === null
+        ) {
+          return null;
+        }
+        return {
+          ...entry,
+          meta: {
+            ...entry.meta,
+            [GEOJSON_WARNING_ACKNOWLEDGED_META_KEY]: 'true',
+          },
+        };
+      }, options);
+    } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
+      console.error(
+        `ProjectCacheService.acknowledgeProjectGeoJSONQuarantine(${projectId}) failed:`,
+        error,
+      );
+      return false;
     }
   }
 
@@ -172,7 +501,7 @@ export class ProjectCacheService {
       await this.store.set('geojson', this.getOverlayCacheKey(overlayId), {
         data,
         cachedAt: Date.now(),
-      });
+      }, options);
       throwIfAborted(options.signal)
       return true
     } catch (error) {
@@ -268,7 +597,7 @@ export class ProjectCacheService {
       await this.store.set('geojson', this.getGpsTrackGeoJSONKey(trackId), {
         data,
         cachedAt: Date.now(),
-      });
+      }, options);
       throwIfAborted(options.signal)
       return true
     } catch (error) {
@@ -295,11 +624,11 @@ export class ProjectCacheService {
    * Wipe all cached projects, geojson, queued offline ops, and recorded GPS
    * tracks (e.g. on logout).
    */
-  async clearAll(): Promise<void> {
-    await this.store.clear('projects');
-    await this.store.clear('geojson');
-    await this.store.clear('offline_ops');
-    await this.store.clear('gps_tracks');
+  async clearAll(options: CacheOperationOptions = {}): Promise<void> {
+    await this.store.clear('projects', options);
+    await this.store.clear('geojson', options);
+    await this.store.clear('offline_ops', options);
+    await this.store.clear('gps_tracks', options);
   }
 
   private getOverlayCacheKey(overlayId: MapOverlayId): string {

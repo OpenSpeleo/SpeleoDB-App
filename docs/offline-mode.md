@@ -60,6 +60,11 @@ Both paths are explicit and user-initiated. The app still does **not** subscribe
 
 - Offline mode uses cached app data and cached map resources.
 - Dashboard map overlays (landmarks, stations, exploration leads, cylinder installs) are read from cached GeoJSON when offline.
+- Project survey GeoJSON is shown offline only when its active cache metadata is
+  schema-v2 valid and its commit matches the cached project list's
+  `latest_commit.id`. A matching-commit legacy record may be audited locally;
+  unversioned legacy bytes remain hidden because offline mode cannot prove
+  which server commit they represent.
 - Outbound network requests should be skipped for normal offline operation paths.
 - Landmark create/edit/delete are the exception to "read-only offline": they are
   captured as persistent offline ops, folded optimistically over the cached
@@ -110,16 +115,47 @@ In offline mode flows, local data must only be purged on authentication-invalid 
 
 During `syncProjects()`, after project/overlay GeoJSON is cached, `SpeleoDBController.scheduleTilePrefetchPhase` pins satellite tiles into the `speleo_tiles` IndexedDB so the map renders offline:
 
-- Projects: one job per project, using the survey GeoJSON's padded bounding box.
+- Projects: one job per project, using its persisted, validated survey bounds.
+  Raw project GeoJSON never enters the tile planner. Oversized/invalid/slow
+  files are quarantined per commit and their jobs are cancelled; see
+  `docs/project-geojson-validation.md`.
 - Landmarks: one combined `landmarks` job covering all landmarks, regardless of per-collection visibility toggles. Because landmarks are scattered globally, tiles are collected as the deduped union of a padded box around each landmark point (never one world-spanning box).
 - Zoom/pad policy lives in `TILE_PREFETCH` in `src/constants.ts` (projects and landmarks both use zoom 0-18, 50 m pad).
-- The reusable collector that turns geometry/points + a zoom range into the set of `{z,x,y}` tile URLs is `src/services/tilePrefetchPlanner.ts` (`buildTileUrlsForFeatureCollection`, `extractPointCoordinates`, `buildTileUrlsForPoints`, `computeTilePrefetchSignature`). Tiles are deduped by URL across all jobs, so shared low-zoom tiles download once.
+- The reusable collector that turns validated project bounds or landmark points
+  plus a zoom range into `{z,x,y}` tile URLs is
+  `src/services/tilePrefetchPlanner.ts` (`buildTileUrlsForProjectBounds`,
+  `extractPointCoordinates`, `buildTileUrlsForPoints`,
+  `computeTilePrefetchSignature`). Tiles are deduped by URL across all jobs, so
+  shared low-zoom and overlapping dateline ranges download once. Project bounds
+  retain their directed antimeridian interval, padding is applied in meters,
+  and latitude is clamped to Web Mercator before tile conversion.
 - The landmark job's `commitId` is a stable signature of the landmark coordinates (`computeTilePrefetchSignature`), so an unchanged set is idempotent (skipped) and an edited set re-prefetches.
 - Landmark prefetch is gated by the same offline lock as project prefetch and is independent of project eligibility (it runs even when there are no eligible projects).
+
+Legacy project GeoJSON cache entries with a matching stored commit are
+bbox-audited even while offline before Dashboard reads them. Unversioned legacy
+bytes are fail-closed and never assigned to the current commit; only an online
+2xx download of the canonical commit can replace them. This lazy metadata
+migration uses schema version 2 inside the existing `geojson` store and does not
+bump the cache database version.
+
+GeoJSON sync counters intentionally overlap. A 2xx response counts as
+downloaded even if validation later rejects it; only newly accepted persisted
+records count as validated; durable/session-disabled dispositions count as
+quarantined; reused or offline-blocked dispositions count as skipped; and any
+project that finishes unusable counts as failed. See
+`docs/project-geojson-validation.md` for examples.
 
 ### Multi-layer prefetch (satellite first)
 
 Prefetch is now per tile layer (see `docs/map-layers.md`). Satellite is forced ON and always scheduled first (landmark + project jobs), followed by any extra layers (ESRI hillshade) the user has opted in to via Settings > Layers. The prefetch queue is FIFO, so satellite tiles always download before extra-layer tiles. Prefetch jobs are namespaced by layer (`${layerId}::${targetId}`), but tiles are still keyed by full URL (which uniquely encodes layer + z/x/y), so existing satellite tiles survive the `v3 -> v4` IndexedDB migration with zero loss. The tile-prefetch sync-phase result and the project panel progress reflect the satellite layer only; extra-layer scheduling is best-effort. Disabling a layer's offline sync removes its jobs and evicts its tiles to reclaim space.
+
+A project quarantine/removal is linearizable across prefetch layers. Each target
+generation invalidates stale cache checks, enqueues, retry sleeps, status writes,
+and queued persistence. Shared queued/in-flight URLs retain their other owners;
+only a solely-owned active request aborts. Job records are deleted, but cached
+tile payloads remain because another target can use the same URL. Durable
+job-deletion failure is logged while the current runtime remains fail-closed.
 
 A magic-hash check treats provider "no data" placeholder tiles (matched by SHA-256 against `MAP.MISSING_TILE_SHA256_HASHES`) as missing: they are never cached and render as 404, both at runtime and during prefetch.
 
@@ -131,7 +167,7 @@ All prefetched tiles are pinned and share a single 500 MB cap (`MAP.TILE_CACHE_M
 - "Allow more storage" persists `tileCacheOverLimitApproved` and lifts the cap for pinned writes via `setTileCacheOverLimitApprovedRuntime`, then resumes the stalled queue (`resumeBlockedJobs`).
 - Settings shows a tappable over-limit warning to re-open the prompt manually, and a Revoke action once approved.
 - Both flags live in `PreferencesService` and are cleared on logout. Offline best-effort runtime caching (`upsertTileBestEffort`) is unaffected and stays within the cap.
-- Mutual exclusivity is one-directional and safe: the consent modal is never shown alongside the offline or companion-info modals (`useStartupUiCoordinator` computes `showStorageConsentModal` with `!showOfflineModal && !showCompanionInfoModal`). If a higher-priority modal takes the slot while consent is open, the coordinator flags `storageConsentSuppressedByGate` and the modal's `onDidDismiss` does **not** acknowledge in that window, so a gating-driven close cannot silently opt the user out of the one-time prompt; consent re-shows when the gate clears. Only a genuine user dismissal (button, gesture, controlled close after a choice) acknowledges.
+- Mutual exclusivity is one-directional and safe: the consent modal is never shown alongside the offline, companion-info, or project-GeoJSON warning modals. If a higher-priority modal takes the slot while consent is open, the coordinator flags `storageConsentSuppressedByGate` and the modal's `onDidDismiss` does **not** acknowledge in that window, so a gating-driven close cannot silently opt the user out of the one-time prompt; consent re-shows when the gate clears. Only a genuine user dismissal (button, gesture, controlled close after a choice) acknowledges.
 - Diagnostic: `isTileCacheOverLimit` intentionally returns false once approved (the Settings warning disappears). To avoid a silently-stalled prefetch if the runtime cap-lift never reached the tile cache, the controller logs a one-shot `console.warn` when a job remains `blockedByStorage` while approval is in effect.
 - Caveat (known, by design): once approved, pinned prefetch may exceed the cap **without an upper bound**. For a globally-scattered landmark set at zoom 0-18 this can reach multiple GB. A bounded guardrail (lower landmark `maxZoom` and/or a max-tiles ceiling in `TILE_PREFETCH.LANDMARK_REQUEST`) is a tracked follow-up pending product sign-off; the current behavior preserves zoom/pad parity with project prefetch.
 - Key tests:
@@ -144,6 +180,26 @@ All prefetched tiles are pinned and share a single 500 MB cap (`MAP.TILE_CACHE_M
   - `src/services/MapLayersService.test.ts`
   - `src/services/tileCache/TileCacheRepository.test.ts`
   - `src/components/map/MapLayerControl.test.tsx`
+
+### Startup modal arbitration
+
+Only one startup modal is effective at a time, in this order: offline/auth gate,
+companion onboarding, project-GeoJSON warning, storage consent. A
+higher-priority controlled close is suppression, not acknowledgement. In
+particular, the GeoJSON safety warning rejects backdrop, escape/back, gesture,
+and uncontrolled programmatic dismissal; it closes only when acknowledgement
+succeeds, recovery removes the warning, or a higher-priority gate temporarily
+owns the slot. Failed acknowledgement remains visible with an inline error and
+can be retried. This arbitration must be tested through coordinator inputs and
+real modal callbacks rather than by asserting independent booleans.
+
+### Verification boundary
+
+Web/native builds and Capacitor sync confirm that assets and types compile, but
+they do not prove mobile-WebView behavior. Physical Android and iOS checks still
+cover worker responsiveness, device-console diagnostics, tile-network
+suppression after removal, warning non-dismissal, IndexedDB persistence across
+force-quit/offline startup, and recovery after a newer server commit.
 
 ## Change checklist (offline/auth)
 

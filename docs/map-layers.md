@@ -97,7 +97,7 @@ a per-layer sync percentage:
 - Toggling a layer is handled by `SpeleoDBController.setLayerOfflineSync(layerId, enabled)`:
   - persists the opt-in (`layerOfflineSync` in `PreferencesService`),
   - when enabling while online, immediately schedules that layer's prefetch
-    (project bounding boxes + landmark boxes) using cached GeoJSON,
+    using persisted validated project bounds plus landmark boxes,
   - when disabling, removes the layer's prefetch jobs
     (`TilePrefetchService.removeLayer`) and evicts its cached tiles by URL
     prefix (`TileCacheService.evictLayerTiles`) to reclaim space. `removeLayer`
@@ -122,14 +122,27 @@ consistent while mounted.
 - **Priority**: `SpeleoDBController.scheduleTilePrefetchPhase` enqueues satellite
   landmark + project jobs first, then each enabled extra layer. The prefetch
   queue is FIFO, so satellite tiles always download before extra-layer tiles.
-- Extra layers reuse the same project GeoJSON inputs and landmark points read
+- Extra layers reuse the same validated project bounds and landmark points read
   once per sync; only the tile URL template differs. `buildLayerPrefetchRequest`
   clamps the request max zoom to the layer's configured `maxZoom` (all layers are
   z18, so prefetch depth is identical across layers).
+- The planner accepts validated `ProjectGeoJSONBounds`, never raw project
+  GeoJSON. It preserves the directed longitude arc across the antimeridian,
+  deduplicates overlapping/root ranges, applies meter padding, preserves
+  zero-width bounds, and clamps latitude to finite Web Mercator before deriving
+  tile rows. Validation rejects projection-amplified polar bounds before this
+  consumer can create a world-scale tile set.
 - The tile-prefetch **phase result** (and the project panel progress) reflect
   **satellite only**. Extra-layer scheduling is best-effort and does not affect
   the sync phase contract. The project panel filters jobs to
   `layerId === 'esri-satellite'`.
+- A project GeoJSON quarantine removes that target's jobs across all layers and
+  prunes queued/in-flight ownership without evicting shared cached tiles.
+  Per-target generations and serialized job persistence make removal
+  linearizable: stale cache checks, enqueue/status writes, and retry waits cannot
+  recreate the removed target. Shared active downloads continue for remaining
+  owners; solely-owned active work aborts. A job-deletion failure is logged and
+  does not reopen the target in the current runtime.
 
 ## Magic-hash missing-tile detection
 
@@ -179,7 +192,11 @@ layers compete for the same pinned budget and honor the user's override.
 - `src/services/MapLayersService.test.ts`: layer config invariants, `buildLayerStyle`, `isLayerTileUrl`.
 - `src/services/TileCacheService.test.ts`: magic-hash runtime 404 + prefetch skip, hash-miss passthrough, empty-list bypass, `getCachedLayerStyle` rewrite.
 - `src/services/tileCache/TileCacheRepository.test.ts`: composite key + `v3 -> v4` migration, delete-by-layer, evict-by-prefix.
-- `src/services/TilePrefetchService.test.ts`: per-layer keying, `removeLayer`.
+- `src/services/TilePrefetchService.test.ts`: per-layer keying, `removeLayer`,
+  target-removal races, shared/sole active ownership, retry cancellation, and
+  durable-deletion failure.
+- `src/services/tilePrefetchPlanner.test.ts`: meter padding, zoom ranges,
+  dateline/root deduplication, zero-width bounds, and latitude clamping.
 - `src/services/PreferencesService.test.ts`: `selectedMapLayerId` + `layerOfflineSync` normalization, forced-layer semantics.
 - `src/controllers/SpeleoDBController.test.ts`: satellite-first ordering, `setLayerOfflineSync` enqueue/cleanup, offline skip.
 - `src/pages/Settings.test.tsx`: Layers toggles (satellite forced) + per-layer %.
@@ -203,6 +220,9 @@ devices before shipping:
 - **Settings row centering** uses shadow-DOM `::part(native)`; verify rows are
   vertically centered (not top-heavy) on both platforms for single- and
   multi-line rows.
+- **Removal under load**: while a project is actively prefetching more than one
+  layer, quarantine/advance its commit and verify no new requests or job rows
+  reappear for that target, while a URL shared by another target continues.
 
 ## Change checklist
 

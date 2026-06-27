@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { IonButton, IonContent, IonModal } from '@ionic/react'
 
 import logoPng from '../assets/media/logo.png'
@@ -16,7 +16,36 @@ const TILE_CACHE_CAP_MB = Math.round(MAP.TILE_CACHE_MAX_BYTES / (1024 * 1024))
 export function SpeleoDBStartupModals({
   startupUi,
 }: SpeleoDBStartupModalsProps): ReactNode {
-  const { authState, controller } = useSpeleoDB()
+  const { authState, controller, projectGeoJSONWarnings = [] } = useSpeleoDB()
+  const [isAcknowledgingProjectWarnings, setIsAcknowledgingProjectWarnings] = useState(false)
+  const [projectWarningError, setProjectWarningError] = useState<string | null>(null)
+  const warningCount = projectGeoJSONWarnings.length
+
+  const warningReason = (warning: (typeof projectGeoJSONWarnings)[number]): string => {
+    if (
+      warning.reason === 'bbox_too_large'
+      && warning.widthKm !== null
+      && warning.heightKm !== null
+    ) {
+      return `Bounding box ${warning.widthKm.toFixed(1)} km × ${warning.heightKm.toFixed(1)} km exceeds the 100 km × 100 km limit.`
+    }
+    if (warning.reason === 'bbox_timeout') {
+      return 'Bounding-box computation exceeded the 0.5-second safety limit.'
+    }
+    if (warning.reason === 'validation_unavailable') {
+      return 'The GeoJSON could not be safely validated and is disabled for this session.'
+    }
+    if (warning.reason === 'invalid_geojson') {
+      return 'The file is not a valid GeoJSON FeatureCollection.'
+    }
+    if (warning.reason === 'no_coordinates') {
+      return 'The GeoJSON does not contain usable geographic coordinates.'
+    }
+    if (warning.reason === 'bbox_too_large') {
+      return 'The GeoJSON exceeds the safe 100 km × 100 km map extent.'
+    }
+    return 'The GeoJSON bounding box could not be measured safely.'
+  }
 
   useEffect(() => {
     if (!authState.isAuthenticated) return
@@ -24,11 +53,48 @@ export function SpeleoDBStartupModals({
     void runTileCacheStartupMaintenanceRuntime()
   }, [authState.isAuthenticated, controller])
 
+  useEffect(() => {
+    if (startupUi.showProjectGeoJSONWarningModal) return
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setIsAcknowledgingProjectWarnings(false)
+      setProjectWarningError(null)
+    })
+    return () => { cancelled = true }
+  }, [startupUi.showProjectGeoJSONWarningModal])
+
+  const acknowledgeProjectWarnings = async (): Promise<void> => {
+    if (isAcknowledgingProjectWarnings) return
+    setIsAcknowledgingProjectWarnings(true)
+    setProjectWarningError(null)
+    try {
+      const result = await controller.acknowledgeProjectGeoJSONWarnings()
+      if (result.failedCount > 0) {
+        setProjectWarningError(
+          result.failedCount === 1
+            ? 'The acknowledgement could not be saved. This warning will remain until you try again.'
+            : `${result.failedCount} acknowledgements could not be saved. Those warnings will remain until you try again.`,
+        )
+      }
+    } catch {
+      setProjectWarningError(
+        'The acknowledgement could not be saved. This warning will remain until you try again.',
+      )
+    } finally {
+      setIsAcknowledgingProjectWarnings(false)
+    }
+  }
+
   return (
     <>
       <IonModal
         isOpen={startupUi.showCompanionInfoModal}
-        onDidDismiss={startupUi.handleCompanionModalDidDismiss}
+        onDidDismiss={() => {
+          if (!startupUi.companionInfoSuppressedByGate) {
+            startupUi.handleCompanionModalDidDismiss()
+          }
+        }}
         canDismiss={startupUi.allowCompanionInfoModalDismiss}
         backdropDismiss={false}
         className="onboarding-modal"
@@ -181,11 +247,78 @@ export function SpeleoDBStartupModals({
       </IonModal>
 
       <IonModal
+        isOpen={startupUi.showProjectGeoJSONWarningModal}
+        backdropDismiss={false}
+        canDismiss={(_data, role) => Promise.resolve(
+          role === undefined && !startupUi.showProjectGeoJSONWarningModal,
+        )}
+        aria-labelledby="project-geojson-warning-title"
+        aria-describedby="project-geojson-warning-description"
+        data-testid="project-geojson-warning-modal"
+      >
+        <IonContent className="ion-padding">
+          <div className="flex flex-col min-h-full justify-center max-w-lg mx-auto">
+            <div className="text-center mb-6">
+              <span className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-amber-500/20 text-amber-400 mb-4">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </span>
+              <h2
+                id="project-geojson-warning-title"
+                className="text-xl font-semibold text-slate-100 mb-2"
+              >
+                Project map data disabled
+              </h2>
+              <p id="project-geojson-warning-description" className="text-slate-400 text-sm">
+                {warningCount === 1
+                  ? 'The following project GeoJSON file will not be displayed or used for offline map downloads.'
+                  : `The following ${warningCount} project GeoJSON files will not be displayed or used for offline map downloads.`}
+              </p>
+            </div>
+            <ul className="space-y-3 mb-6" aria-label="Disabled project map data">
+              {projectGeoJSONWarnings.map((warning) => (
+                <li
+                  key={`${warning.projectId}:${warning.commitId}`}
+                  className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4"
+                >
+                  <p className="font-semibold text-slate-100">{warning.projectName}</p>
+                  <p className="text-xs text-slate-400 break-all">Project ID: {warning.projectId}</p>
+                  <p className="text-sm text-slate-300 mt-2">{warningReason(warning)}</p>
+                </li>
+              ))}
+            </ul>
+            {projectWarningError && (
+              <p
+                role="alert"
+                aria-live="assertive"
+                className="text-sm text-red-300 mb-3 text-center"
+                data-testid="project-geojson-warning-error"
+              >
+                {projectWarningError}
+              </p>
+            )}
+            <IonButton
+              expand="block"
+              color="warning"
+              disabled={isAcknowledgingProjectWarnings}
+              aria-label="Acknowledge disabled project map data"
+              data-testid="project-geojson-warning-acknowledge"
+              onClick={() => { void acknowledgeProjectWarnings() }}
+            >
+              {isAcknowledgingProjectWarnings ? 'Saving…' : 'Acknowledge'}
+            </IonButton>
+          </div>
+        </IonContent>
+      </IonModal>
+
+      <IonModal
         isOpen={startupUi.showStorageConsentModal}
         // A genuine dismissal (button, gesture, or controlled isOpen close after
         // a user choice) marks the prompt acknowledged so it never auto-reappears.
         // But when the modal is closed only because a higher-priority modal
-        // (offline/companion) took the slot, we must NOT acknowledge -- otherwise
+        // (offline/companion/GeoJSON warning) took the slot, we must NOT
+        // acknowledge -- otherwise
         // the user is silently opted out of the one-time popup. It re-shows once
         // the gate clears.
         // NOTE: do NOT set canDismiss={false} -- that also blocks the controlled

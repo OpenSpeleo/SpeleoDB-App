@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import { SpeleoDBProvider } from './SpeleoDBProvider';
+import { useSpeleoDB } from './useSpeleoDB';
 
 const {
   mockValidateSession,
@@ -25,6 +26,7 @@ const {
   projectsSnapshot,
   tilePrefetchJobsSnapshot,
   syncStatusRef,
+  mapDataRevisionRef,
 } = vi.hoisted(() => {
   const storeSubscribers = new Set<() => void>();
   return {
@@ -60,6 +62,7 @@ const {
     projectsSnapshot: [] as unknown[],
     tilePrefetchJobsSnapshot: [] as unknown[],
     syncStatusRef: { current: 'idle' as string },
+    mapDataRevisionRef: { current: 0 },
   };
 });
 
@@ -167,6 +170,10 @@ vi.mock('../controllers/SpeleoDBController', () => {
       return null;
     }
 
+    get mapDataRevision() {
+      return mapDataRevisionRef.current;
+    }
+
     get tilePrefetchJobs() {
       return tilePrefetchJobsSnapshot;
     }
@@ -198,6 +205,44 @@ describe('SpeleoDBProvider', () => {
       token: 'tok',
     };
     syncStatusRef.current = 'idle';
+    mapDataRevisionRef.current = 0;
+  });
+
+  it('publishes map-data revisions without changing the stable projects snapshot', async () => {
+    function RevisionProbe() {
+      const { mapDataRevision, projects } = useSpeleoDB();
+      const firstProjects = React.useRef(projects);
+      return (
+        <div
+          data-testid="map-data-revision"
+          data-projects-stable={String(firstProjects.current === projects)}
+        >
+          {mapDataRevision}
+        </div>
+      );
+    }
+
+    render(
+      <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+        <SpeleoDBProvider>
+          <RevisionProbe />
+        </SpeleoDBProvider>
+      </Router>,
+    );
+    expect(screen.getByTestId('map-data-revision')).toHaveTextContent('0');
+
+    act(() => {
+      mapDataRevisionRef.current = 1;
+      emitStoreUpdate();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('map-data-revision')).toHaveTextContent('1');
+    });
+    expect(screen.getByTestId('map-data-revision')).toHaveAttribute(
+      'data-projects-stable',
+      'true',
+    );
   });
 
   it('shows offline modal on startup network_error and does not logout', async () => {

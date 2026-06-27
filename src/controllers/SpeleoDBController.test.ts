@@ -15,6 +15,7 @@ import type { SerializedOfflineOp } from '../types/offlineOp';
 import { GpsTrackStore } from '../services/GpsTrackStore';
 import type { GeolocationWatcher } from '../services/GeolocationWatcher';
 import type { RecordingNotificationPermissionGuard } from '../services/RecordingNotificationPermissionGuard';
+import { ProjectGeoJSONAnalysisError } from '../services/ProjectGeoJSONAnalyzer';
 import type { LocalGpsTrack, RecordedPoint } from '../types/gpsTrack';
 
 function createProjectFixture(
@@ -144,11 +145,40 @@ function createMockCache(): ProjectCacheService {
   // Stateful GPS-track caches so applyGpsTrackUpsert/Removal + sync reflect back.
   let gpsTracks: unknown[] | null = null;
   const gpsGeo = new Map<string, unknown>();
-  return {
+  const projectGeoJSON = new Map<string, import('../types/projectGeoJSON').ProjectGeoJSONCacheRecord>();
+  const cache = {
     getProjects: vi.fn(async () => null),
     setProjects: vi.fn(async () => true),
     getGeoJSON: vi.fn(async () => null),
     setGeoJSON: vi.fn(async () => true),
+    getProjectGeoJSONRecord: vi.fn(async (id: string) =>
+      projectGeoJSON.get(id) ?? { state: 'missing', commitId: null, data: null }),
+    setValidatedProjectGeoJSON: vi.fn(async (
+      id: string,
+      data: GeoJSON.FeatureCollection,
+      commitId: string,
+      analysis: import('../types/projectGeoJSON').ProjectGeoJSONAnalysis,
+    ) => {
+      projectGeoJSON.set(id, { state: 'active', commitId, data, analysis });
+      return true;
+    }),
+    setQuarantinedProjectGeoJSON: vi.fn(async (
+      id: string,
+      commitId: string,
+      reason: import('../types/projectGeoJSON').ProjectGeoJSONFileFailureReason,
+      diagnostics: import('../types/projectGeoJSON').ProjectGeoJSONFailureDiagnostics,
+    ) => {
+      projectGeoJSON.set(id, {
+        state: 'quarantined',
+        commitId,
+        data: null,
+        reason,
+        diagnostics,
+        warningAcknowledged: false,
+      });
+      return true;
+    }),
+    acknowledgeProjectGeoJSONQuarantine: vi.fn(async () => true),
     getOverlayGeoJSON: vi.fn(async () => null),
     setOverlayGeoJSON: vi.fn(async () => true),
     getCachedCommitId: vi.fn(async () => null),
@@ -169,6 +199,7 @@ function createMockCache(): ProjectCacheService {
     }),
     clearAll: vi.fn(async () => {}),
   } as unknown as ProjectCacheService;
+  return cache;
 }
 
 /** In-memory OfflineOpStore so controller offline tests are isolated from IDB. */
@@ -197,6 +228,7 @@ function createMockTilePrefetch(
     enqueueProjects: vi.fn(async () => {}),
     enqueueTileUrls: vi.fn(async () => {}),
     removeLayer: vi.fn(async () => {}),
+    removeTarget: vi.fn(async () => {}),
     resumeBlockedJobs: vi.fn(),
     subscribe: vi.fn((listener: (jobs: TilePrefetchJobState[]) => void) => {
       listener([]);
@@ -219,6 +251,7 @@ function createControllableTilePrefetch() {
     enqueueProjects: vi.fn(async () => {}),
     enqueueTileUrls: vi.fn(async () => {}),
     removeLayer: vi.fn(async () => {}),
+    removeTarget: vi.fn(async () => {}),
     resumeBlockedJobs,
     subscribe: vi.fn((listener: (jobs: TilePrefetchJobState[]) => void) => {
       listenerRef = listener;
@@ -1165,7 +1198,8 @@ describe('SpeleoDBController', () => {
         token: 'tok',
         instance: 'https://www.speleodb.org',
       });
-      const ctrl = new SpeleoDBController(service, withToken, cache);
+      const tilePrefetch = createMockTilePrefetch();
+      const ctrl = new SpeleoDBController(service, withToken, cache, tilePrefetch);
 
       const syncPromise = ctrl.syncProjects();
       await flushPromises(8);
@@ -1184,7 +1218,10 @@ describe('SpeleoDBController', () => {
       await Promise.all([syncPromise, logoutPromise]);
 
       expect(ctrl.isAuthenticated()).toBe(false);
-      expect(cache.setGeoJSON).not.toHaveBeenCalled();
+      expect(cache.setValidatedProjectGeoJSON).not.toHaveBeenCalled();
+      expect(cache.setQuarantinedProjectGeoJSON).not.toHaveBeenCalled();
+      expect(tilePrefetch.enqueueProjects).not.toHaveBeenCalled();
+      expect(ctrl.projectGeoJSONWarnings).toEqual([]);
       expect(ctrl.projects).toEqual([]);
       expect(ctrl.lastSyncedAt).toBeNull();
     });
@@ -1275,6 +1312,64 @@ describe('SpeleoDBController', () => {
       }));
     });
 
+    it('processes three project files concurrently while preserving exact counters', async () => {
+      const projects = ['p1', 'p2', 'p3'].map((id, index) => createProjectFixture({
+        id,
+        name: `Project ${index + 1}`,
+        geojson_file: `https://example.com/${id}.geojson`,
+        latest_commit: { id: `commit-${index + 1}` },
+      }));
+      const responses = new Map(projects.map((project) => [
+        project.geojson_file!,
+        createDeferred<HttpResponse<unknown>>(),
+      ]));
+      let activeDownloads = 0;
+      let maximumActiveDownloads = 0;
+      const downloadJSON = vi.fn((url: string) => {
+        activeDownloads += 1;
+        maximumActiveDownloads = Math.max(maximumActiveDownloads, activeDownloads);
+        return responses.get(url)!.promise.finally(() => { activeDownloads -= 1; });
+      });
+      const concurrentController = new SpeleoDBController(
+        createMockService({
+          getProjectsGeoJSON: vi.fn(async () => ({ status: 200, data: projects })),
+          downloadJSON: downloadJSON as unknown as SpeleoDBService['downloadJSON'],
+        }),
+        createMockPrefs({ token: 'tok', instance: 'https://api.test' }),
+        createMockCache(),
+        createMockTilePrefetch(),
+      );
+
+      const sync = concurrentController.syncProjects();
+      await flushPromises(8);
+
+      expect(downloadJSON).toHaveBeenCalledTimes(3);
+      expect(maximumActiveDownloads).toBe(3);
+      for (const response of responses.values()) {
+        response.resolve({
+          status: 200,
+          data: {
+            type: 'FeatureCollection',
+            features: [{
+              type: 'Feature',
+              properties: {},
+              geometry: { type: 'Point', coordinates: [2.3, 46.6] },
+            }],
+          },
+        });
+      }
+
+      const result = await sync;
+      expect(result.phases.geojsonSync).toMatchObject({
+        eligibleProjectCount: 3,
+        downloadedProjectCount: 3,
+        validatedProjectCount: 3,
+        quarantinedProjectCount: 0,
+        skippedProjectCount: 0,
+        failedProjectCount: 0,
+      });
+    });
+
     it('aborts an older sync run when a newer sync starts', async () => {
       const firstResponse = createDeferred<HttpResponse<Project[]>>();
       const secondProject = createProjectFixture({
@@ -1323,6 +1418,447 @@ describe('SpeleoDBController', () => {
       expect(cache.setProjects).toHaveBeenCalledTimes(1);
       expect(cache.setProjects).toHaveBeenCalledWith(
         [secondProject],
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+  });
+
+  describe('project GeoJSON bbox quarantine', () => {
+    it('quarantines an 8,000 km file and never downloads or analyzes the same commit again', async () => {
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({ projectId: 'p1', reason: 'bbox_too_large' }),
+      );
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({ projectId: 'p1', reason: 'bbox_too_large' }),
+      );
+      const hugeGeoJSON: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: [[0, 0], [75, 0]] },
+        }],
+      };
+      const downloadJSON = vi.fn(async () => ({ status: 200, data: hugeGeoJSON }));
+      const quarantineService = createMockService({
+        downloadJSON: downloadJSON as unknown as SpeleoDBService['downloadJSON'],
+      });
+      const quarantineCache = createMockCache();
+      const quarantineTile = createMockTilePrefetch();
+      const quarantinePrefs = createMockPrefs({ token: 'tok', instance: 'https://api.test' });
+      const quarantineController = new SpeleoDBController(
+        quarantineService,
+        quarantinePrefs,
+        quarantineCache,
+        quarantineTile,
+      );
+
+      const first = await quarantineController.syncProjects();
+      const warningSnapshot = quarantineController.projectGeoJSONWarnings;
+      const second = await quarantineController.syncProjects();
+
+      expect(first.phases.geojsonSync).toMatchObject({
+        status: 'failed', quarantinedProjectCount: 1, validatedProjectCount: 0,
+      });
+      expect(second.phases.geojsonSync).toMatchObject({ quarantinedProjectCount: 1 });
+      expect(downloadJSON).toHaveBeenCalledOnce();
+      expect(quarantineCache.setQuarantinedProjectGeoJSON).toHaveBeenCalledOnce();
+      expect(quarantineTile.enqueueProjects).not.toHaveBeenCalled();
+      expect(quarantineTile.removeTarget).toHaveBeenCalledWith(
+        'p1',
+        { signal: expect.any(AbortSignal) },
+      );
+      expect(quarantineController.projectGeoJSONWarnings).toEqual([
+        expect.objectContaining({ projectId: 'p1', commitId: 'commit-1', reason: 'bbox_too_large' }),
+      ]);
+      expect(quarantineController.projectGeoJSONWarnings).toBe(warningSnapshot);
+      expect(await quarantineController.getProjectMapData('p1')).toBeNull();
+    });
+
+    it('keeps a file session-blocked when quarantine persistence fails', async () => {
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({ projectId: 'p1', reason: 'bbox_too_large' }),
+      );
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({
+          projectId: 'p1',
+          reason: 'bbox_too_large',
+          source: 'cache',
+        }),
+      );
+      allowConsoleWarn(
+        '[project-geojson:quarantine-persistence-failed]',
+        expect.objectContaining({ projectId: 'p1', commitId: 'commit-1' }),
+      );
+      const downloadJSON = vi.fn(async () => ({
+        status: 200,
+        data: {
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'LineString', coordinates: [[0, 0], [75, 0]] },
+          }],
+        },
+      }));
+      const cache = createMockCache();
+      cache.setQuarantinedProjectGeoJSON = vi.fn(async () => false);
+      const controller = new SpeleoDBController(
+        createMockService({
+          downloadJSON: downloadJSON as unknown as SpeleoDBService['downloadJSON'],
+        }),
+        createMockPrefs({ token: 'tok', instance: 'https://api.test' }),
+        cache,
+        createMockTilePrefetch(),
+      );
+
+      await controller.syncProjects();
+      const second = await controller.syncProjects();
+
+      expect(downloadJSON).toHaveBeenCalledOnce();
+      expect(cache.setQuarantinedProjectGeoJSON).toHaveBeenCalledOnce();
+      expect(second.phases.geojsonSync).toMatchObject({
+        quarantinedProjectCount: 1,
+        skippedProjectCount: 1,
+        failedProjectCount: 1,
+      });
+      expect(controller.projectGeoJSONWarnings).toEqual([
+        expect.objectContaining({ projectId: 'p1', persistent: false }),
+      ]);
+    });
+
+    it('reactivates a quarantined project when a newer compact commit arrives', async () => {
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({ projectId: 'p1', reason: 'bbox_too_large' }),
+      );
+      const firstProject = createProjectFixture({ latest_commit: { id: 'bad' } });
+      const fixedProject = createProjectFixture({ latest_commit: { id: 'fixed' } });
+      const getProjectsGeoJSON = vi.fn()
+        .mockResolvedValueOnce({ status: 200, data: [firstProject] })
+        .mockResolvedValueOnce({ status: 200, data: [fixedProject] });
+      const downloadJSON = vi.fn()
+        .mockResolvedValueOnce({
+          status: 200,
+          data: {
+            type: 'FeatureCollection',
+            features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[0, 0], [75, 0]] } }],
+          },
+        })
+        .mockResolvedValueOnce({
+          status: 200,
+          data: {
+            type: 'FeatureCollection',
+            features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2, 45] } }],
+          },
+        });
+      const recoveryCache = createMockCache();
+      const recoveryController = new SpeleoDBController(
+        createMockService({ getProjectsGeoJSON, downloadJSON }),
+        createMockPrefs({ token: 'tok', instance: 'https://api.test' }),
+        recoveryCache,
+        createMockTilePrefetch(),
+      );
+
+      await recoveryController.syncProjects();
+      expect(recoveryController.projectGeoJSONWarnings).toHaveLength(1);
+      await recoveryController.syncProjects();
+
+      expect(downloadJSON).toHaveBeenCalledTimes(2);
+      expect(recoveryController.projectGeoJSONWarnings).toEqual([]);
+      expect(await recoveryController.getProjectMapData('p1')).toMatchObject({
+        featureCollection: { type: 'FeatureCollection' },
+      });
+    });
+
+    it('quarantines a worker timeout, exposes a warning, and persists acknowledgement', async () => {
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({ projectId: 'p1', reason: 'bbox_timeout' }),
+      );
+      const timeoutAnalyzer = {
+        analyze: vi.fn(async () => {
+          throw new ProjectGeoJSONAnalysisError('bbox_timeout', 'too slow', true);
+        }),
+      };
+      const timeoutCache = createMockCache();
+      const timeoutController = new SpeleoDBController(
+        createMockService(),
+        createMockPrefs({ token: 'tok', instance: 'https://api.test' }),
+        timeoutCache,
+        createMockTilePrefetch(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        timeoutAnalyzer,
+      );
+
+      await timeoutController.syncProjects();
+      expect(timeoutController.projectGeoJSONWarnings[0]).toMatchObject({ reason: 'bbox_timeout' });
+      await timeoutController.acknowledgeProjectGeoJSONWarnings();
+      expect(timeoutController.projectGeoJSONWarnings).toEqual([]);
+      expect(timeoutCache.acknowledgeProjectGeoJSONQuarantine).toHaveBeenCalledWith(
+        'p1',
+        'commit-1',
+      );
+    });
+
+    it('keeps the warning open when acknowledgement persistence fails', async () => {
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({ projectId: 'p1', reason: 'bbox_too_large' }),
+      );
+      const cache = createMockCache();
+      cache.acknowledgeProjectGeoJSONQuarantine = vi.fn(async () => false);
+      const controller = new SpeleoDBController(
+        createMockService({
+          downloadJSON: vi.fn(async () => ({
+            status: 200,
+            data: {
+              type: 'FeatureCollection',
+              features: [{
+                type: 'Feature',
+                properties: {},
+                geometry: { type: 'LineString', coordinates: [[0, 0], [75, 0]] },
+              }],
+            },
+          })) as unknown as SpeleoDBService['downloadJSON'],
+        }),
+        createMockPrefs({ token: 'tok', instance: 'https://api.test' }),
+        cache,
+        createMockTilePrefetch(),
+      );
+
+      await controller.syncProjects();
+      const warningSnapshot = controller.projectGeoJSONWarnings;
+      const result = await controller.acknowledgeProjectGeoJSONWarnings();
+
+      expect(result).toEqual({ acknowledgedCount: 0, failedCount: 1 });
+      expect(controller.projectGeoJSONWarnings).toBe(warningSnapshot);
+      expect(controller.projectGeoJSONWarnings).toHaveLength(1);
+    });
+
+    it('session-blocks a cache-record read failure without retrying storage, download, or analysis', async () => {
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({ projectId: 'p1', reason: 'validation_unavailable' }),
+      );
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({
+          projectId: 'p1',
+          reason: 'validation_unavailable',
+          source: 'cache',
+        }),
+      );
+      const failingCache = createMockCache();
+      failingCache.getProjectGeoJSONRecord = vi.fn(async () => {
+        throw new Error('IndexedDB read failed');
+      });
+      const analyzer = { analyze: vi.fn() };
+      const tilePrefetch = createMockTilePrefetch();
+      const readFailureController = new SpeleoDBController(
+        createMockService(),
+        createMockPrefs({ token: 'tok', instance: 'https://api.test' }),
+        failingCache,
+        tilePrefetch,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        analyzer,
+      );
+
+      const first = await readFailureController.syncProjects();
+      const second = await readFailureController.syncProjects();
+
+      expect(first.phases.geojsonSync).toMatchObject({
+        quarantinedProjectCount: 1,
+        skippedProjectCount: 1,
+        failedProjectCount: 1,
+      });
+      expect(second.phases.geojsonSync).toMatchObject({
+        quarantinedProjectCount: 1,
+        skippedProjectCount: 1,
+        failedProjectCount: 1,
+      });
+      expect(failingCache.getProjectGeoJSONRecord).toHaveBeenCalledOnce();
+      expect(failingCache.setValidatedProjectGeoJSON).not.toHaveBeenCalled();
+      expect(failingCache.setQuarantinedProjectGeoJSON).not.toHaveBeenCalled();
+      expect(analyzer.analyze).not.toHaveBeenCalled();
+      expect(readFailureController.projectGeoJSONWarnings).toEqual([
+        expect.objectContaining({ reason: 'validation_unavailable', persistent: false }),
+      ]);
+      expect(tilePrefetch.removeTarget).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps unversioned legacy bytes fail-closed offline without attributing or analyzing them', async () => {
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({ projectId: 'p1', reason: 'validation_unavailable' }),
+      );
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({
+          projectId: 'p1',
+          reason: 'validation_unavailable',
+          source: 'cache',
+        }),
+      );
+      const offlineCache = createMockCache();
+      offlineCache.getProjects = vi.fn(async () => [DEFAULT_PROJECT]);
+      offlineCache.getProjectGeoJSONRecord = vi.fn(async () => ({
+        state: 'legacy',
+        commitId: null,
+        data: {
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'Point', coordinates: [2.3, 46.6] },
+          }],
+        },
+      } as const));
+      const analyzer = {
+        analyze: vi.fn(async () => ({
+          bounds: {
+            west: 2.3,
+            east: 2.3,
+            south: 46.6,
+            north: 46.6,
+            crossesDateline: false,
+          },
+          widthKm: 0,
+          heightKm: 0,
+          durationMs: 1,
+        })),
+      };
+      const validateToken = vi.fn()
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockResolvedValue({ status: 200, data: {} });
+      const offlineService = createMockService({
+        validateToken,
+      });
+      const offlineController = new SpeleoDBController(
+        offlineService,
+        createMockPrefs({ token: 'tok', instance: 'https://api.test' }),
+        offlineCache,
+        createMockTilePrefetch(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        analyzer,
+      );
+      expect(await offlineController.validateSession()).toBe('network_error');
+
+      const result = await offlineController.syncProjects();
+
+      expect(result.phases.geojsonSync).toMatchObject({
+        downloadedProjectCount: 0,
+        validatedProjectCount: 0,
+        quarantinedProjectCount: 1,
+        skippedProjectCount: 1,
+        failedProjectCount: 1,
+      });
+      expect(offlineService.downloadJSON).not.toHaveBeenCalled();
+      expect(analyzer.analyze).not.toHaveBeenCalled();
+      expect(offlineCache.setValidatedProjectGeoJSON).not.toHaveBeenCalled();
+      expect(offlineCache.setQuarantinedProjectGeoJSON).not.toHaveBeenCalled();
+
+      expect(await offlineController.acknowledgeProjectGeoJSONWarnings()).toEqual({
+        acknowledgedCount: 1,
+        failedCount: 0,
+      });
+      await offlineController.syncProjects();
+      expect(offlineCache.getProjectGeoJSONRecord).toHaveBeenCalledOnce();
+      expect(offlineController.projectGeoJSONWarnings).toEqual([]);
+
+      expect(await offlineController.attemptReconnect()).toBe('ok');
+      await flushPromises(20);
+      expect(offlineService.downloadJSON).toHaveBeenCalledOnce();
+      expect(analyzer.analyze).toHaveBeenCalledOnce();
+      expect(offlineCache.setValidatedProjectGeoJSON).toHaveBeenCalledOnce();
+    });
+
+    it('counts a successful malformed response as downloaded and as a failed quarantine', async () => {
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({ projectId: 'p1', reason: 'invalid_geojson' }),
+      );
+      const malformedController = new SpeleoDBController(
+        createMockService({
+          downloadJSON: vi.fn(async () => ({
+            status: 200,
+            data: { nope: true },
+          })) as unknown as SpeleoDBService['downloadJSON'],
+        }),
+        createMockPrefs({ token: 'tok', instance: 'https://api.test' }),
+        createMockCache(),
+        createMockTilePrefetch(),
+      );
+
+      const result = await malformedController.syncProjects();
+
+      expect(result.phases.geojsonSync).toMatchObject({
+        downloadedProjectCount: 1,
+        validatedProjectCount: 0,
+        quarantinedProjectCount: 1,
+        skippedProjectCount: 0,
+        failedProjectCount: 1,
+      });
+    });
+
+    it('audits and quarantines a legacy cached file while offline without downloading', async () => {
+      allowConsoleWarn(
+        '[project-geojson:bbox]',
+        expect.objectContaining({ projectId: 'p1', reason: 'bbox_too_large' }),
+      );
+      const offlineCache = createMockCache();
+      offlineCache.getProjects = vi.fn(async () => [DEFAULT_PROJECT]);
+      offlineCache.getProjectGeoJSONRecord = vi.fn(async () => ({
+        state: 'legacy',
+        commitId: 'commit-1',
+        data: {
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'LineString', coordinates: [[0, 0], [75, 0]] },
+          }],
+        },
+      } as const));
+      const offlineService = createMockService({
+        validateToken: vi.fn(async () => { throw new Error('offline'); }),
+      });
+      const offlineController = new SpeleoDBController(
+        offlineService,
+        createMockPrefs({ token: 'tok', instance: 'https://api.test' }),
+        offlineCache,
+        createMockTilePrefetch(),
+      );
+      expect(await offlineController.validateSession()).toBe('network_error');
+
+      const result = await offlineController.syncProjects();
+
+      expect(offlineService.downloadJSON).not.toHaveBeenCalled();
+      expect(result.phases.geojsonSync).toMatchObject({
+        quarantinedProjectCount: 1,
+        status: 'failed',
+      });
+      expect(offlineCache.setQuarantinedProjectGeoJSON).toHaveBeenCalledWith(
+        'p1',
+        'commit-1',
+        'bbox_too_large',
+        expect.anything(),
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
@@ -1729,7 +2265,8 @@ describe('SpeleoDBController', () => {
 
       expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
       expect(service.downloadJSON).toHaveBeenCalledOnce();
-      expect(cache.setGeoJSON).not.toHaveBeenCalled();
+      expect(cache.setValidatedProjectGeoJSON).not.toHaveBeenCalled();
+      expect(cache.setQuarantinedProjectGeoJSON).not.toHaveBeenCalled();
     });
 
     it('skips project geojson cache writes for non-2xx download responses', async () => {
@@ -1752,7 +2289,8 @@ describe('SpeleoDBController', () => {
 
       expect(service.getProjectsGeoJSON).toHaveBeenCalledOnce();
       expect(service.downloadJSON).toHaveBeenCalledOnce();
-      expect(cache.setGeoJSON).not.toHaveBeenCalled();
+      expect(cache.setValidatedProjectGeoJSON).not.toHaveBeenCalled();
+      expect(cache.setQuarantinedProjectGeoJSON).not.toHaveBeenCalled();
       expect(cache.setProjects).toHaveBeenCalledOnce();
       expect(controller.syncStatus).toBe('done');
     });

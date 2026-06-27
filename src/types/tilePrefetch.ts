@@ -33,7 +33,7 @@ export interface TilePrefetchJobState {
 export interface TilePrefetchProjectInput {
   projectId: string;
   commitId: string;
-  geojson: GeoJSON.FeatureCollection;
+  bounds: import('./projectGeoJSON').ProjectGeoJSONBounds;
 }
 
 /**
@@ -55,6 +55,11 @@ export interface TilePrefetchEnqueueOptions {
   signal?: AbortSignal;
   /** Tile layer id; defaults to the satellite layer when omitted. */
   layerId?: string;
+}
+
+/** Cancellation options for target-wide prefetch cleanup. */
+export interface TilePrefetchRemoveOptions {
+  signal?: AbortSignal;
 }
 
 export interface TilePrefetchRequest {

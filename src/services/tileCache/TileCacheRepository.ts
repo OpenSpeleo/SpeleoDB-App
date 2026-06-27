@@ -535,6 +535,29 @@ export async function deletePrefetchJobsByLayer(layerId: string): Promise<void> 
   await transactionDone(tx);
 }
 
+/** Delete every persisted prefetch job for a project across all tile layers. */
+export async function deletePrefetchJobsByTarget(targetId: string): Promise<void> {
+  const db = await openTileDB();
+  const tx = db.transaction(PREFETCH_JOB_STORE, 'readwrite');
+  const store = tx.objectStore(PREFETCH_JOB_STORE);
+  await new Promise<void>((resolve, reject) => {
+    const req = store.openCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) {
+        resolve();
+        return;
+      }
+      if ((cursor.value as TilePrefetchJobState).projectId === targetId) {
+        cursor.delete();
+      }
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error);
+  });
+  await transactionDone(tx);
+}
+
 /**
  * Evict all cached tiles whose URL starts with any of the given prefixes,
  * including pinned (auto-prefetched) tiles. Used to reclaim space when a

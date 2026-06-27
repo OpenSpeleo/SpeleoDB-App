@@ -19,6 +19,10 @@ This document defines high-level architecture boundaries and coding expectations
 ## State ownership
 
 - Treat `SpeleoDBController` as the source of truth for auth, offline lock, sync, and retry state.
+- Treat controller revision fields as stable publication boundaries. For project
+  maps, `mapDataRevision` tells mounted consumers to reread atomic
+  `{ commitId, featureCollection, bounds }` records; UI code must still require
+  the commit to match `latest_commit.id` and ignore stale async completions.
 - Avoid parallel state machines across UI and services for the same behavior.
 - UI local state is acceptable for presentation-only concerns (modal visibility, form state, layout state).
 - UI coordinators may use reducer-backed local state for startup/offline/onboarding flows, but they must translate controller snapshots into presentation state rather than owning auth/offline truth themselves.
@@ -39,6 +43,24 @@ This document defines high-level architecture boundaries and coding expectations
 - Prefer narrow interfaces and explicit return types for side-effecting functions.
 - Keep cache fallbacks and network retries inside service/controller orchestration, not in UI components.
 - Long-running IO paths should accept `AbortSignal` when they participate in startup validation, sync, or logout-sensitive flows.
+- Project GeoJSON is untrusted input. It must cross the worker-backed,
+  per-commit validation/cache boundary documented in
+  `project-geojson-validation.md` before Dashboard or tile-prefetch code can
+  consume it. Downstream consumers use persisted bounds and must not recompute
+  project bboxes.
+- Durable GeoJSON quarantine APIs accept file-scoped reasons only.
+  `validation_unavailable` is an infrastructure/session disposition and must
+  not be persisted as blame against a commit. Cache metadata is schema-versioned
+  independently from the IndexedDB database version and must be parsed strictly.
+- Cache writes participating in sync accept `AbortSignal`. Conditional changes
+  such as warning acknowledgement belong in one read/write transaction, with
+  commit identity checked inside that transaction.
+- Tile-prefetch target removal is a concurrency boundary, not a best-effort
+  array filter. Preserve per-target generations, serialized job persistence,
+  shared URL ownership, abortable retry waits, and bounds-only planning.
+- Circular longitude logic is centralized. Consumers merge complete directed
+  intervals and clamp display/tile latitude to Web Mercator; do not independently
+  min/max interval endpoints.
 
 ## TypeScript and code style
 
@@ -53,6 +75,8 @@ This document defines high-level architecture boundaries and coding expectations
 - Use best-effort writes for non-critical caches when appropriate.
 - Do not swallow errors that determine auth/offline correctness.
 - Cancellation is not an error fallback. Once a controller-owned run is aborted, stale IO completions must not publish state, cache writes, or prefetch jobs.
+- Recheck cancellation after persistence and cleanup awaits, immediately before
+  logging, counters, warnings, revisions, or other observable publication.
 
 ## Testing expectations
 
@@ -60,6 +84,15 @@ This document defines high-level architecture boundaries and coding expectations
 - Prefer focused unit tests around controller decisions and service fallbacks.
 - Keep provider/dashboard tests for user-visible contracts (offline modal, Settings sync).
 - Include regression coverage when fixing edge cases (timeouts, retries, offline lock transitions).
+- Exercise the authoritative production seam. Persistence invariants require a
+  real fake-IndexedDB transaction test; concurrency invariants require deferred
+  dependencies at the actual awaited cache/fetch/sleep/write boundary; UI reload
+  invariants require the revision and controller accessor used by Dashboard.
+  Mocking an obsolete helper or making a mock return the desired answer is not
+  proof. See `tasks/lessons/authoritative-seam-tests.md`.
+- Separate compilation evidence from device evidence. Web/native builds cannot
+  establish WebView responsiveness, native modal dismissal, device-console
+  output, real network cancellation, or persistence across force-quit.
 
 ## Change checklist
 
@@ -68,6 +101,8 @@ This document defines high-level architecture boundaries and coding expectations
 3. Verify reconnect behavior stays explicit and user-driven.
 4. Run targeted unit tests for touched paths.
 5. Run `npm run build` for type and dead-path validation.
+6. Record physical Android/iOS checks separately when behavior crosses worker,
+   WebView, native modal, network, or persistence boundaries.
 
 ## Related docs
 

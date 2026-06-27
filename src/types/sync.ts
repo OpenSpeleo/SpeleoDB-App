@@ -48,6 +48,8 @@ export interface ProjectRefreshPhaseResult extends SyncPhaseResult<'project_refr
 export interface GeoJSONSyncPhaseResult extends SyncPhaseResult<'geojson_sync'> {
   eligibleProjectCount: number
   downloadedProjectCount: number
+  validatedProjectCount: number
+  quarantinedProjectCount: number
   skippedProjectCount: number
   failedProjectCount: number
 }

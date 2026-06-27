@@ -54,3 +54,12 @@ export type {
 } from './mapOverlay';
 
 export { MAP_OVERLAY_IDS } from './mapOverlay';
+
+export type {
+  ProjectGeoJSONAnalysis,
+  ProjectGeoJSONBounds,
+  ProjectGeoJSONCacheRecord,
+  ProjectGeoJSONFailureReason,
+  ProjectGeoJSONMapData,
+  ProjectGeoJSONWarning,
+} from './projectGeoJSON';

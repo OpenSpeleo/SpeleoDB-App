@@ -1,12 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   TilePrefetchService,
-  buildTileUrlsForFeatureCollection,
-  computePaddedBounds,
+  buildTileUrlsForProjectBounds,
 } from './TilePrefetchService';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import type { TilePrefetchDependencies } from './TilePrefetchService';
 import { MAP_LAYERS } from '../constants';
+import { measureProjectGeoJSONBounds } from '../utils/projectGeoJSONBounds';
 
 const HILLSHADE_TEMPLATE = MAP_LAYERS.find(
   (l) => l.id === 'esri-world-hillshade',
@@ -26,6 +26,14 @@ function pointFeatureCollection(lng: number, lat: number): GeoJSON.FeatureCollec
       },
     ],
   };
+}
+
+function projectInput(
+  projectId: string,
+  commitId: string,
+  geojson: GeoJSON.FeatureCollection,
+) {
+  return { projectId, commitId, bounds: measureProjectGeoJSONBounds(geojson).bounds };
 }
 
 function twoPointFeatureCollection(lng: number, lat: number): GeoJSON.FeatureCollection {
@@ -91,14 +99,13 @@ describe('TilePrefetchService geometry helpers', () => {
       ],
     };
 
-    const bounds = computePaddedBounds(fc, 50);
-    expect(bounds).not.toBeNull();
-    expect(bounds?.crossesDateline).toBe(true);
+    const bounds = measureProjectGeoJSONBounds(fc).bounds;
+    expect(bounds.crossesDateline).toBe(true);
   });
 
   it('builds tile urls for the requested zoom range', () => {
     const fc = pointFeatureCollection(2.3, 46.6);
-    const urls = buildTileUrlsForFeatureCollection(fc, {
+    const urls = buildTileUrlsForProjectBounds(measureProjectGeoJSONBounds(fc).bounds, {
       tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
       minZoom: 0,
       maxZoom: 2,
@@ -150,8 +157,8 @@ describe('TilePrefetchService queue behavior', () => {
 
     await service.enqueueProjects(
       [
-        { projectId: 'p1', commitId: 'c1', geojson },
-        { projectId: 'p2', commitId: 'c1', geojson },
+        projectInput('p1', 'c1', geojson),
+        projectInput('p2', 'c1', geojson),
       ],
       {
         tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
@@ -181,11 +188,11 @@ describe('TilePrefetchService queue behavior', () => {
       padMeters: 50,
     };
 
-    await service.enqueueProjects([{ projectId: 'p1', commitId: 'c1', geojson }], request);
+    await service.enqueueProjects([projectInput('p1', 'c1', geojson)], request);
     await service.waitForIdle();
     expect(fetchAndCacheTile).toHaveBeenCalledTimes(1);
 
-    await service.enqueueProjects([{ projectId: 'p1', commitId: 'c1', geojson }], request);
+    await service.enqueueProjects([projectInput('p1', 'c1', geojson)], request);
     await service.waitForIdle();
     expect(fetchAndCacheTile).toHaveBeenCalledTimes(1);
     service.dispose();
@@ -252,7 +259,7 @@ describe('TilePrefetchService queue behavior', () => {
     const sharedUrl = 'https://tiles.example.com/0/0/0.png';
 
     await service.enqueueProjects(
-      [{ projectId: 'p1', commitId: 'c1', geojson: pointFeatureCollection(2.3, 46.6) }],
+      [projectInput('p1', 'c1', pointFeatureCollection(2.3, 46.6))],
       {
         tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
         minZoom: 0,
@@ -310,7 +317,7 @@ describe('TilePrefetchService queue behavior', () => {
     const service = new TilePrefetchService(deps);
 
     await service.enqueueProjects(
-      [{ projectId: 'p1', commitId: 'c1', geojson: pointFeatureCollection(2.3, 46.6) }],
+      [projectInput('p1', 'c1', pointFeatureCollection(2.3, 46.6))],
       {
         tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
         minZoom: 0,
@@ -325,6 +332,36 @@ describe('TilePrefetchService queue behavior', () => {
     expect(service.getSnapshot().length).toBe(0);
   });
 
+  it('waits for an already-started persistence write after disposal', async () => {
+    const persistence = createDeferred<void>();
+    const setPrefetchJob = vi.fn(() => persistence.promise);
+    const { deps } = createDeps({
+      isOnline: vi.fn(() => false),
+      setPrefetchJob,
+    });
+    const service = new TilePrefetchService(deps);
+
+    const enqueue = service.enqueueTileUrls({
+      id: 'p1',
+      commitId: 'c1',
+      tileUrls: ['https://tiles.example.com/0/0/0.png'],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 0,
+    });
+    await waitForCondition(() => setPrefetchJob.mock.calls.length === 1);
+
+    service.dispose();
+    let idleResolved = false;
+    const idle = service.waitForIdle().then(() => { idleResolved = true; });
+    await Promise.resolve();
+    expect(idleResolved).toBe(false);
+
+    persistence.resolve();
+    await Promise.all([enqueue, idle]);
+    expect(service.getSnapshot()).toEqual([]);
+  });
+
   it('throws AbortError when enqueueing is cancelled before work begins', async () => {
     const { deps, fetchAndCacheTile } = createDeps();
     const service = new TilePrefetchService(deps);
@@ -333,7 +370,7 @@ describe('TilePrefetchService queue behavior', () => {
 
     await expect(
       service.enqueueProjects(
-        [{ projectId: 'p1', commitId: 'c1', geojson: pointFeatureCollection(2.3, 46.6) }],
+        [projectInput('p1', 'c1', pointFeatureCollection(2.3, 46.6))],
         {
           tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
           minZoom: 0,
@@ -367,8 +404,14 @@ describe('TilePrefetchService queue behavior', () => {
       maxZoom: 3,
       padMeters: 0,
     };
-    const firstUrls = buildTileUrlsForFeatureCollection(firstGeojson, request);
-    const secondUrls = buildTileUrlsForFeatureCollection(secondGeojson, request);
+    const firstUrls = buildTileUrlsForProjectBounds(
+      measureProjectGeoJSONBounds(firstGeojson).bounds,
+      request,
+    );
+    const secondUrls = buildTileUrlsForProjectBounds(
+      measureProjectGeoJSONBounds(secondGeojson).bounds,
+      request,
+    );
     expect(firstUrls.length).toBeGreaterThan(0);
     expect(secondUrls.length).toBeGreaterThan(0);
     const secondUrlSet = new Set(secondUrls);
@@ -376,13 +419,13 @@ describe('TilePrefetchService queue behavior', () => {
     expect(overlapCount).toBe(0);
 
     await service.enqueueProjects(
-      [{ projectId: 'p1', commitId: 'c1', geojson: firstGeojson }],
+      [projectInput('p1', 'c1', firstGeojson)],
       request,
     );
     await waitForCondition(() => fetchAndCacheTile.mock.calls.length === 1);
 
     await service.enqueueProjects(
-      [{ projectId: 'p1', commitId: 'c2', geojson: secondGeojson }],
+      [projectInput('p1', 'c2', secondGeojson)],
       request,
     );
 
@@ -408,7 +451,7 @@ describe('TilePrefetchService queue behavior', () => {
     const service = new TilePrefetchService(deps);
 
     await service.enqueueProjects(
-      [{ projectId: 'p1', commitId: 'c1', geojson: pointFeatureCollection(2.3, 46.6) }],
+      [projectInput('p1', 'c1', pointFeatureCollection(2.3, 46.6))],
       {
         tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
         minZoom: 0,
@@ -432,7 +475,7 @@ describe('TilePrefetchService queue behavior', () => {
     const service = new TilePrefetchService(deps);
 
     await service.enqueueProjects(
-      [{ projectId: 'p1', commitId: 'c1', geojson: pointFeatureCollection(2.3, 46.6) }],
+      [projectInput('p1', 'c1', pointFeatureCollection(2.3, 46.6))],
       {
         tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
         minZoom: 0,
@@ -533,11 +576,11 @@ describe('TilePrefetchService queue behavior', () => {
       padMeters: 50,
     };
 
-    await service.enqueueProjects([{ projectId: 'p1', commitId: 'c1', geojson }], baseRequest, {
+    await service.enqueueProjects([projectInput('p1', 'c1', geojson)], baseRequest, {
       layerId: 'esri-satellite',
     });
     await service.enqueueProjects(
-      [{ projectId: 'p1', commitId: 'c1', geojson }],
+      [projectInput('p1', 'c1', geojson)],
       { ...baseRequest, tileUrlTemplate: 'https://hill.example.com/{z}/{y}/{x}.png' },
       { layerId: 'esri-world-hillshade' },
     );
@@ -565,11 +608,11 @@ describe('TilePrefetchService queue behavior', () => {
       padMeters: 50,
     };
 
-    await service.enqueueProjects([{ projectId: 'p1', commitId: 'c1', geojson }], request, {
+    await service.enqueueProjects([projectInput('p1', 'c1', geojson)], request, {
       layerId: 'esri-satellite',
     });
     await service.enqueueProjects(
-      [{ projectId: 'p1', commitId: 'c1', geojson }],
+      [projectInput('p1', 'c1', geojson)],
       { ...request, tileUrlTemplate: 'https://hill.example.com/{z}/{y}/{x}.png' },
       { layerId: 'esri-world-hillshade' },
     );
@@ -601,7 +644,7 @@ describe('TilePrefetchService queue behavior', () => {
       padMeters: 50,
     };
 
-    await service.enqueueProjects([{ projectId: 'p1', commitId: 'c1', geojson }], request, {
+    await service.enqueueProjects([projectInput('p1', 'c1', geojson)], request, {
       layerId: 'esri-world-hillshade',
     });
     await service.waitForIdle();
@@ -612,7 +655,7 @@ describe('TilePrefetchService queue behavior', () => {
 
     // Re-enable the same target/commit. Because cache-presence was pruned, the
     // tiles must be queued and downloaded again (not short-circuited as done).
-    await service.enqueueProjects([{ projectId: 'p1', commitId: 'c1', geojson }], request, {
+    await service.enqueueProjects([projectInput('p1', 'c1', geojson)], request, {
       layerId: 'esri-world-hillshade',
     });
     await service.waitForIdle();
@@ -621,6 +664,378 @@ describe('TilePrefetchService queue behavior', () => {
     const job = service.getSnapshot().find((j) => j.layerId === 'esri-world-hillshade');
     expect(job?.status).toBe('done');
     expect(job?.completedTiles).toBe(job?.totalTiles);
+    service.dispose();
+  });
+
+  it('removeTarget drops all layer jobs while retaining another owner of shared URLs', async () => {
+    const deletePrefetchJobsByTarget = vi.fn(async () => {});
+    const { deps } = createDeps({
+      deletePrefetchJobsByTarget,
+      isOnline: vi.fn(() => false),
+    });
+    const service = new TilePrefetchService(deps);
+    const geojson = pointFeatureCollection(2.3, 46.6);
+    const request = {
+      tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
+      minZoom: 0,
+      maxZoom: 1,
+      padMeters: 50,
+    };
+    await service.enqueueProjects([
+      projectInput('p1', 'c1', geojson),
+      projectInput('p2', 'c1', geojson),
+    ], request);
+
+    await service.removeTarget('p1');
+
+    expect(deletePrefetchJobsByTarget).toHaveBeenCalledWith('p1');
+    expect(service.getSnapshot().map((job) => job.projectId)).toEqual(['p2']);
+    service.dispose();
+  });
+
+  it('prunes a target\'s unique tiles across layers but retains shared queued work', async () => {
+    let online = false;
+    const { deps, fetchAndCacheTile } = createDeps({
+      isOnline: vi.fn(() => online),
+      deletePrefetchJobsByTarget: vi.fn(async () => {}),
+    });
+    const service = new TilePrefetchService(deps);
+    const shared = 'https://sat.example.com/3/shared.png';
+    const retainedUnique = 'https://sat.example.com/3/p2.png';
+    const removedSatellite = 'https://sat.example.com/3/p1.png';
+    const removedHillshade = 'https://hill.example.com/3/p1.png';
+
+    await service.enqueueTileUrls({
+      id: 'p1',
+      commitId: 'c1',
+      tileUrls: [shared, removedSatellite],
+      zoomMin: 3,
+      zoomMax: 3,
+      padMeters: 0,
+    }, { layerId: 'esri-satellite' });
+    await service.enqueueTileUrls({
+      id: 'p2',
+      commitId: 'c1',
+      tileUrls: [shared, retainedUnique],
+      zoomMin: 3,
+      zoomMax: 3,
+      padMeters: 0,
+    }, { layerId: 'esri-satellite' });
+    await service.enqueueTileUrls({
+      id: 'p1',
+      commitId: 'c1',
+      tileUrls: [removedHillshade],
+      zoomMin: 3,
+      zoomMax: 3,
+      padMeters: 0,
+    }, { layerId: 'esri-world-hillshade' });
+
+    await service.removeTarget('p1');
+    online = true;
+    service.resumeBlockedJobs();
+    await service.waitForIdle();
+
+    const fetchedUrls = fetchAndCacheTile.mock.calls.map(([url]) => url);
+    expect(fetchedUrls.sort()).toEqual([retainedUnique, shared].sort());
+    expect(service.getSnapshot()).toMatchObject([
+      { layerId: 'esri-satellite', projectId: 'p2', status: 'done' },
+    ]);
+    service.dispose();
+  });
+
+  it('aborts an in-flight tile when the removed target is its only owner', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const fetchAndCacheTile = vi.fn((_url: string, signal?: AbortSignal) => {
+      capturedSignal = signal;
+      return new Promise<number>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    });
+    const { deps } = createDeps({
+      fetchAndCacheTile,
+      deletePrefetchJobsByTarget: vi.fn(async () => {}),
+    });
+    const service = new TilePrefetchService(deps);
+    await service.enqueueProjects(
+      [projectInput('p1', 'c1', pointFeatureCollection(2.3, 46.6))],
+      {
+        tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
+        minZoom: 0,
+        maxZoom: 0,
+        padMeters: 50,
+      },
+    );
+    await waitForCondition(() => fetchAndCacheTile.mock.calls.length === 1);
+
+    await service.removeTarget('p1');
+    await service.waitForIdle();
+
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(service.getSnapshot()).toEqual([]);
+    service.dispose();
+  });
+
+  it('invalidates an enqueue that is awaiting its cache-presence check', async () => {
+    const cacheCheck = createDeferred<boolean>();
+    const deletePrefetchJobsByTarget = vi.fn(async () => {});
+    const { deps, fetchAndCacheTile, hasCachedTile } = createDeps({
+      hasCachedTile: vi.fn(() => cacheCheck.promise),
+      deletePrefetchJobsByTarget,
+    });
+    const service = new TilePrefetchService(deps);
+    const enqueue = service.enqueueTileUrls({
+      id: 'p1',
+      commitId: 'c1',
+      tileUrls: ['https://tiles.example.com/0/0/0.png'],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 0,
+    });
+    await waitForCondition(() => hasCachedTile.mock.calls.length === 1);
+
+    await service.removeTarget('p1');
+    cacheCheck.resolve(false);
+    await enqueue;
+    await service.waitForIdle();
+
+    expect(deletePrefetchJobsByTarget).toHaveBeenCalledWith('p1');
+    expect(fetchAndCacheTile).not.toHaveBeenCalled();
+    expect(service.getSnapshot()).toEqual([]);
+    service.dispose();
+  });
+
+  it('serializes target deletion after an older pending job write', async () => {
+    const firstWrite = createDeferred<void>();
+    const operations: string[] = [];
+    const setPrefetchJob = vi.fn(async () => {
+      operations.push('set:start');
+      await firstWrite.promise;
+      operations.push('set:end');
+    });
+    const deletePrefetchJobsByTarget = vi.fn(async () => {
+      operations.push('delete');
+    });
+    const { deps, fetchAndCacheTile } = createDeps({
+      setPrefetchJob,
+      deletePrefetchJobsByTarget,
+    });
+    const service = new TilePrefetchService(deps);
+    const enqueue = service.enqueueTileUrls({
+      id: 'p1',
+      commitId: 'c1',
+      tileUrls: ['https://tiles.example.com/0/0/0.png'],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 0,
+    });
+    await waitForCondition(() => setPrefetchJob.mock.calls.length === 1);
+
+    const removal = service.removeTarget('p1');
+    await Promise.resolve();
+    expect(deletePrefetchJobsByTarget).not.toHaveBeenCalled();
+    firstWrite.resolve();
+    await Promise.all([enqueue, removal]);
+    await service.waitForIdle();
+
+    expect(operations).toEqual(['set:start', 'set:end', 'delete']);
+    expect(fetchAndCacheTile).not.toHaveBeenCalled();
+    expect(service.getSnapshot()).toEqual([]);
+    service.dispose();
+  });
+
+  it('registers active ownership before awaiting the downloading status write', async () => {
+    const downloadingWrite = createDeferred<void>();
+    let writeCount = 0;
+    const setPrefetchJob = vi.fn(async () => {
+      writeCount += 1;
+      if (writeCount === 2) await downloadingWrite.promise;
+    });
+    const { deps, fetchAndCacheTile } = createDeps({
+      setPrefetchJob,
+      deletePrefetchJobsByTarget: vi.fn(async () => {}),
+    });
+    const service = new TilePrefetchService(deps);
+
+    await service.enqueueTileUrls({
+      id: 'p1',
+      commitId: 'c1',
+      tileUrls: ['https://tiles.example.com/0/0/0.png'],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 0,
+    });
+    await waitForCondition(() => setPrefetchJob.mock.calls.length === 2);
+
+    const removal = service.removeTarget('p1');
+    downloadingWrite.resolve();
+    await removal;
+    await service.waitForIdle();
+
+    expect(fetchAndCacheTile).not.toHaveBeenCalled();
+    expect(service.getSnapshot()).toEqual([]);
+    service.dispose();
+  });
+
+  it('persists a new generation only after an overlapping target deletion', async () => {
+    const deletion = createDeferred<void>();
+    const operations: string[] = [];
+    const deletePrefetchJobsByTarget = vi.fn(async () => {
+      operations.push('delete:start');
+      await deletion.promise;
+      operations.push('delete:end');
+    });
+    const setPrefetchJob = vi.fn(async () => {
+      operations.push('set');
+    });
+    const { deps } = createDeps({
+      isOnline: vi.fn(() => false),
+      setPrefetchJob,
+      deletePrefetchJobsByTarget,
+    });
+    const service = new TilePrefetchService(deps);
+
+    const removal = service.removeTarget('p1');
+    await waitForCondition(() => deletePrefetchJobsByTarget.mock.calls.length === 1);
+    const enqueue = service.enqueueTileUrls({
+      id: 'p1',
+      commitId: 'c2',
+      tileUrls: ['https://tiles.example.com/0/0/0.png'],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 0,
+    });
+    await Promise.resolve();
+    expect(setPrefetchJob).not.toHaveBeenCalled();
+
+    deletion.resolve();
+    await Promise.all([removal, enqueue]);
+
+    expect(operations.slice(0, 3)).toEqual(['delete:start', 'delete:end', 'set']);
+    expect(service.getSnapshot()).toMatchObject([{ projectId: 'p1', commitId: 'c2' }]);
+    service.dispose();
+  });
+
+  it('interrupts a retry wait when the sole owner is removed', async () => {
+    const retrySleep = createDeferred<void>();
+    const sleep = vi.fn(() => retrySleep.promise);
+    const { deps, fetchAndCacheTile } = createDeps({
+      fetchAndCacheTile: vi.fn(async () => {
+        throw new Error('temporary');
+      }),
+      sleep,
+      deletePrefetchJobsByTarget: vi.fn(async () => {}),
+    });
+    const service = new TilePrefetchService(deps);
+
+    await service.enqueueTileUrls({
+      id: 'p1',
+      commitId: 'c1',
+      tileUrls: ['https://tiles.example.com/0/0/0.png'],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 0,
+    });
+    await waitForCondition(() => sleep.mock.calls.length === 1);
+
+    await service.removeTarget('p1');
+    await service.waitForIdle();
+
+    expect(fetchAndCacheTile).toHaveBeenCalledTimes(1);
+    expect(service.getSnapshot()).toEqual([]);
+    service.dispose();
+  });
+
+  it('keeps a shared active download alive for its remaining owner', async () => {
+    const download = createDeferred<number>();
+    let capturedSignal: AbortSignal | undefined;
+    const fetchAndCacheTile = vi.fn((_url: string, signal?: AbortSignal) => {
+      capturedSignal = signal;
+      return download.promise;
+    });
+    const { deps } = createDeps({
+      fetchAndCacheTile,
+      deletePrefetchJobsByTarget: vi.fn(async () => {}),
+    });
+    const service = new TilePrefetchService(deps);
+    const geojson = pointFeatureCollection(2.3, 46.6);
+
+    await service.enqueueProjects(
+      [projectInput('p1', 'c1', geojson), projectInput('p2', 'c1', geojson)],
+      {
+        tileUrlTemplate: 'https://tiles.example.com/{z}/{y}/{x}.png',
+        minZoom: 0,
+        maxZoom: 0,
+        padMeters: 0,
+      },
+    );
+    await waitForCondition(() => fetchAndCacheTile.mock.calls.length === 1);
+
+    await service.removeTarget('p1');
+    expect(capturedSignal?.aborted).toBe(false);
+    download.resolve(1024);
+    await service.waitForIdle();
+
+    expect(fetchAndCacheTile).toHaveBeenCalledTimes(1);
+    expect(service.getSnapshot()).toMatchObject([
+      { projectId: 'p2', status: 'done', completedTiles: 1 },
+    ]);
+    service.dispose();
+  });
+
+  it('keeps removal runtime-safe and logs when durable deletion fails', async () => {
+    const error = new Error('IndexedDB unavailable');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { deps } = createDeps({
+      isOnline: vi.fn(() => false),
+      deletePrefetchJobsByTarget: vi.fn(async () => {
+        throw error;
+      }),
+    });
+    const service = new TilePrefetchService(deps);
+    await service.enqueueTileUrls({
+      id: 'p1',
+      commitId: 'c1',
+      tileUrls: ['https://tiles.example.com/0/0/0.png'],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 0,
+    });
+
+    await service.removeTarget('p1');
+
+    expect(service.getSnapshot()).toEqual([]);
+    expect(consoleError).toHaveBeenCalledWith(
+      'TilePrefetchService.removeTarget(p1) failed:',
+      error,
+    );
+    consoleError.mockRestore();
+    service.dispose();
+  });
+
+  it('does not start target removal when its cancellation signal is already aborted', async () => {
+    const deletePrefetchJobsByTarget = vi.fn(async () => {});
+    const { deps } = createDeps({
+      isOnline: vi.fn(() => false),
+      deletePrefetchJobsByTarget,
+    });
+    const service = new TilePrefetchService(deps);
+    await service.enqueueTileUrls({
+      id: 'p1',
+      commitId: 'c1',
+      tileUrls: ['https://tiles.example.com/0/0/0.png'],
+      zoomMin: 0,
+      zoomMax: 0,
+      padMeters: 0,
+    });
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await expect(
+      service.removeTarget('p1', { signal: abortController.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(deletePrefetchJobsByTarget).not.toHaveBeenCalled();
+    expect(service.getSnapshot()).toHaveLength(1);
     service.dispose();
   });
 });

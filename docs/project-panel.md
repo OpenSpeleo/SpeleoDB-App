@@ -5,6 +5,7 @@ The project panel is a slide-in side panel on the dashboard that lets users mana
 ## Opening and closing
 
 | Trigger | Result |
+| --- | --- |
 | "Projects" tab in bottom navigation bar | Panel slides in from the left |
 | Close button (X in panel header) | Panel slides out |
 | Backdrop tap (dark overlay behind panel) | Panel slides out |
@@ -37,7 +38,8 @@ When the user taps a project name to zoom to it, the panel closes automatically 
 The subtitle reads `{N} of {M} visible` where:
 
 - `M` is the total number of projects in the list.
-- `N` counts **effectively visible** projects (individual toggle ON **AND** country gate ON), not just individually-on projects.
+- `N` counts **effectively visible** panel projects (current active map data,
+  individual toggle ON, and country gate ON), not just individually-on projects.
 
 ## Bulk actions
 
@@ -46,6 +48,11 @@ Two action buttons directly below the header using `.app-btn.app-btn--compact` (
 - **Show all**: activates every project (`projectVisibility[id] = true`) **and** re-enables every country gate (`countryVisibility[country] = true`). The country re-enable is required so a user who previously gated off a country can recover with a single tap.
 - **Hide all**: deactivates every project (`projectVisibility[id] = false`) and **leaves country gates untouched**. The AND naturally hides everything; the user's per-country choices survive a "Hide all".
 
+Project visibility is persisted user intent, not a statement that map bytes are
+currently usable. Quarantine or a commit transition suppresses effective
+visibility without changing the stored toggle. If a newer commit validates,
+the project reappears with the prior intent without requiring an app reload.
+
 ## Project list
 
 The project list runs in one of two render modes:
@@ -53,7 +60,19 @@ The project list runs in one of two render modes:
 - **Flat list** (back-compat path): used when **no** project in the dataset carries a `country`. Each row renders directly under the bulk actions, alphabetically by name.
 - **Grouped by country**: used as soon as any project has a `country`. See "Country grouping" below.
 
-In both modes, projects with `exclude_geojson: true` or no `geojson_file` are filtered out before reaching the panel.
+In both modes, projects with `exclude_geojson: true`, no `geojson_file`, or no
+validated active GeoJSON cache record are filtered out before reaching the
+panel. Faulty files quarantined by `docs/project-geojson-validation.md` never
+produce a row. Active data is commit-gated: the atomically loaded
+`{ commitId, featureCollection, bounds }` record must match
+`project.latest_commit.id`. A stale record disappears from the panel as soon as
+the project list advances, before any asynchronous cache read completes.
+
+The controller's stable `mapDataRevision` makes Dashboard reload records after
+initial, offline, Settings-triggered, and later sync completions. The final
+state update swaps the complete project map-data record at once, so a new bbox
+cannot be paired with old GeoJSON (or vice versa), and stale async completions
+are ignored.
 
 Each row contains:
 
@@ -70,7 +89,10 @@ Tapping the name or the color dot triggers `onZoomToProject(projectId)`, which:
 1. Ensures the project layer is visible: activates the project if not already active and persists the visibility preference as `true`.
 2. **If the target project's country gate is OFF, force it ON** and persist that change. Without this, the user would tap a row and zoom into nothing because the AND would still hide the project.
 3. Closes the panel immediately (auto-close) so the map is unobstructed.
-4. Computes the bounding box from the project's GeoJSON data (with 10% padding).
+4. Reads the current commit-matched prevalidated cached bounding box and applies
+   10% display padding; it never rescans GeoJSON coordinates. Directed
+   longitude intervals preserve antimeridian coverage, and fit latitude is
+   clamped to the finite Web-Mercator range.
 5. Calls `map.fitBounds()` with `padding: 60`, `maxZoom: 16`, `duration: 800` (800ms fly animation).
 
 ### Toggle switch
@@ -112,12 +134,13 @@ Tapping the header (anywhere except the toggle) toggles collapse. Tapping the to
 - `country-collapse-{ISO}` on the header (the click target for collapse).
 - `country-toggle-{ISO}` on the gate toggle.
 
-### Two-level visibility model
+### Effective visibility model
 
-A project is **effectively visible** on the map iff both:
+A project is **effectively visible** on the map iff all three conditions hold:
 
-1. its individual toggle is ON, **AND**
-2. its country gate is ON.
+1. its map-data record is active and matches `latest_commit.id`;
+2. its individual toggle is ON; and
+3. its country gate is ON.
 
 Defaults: a country is visible unless `countryVisibility[country] === false`; a country is expanded unless `countryCollapsed[country] === true`.
 
@@ -145,6 +168,8 @@ Toggling a country gate ON: the cascade reverses; projects whose individual togg
 ### Tile prefetch status
 
 If the project has a tile prefetch job in progress, a small label appears below the name showing the cache status (e.g. "Caching map (42%)", "Map ready (100%)").
+Progress is shown only when the project also has current active map data, so a
+stale or quarantined job cannot keep a disabled row alive.
 
 ## Empty state
 
@@ -167,7 +192,13 @@ src/components/AppTabBar.tsx      -- Navigation trigger (Projects tab calls `onP
 - `handleToggleCountry` -- flip the country gate; cascades through `effectiveActiveProjectIds`
 - `handleToggleCountryCollapsed` -- UI-only collapse persistence
 
-`Dashboard.tsx` also owns the two new local-state maps (`countryVisibility`, `countryCollapsed`) and the `effectiveActiveProjectIds` memo that computes the AND. Country UX state never reaches the controller.
+`Dashboard.tsx` also owns the local country-state maps (`countryVisibility`,
+`countryCollapsed`), the raw per-project visibility-intent set, and the
+`effectiveActiveProjectIds` memo. The effective set intersects individual
+intent, country gates, and current commit-matched map data. Every project map
+consumer uses that same boundary: panel rows/progress, map sources, combined
+fit, row zoom, depth mode/probing, and project-linked overlays. Country UX state
+never reaches the controller.
 
 ## Persistence
 
@@ -192,6 +223,9 @@ All preferences live in a single `localStorage` blob managed by `PreferencesServ
   - Show All / Hide All persist preferences.
   - Zoom-to-project persists `visible: true`.
   - Panel auto-closes after zooming to a project.
+  - Commit advances hide stale data immediately and late loads cannot restore it.
+  - Active-to-quarantined-to-new-valid transitions preserve visibility intent.
+  - Antimeridian/opposite-side/high-latitude fits use directed, clamped bounds.
 
 ## Change checklist
 

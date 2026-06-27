@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildTileUrlsForFeatureCollection,
+  buildTileUrlsForProjectBounds,
   buildTileUrlsForPoints,
-  computePaddedBounds,
   computeTilePrefetchSignature,
   extractPointCoordinates,
 } from './tilePrefetchPlanner';
 import type { TilePrefetchRequest } from '../types/tilePrefetch';
+import { measureProjectGeoJSONBounds } from '../utils/projectGeoJSONBounds';
 
 const TEMPLATE = '{z}/{x}/{y}';
 
@@ -50,6 +50,7 @@ describe('extractPointCoordinates', () => {
       { type: 'Feature', properties: {}, geometry: null } as unknown as GeoJSON.Feature,
       { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [1] } } as unknown as GeoJSON.Feature,
       { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [Number.NaN, 5] } } as unknown as GeoJSON.Feature,
+      { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: ['1', 5] } } as unknown as GeoJSON.Feature,
       pointFeature(-73.9, 40.7),
     ]);
     expect(extractPointCoordinates(fc)).toEqual([
@@ -115,24 +116,116 @@ describe('buildTileUrlsForPoints', () => {
     expect(urls.length).toBeLessThanOrEqual(4);
     expect(urls.every((u) => zoomOf(u) === 3)).toBe(true);
   });
+
+  it('clamps polar points to finite Web-Mercator tile rows', () => {
+    expect(
+      buildTileUrlsForPoints([[0, 90]], request({ minZoom: 3, maxZoom: 3, padMeters: 0 })),
+    ).toEqual(['3/4/0']);
+    expect(
+      buildTileUrlsForPoints([[0, -90]], request({ minZoom: 3, maxZoom: 3, padMeters: 0 })),
+    ).toEqual(['3/4/7']);
+  });
+
+  it('skips finite coordinates outside the geographic range', () => {
+    expect(
+      buildTileUrlsForPoints(
+        [[181, 0], [-181, 0], [0, 91], [0, -91]],
+        request({ minZoom: 3, maxZoom: 3 }),
+      ),
+    ).toEqual([]);
+  });
 });
 
-describe('buildTileUrlsForFeatureCollection (parity preserved after extraction)', () => {
+describe('buildTileUrlsForProjectBounds', () => {
   it('returns tiles for a compact feature collection', () => {
     const fc = collection([pointFeature(2.35, 48.85), pointFeature(2.36, 48.86)]);
-    const urls = buildTileUrlsForFeatureCollection(fc, request({ minZoom: 0, maxZoom: 10 }));
+    const urls = buildTileUrlsForProjectBounds(
+      measureProjectGeoJSONBounds(fc).bounds,
+      request({ minZoom: 0, maxZoom: 10 }),
+    );
     expect(urls.length).toBeGreaterThan(0);
     expect(urls[0]).toBe('0/0/0');
   });
 
-  it('returns empty when the collection has no usable geometry', () => {
-    expect(buildTileUrlsForFeatureCollection(collection([]), request())).toEqual([]);
+  it('uses already-validated dateline-aware bounds', () => {
+    const fc = collection([pointFeature(179.9, 0), pointFeature(-179.9, 0)]);
+    const bounds = measureProjectGeoJSONBounds(fc).bounds;
+    expect(bounds.crossesDateline).toBe(true);
+    const urls = buildTileUrlsForProjectBounds(bounds, request({ minZoom: 3, maxZoom: 3 }));
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.length).toBeLessThanOrEqual(4);
   });
 
-  it('computePaddedBounds remains exported and dateline-aware', () => {
-    const fc = collection([pointFeature(179.9, 0), pointFeature(-179.9, 0)]);
-    const bounds = computePaddedBounds(fc, 50);
-    expect(bounds?.crossesDateline).toBe(true);
+  it('dedupes overlapping dateline ranges at the root zoom', () => {
+    const urls = buildTileUrlsForProjectBounds(
+      {
+        west: 179.9,
+        east: -179.9,
+        south: 0,
+        north: 0,
+        crossesDateline: true,
+      },
+      request({ minZoom: 0, maxZoom: 0, padMeters: 0 }),
+    );
+
+    expect(urls).toEqual(['0/0/0']);
+  });
+
+  it('keeps a zero-width interval local instead of expanding it to the world', () => {
+    const urls = buildTileUrlsForProjectBounds(
+      {
+        west: 12,
+        east: 12,
+        south: 45,
+        north: 45,
+        crossesDateline: false,
+      },
+      request({ minZoom: 8, maxZoom: 8, padMeters: 0 }),
+    );
+
+    expect(urls).toHaveLength(1);
+  });
+
+  it('applies meter padding on both sides of a tile boundary', () => {
+    const bounds = {
+      west: 0,
+      east: 0,
+      south: 0,
+      north: 0,
+      crossesDateline: false,
+    };
+    const unpadded = buildTileUrlsForProjectBounds(
+      bounds,
+      request({ minZoom: 10, maxZoom: 10, padMeters: 0 }),
+    );
+    const padded = buildTileUrlsForProjectBounds(
+      bounds,
+      request({ minZoom: 10, maxZoom: 10, padMeters: 50 }),
+    );
+
+    expect(unpadded).toEqual(['10/512/512']);
+    expect(padded).toEqual(expect.arrayContaining([
+      '10/511/511',
+      '10/511/512',
+      '10/512/511',
+      '10/512/512',
+    ]));
+    expect(new Set(padded).size).toBe(padded.length);
+  });
+
+  it('clamps validated high-latitude bounds before tile conversion', () => {
+    const urls = buildTileUrlsForProjectBounds(
+      {
+        west: 20,
+        east: 20,
+        south: 89,
+        north: 90,
+        crossesDateline: false,
+      },
+      request({ minZoom: 4, maxZoom: 4, padMeters: 0 }),
+    );
+
+    expect(urls).toEqual(['4/8/0']);
   });
 });
 

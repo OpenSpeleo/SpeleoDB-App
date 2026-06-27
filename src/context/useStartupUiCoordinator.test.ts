@@ -68,6 +68,53 @@ describe('useStartupUiCoordinator storage-consent gating', () => {
     expect(result.current.showStorageConsentModal).toBe(false);
     expect(result.current.storageConsentSuppressedByGate).toBe(false);
   });
+
+  it('gives project GeoJSON warnings priority over storage consent', () => {
+    const { result } = renderCoordinator({ hasProjectGeoJSONWarnings: true });
+    expect(result.current.showProjectGeoJSONWarningModal).toBe(true);
+    expect(result.current.showStorageConsentModal).toBe(false);
+    expect(result.current.storageConsentSuppressedByGate).toBe(true);
+  });
+
+  it('keeps exactly one modal active when offline preempts companion onboarding', async () => {
+    type Props = Parameters<typeof useStartupUiCoordinator>[0];
+    const unauthenticated: AuthState = { isAuthenticated: false, user: null, token: null };
+    const makeProps = (authState: AuthState, isOfflineLocked = false): Props => ({
+      authState,
+      isOfflineLocked,
+      syncStatus: 'done',
+      controller: {
+        validateSession: vi.fn(async () => 'ok' as const),
+        isAuthenticated: () => authState.isAuthenticated,
+      },
+      history: { replace: vi.fn() },
+      location: { pathname: '/dashboard' },
+      getPreferences: () => ({}),
+      hideSplashScreenSafely: vi.fn(),
+      storageConsentRequired: true,
+      hasProjectGeoJSONWarnings: true,
+    });
+    const { result, rerender } = renderHook(
+      (props: Props) => useStartupUiCoordinator(props),
+      { initialProps: makeProps(unauthenticated) },
+    );
+
+    await act(async () => {
+      rerender(makeProps(authenticated));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.showCompanionInfoModal).toBe(true);
+    expect(result.current.showProjectGeoJSONWarningModal).toBe(false);
+    expect(result.current.showStorageConsentModal).toBe(false);
+
+    rerender(makeProps(authenticated, true));
+    expect(result.current.showOfflineModal).toBe(true);
+    expect(result.current.showCompanionInfoModal).toBe(false);
+    expect(result.current.companionInfoSuppressedByGate).toBe(true);
+    expect(result.current.showProjectGeoJSONWarningModal).toBe(false);
+    expect(result.current.showStorageConsentModal).toBe(false);
+  });
 });
 
 describe('useStartupUiCoordinator runtime offline modal', () => {

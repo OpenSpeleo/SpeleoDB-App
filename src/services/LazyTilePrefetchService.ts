@@ -2,6 +2,7 @@ import type {
   TilePrefetchEnqueueOptions,
   TilePrefetchJobState,
   TilePrefetchProjectInput,
+  TilePrefetchRemoveOptions,
   TilePrefetchRequest,
   TilePrefetchTileUrlsInput,
 } from '../types/tilePrefetch'
@@ -18,6 +19,7 @@ const NOOP_TILE_PREFETCH_SERVICE: TilePrefetchServiceLike = {
   enqueueProjects: async () => {},
   enqueueTileUrls: async () => {},
   removeLayer: async () => {},
+  removeTarget: async () => {},
   resumeBlockedJobs: () => {},
   waitForIdle: async () => {},
   dispose: () => {},
@@ -77,6 +79,16 @@ export class LazyTilePrefetchService implements TilePrefetchServiceLike {
     const service = await this.loadService()
     if (this.disposed) return
     await service.removeLayer(layerId)
+  }
+
+  async removeTarget(
+    targetId: string,
+    options: TilePrefetchRemoveOptions = {},
+  ): Promise<void> {
+    if (this.disposed) return
+    const service = await this.loadService()
+    if (this.disposed) return
+    await service.removeTarget(targetId, options)
   }
 
   resumeBlockedJobs(): void {

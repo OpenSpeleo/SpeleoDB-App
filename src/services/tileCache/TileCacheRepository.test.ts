@@ -9,6 +9,7 @@ import {
   __resetTileCacheRepositoryForTests,
   __closeTileCacheRepositoryForTests,
   deletePrefetchJobsByLayer,
+  deletePrefetchJobsByTarget,
   deleteTilesByUrlPrefixes,
   getAllPrefetchJobs,
   getPrefetchJob,
@@ -109,6 +110,19 @@ describe('TileCacheRepository', () => {
 
       const all = await getAllPrefetchJobs();
       expect(all.map((j) => j.layerId)).toEqual(['esri-satellite']);
+    });
+  });
+
+  describe('deletePrefetchJobsByTarget', () => {
+    it('removes the target across layers without deleting other jobs', async () => {
+      await setPrefetchJob(makeJob({ layerId: 'esri-satellite', projectId: 'p1' }));
+      await setPrefetchJob(makeJob({ layerId: 'esri-world-hillshade', projectId: 'p1' }));
+      await setPrefetchJob(makeJob({ layerId: 'esri-satellite', projectId: 'p2' }));
+
+      await deletePrefetchJobsByTarget('p1');
+
+      const all = await getAllPrefetchJobs();
+      expect(all.map((job) => job.projectId)).toEqual(['p2']);
     });
   });
 

@@ -4,6 +4,7 @@ import type { SyncStatus } from '../controllers/SpeleoDBController';
 import type { AuthState } from '../types';
 import type { Project } from '../types/project';
 import type { TilePrefetchJobState } from '../types/tilePrefetch';
+import type { ProjectGeoJSONWarning } from '../types/projectGeoJSON';
 import type { GpsRecordingState, GpsTrackListItem } from '../types/gpsTrack';
 
 export interface SpeleoDBContextValue {
@@ -14,6 +15,9 @@ export interface SpeleoDBContextValue {
   projects: Project[];
   syncStatus: SyncStatus;
   lastSyncedAt: number | null;
+  projectGeoJSONWarnings: ProjectGeoJSONWarning[];
+  /** Bumped after a map-data synchronization attempt reaches a terminal state. */
+  mapDataRevision: number;
   tilePrefetchJobs: TilePrefetchJobState[];
   /** Bumped after any landmark create/edit/delete writes the cached overlay. */
   landmarksRevision: number;

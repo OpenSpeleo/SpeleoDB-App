@@ -29,6 +29,7 @@ export function SpeleoDBStartupGate(): ReactNode {
     isOfflineLocked,
     syncStatus,
     storageConsentRequired,
+    projectGeoJSONWarnings = [],
   } = useSpeleoDB()
 
   const hideSplashScreenSafely = useCallback((reason: string) => {
@@ -47,12 +48,14 @@ export function SpeleoDBStartupGate(): ReactNode {
     getPreferences,
     hideSplashScreenSafely,
     storageConsentRequired,
+    hasProjectGeoJSONWarnings: projectGeoJSONWarnings.length > 0,
   })
 
   const shouldLoadModals =
     authState.isAuthenticated ||
     startupUi.showOfflineModal ||
     startupUi.showCompanionInfoModal ||
+    startupUi.showProjectGeoJSONWarningModal ||
     startupUi.showStorageConsentModal
 
   return (

@@ -10,6 +10,8 @@ import type { Project } from '../types/project';
 import type { GpsTrackListItem } from '../types/gpsTrack';
 import { LandmarkMutationError } from '../types/landmark';
 import { allowConsoleWarn } from '../test/consoleGuard';
+import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
+import { measureProjectGeoJSONBounds } from '../utils/projectGeoJSONBounds';
 
 // jsdom lacks PointerEvent -- polyfill so fireEvent.pointerDown/Up creates
 // events with pointerId/pointerType that the pointer-capture handlers rely on.
@@ -412,6 +414,19 @@ vi.mock('../onboarding/guidedTour/engine', () => ({
 // Mock SpeleoDBProvider
 const mockSyncProjects = vi.fn().mockResolvedValue({ status: 'done' });
 const mockGetProjectGeoJSON = vi.fn().mockResolvedValue(null);
+const mockGetProjectMapData = vi.fn(async (projectId: string) => {
+  const featureCollection = normalizeGeoJSON(await mockGetProjectGeoJSON(projectId));
+  if (!featureCollection) return null;
+  try {
+    return {
+      commitId: mockProjects.find((project) => project.id === projectId)?.latest_commit.id ?? 'commit-1',
+      featureCollection,
+      bounds: measureProjectGeoJSONBounds(featureCollection).bounds,
+    };
+  } catch {
+    return null;
+  }
+});
 const mockGetOverlayGeoJSON = vi.fn().mockResolvedValue(null);
 const mockLogout = vi.fn();
 const mockIsAuthenticated = vi.fn().mockReturnValue(true);
@@ -422,12 +437,13 @@ const mockDeleteLandmark = vi.fn().mockResolvedValue(undefined);
 let mockIsOfflineLocked = false;
 let mockProjects: Project[] = [];
 let mockLandmarksRevision = 0;
-let mockLastSyncedAt: number | null = null;
+let mockMapDataRevision = 1;
 let mockGpsRecordingState: 'idle' | 'recording' | 'paused' = 'idle';
 let mockGpsTracks: GpsTrackListItem[] = [];
 const mockController = {
   syncProjects: mockSyncProjects,
   getProjectGeoJSON: mockGetProjectGeoJSON,
+  getProjectMapData: mockGetProjectMapData,
   getOverlayGeoJSON: mockGetOverlayGeoJSON,
   logout: mockLogout,
   isAuthenticated: mockIsAuthenticated,
@@ -458,7 +474,7 @@ vi.mock('../context/useSpeleoDB', () => ({
     syncStatus: 'idle' as const,
     isOnline: true,
     isOfflineLocked: mockIsOfflineLocked,
-    lastSyncedAt: mockLastSyncedAt,
+    mapDataRevision: mockMapDataRevision,
     tilePrefetchJobs: [],
     landmarksRevision: mockLandmarksRevision,
     gpsTracks: mockGpsTracks,
@@ -508,12 +524,18 @@ function renderDashboard(options?: {
       />
     );
   };
-  render(
+  const view = render(
     <Router history={history}>
       <Harness />
     </Router>,
   );
-  return history;
+  return Object.assign(history, {
+    rerenderDashboard: () => view.rerender(
+      <Router history={history}>
+        <Harness />
+      </Router>,
+    ),
+  });
 }
 
 function simulatePointerTap(
@@ -717,6 +739,20 @@ function mixedProjectFeatureCollection(): GeoJSON.FeatureCollection {
 describe('Dashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockMapDataRevision = 1;
+    mockGetProjectMapData.mockImplementation(async (projectId: string) => {
+      const featureCollection = normalizeGeoJSON(await mockGetProjectGeoJSON(projectId));
+      if (!featureCollection) return null;
+      try {
+        return {
+          commitId: mockProjects.find((project) => project.id === projectId)?.latest_commit.id ?? 'commit-1',
+          featureCollection,
+          bounds: measureProjectGeoJSONBounds(featureCollection).bounds,
+        };
+      } catch {
+        return null;
+      }
+    });
     mapPropsRef.current = null;
     mockIsAuthenticated.mockReturnValue(true);
     mockIsOfflineLocked = false;
@@ -2433,6 +2469,88 @@ describe('Dashboard', () => {
     });
   });
 
+  it('never exposes a project whose validated map data is unavailable', async () => {
+    mockProjects = [makeProject({ id: 'quarantined', name: 'Faulty Cave' })];
+    mockGetProjectGeoJSON.mockResolvedValue(null);
+
+    renderDashboard();
+    await waitFor(() => expect(mockGetProjectMapData).toHaveBeenCalledWith('quarantined'));
+    await userEvent.click(screen.getByTestId('projects-tab'));
+
+    expect(screen.queryByText('Faulty Cave')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-layer-id="project-quarantined-line"]')).toBeNull();
+    expect(mockMapFitBounds).not.toHaveBeenCalled();
+  });
+
+  it('hides a stale commit immediately and installs the superseding map record atomically', async () => {
+    const first = makeProject({ id: 'p1', name: 'Commit Cave' });
+    const second = makeProject({
+      id: 'p1',
+      name: 'Commit Cave',
+      latest_commit: { ...first.latest_commit, id: 'c2' },
+    });
+    mockProjects = [first];
+    mockGetProjectVisibilityPreferences.mockReturnValue({ p1: true });
+    mockGetProjectMapData.mockResolvedValue({
+      commitId: 'c1',
+      featureCollection: pointFeatureCollection(),
+      bounds: measureProjectGeoJSONBounds(pointFeatureCollection()).bounds,
+    });
+
+    const view = renderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+    });
+
+    mockProjects = [second];
+    mockMapDataRevision += 1;
+    mockGetProjectMapData.mockResolvedValue({
+      commitId: 'c2',
+      featureCollection: pointFeatureCollection(3, 47),
+      bounds: measureProjectGeoJSONBounds(pointFeatureCollection(3, 47)).bounds,
+    });
+    view.rerenderDashboard();
+
+    expect(document.querySelector('[data-layer-id="project-p1-line"]')).toBeNull();
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+    });
+    expect(mockGetProjectMapData).toHaveBeenLastCalledWith('p1');
+  });
+
+  it('preserves visible user intent while a project is quarantined and restores it on recovery', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Recovering Cave' })];
+    mockGetProjectVisibilityPreferences.mockReturnValue({ p1: true });
+    mockGetProjectMapData.mockResolvedValue({
+      commitId: 'c1',
+      featureCollection: pointFeatureCollection(),
+      bounds: measureProjectGeoJSONBounds(pointFeatureCollection()).bounds,
+    });
+    const view = renderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+    });
+
+    mockGetProjectMapData.mockResolvedValue(null);
+    mockMapDataRevision += 1;
+    view.rerenderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).toBeNull();
+    });
+
+    mockGetProjectMapData.mockResolvedValue({
+      commitId: 'c1',
+      featureCollection: pointFeatureCollection(),
+      bounds: measureProjectGeoJSONBounds(pointFeatureCollection()).bounds,
+    });
+    mockMapDataRevision += 1;
+    view.rerenderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
+    });
+    expect(mockSetProjectVisibilityPreference).not.toHaveBeenCalledWith('p1', false);
+  });
+
   it('hides landmark layers when showLandmarks preference is false', async () => {
     mockGetShowLandmarks.mockReturnValue(false);
     mockProjects = [makeProject({ id: 'p1', name: 'Landmark Hidden Project' })];
@@ -2658,7 +2776,7 @@ describe('Dashboard -- Landmark CRUD', () => {
     mockIsAuthenticated.mockReturnValue(true);
     mockIsOfflineLocked = false;
     mockLandmarksRevision = 0;
-    mockLastSyncedAt = null;
+    mockMapDataRevision = 1;
     mockProjects = [makeProject({ id: 'p1', name: 'CRUD Project' })];
     mockGetProjectVisibilityPreferences.mockReturnValue({});
     mockGetCountryVisibilityPreferences.mockReturnValue({});

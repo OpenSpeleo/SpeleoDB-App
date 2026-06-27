@@ -21,6 +21,7 @@ import {
   clearCachedTiles as clearCachedTilesFromStore,
   clearPrefetchJobs as clearPrefetchJobsFromStore,
   deletePrefetchJobsByLayer as deletePrefetchJobsByLayerFromStore,
+  deletePrefetchJobsByTarget as deletePrefetchJobsByTargetFromStore,
   deleteTilesByUrlPrefixes as deleteTilesByUrlPrefixesFromStore,
   getAllPrefetchJobs as getAllPrefetchJobsFromStore,
   getPrefetchJob as getPrefetchJobFromStore,
@@ -209,6 +210,10 @@ export async function clearPrefetchJobs(): Promise<void> {
 
 export async function deletePrefetchJobsByLayer(layerId: string): Promise<void> {
   await deletePrefetchJobsByLayerFromStore(layerId);
+}
+
+export async function deletePrefetchJobsByTarget(targetId: string): Promise<void> {
+  await deletePrefetchJobsByTargetFromStore(targetId);
 }
 
 /**
