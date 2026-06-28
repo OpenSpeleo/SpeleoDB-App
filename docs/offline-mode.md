@@ -46,7 +46,8 @@ When app is in offline mode, user-driven actions are allowed to attempt returnin
 2. Tap **Go Online** in Settings or **Try Reconnect** on Pending Changes
    (both call `controller.attemptReconnect()`).
 
-Both run a tentative reconnect flow (`validateSessionAgainstServer()`) and resolve to exactly one outcome:
+Both delegate a tentative reconnect flow to `SessionCoordinator` and resolve to
+exactly one outcome:
 
 - reconnect success (`2xx`): clear offline lock and resume online behavior. The Settings **Go Online** / Pending **Try Reconnect** path additionally launches a project sync; the button hides once `isOfflineLocked` is false.
 - still offline (`5xx` / timeout / transport): remain offline without forced logout and without repeated blocking prompts. The Settings **Go Online** / Pending **Try Reconnect** path shows a local "Couldn't reconnect" modal and changes nothing.
@@ -106,8 +107,11 @@ In offline mode flows, local data must only be purged on authentication-invalid 
 
 - Startup UI coordination: `src/context/useStartupUiCoordinator.ts`
 - React provider bridge: `src/context/SpeleoDBProvider.tsx`
-- Auth decision logic: `src/controllers/SpeleoDBController.ts`
-- Manual reconnect + runtime offline transition: `SpeleoDBController.attemptReconnect()` and `SpeleoDBController.enterOfflineMode()` (wired into `refreshProjectsPhase`)
+- Auth decision logic and session connectivity state:
+  `src/controllers/SessionCoordinator.ts`
+- Manual reconnect façade + runtime offline transition:
+  `SpeleoDBController.attemptReconnect()` and the coordinator hook wired into
+  `refreshProjectsPhase`
 - Reconnect UI (Go Online button + "Couldn't reconnect" modal): `src/pages/Settings.tsx`
 - Timeout/transport behavior: `src/services/HttpClient.ts`
 - Auth API call: `src/services/SpeleoDBService.ts`

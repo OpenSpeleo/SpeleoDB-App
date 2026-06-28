@@ -6,8 +6,9 @@ This document defines how the app creates and restores SpeleoDB sessions.
 
 - Support both normal email/password login and direct OAuth-token login.
 - Validate every user-supplied OAuth token before storing or using it.
-- Keep authentication state transitions in `SpeleoDBController`; the login page
-  only collects credentials and presents controller results.
+- Keep authentication state transitions in `SessionCoordinator`, exposed to UI
+  callers through the stable `SpeleoDBController` façade. The login page only
+  collects credentials and presents controller results.
 - Permit offline use only through a secure session that was validated online
   before the current network failure.
 - Never log, display, or include token values in error messages.
@@ -61,7 +62,7 @@ form state while the login screen remains mounted.
 
 ## Session persistence and restoration
 
-Successful online login from either method uses one controller session-setup
+Successful online login from either method uses one coordinator session-setup
 path. `SecureSessionStore` writes the normalized token to the native vault
 first, commits only non-secret metadata (`instance`, optional `email`, and a
 session-presence marker) to `PreferencesService`, and only then publishes the
@@ -94,7 +95,11 @@ call logout or purge caches because it never created a session.
 ## Architecture and performance
 
 - `src/pages/Login.tsx` owns tab selection and form presentation only.
-- `SpeleoDBController` owns validation outcomes, session state, and persistence.
+- `SpeleoDBController` is the public façade and injects bounded lifecycle hooks
+  for application-wide invalidation, destructive purge, and reconnect sync.
+- `SessionCoordinator` owns login policy, restored auth state, online/offline
+  transitions, validation cancellation, reconnect decisions, and session
+  establishment. It does not depend on project, GPS, tile, or React modules.
 - `SecureSessionStore` owns migration, commit ordering, rollback, and revocation.
 - `PreferencesService` owns non-secret metadata and exposes legacy token bytes
   only to the one migration adapter.
@@ -110,9 +115,12 @@ are never logged or parsed.
 
 ## Verification strategy
 
-- Controller unit tests cover validation, trimming, fail-closed persistence,
-  identity-free restoration, every response class, and rejection of seeded
-  legacy plaintext credentials during a transport failure.
+- Coordinator unit tests cover every branch of validation, trimming,
+  fail-closed persistence, cancellation, reconnect, and state publication.
+- Controller characterization tests cover the stable façade and its integration
+  with destructive purge, project sync, and application-wide invalidation.
+- Together they cover identity-free restoration, every response class, and
+  rejection of seeded legacy plaintext credentials during a transport failure.
 - Session-store tests cover fresh writes, account replacement, legacy migration,
   interrupted migration, orphan cleanup, rollback, rollback failure, and logout.
 - Login component tests cover tab semantics and keyboard navigation, masked

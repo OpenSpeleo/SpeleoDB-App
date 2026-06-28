@@ -35,7 +35,8 @@ Logout must not be triggered by transient network conditions:
 
 Implementation notes:
 
-- logout invalidates and cancels controller-owned startup validation and sync run contexts before the destructive cache wipe starts,
+- logout invalidates and cancels coordinator-owned startup validation and
+  controller-owned sync run contexts before the destructive cache wipe starts,
 - UI auth/session state resets immediately so the app stops rendering the old session,
 - native credential deletion runs before session metadata deletion; any failure
   still revokes the in-process token, completes local cache cleanup, and is
@@ -47,12 +48,16 @@ Implementation notes:
 
 - Entering offline mode does not clear local data.
 - `Go Offline` acknowledges offline state and keeps cached content available.
-- Reconnect attempts are separate from logout and must not wipe data unless server returns 4xx. In-process reconnect is intentionally unsupported; recovery is relaunch-only.
+- Reconnect attempts are separate from logout and must not wipe data unless the
+  server returns 4xx. In-process reconnect is explicit and user-initiated via
+  Settings or Pending Changes; passive connectivity events never reconnect.
 
 ## Source map
 
 - Controller logout implementation: `src/controllers/SpeleoDBController.ts`
-- Startup/session validation decisions: `src/controllers/SpeleoDBController.ts`
+- Startup/session validation decisions: `src/controllers/SessionCoordinator.ts`
 - Offline modal behavior: `src/context/useStartupUiCoordinator.ts`, `src/context/SpeleoDBProvider.tsx`
 - Overlay details: `docs/dashboard-map-overlays.md`
-- Regression tests: `src/controllers/SpeleoDBController.test.ts`, `src/context/SpeleoDBProvider.test.tsx`
+- Regression tests: `src/controllers/SessionCoordinator.test.ts`,
+  `src/controllers/SpeleoDBController.test.ts`, and
+  `src/context/SpeleoDBProvider.test.tsx`

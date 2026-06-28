@@ -1,9 +1,9 @@
 /**
  * SpeleoDBController -- the "center of the app".
  *
- * Owns all application state (auth, user, online/offline) and orchestrates
- * business logic.  Delegates network I/O to SpeleoDBService and persistence
- * to PreferencesService -- both injected for testability.
+ * Public application façade for React state and mobile business operations.
+ * Session/startup state is delegated to SessionCoordinator; network I/O and
+ * persistence remain behind injected services.
  *
  * Exposes an observer pattern (subscribe / notify) so the React provider can
  * re-render via useSyncExternalStore.
@@ -12,10 +12,8 @@
 import {
   DEFAULT_MAP_LAYER_ID,
   GPS,
-  HTTP_STATUS,
   MAP_LAYERS,
   MAP_OVERLAYS,
-  NETWORK,
   TILE_PREFETCH,
 } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
@@ -53,7 +51,6 @@ import type { MapLayerDefinition } from '../types/mapLayer';
 import type {
   AuthResponse,
   AuthState,
-  AuthTokenResponse,
   LoginCredentials,
   OAuthTokenCredentials,
   User,
@@ -127,6 +124,7 @@ import { snapshotFromRemote } from '../offline/gpsTrackSnapshot';
 import { parseRemoteGpsTrack, parseRemoteGpsTracks } from '../utils/remoteGpsTrack';
 import { gpsTrackGeoJsonToPoints } from '../utils/gpsTrackGeoJson';
 import { CancellationContext } from './CancellationContext';
+import { SessionCoordinator } from './SessionCoordinator';
 import { isAbortError } from '../utils/abort';
 import type {
   CacheLoadPhaseResult,
@@ -155,9 +153,6 @@ interface SessionProjectGeoJSONDisposition {
   /** Unversioned legacy bytes may retry only after a canonical online fetch. */
   retryWhenOnline: boolean;
 }
-
-const OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE =
-  'Unable to reach SpeleoDB. Offline access requires a previously validated session.';
 
 // ==================== Preferences interface (for DI) ====================
 
@@ -222,39 +217,11 @@ const GPS_RECORDING_PERMISSION_LOST_MESSAGE =
   'Location access was denied, so GPS recording stopped. Allow location ' +
   '(set to "Always" for background recording) and start again.';
 
-function hasAuthTokenResponse(data: unknown): data is AuthTokenResponse {
-  if (!data || typeof data !== 'object') {
-    return false;
-  }
-
-  return typeof (data as { token?: unknown }).token === 'string'
-    && (data as { token: string }).token.trim().length > 0;
-}
-
-function extractAuthErrorMessage(data: unknown): string | undefined {
-  if (!data || typeof data !== 'object') return undefined;
-
-  const body = data as {
-    detail?: unknown;
-    message?: unknown;
-    errors?: { non_field_errors?: unknown };
-  };
-  if (typeof body.detail === 'string' && body.detail.trim()) return body.detail;
-  if (typeof body.message === 'string' && body.message.trim()) return body.message;
-  if (Array.isArray(body.errors?.non_field_errors)) {
-    const firstError = body.errors.non_field_errors[0];
-    if (typeof firstError === 'string' && firstError.trim()) return firstError;
-  }
-  return undefined;
-}
-
 // ==================== Controller ====================
 
 export class SpeleoDBController {
   // ---- Observable state -----------------------------------------------------
-  private _authState: AuthState = { isAuthenticated: false, user: null, token: null };
-  private _isOnline = false;
-  private _isOfflineLocked = false;
+  private readonly sessionCoordinator: SessionCoordinator;
   private _projects: Project[] = [];
   private _syncStatus: SyncStatus = 'idle';
   private _lastSyncedAt: number | null = null;
@@ -314,7 +281,6 @@ export class SpeleoDBController {
   private _isPurgingLocalData = false;
   private _asyncGeneration = 0;
   private _nextRunId = 1;
-  private activeValidationContext: CancellationContext | null = null;
   private activeSyncContext: CancellationContext | null = null;
   // Best-effort, fire-and-forget layer prefetches (Settings toggle) run on their
   // own contexts. Tracked here so logout/teardown aborts them like the sync and
@@ -323,9 +289,6 @@ export class SpeleoDBController {
   private _trackedOperations = new Set<Promise<unknown>>();
 
   // Snapshot references for useSyncExternalStore (identity-stable between notifies)
-  private _authStateSnapshot: AuthState = this._authState;
-  private _isOnlineSnapshot: boolean = this._isOnline;
-  private _isOfflineLockedSnapshot: boolean = this._isOfflineLocked;
   private _projectsSnapshot: Project[] = this._projects;
   private _syncStatusSnapshot: SyncStatus = this._syncStatus;
   private _lastSyncedAtSnapshot: number | null = this._lastSyncedAt;
@@ -367,11 +330,21 @@ export class SpeleoDBController {
     private gpsTrackGpxService: GpsTrackGpxService = new GpsTrackGpxService(),
     private projectGeoJSONAnalyzer: ProjectGeoJSONAnalyzerPort = new ProjectGeoJSONAnalyzer(),
   ) {
+    this.sessionCoordinator = new SessionCoordinator({
+      transport: this.service,
+      sessionStore: this.prefs.session,
+      hooks: {
+        notifyStateChanged: () => this.notify(),
+        invalidateApplicationOperations: () => this.invalidateAsyncOperations(),
+        purgeLocalUserData: () => this.purgeAllLocalUserData(),
+        startReconnectSync: () => { void this.syncProjects(); },
+        setOfflineRuntime: (locked) => setTileCacheOfflineModeRuntime(locked),
+      },
+    });
     this.attachTilePrefetch(tilePrefetch ?? this.createTilePrefetchService());
     this.offlineQueue = this.buildOfflineQueue();
-    this.restoreSession();
+    this.restoreLastSyncedAt();
     this.restoreTileCacheOverLimitConsent();
-    this.setOfflineLocked(false);
     // Load persisted GPS tracks so the panel shows them on startup. Only notify
     // when something was restored, so a clean start does not perturb revisions.
     const gpsLoadGeneration = this.captureAsyncGeneration();
@@ -381,7 +354,7 @@ export class SpeleoDBController {
         if (
           tracks.length > 0 &&
           this.isAsyncGenerationCurrent(gpsLoadGeneration) &&
-          this._authState.isAuthenticated &&
+          this.sessionCoordinator.isAuthenticated &&
           !this._isPurgingLocalData
         ) {
           this._gpsTracks = tracks;
@@ -397,7 +370,7 @@ export class SpeleoDBController {
           tracks &&
           tracks.length > 0 &&
           this.isAsyncGenerationCurrent(gpsLoadGeneration) &&
-          this._authState.isAuthenticated &&
+          this.sessionCoordinator.isAuthenticated &&
           !this._isPurgingLocalData
         ) {
           this._remoteGpsTracks = tracks;
@@ -492,19 +465,19 @@ export class SpeleoDBController {
   // ---- State accessors (snapshot-based for useSyncExternalStore) -------------
 
   get authState(): AuthState {
-    return this._authStateSnapshot;
+    return this.sessionCoordinator.authState;
   }
 
   get isOnline(): boolean {
-    return this._isOnlineSnapshot;
+    return this.sessionCoordinator.isOnline;
   }
 
   get isOfflineLocked(): boolean {
-    return this._isOfflineLockedSnapshot;
+    return this.sessionCoordinator.isOfflineLocked;
   }
 
   get currentUser(): User | null {
-    return this._authState.user;
+    return this.sessionCoordinator.currentUser;
   }
 
   get projects(): Project[] {
@@ -640,7 +613,7 @@ export class SpeleoDBController {
   }
 
   isAuthenticated(): boolean {
-    return this._authState.isAuthenticated;
+    return this.sessionCoordinator.isAuthenticated;
   }
 
   // ---- Observer pattern -----------------------------------------------------
@@ -652,9 +625,6 @@ export class SpeleoDBController {
 
   private notify(): void {
     // Produce new snapshot references so useSyncExternalStore detects changes.
-    this._authStateSnapshot = { ...this._authState };
-    this._isOnlineSnapshot = this._isOnline;
-    this._isOfflineLockedSnapshot = this._isOfflineLocked;
     if (this._projectsSnapshot !== this._projects) {
       this._projectsSnapshot = this._projects;
     }
@@ -702,7 +672,7 @@ export class SpeleoDBController {
 
   private invalidateAsyncOperations(): void {
     this._asyncGeneration += 1;
-    this.activeValidationContext?.abort('Async operations invalidated');
+    this.sessionCoordinator.invalidate();
     this.activeSyncContext?.abort('Async operations invalidated');
     for (const context of this.activeLayerPrefetchContexts) {
       context.abort('Async operations invalidated');
@@ -718,21 +688,10 @@ export class SpeleoDBController {
     return generation === this._asyncGeneration;
   }
 
-  private staleSessionResult(): 'ok' | 'unauthorized' {
-    return this._authState.isAuthenticated ? 'ok' : 'unauthorized';
-  }
-
   private nextRunId(): number {
     const runId = this._nextRunId;
     this._nextRunId += 1;
     return runId;
-  }
-
-  private beginValidationContext(): CancellationContext {
-    this.activeValidationContext?.abort('Session validation superseded');
-    const context = new CancellationContext(this.nextRunId(), 'Session validation');
-    this.activeValidationContext = context;
-    return context;
   }
 
   private beginSyncContext(): CancellationContext {
@@ -740,10 +699,6 @@ export class SpeleoDBController {
     const context = new CancellationContext(this.nextRunId(), 'Project sync');
     this.activeSyncContext = context;
     return context;
-  }
-
-  private isValidationContextCurrent(context: CancellationContext): boolean {
-    return this.activeValidationContext === context;
   }
 
   private isSyncContextCurrent(context: CancellationContext): boolean {
@@ -822,11 +777,6 @@ export class SpeleoDBController {
     });
   }
 
-  private setOfflineLocked(locked: boolean): void {
-    this._isOfflineLocked = locked;
-    setTileCacheOfflineModeRuntime(locked);
-  }
-
   /**
    * Flip the app from online to offline at runtime when a server request shows
    * we can no longer reach the backend (timeout / transport error / 5xx).
@@ -837,10 +787,7 @@ export class SpeleoDBController {
    * `online`/`offline` connectivity events. See docs/networking.md.
    */
   private enterOfflineMode(): void {
-    if (this._isOfflineLocked) return;
-    this._isOnline = false;
-    this.setOfflineLocked(true);
-    this.notify();
+    this.sessionCoordinator.enterOfflineMode();
   }
 
   async preloadTilePrefetch(): Promise<void> {
@@ -999,66 +946,7 @@ export class SpeleoDBController {
 
   /** Login validates credentials against the server and never stores passwords locally. */
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
-    const { email, password, instance } = credentials;
-
-    if (!this.validateEmail(email)) {
-      return { success: false, message: 'Invalid email address' };
-    }
-    if (!password) {
-      return { success: false, message: 'Password is required' };
-    }
-    if (!instance?.trim()) {
-      return { success: false, message: 'SpeleoDB instance URL is required' };
-    }
-
-    // Online path
-    if (this.hasNetworkAccess()) {
-      try {
-        const response = await this.service.authenticate(instance, email, password);
-
-        if (isSuccessfulStatus(response.status) && hasAuthTokenResponse(response.data)) {
-          const authToken = response.data.token.trim();
-          const userEmail = typeof response.data.user === 'string' && response.data.user.trim()
-            ? response.data.user
-            : email;
-          let user: User | null;
-          try {
-            user = await this.establishAuthenticatedSession(
-              authToken,
-              instance,
-              userEmail,
-            );
-          } catch {
-            return {
-              success: false,
-              message: 'Login succeeded, but the secure session could not be saved.',
-            };
-          }
-          return {
-            success: true,
-            message: 'Login successful',
-            user: user ?? undefined,
-            token: authToken,
-          };
-        }
-
-        // Error response from server
-        const message =
-          extractAuthErrorMessage(response.data) ??
-          (response.status === HTTP_STATUS.UNAUTHORIZED ? 'Invalid email or password' : 'Login failed');
-        return { success: false, message };
-      } catch {
-        return {
-          success: false,
-          message: OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE,
-        };
-      }
-    }
-
-    return {
-      success: false,
-      message: OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE,
-    };
+    return this.sessionCoordinator.login(credentials);
   }
 
   /**
@@ -1067,50 +955,7 @@ export class SpeleoDBController {
    * offline fallback for this flow.
    */
   async loginWithToken(credentials: OAuthTokenCredentials): Promise<AuthResponse> {
-    const token = credentials.token?.trim();
-    const instance = credentials.instance?.trim();
-
-    if (!token) {
-      return { success: false, message: 'OAuth token is required' };
-    }
-    if (!instance) {
-      return { success: false, message: 'SpeleoDB instance URL is required' };
-    }
-
-    try {
-      const response = await this.service.validateToken(instance, token);
-
-      if (isSuccessfulStatus(response.status)) {
-        try {
-          await this.establishAuthenticatedSession(token, instance);
-        } catch {
-          return {
-            success: false,
-            message: 'Login succeeded, but the secure session could not be saved.',
-          };
-        }
-        return { success: true, message: 'Login successful', token };
-      }
-
-      if (isClientErrorStatus(response.status)) {
-        return {
-          success: false,
-          message: extractAuthErrorMessage(response.data) ?? 'Invalid OAuth token',
-        };
-      }
-
-      return {
-        success: false,
-        message:
-          extractAuthErrorMessage(response.data) ??
-          'Unable to validate OAuth token. Please try again.',
-      };
-    } catch {
-      return {
-        success: false,
-        message: 'Unable to validate OAuth token. Check your connection and try again.',
-      };
-    }
+    return this.sessionCoordinator.loginWithToken(credentials);
   }
 
   /**
@@ -1120,10 +965,7 @@ export class SpeleoDBController {
    * - other -> 'network_error' (keeps current session, enters offline mode)
    */
   async validateSession(): Promise<'ok' | 'unauthorized' | 'network_error'> {
-    if (this._isOfflineLocked) {
-      return 'network_error';
-    }
-    return this.validateSessionAgainstServer();
+    return this.sessionCoordinator.validateSession();
   }
 
   /**
@@ -1140,78 +982,7 @@ export class SpeleoDBController {
    * user-driven, not a passive connectivity listener. See docs/networking.md.
    */
   async attemptReconnect(): Promise<'ok' | 'unauthorized' | 'network_error'> {
-    const result = await this.validateSessionAgainstServer();
-    if (result === 'ok') {
-      // Fire-and-forget: the offline lock is already cleared, so the UI can
-      // hide the Go Online button immediately while the sync runs. syncProjects
-      // tracks itself for logout teardown and refreshes the GPS track list.
-      // Pending GPS ops drain from the Pending page, exactly like landmarks.
-      void this.syncProjects();
-    }
-    return result;
-  }
-
-  private async validateSessionAgainstServer(): Promise<'ok' | 'unauthorized' | 'network_error'> {
-    const validationGeneration = this.captureAsyncGeneration();
-    const context = this.beginValidationContext();
-    const session = this.prefs.session.getSession();
-    if (!session) {
-      return 'unauthorized';
-    }
-    const { instance, token } = session;
-
-    try {
-      const response = await this.service.validateToken(
-        instance,
-        token,
-        {
-          timeoutMs: NETWORK.STARTUP_AUTH_TIMEOUT_MS,
-          signal: context.signal,
-        },
-      );
-
-      context.throwIfAborted();
-      if (
-        !this.isAsyncGenerationCurrent(validationGeneration) ||
-        !this.isValidationContextCurrent(context)
-      ) {
-        return this.staleSessionResult();
-      }
-
-      if (isSuccessfulStatus(response.status)) {
-        this._isOnline = true;
-        this.setOfflineLocked(false);
-        this.notify();
-        return 'ok';
-      }
-      if (isClientErrorStatus(response.status)) {
-        await this.logout();
-        return 'unauthorized';
-      }
-      // Any non-4xx status at startup is treated as a transient network/server issue.
-      // Keep the session and move to offline mode instead of wiping local data.
-      this._isOnline = false;
-      this.setOfflineLocked(true);
-      this.notify();
-      return 'network_error';
-    } catch (error) {
-      if (
-        isAbortError(error) ||
-        !this.isAsyncGenerationCurrent(validationGeneration) ||
-        !this.isValidationContextCurrent(context)
-      ) {
-        return this.staleSessionResult();
-      }
-      // Timeout or transport errors must never trigger logout.
-      this._isOnline = false;
-      this.setOfflineLocked(true);
-      this.notify();
-      return 'network_error';
-    } finally {
-      if (this.activeValidationContext === context) {
-        this.activeValidationContext = null;
-      }
-    }
+    return this.sessionCoordinator.attemptReconnect();
   }
 
   /**
@@ -1219,7 +990,7 @@ export class SpeleoDBController {
    * Confirmation (if any) is handled by the UI layer before calling this.
    */
   async logout(): Promise<void> {
-    await this.purgeAllLocalUserData();
+    await this.sessionCoordinator.logout();
   }
 
   private async purgeAllLocalUserData(): Promise<void> {
@@ -1246,9 +1017,7 @@ export class SpeleoDBController {
       await this.geolocationWatcher.stop();
 
       // Reset in-memory state first so UI reflects the wipe immediately.
-      this._authState = { isAuthenticated: false, user: null, token: null };
-      this._isOnline = false;
-      this.setOfflineLocked(false);
+      this.sessionCoordinator.reset();
       this._projects = [];
       this._syncStatus = 'idle';
       this._lastSyncedAt = null;
@@ -2350,13 +2119,13 @@ export class SpeleoDBController {
 
   private async persistGpsTrack(track: LocalGpsTrack): Promise<void> {
     const generation = this._gpsPersistGeneration;
-    if (this._isPurgingLocalData || !this._authState.isAuthenticated) return;
+    if (this._isPurgingLocalData || !this.sessionCoordinator.isAuthenticated) return;
     try {
       await this.gpsTrackStore.put(track);
       if (
         generation !== this._gpsPersistGeneration ||
         this._isPurgingLocalData ||
-        !this._authState.isAuthenticated
+        !this.sessionCoordinator.isAuthenticated
       ) {
         await this.gpsTrackStore.remove(track.id).catch(() => {
           // Best-effort cleanup of a write that finished after logout/discard.
@@ -2854,8 +2623,7 @@ export class SpeleoDBController {
 
       const freshProjects = response.data;
       this._projects = freshProjects;
-      this._isOnline = true;
-      this.setOfflineLocked(false);
+      this.sessionCoordinator.markOnline(false);
       const cacheWriteSucceeded = await this.cache.setProjects(
         freshProjects,
         { signal: context.signal },
@@ -3760,37 +3528,26 @@ export class SpeleoDBController {
   // ---- Validation helpers ---------------------------------------------------
 
   validateEmail(email: string): boolean {
-    const re = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
-    return re.test(email);
+    return this.sessionCoordinator.validateEmail(email);
   }
 
   // ---- Private helpers ------------------------------------------------------
 
-  /** Restore auth state from preferences at construction time. */
-  private restoreSession(): void {
+  /** Restore the non-secret successful-sync timestamp at construction time. */
+  private restoreLastSyncedAt(): void {
     try {
       const prefs = this.prefs.getPreferences();
-      const session = this.prefs.session.getSession();
-      if (session) {
-        const email = session.email?.trim() ?? '';
-        this._authState = {
-          isAuthenticated: true,
-          user: email ? { id: 'restored', email, name: email } : null,
-          token: session.token,
-        };
-        if (
-          typeof prefs.lastSyncedAt === 'number' &&
-          Number.isFinite(prefs.lastSyncedAt) &&
-          prefs.lastSyncedAt > 0
-        ) {
-          this._lastSyncedAt = prefs.lastSyncedAt;
-        }
-        // Update snapshots (no notify -- no listeners registered yet at construct time).
-        this._authStateSnapshot = { ...this._authState };
+      if (
+        this.sessionCoordinator.isAuthenticated
+        && typeof prefs.lastSyncedAt === 'number'
+        && Number.isFinite(prefs.lastSyncedAt)
+        && prefs.lastSyncedAt > 0
+      ) {
+        this._lastSyncedAt = prefs.lastSyncedAt;
         this._lastSyncedAtSnapshot = this._lastSyncedAt;
       }
     } catch (error) {
-      console.error('Failed to load auth state:', error);
+      console.error('Failed to load last sync state:', error);
     }
   }
 
@@ -3804,33 +3561,7 @@ export class SpeleoDBController {
     }
   }
 
-  /** Publish and persist a validated online session from either login method. */
-  private async establishAuthenticatedSession(
-    token: string,
-    instance: string,
-    email?: string,
-  ): Promise<User | null> {
-    const normalizedToken = token.trim();
-    const normalizedInstance = instance.trim();
-    const normalizedEmail = email?.trim() ?? '';
-    const user: User | null = normalizedEmail
-      ? { id: 'auth', email: normalizedEmail, name: normalizedEmail }
-      : null;
-
-    await this.prefs.session.establish({
-      email: normalizedEmail || undefined,
-      token: normalizedToken,
-      instance: normalizedInstance,
-    });
-    this.invalidateAsyncOperations();
-    this._authState = { isAuthenticated: true, user, token: normalizedToken };
-    this._isOnline = true;
-    this.setOfflineLocked(false);
-    this.notify();
-    return user;
-  }
-
   private hasNetworkAccess(): boolean {
-    return !this._isOfflineLocked;
+    return this.sessionCoordinator.hasNetworkAccess;
   }
 }

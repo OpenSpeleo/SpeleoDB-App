@@ -20,7 +20,10 @@ This document defines how network state is handled in the app and what is intent
 Explicit, user-initiated actions may attempt to return online from offline mode:
 
 1. Close and reopen the app (startup validation flow).
-2. Tap **Go Online** in Settings or **Try Reconnect** on Pending Changes. Both call `controller.attemptReconnect()` (an in-process reconnect that probes the server via `validateSessionAgainstServer()`, then launches a sync on success).
+2. Tap **Go Online** in Settings or **Try Reconnect** on Pending Changes. Both
+   call `controller.attemptReconnect()`, which delegates the explicit probe to
+   `SessionCoordinator` and launches a sync through an injected lifecycle hook
+   only after validation succeeds.
 
 If none of these actions occurs, the app remains in offline behavior even if device connectivity changes. The Settings **Resync** button calls `syncProjects()` only, is disabled while offline-locked, and never performs a reconnect.
 
@@ -65,6 +68,8 @@ The app enters offline mode only as a result of a failed server probe, never fro
 - Pre-login token validation failure does not purge local data. It never
   established a session, so it returns a form error rather than calling the
   stored-session logout path.
+- `SessionCoordinator` is the sole owner of auth-validation outcome policy and
+  online/offline state transitions; `SpeleoDBController` remains the UI façade.
 - `4xx` from auth validation means token/session is invalid and must trigger logout + local purge.
 - Network errors, timeouts, and non-`4xx` failures must preserve session and local cache.
 - Logout invalidates and cancels in-flight startup/sync work before cache purge, so stale validation or sync completions cannot re-lock offline mode or repopulate cache after logout.
@@ -98,7 +103,8 @@ Implementation notes:
 - `SpeleoDBController.syncProjects` is split into explicit phases: cache load, project-list refresh, project GeoJSON sync, overlay sync, and tile-prefetch scheduling. It treats only `2xx + Project[]` as the project-list success path. `2xx + []` is a valid empty refresh and replaces stale cached projects; non-array `2xx` payloads are malformed and are treated like failed refreshes. Failed refreshes preserve cache, skip later phase side-effects, and set `syncStatus` to `'error'` only when no cached projects are available, otherwise `'done'`. A 4xx during data fetch never triggers logout — only `validateSession` does.
 - Background GeoJSON cache writes validate the downloaded body before persisting it. Non-`2xx` or malformed GeoJSON payloads are skipped so stale cache is preserved instead of being overwritten with garbage.
 - Service/cache IO now accepts cancellation signals from controller-owned run contexts. Web `fetch` aborts transport immediately; native requests are best-effort at the transport level but still must not publish stale state or cache writes after abort/logout.
-- Login error parsing in `SpeleoDBController.login` reads `detail` / `message` / `errors.non_field_errors` directly off `response.data` (already v2-shaped).
+- Login error parsing in `SessionCoordinator.login` reads `detail` / `message` /
+  `errors.non_field_errors` directly off `response.data` (already v2-shaped).
 - Direct token login reuses `SpeleoDBService.validateToken`; `2xx` establishes
   an identity-free session, while every failure remains unauthenticated and
   never falls back offline.

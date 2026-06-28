@@ -71,7 +71,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Security] Migrate authenticated sessions to secure storage`
 - [x] `[Security] Remove plaintext offline password authentication`
 - [x] `[Security] Harden URLs backups and diagnostics`
-- [ ] `[Refactoring] Extract session and startup coordination`
+- [x] `[Refactoring] Extract session and startup coordination`
 - [ ] `[Refactoring] Extract project synchronization coordination`
 - [ ] `[Refactoring] Extract offline mutation and tile coordination`
 - [ ] `[Refactoring] Extract GPS recording and track coordination`
@@ -212,7 +212,7 @@ and physical-device evidence.
 
 ### Harden URLs backups and diagnostics
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `a0ce0da` (`[Security] Harden URLs backups and diagnostics`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -222,3 +222,22 @@ and physical-device evidence.
 - Findings closed: MH-011, MH-012, and MH-013. Backups/transfers exclude app
   data, release traffic is HTTPS-only, sensitive requests do not redirect, and
   console/Sentry diagnostics receive bounded redacted values only.
+
+### Extract session and startup coordination
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
+  compilation.
+- Result: all gates pass. Vitest passes 1,546/1,546 tests across 87 files;
+  aggregate coverage is 85.05% statements, 77.24% branches, 88.38% functions,
+  and 88.03% lines. Android passes 9/9 native tests and iOS passes 7/7 native
+  tests. The new `SessionCoordinator` owns login, restoration, validation
+  cancellation, offline lock, explicit reconnect, and logout decisions behind
+  narrow ports while `SpeleoDBController` preserves its public façade. Direct
+  coordinator coverage is 100% statements, branches, functions, and lines; the
+  controller shrinks from 3,863 baseline lines to 3,567 lines without changing
+  its characterized behavior.
+- Findings closed: the session/startup slice of MH-007. Project, offline/tile,
+  GPS, and dashboard ownership remain scheduled in the next objectives.
