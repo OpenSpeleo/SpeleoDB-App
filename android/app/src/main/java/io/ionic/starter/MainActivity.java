@@ -7,6 +7,7 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(CredentialStorePlugin.class);
         // Local Android-only plugin used to request POST_NOTIFICATIONS (Android 13+)
         // for the background GPS recording foreground-service notification.
         registerPlugin(RecordingNotificationPermissionPlugin.class);

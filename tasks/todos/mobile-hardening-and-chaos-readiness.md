@@ -64,7 +64,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Align local development commands with CI`
 - [x] `[Security] Separate compile smoke artifacts from trusted releases`
 - [x] `[Security] Remove the vulnerable asset generation toolchain`
-- [ ] `[Feature] Add native secure credential storage`
+- [x] `[Feature] Add native secure credential storage`
 - [ ] `[Security] Migrate authenticated sessions to secure storage`
 - [ ] `[Security] Remove plaintext offline password authentication`
 - [ ] `[Security] Harden URLs backups and diagnostics`
@@ -160,9 +160,20 @@ and physical-device evidence.
 
 ### Remove the vulnerable asset generation toolchain
 
-- Commit: recorded after commit creation.
+- Commit: `bfe2a44` (`[Security] Remove the vulnerable asset generation toolchain`).
 - Verification: clean Node 22 install, production/full npm audits, `make ci`,
   Android release compilation, and iOS Release build.
 - Result: clean Node 22 install and both audits report zero vulnerabilities;
   all 1,443 tests and web/native release builds pass.
 - Findings closed: MH-010; the dependency and self-installing target are removed.
+
+### Add native secure credential storage
+
+- Commit: recorded after commit creation.
+- Verification: `make ci` under Node 22.22.2; Android `lintDebug`,
+  `testDebugUnitTest`, `assembleRelease`, and `bundleRelease`; five hosted
+  Keychain XCTests on iPhone 17 Pro/iOS 26.5; and an iOS Release simulator build.
+- Result: all web and native gates pass. The new Android suite passes 9/9 and
+  the new iOS suite passes 5/5 with no skips or retries.
+- Findings closed: none. This establishes the secure native boundary required
+  to close MH-001; session migration remains the next objective.

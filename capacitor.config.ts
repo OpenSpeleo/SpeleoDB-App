@@ -4,6 +4,9 @@ const config: CapacitorConfig = {
   appId: "org.speleodb.app",
   appName: "SpeleoDB",
   webDir: "dist",
+  // Native bridge debug logging includes plugin arguments. Credentials cross
+  // that bridge, so native logging must remain disabled in every build type.
+  loggingBehavior: "none",
   server: {
     hostname: "www.speleodb.org",
     androidScheme: "https",

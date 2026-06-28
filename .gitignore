@@ -33,7 +33,9 @@ yarn-error.log*
 
 .env
 
-SpeleoDB
+# Nested backend checkout is outside the mobile audit scope. Anchor this rule so
+# the case-insensitive macOS filesystem does not hide the Android org.speleodb package.
+/SpeleoDB/
 
 resources/ios/**/*
 resources/android/**/*
