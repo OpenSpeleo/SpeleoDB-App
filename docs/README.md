@@ -13,6 +13,8 @@ This folder contains product and engineering documentation for core app behavior
   validation, offline lock, reconnect, cancellation, and logout.
 - `project-sync-coordination.md`: project-list, GeoJSON quarantine, overlay,
   cancellation, publication, and downstream phase ownership.
+- `offline-tile-coordination.md`: offline queue lifecycle, replay ports, pending
+  revisions, tile scheduling, consent, layer settings, and logout teardown.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `ci.md`: GitHub Actions stages, Vitest non-watch requirements, integration-test secrets, and native build verification.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding

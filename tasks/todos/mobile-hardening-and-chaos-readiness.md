@@ -73,7 +73,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Security] Harden URLs backups and diagnostics`
 - [x] `[Refactoring] Extract session and startup coordination`
 - [x] `[Refactoring] Extract project synchronization coordination`
-- [ ] `[Refactoring] Extract offline mutation and tile coordination`
+- [x] `[Refactoring] Extract offline mutation and tile coordination`
 - [ ] `[Refactoring] Extract GPS recording and track coordination`
 - [ ] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [ ] `[Fix] Stop inactive page effects and polling`
@@ -244,7 +244,7 @@ and physical-device evidence.
 
 ### Extract project synchronization coordination
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `66e5281` (`[Refactoring] Extract project synchronization coordination`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -258,3 +258,21 @@ and physical-device evidence.
   below 600 lines; the controller shrinks from 3,567 to 2,468 lines.
 - Findings closed: the project synchronization and GeoJSON/overlay ownership
   slice of MH-007. Tile/offline and GPS ownership remain next.
+
+### Extract offline mutation and tile coordination
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
+  compilation.
+- Result: all gates pass. Vitest passes 1,546/1,546 tests across 87 files;
+  aggregate coverage is 85.25% statements, 77.32% branches, 88.68% functions,
+  and 88.32% lines. Android passes 9/9 native tests and iOS passes 7/7 native
+  tests. Offline queue lifecycle/revision/replay delegation and tile
+  service/consent/layer/scheduling ownership now sit behind focused
+  coordinators without changing persisted operation or tile formats. Both new
+  modules remain below 600 lines; the controller shrinks from 2,468 to 2,017
+  lines.
+- Findings closed: the offline mutation and tile ownership slice of MH-007. GPS
+  and dashboard ownership remain scheduled next.

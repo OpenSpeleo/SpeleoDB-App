@@ -119,13 +119,17 @@ In offline mode flows, local data must only be purged on authentication-invalid 
 - Networking state model: `docs/networking.md`
 - Architecture and style expectations: `docs/implementation-guidelines.md`
 - Map/tile offline fetch behavior: `src/services/TileCacheService.ts`
+- Tile orchestration, consent, and layer settings:
+  `src/controllers/TileCoordinator.ts`
 - Tile prefetch runtime behavior: `src/services/TilePrefetchService.ts`
 - Tile prefetch planning (locations + zoom -> tile URLs): `src/services/tilePrefetchPlanner.ts`
 - Overlay contract and icon mapping: `docs/dashboard-map-overlays.md`
 
 ## Satellite tile pre-caching (projects + landmarks)
 
-During `syncProjects()`, after project/overlay GeoJSON is cached, `SpeleoDBController.scheduleTilePrefetchPhase` pins satellite tiles into the `speleo_tiles` IndexedDB so the map renders offline:
+During `syncProjects()`, after project/overlay GeoJSON is cached,
+`TileCoordinator.scheduleSyncPhase` pins satellite tiles into the `speleo_tiles`
+IndexedDB so the map renders offline:
 
 - Projects: one job per project, using its persisted, validated survey bounds.
   Raw project GeoJSON never enters the tile planner. Oversized/invalid/slow
@@ -173,14 +177,16 @@ A magic-hash check treats provider "no data" placeholder tiles (matched by SHA-2
 
 ### Tile cache cap and user-approved overflow
 
-All prefetched tiles are pinned and share a single 500 MB cap (`MAP.TILE_CACHE_MAX_BYTES`). Pinned tiles are not evictable, so a large (e.g. global landmark) set can reach the cap. Rather than silently failing, the cache raises `TileCacheCapacityError`, `TilePrefetchService` marks the job `blockedByStorage` and halts the queue, and the controller surfaces a **one-time, persistent** consent prompt:
+All prefetched tiles are pinned and share a single 500 MB cap (`MAP.TILE_CACHE_MAX_BYTES`). Pinned tiles are not evictable, so a large (e.g. global landmark) set can reach the cap. Rather than silently failing, the cache raises `TileCacheCapacityError`, `TilePrefetchService` marks the job `blockedByStorage` and halts the queue, and `TileCoordinator` surfaces a **one-time, persistent** consent prompt through the controller façade:
 
 - The auto prompt appears exactly once; "Allow more storage" and "Not now" both persist `tileCacheOverLimitPromptAcknowledged` (gated so it never auto-reappears across app starts).
 - "Allow more storage" persists `tileCacheOverLimitApproved` and lifts the cap for pinned writes via `setTileCacheOverLimitApprovedRuntime`, then resumes the stalled queue (`resumeBlockedJobs`).
 - Settings shows a tappable over-limit warning to re-open the prompt manually, and a Revoke action once approved.
 - Both flags live in `PreferencesService` and are cleared on logout. Offline best-effort runtime caching (`upsertTileBestEffort`) is unaffected and stays within the cap.
 - Mutual exclusivity is one-directional and safe: the consent modal is never shown alongside the offline, companion-info, or project-GeoJSON warning modals. If a higher-priority modal takes the slot while consent is open, the coordinator flags `storageConsentSuppressedByGate` and the modal's `onDidDismiss` does **not** acknowledge in that window, so a gating-driven close cannot silently opt the user out of the one-time prompt; consent re-shows when the gate clears. Only a genuine user dismissal (button, gesture, controlled close after a choice) acknowledges.
-- Diagnostic: `isTileCacheOverLimit` intentionally returns false once approved (the Settings warning disappears). To avoid a silently-stalled prefetch if the runtime cap-lift never reached the tile cache, the controller logs a one-shot `console.warn` when a job remains `blockedByStorage` while approval is in effect.
+- Diagnostic: `isTileCacheOverLimit` intentionally returns false once approved
+  (the Settings warning disappears). `TileCoordinator` logs one bounded warning
+  if a job remains blocked after approval.
 - Caveat (known, by design): once approved, pinned prefetch may exceed the cap **without an upper bound**. For a globally-scattered landmark set at zoom 0-18 this can reach multiple GB. A bounded guardrail (lower landmark `maxZoom` and/or a max-tiles ceiling in `TILE_PREFETCH.LANDMARK_REQUEST`) is a tracked follow-up pending product sign-off; the current behavior preserves zoom/pad parity with project prefetch.
 - Key tests:
   - `src/controllers/SpeleoDBController.test.ts`

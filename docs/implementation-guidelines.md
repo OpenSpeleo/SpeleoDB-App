@@ -77,7 +77,9 @@ This document defines high-level architecture boundaries and coding expectations
 - Fail safely for user-facing flows: preserve usable local state when remote calls fail.
 - Use best-effort writes for non-critical caches when appropriate.
 - Do not swallow errors that determine auth/offline correctness.
-- Cancellation is not an error fallback. Once a controller-owned run is aborted, stale IO completions must not publish state, cache writes, or prefetch jobs.
+- Cancellation is not an error fallback. Once a coordinator-owned run is
+  aborted, stale IO completions must not publish state, cache writes, or
+  prefetch jobs.
 - Recheck cancellation after persistence and cleanup awaits, immediately before
   logging, counters, warnings, revisions, or other observable publication.
 

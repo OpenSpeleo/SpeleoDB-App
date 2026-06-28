@@ -9,7 +9,8 @@ connectivity returns.
 
 > Design rule: do **not** invent a second offline mechanism for a new entity.
 > Add a new `OfflineEntityType`, subclass `OfflineOp`, extend the
-> `OfflineReplayPort`, and route the controller mutation through the queue.
+> `OfflineReplayPort`, and route the controller mutation through
+> `OfflineMutationCoordinator`.
 > Everything (persistence, ordering, coalescing, conflict UI, the Pending page,
 > the `pendingOpsCount` badge) is then inherited for free.
 
@@ -52,11 +53,11 @@ Two layers, per entity:
 What the user sees is `fold(groundTruth, pendingOps)`, recomputed on demand:
 
 - landmarks: `SpeleoDBController.getOverlayGeoJSON('landmarks')` ->
-  `OfflineOpQueue.foldOver(fc)` (applies only landmark-entity ops).
+  `OfflineMutationCoordinator.foldLandmarks(fc)` -> queue fold (applies only
+  landmark-entity ops).
 - gps tracks: `SpeleoDBController.gpsTracks` (the unified list) merges local
-  recordings with `OfflineOpQueue.foldGpsTracks(remoteList)` (applies only
-  gps-track-entity ops) and annotates each row with a derived pending state from
-  `OfflineOpQueue.gpsPendingBySubject()`.
+  recordings with `OfflineMutationCoordinator.foldGpsTracks(remoteList)` and
+  annotates each row with derived pending state from the same coordinator.
 
 Why fold instead of mutating the cache and storing an "undo"? Discarding a
 pending op (or reordering the queue) becomes a pure recompute -- no re-pull,
@@ -109,6 +110,7 @@ Concrete subclasses:
 - GPS tracks: `CreateGpsTrackOp` (holds the recorded local track id; replay
   uploads its GPX), `UpdateGpsTrackOp` (`{name,color}`), `DeleteGpsTrackOp`.
 
+Queue lifecycle and revision publication live in `OfflineMutationCoordinator`.
 Network replay + conflict detection live in `OfflineOpQueue`, not on the ops, so
 ops stay free of HTTP and are trivially unit-testable. The queue dispatches on
 op type, and pulls the **right** server snapshot per entity lazily within a run

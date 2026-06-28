@@ -19,8 +19,8 @@ project-sync behavior:
   the landmarks ground truth while pending mutations exist or replay is active.
 
 All three production modules remain below the 600-line limit. Tile scheduling
-and GPS refresh are explicit phase hooks because their state belongs to the
-dedicated tile/offline and GPS coordinators scheduled next.
+is an explicit `TileCoordinator` phase hook; GPS refresh remains an injected
+hook until GPS ownership is extracted in the next objective.
 
 ## Phase contract
 

@@ -94,7 +94,8 @@ a per-layer sync percentage:
 - Extra-layer toggles are also disabled while the app is offline-locked: enabling
   schedules a network prefetch and disabling reconciles cached tiles, neither of
   which can run offline. The row subtitle reads "unavailable offline".
-- Toggling a layer is handled by `SpeleoDBController.setLayerOfflineSync(layerId, enabled)`:
+- Toggling enters through `SpeleoDBController.setLayerOfflineSync` and is owned
+  by `TileCoordinator.setLayerOfflineSync(layerId, enabled)`:
   - persists the opt-in (`layerOfflineSync` in `PreferencesService`),
   - when enabling while online, immediately schedules that layer's prefetch
     using persisted validated project bounds plus landmark boxes,
@@ -119,7 +120,7 @@ consistent while mounted.
   project id or `landmarks`), so the same target has independent jobs per layer.
 - **Tiles are keyed by full URL**, which already uniquely encodes layer + z/x/y
   (each layer has a distinct host/path). No tile re-keying is needed.
-- **Priority**: `SpeleoDBController.scheduleTilePrefetchPhase` enqueues satellite
+- **Priority**: `TileCoordinator.scheduleSyncPhase` enqueues satellite
   landmark + project jobs first, then each enabled extra layer. The prefetch
   queue is FIFO, so satellite tiles always download before extra-layer tiles.
 - Extra layers reuse the same validated project bounds and landmark points read
@@ -185,7 +186,7 @@ layers compete for the same pinned budget and honor the user's override.
 - Shared state: `src/AuthenticatedAppShell.tsx`
 - Preferences: `src/services/PreferencesService.ts`
 - Prefetch jobs: `src/types/tilePrefetch.ts`, `src/services/TilePrefetchService.ts`, `src/services/tileCache/TileCacheRepository.ts`
-- Scheduling + per-layer toggle: `src/controllers/SpeleoDBController.ts`
+- Scheduling + per-layer toggle: `src/controllers/TileCoordinator.ts`
 
 ## Tests
 
