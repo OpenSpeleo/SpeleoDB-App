@@ -100,9 +100,18 @@ Implementation notes:
 
 - `SpeleoDBService` returns `HttpResponse<T>` where `T` is the raw v2 payload (no wrapper).
 - `SpeleoDBController.login` treats any `2xx` auth response with a token body as success; malformed `2xx` auth payloads fall back to normal error handling instead of creating a partial session.
-- `SpeleoDBController.syncProjects` is split into explicit phases: cache load, project-list refresh, project GeoJSON sync, overlay sync, and tile-prefetch scheduling. It treats only `2xx + Project[]` as the project-list success path. `2xx + []` is a valid empty refresh and replaces stale cached projects; non-array `2xx` payloads are malformed and are treated like failed refreshes. Failed refreshes preserve cache, skip later phase side-effects, and set `syncStatus` to `'error'` only when no cached projects are available, otherwise `'done'`. A 4xx during data fetch never triggers logout — only `validateSession` does.
+- `SpeleoDBController.syncProjects` is a stable façade over
+  `ProjectSyncCoordinator`, which orders cache load, project-list refresh,
+  project GeoJSON, overlay, GPS refresh, and tile-prefetch phases. It treats
+  only `2xx + Project[]` as project-list success. `2xx + []` replaces stale
+  cache; malformed `2xx` and failed refreshes preserve cache and skip unsafe
+  downstream side effects. A 4xx data fetch never logs out; only session
+  validation owns that decision.
 - Background GeoJSON cache writes validate the downloaded body before persisting it. Non-`2xx` or malformed GeoJSON payloads are skipped so stale cache is preserved instead of being overwritten with garbage.
-- Service/cache IO now accepts cancellation signals from controller-owned run contexts. Web `fetch` aborts transport immediately; native requests are best-effort at the transport level but still must not publish stale state or cache writes after abort/logout.
+- Service/cache IO accepts cancellation signals from coordinator-owned run
+  contexts. Web `fetch` aborts transport immediately; native requests are
+  best-effort at transport level but cannot publish stale state or cache writes
+  after supersession/logout.
 - Login error parsing in `SessionCoordinator.login` reads `detail` / `message` /
   `errors.non_field_errors` directly off `response.data` (already v2-shaped).
 - Direct token login reuses `SpeleoDBService.validateToken`; `2xx` establishes

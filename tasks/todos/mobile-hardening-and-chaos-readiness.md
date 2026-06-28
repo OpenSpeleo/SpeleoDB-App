@@ -72,7 +72,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Security] Remove plaintext offline password authentication`
 - [x] `[Security] Harden URLs backups and diagnostics`
 - [x] `[Refactoring] Extract session and startup coordination`
-- [ ] `[Refactoring] Extract project synchronization coordination`
+- [x] `[Refactoring] Extract project synchronization coordination`
 - [ ] `[Refactoring] Extract offline mutation and tile coordination`
 - [ ] `[Refactoring] Extract GPS recording and track coordination`
 - [ ] `[Refactoring] Decompose dashboard rendering and interaction state`
@@ -225,7 +225,7 @@ and physical-device evidence.
 
 ### Extract session and startup coordination
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `66a829d` (`[Refactoring] Extract session and startup coordination`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -241,3 +241,20 @@ and physical-device evidence.
   its characterized behavior.
 - Findings closed: the session/startup slice of MH-007. Project, offline/tile,
   GPS, and dashboard ownership remain scheduled in the next objectives.
+
+### Extract project synchronization coordination
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
+  compilation.
+- Result: all gates pass. Vitest passes 1,546/1,546 tests across 87 files;
+  aggregate coverage is 85.28% statements, 77.36% branches, 88.72% functions,
+  and 88.32% lines. Android passes 9/9 native tests and iOS passes 7/7 native
+  tests. Project-list state, cancellation, phase ordering, terminal
+  publication, GeoJSON validation/quarantine, and overlay refresh now have
+  focused owners behind the unchanged controller façade. Each new module is
+  below 600 lines; the controller shrinks from 3,567 to 2,468 lines.
+- Findings closed: the project synchronization and GeoJSON/overlay ownership
+  slice of MH-007. Tile/offline and GPS ownership remain next.

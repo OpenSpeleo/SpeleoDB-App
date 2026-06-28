@@ -184,7 +184,8 @@ list refresh or prevent unrelated overlay synchronization.
 
 ## Consumer boundary
 
-The controller exposes active map data atomically as
+`ProjectGeoJSONCoordinator` exposes active map data through the controller
+façade atomically as
 `{ commitId, featureCollection, bounds }`. It returns null for legacy,
 quarantined, session-disabled, missing, or non-current commits. A stable
 `mapDataRevision` is published after map-data sync attempts reach a terminal
@@ -216,7 +217,7 @@ because a URL can be shared by another project.
 ## Diagnostics and warning UX
 
 When an eligible project reaches an active, quarantined, or session-disabled
-disposition, the controller emits a structured device-console record under
+disposition, `ProjectGeoJSONCoordinator` emits a structured device-console record under
 `[project-geojson:bbox]`, including name, ID, commit, cache/computed source,
 available dimensions/duration, status, and failure reason. A transport failure
 before validation has no bbox disposition and uses the ordinary sync warning.

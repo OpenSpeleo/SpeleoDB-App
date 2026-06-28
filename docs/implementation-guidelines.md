@@ -18,8 +18,11 @@ This document defines high-level architecture boundaries and coding expectations
 
 ## State ownership
 
-- Treat `SpeleoDBController` as the source of truth for auth, offline lock, sync, and retry state.
-- Treat controller revision fields as stable publication boundaries. For project
+- Treat `SessionCoordinator` as the source of truth for auth and offline-lock
+  state, and `ProjectSyncCoordinator` as the source of truth for project-list,
+  sync-status, last-sync, cancellation, and map-data revision state. Both remain
+  exposed through the stable `SpeleoDBController` façade.
+- Treat coordinator revision fields as stable publication boundaries. For project
   maps, `mapDataRevision` tells mounted consumers to reread atomic
   `{ commitId, featureCollection, bounds }` records; UI code must still require
   the commit to match `latest_commit.id` and ignore stale async completions.

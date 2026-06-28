@@ -26,7 +26,8 @@ The app fetches these authenticated endpoints during dashboard sync:
 Implementation lives in:
 
 - `src/services/SpeleoDBService.ts`
-- `src/controllers/SpeleoDBController.ts`
+- `src/controllers/ProjectOverlaySyncCoordinator.ts`
+- `src/controllers/ProjectSyncCoordinator.ts`
 - `src/services/ProjectCacheService.ts`
 - `src/utils/overlayMarkerDetails.ts`
 - `src/components/OverlayMarkerDetailsModal.tsx`

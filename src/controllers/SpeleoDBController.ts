@@ -13,7 +13,6 @@ import {
   DEFAULT_MAP_LAYER_ID,
   GPS,
   MAP_LAYERS,
-  MAP_OVERLAYS,
   TILE_PREFETCH,
 } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
@@ -37,7 +36,6 @@ import {
 import { getMapLayerById } from '../services/MapLayersService';
 import { LazyTilePrefetchService } from '../services/LazyTilePrefetchService';
 import {
-  ProjectGeoJSONAnalysisError,
   ProjectGeoJSONAnalyzer,
   type ProjectGeoJSONAnalyzerPort,
 } from '../services/ProjectGeoJSONAnalyzer';
@@ -58,11 +56,6 @@ import type {
 import type { Project } from '../types/project';
 import type {
   ProjectGeoJSONAcknowledgementResult,
-  ProjectGeoJSONAnalysis,
-  ProjectGeoJSONCacheRecord,
-  ProjectGeoJSONFailureDiagnostics,
-  ProjectGeoJSONFailureReason,
-  ProjectGeoJSONFileFailureReason,
   ProjectGeoJSONMapData,
   ProjectGeoJSONWarning,
 } from '../types/projectGeoJSON';
@@ -73,7 +66,6 @@ import type {
   TilePrefetchRequest,
 } from '../types/tilePrefetch';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
-import { isProjectGeoJSONOversized } from '../utils/projectGeoJSONBounds';
 import {
   mapLandmarkCollections,
   parseLandmarkMutationError,
@@ -125,33 +117,28 @@ import { parseRemoteGpsTrack, parseRemoteGpsTracks } from '../utils/remoteGpsTra
 import { gpsTrackGeoJsonToPoints } from '../utils/gpsTrackGeoJson';
 import { CancellationContext } from './CancellationContext';
 import { SessionCoordinator } from './SessionCoordinator';
+import { ProjectGeoJSONCoordinator } from './ProjectGeoJSONCoordinator';
+import { ProjectOverlaySyncCoordinator } from './ProjectOverlaySyncCoordinator';
+import {
+  ProjectSyncCoordinator,
+  createSkippedTilePrefetchPhase,
+  type SyncStatus,
+} from './ProjectSyncCoordinator';
 import { isAbortError } from '../utils/abort';
 import type {
-  CacheLoadPhaseResult,
-  GeoJSONSyncPhaseResult,
-  OverlaySyncPhaseResult,
-  ProjectRefreshPhaseResult,
   SyncProjectsResult,
   TilePrefetchPhaseResult,
 } from '../types/sync';
 
 // ==================== Sync status ====================
 
-export type SyncStatus = 'idle' | 'syncing' | 'done' | 'error';
+export type { SyncStatus } from './ProjectSyncCoordinator';
 
 /** Per-project prefetch inputs built once and reused across layers. */
 interface BuiltProjectInputs {
   inputs: TilePrefetchProjectInput[];
   eligibleCount: number;
   failedCount: number;
-}
-
-interface SessionProjectGeoJSONDisposition {
-  reason: ProjectGeoJSONFailureReason;
-  diagnostics: ProjectGeoJSONFailureDiagnostics;
-  warningAcknowledged: boolean;
-  /** Unversioned legacy bytes may retry only after a canonical online fetch. */
-  retryWhenOnline: boolean;
 }
 
 // ==================== Preferences interface (for DI) ====================
@@ -188,10 +175,6 @@ function isSuccessfulStatus(status: number): boolean {
   return status >= 200 && status < 300;
 }
 
-function isClientErrorStatus(status: number): boolean {
-  return status >= 400 && status < 500;
-}
-
 function isRetryableGpsUploadStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
 }
@@ -222,14 +205,9 @@ const GPS_RECORDING_PERMISSION_LOST_MESSAGE =
 export class SpeleoDBController {
   // ---- Observable state -----------------------------------------------------
   private readonly sessionCoordinator: SessionCoordinator;
-  private _projects: Project[] = [];
-  private _syncStatus: SyncStatus = 'idle';
-  private _lastSyncedAt: number | null = null;
-  private _projectGeoJSONWarnings: ProjectGeoJSONWarning[] = [];
-  /** Session-only fail-closed dispositions used when durable safety is unavailable. */
-  private blockedProjectGeoJSONCommits = new Map<string, SessionProjectGeoJSONDisposition>();
-  /** Bumped only after a GeoJSON/overlay sync attempt has reached a terminal state. */
-  private _mapDataRevision = 0;
+  private readonly projectGeoJSONCoordinator: ProjectGeoJSONCoordinator;
+  private readonly projectOverlaySyncCoordinator: ProjectOverlaySyncCoordinator;
+  private readonly projectSyncCoordinator: ProjectSyncCoordinator;
   private _tilePrefetchJobs: TilePrefetchJobState[] = [];
   // Monotonic counter bumped after any landmark create/edit/delete writes the
   // cached overlay:landmarks FeatureCollection, so the Dashboard re-reads it.
@@ -281,7 +259,6 @@ export class SpeleoDBController {
   private _isPurgingLocalData = false;
   private _asyncGeneration = 0;
   private _nextRunId = 1;
-  private activeSyncContext: CancellationContext | null = null;
   // Best-effort, fire-and-forget layer prefetches (Settings toggle) run on their
   // own contexts. Tracked here so logout/teardown aborts them like the sync and
   // validation contexts (otherwise an enable-then-logout race leaks async work).
@@ -289,11 +266,6 @@ export class SpeleoDBController {
   private _trackedOperations = new Set<Promise<unknown>>();
 
   // Snapshot references for useSyncExternalStore (identity-stable between notifies)
-  private _projectsSnapshot: Project[] = this._projects;
-  private _syncStatusSnapshot: SyncStatus = this._syncStatus;
-  private _lastSyncedAtSnapshot: number | null = this._lastSyncedAt;
-  private _projectGeoJSONWarningsSnapshot: ProjectGeoJSONWarning[] = [];
-  private _mapDataRevisionSnapshot = this._mapDataRevision;
   private _tilePrefetchJobsSnapshot: TilePrefetchJobState[] = this._tilePrefetchJobs;
   private _landmarksRevisionSnapshot: number = this._landmarksRevision;
   private _tileCacheOverLimitApprovedSnapshot = this._tileCacheOverLimitApproved;
@@ -342,8 +314,56 @@ export class SpeleoDBController {
       },
     });
     this.attachTilePrefetch(tilePrefetch ?? this.createTilePrefetchService());
+    this.projectGeoJSONCoordinator = new ProjectGeoJSONCoordinator({
+      cache: this.cache,
+      transport: this.service,
+      analyzer: this.projectGeoJSONAnalyzer,
+      hasNetworkAccess: () => this.hasNetworkAccess(),
+      removePrefetchTarget: (projectId, signal) => this.tilePrefetch.removeTarget(
+        projectId,
+        { signal },
+      ),
+      notifyStateChanged: () => this.notify(),
+    });
     this.offlineQueue = this.buildOfflineQueue();
-    this.restoreLastSyncedAt();
+    this.projectOverlaySyncCoordinator = new ProjectOverlaySyncCoordinator({
+      cache: this.cache,
+      transport: this.service,
+      pendingMutations: () => this.offlineQueue,
+      hasNetworkAccess: () => this.hasNetworkAccess(),
+    });
+    this.projectSyncCoordinator = new ProjectSyncCoordinator({
+      cache: this.cache,
+      transport: this.service,
+      sessions: this.prefs.session,
+      metadata: {
+        getLastSyncedAt: () => (
+          this.sessionCoordinator.isAuthenticated
+            ? this.prefs.getPreferences().lastSyncedAt
+            : undefined
+        ),
+        setLastSyncedAt: (value) => this.prefs.setPreferences({ lastSyncedAt: value }),
+      },
+      geoJSON: this.projectGeoJSONCoordinator,
+      overlays: this.projectOverlaySyncCoordinator,
+      hooks: {
+        hasNetworkAccess: () => this.hasNetworkAccess(),
+        markOnline: () => this.sessionCoordinator.markOnline(false),
+        enterOfflineMode: () => this.enterOfflineMode(),
+        notifyStateChanged: () => this.notify(),
+        bumpLandmarksRevision: () => this.bumpLandmarksRevision(),
+        syncGpsTracks: (context, instance, token) => this.syncGpsTracksPhase(
+          context,
+          instance,
+          token,
+        ),
+        scheduleTilePrefetch: (context, projects) => this.scheduleTilePrefetchPhase(
+          context,
+          projects,
+        ),
+      },
+      now: () => Date.now(),
+    });
     this.restoreTileCacheOverLimitConsent();
     // Load persisted GPS tracks so the panel shows them on startup. Only notify
     // when something was restored, so a clean start does not perturb revisions.
@@ -481,23 +501,23 @@ export class SpeleoDBController {
   }
 
   get projects(): Project[] {
-    return this._projectsSnapshot;
+    return this.projectSyncCoordinator.projects;
   }
 
   get syncStatus(): SyncStatus {
-    return this._syncStatusSnapshot;
+    return this.projectSyncCoordinator.syncStatus;
   }
 
   get lastSyncedAt(): number | null {
-    return this._lastSyncedAtSnapshot;
+    return this.projectSyncCoordinator.lastSyncedAt;
   }
 
   get projectGeoJSONWarnings(): ProjectGeoJSONWarning[] {
-    return this._projectGeoJSONWarningsSnapshot;
+    return this.projectGeoJSONCoordinator.warnings;
   }
 
   get mapDataRevision(): number {
-    return this._mapDataRevisionSnapshot;
+    return this.projectSyncCoordinator.mapDataRevision;
   }
 
   get tilePrefetchJobs(): TilePrefetchJobState[] {
@@ -625,20 +645,6 @@ export class SpeleoDBController {
 
   private notify(): void {
     // Produce new snapshot references so useSyncExternalStore detects changes.
-    if (this._projectsSnapshot !== this._projects) {
-      this._projectsSnapshot = this._projects;
-    }
-    this._syncStatusSnapshot = this._syncStatus;
-    this._lastSyncedAtSnapshot = this._lastSyncedAt;
-    if (
-      this._projectGeoJSONWarningsSnapshot.length !== this._projectGeoJSONWarnings.length
-      || this._projectGeoJSONWarningsSnapshot.some(
-        (warning, index) => warning !== this._projectGeoJSONWarnings[index],
-      )
-    ) {
-      this._projectGeoJSONWarningsSnapshot = [...this._projectGeoJSONWarnings];
-    }
-    this._mapDataRevisionSnapshot = this._mapDataRevision;
     this._tilePrefetchJobsSnapshot = [...this._tilePrefetchJobs];
     this._landmarksRevisionSnapshot = this._landmarksRevision;
     this._tileCacheOverLimitApprovedSnapshot = this._tileCacheOverLimitApproved;
@@ -673,7 +679,7 @@ export class SpeleoDBController {
   private invalidateAsyncOperations(): void {
     this._asyncGeneration += 1;
     this.sessionCoordinator.invalidate();
-    this.activeSyncContext?.abort('Async operations invalidated');
+    this.projectSyncCoordinator.cancel();
     for (const context of this.activeLayerPrefetchContexts) {
       context.abort('Async operations invalidated');
     }
@@ -692,17 +698,6 @@ export class SpeleoDBController {
     const runId = this._nextRunId;
     this._nextRunId += 1;
     return runId;
-  }
-
-  private beginSyncContext(): CancellationContext {
-    this.activeSyncContext?.abort('Project sync superseded');
-    const context = new CancellationContext(this.nextRunId(), 'Project sync');
-    this.activeSyncContext = context;
-    return context;
-  }
-
-  private isSyncContextCurrent(context: CancellationContext): boolean {
-    return this.activeSyncContext === context;
   }
 
   private trackOperation<T>(promise: Promise<T>): Promise<T> {
@@ -915,7 +910,10 @@ export class SpeleoDBController {
     try {
       const landmarkPoints = await this.loadLandmarkPrefetchPoints(context);
       await this.enqueueLayerLandmarks(context, layer, landmarkPoints);
-      const built = await this.buildProjectPrefetchInputs(context, this._projects);
+      const built = await this.buildProjectPrefetchInputs(
+        context,
+        this.projectSyncCoordinator.projects,
+      );
       await this.enqueueLayerProjects(context, layer, built);
     } catch (error) {
       if (isAbortError(error)) return;
@@ -1018,12 +1016,7 @@ export class SpeleoDBController {
 
       // Reset in-memory state first so UI reflects the wipe immediately.
       this.sessionCoordinator.reset();
-      this._projects = [];
-      this._syncStatus = 'idle';
-      this._lastSyncedAt = null;
-      this._projectGeoJSONWarnings = [];
-      this.blockedProjectGeoJSONCommits.clear();
-      this._mapDataRevision += 1;
+      this.projectSyncCoordinator.reset();
       this._tilePrefetchJobs = [];
       this._gpsTracks = [];
       this._remoteGpsTracks = [];
@@ -1100,155 +1093,7 @@ export class SpeleoDBController {
    *    download any new/changed geojson files in the background.
    */
   async syncProjects(): Promise<SyncProjectsResult> {
-    return this.trackOperation((async () => {
-      const context = this.beginSyncContext();
-      const result = this.createSyncProjectsResult(context.runId);
-
-      try {
-        result.phases.cacheLoad = await this.loadCachedProjectsPhase(context);
-
-        if (!this.hasNetworkAccess()) {
-          result.phases.projectRefresh = {
-            phase: 'project_refresh',
-            status: 'skipped',
-            reason: 'offline_locked',
-            projectCount: 0,
-            httpStatus: null,
-            cacheWriteSucceeded: false,
-            preservedCachedProjects: this._projects.length > 0,
-          };
-          result.phases.geojsonSync = await this.syncGeoJSONPhase(
-            context,
-            this._projects,
-            false,
-          );
-          result.phases.overlaySync = this.createSkippedOverlaySyncPhase('offline_locked');
-          result.phases.tilePrefetch = this.createSkippedTilePrefetchPhase('offline_locked');
-
-          const finalStatus = this.deriveSyncCompletionStatus(result.phases.projectRefresh);
-          if (this.isSyncContextCurrent(context)) {
-            this._mapDataRevision += 1;
-            this._syncStatus = finalStatus;
-            this.notify();
-          }
-          result.status = finalStatus;
-          return result;
-        }
-
-        const credentials = this.getSyncCredentials();
-        if (!credentials) {
-          result.phases.projectRefresh = {
-            phase: 'project_refresh',
-            status: 'skipped',
-            reason: 'missing_credentials',
-            projectCount: 0,
-            httpStatus: null,
-            cacheWriteSucceeded: false,
-            preservedCachedProjects: this._projects.length > 0,
-          };
-          result.phases.geojsonSync = await this.syncGeoJSONPhase(
-            context,
-            this._projects,
-            false,
-          );
-          result.phases.overlaySync = this.createSkippedOverlaySyncPhase('missing_credentials');
-          result.phases.tilePrefetch = this.createSkippedTilePrefetchPhase('missing_credentials');
-
-          const finalStatus = this.deriveSyncCompletionStatus(result.phases.projectRefresh);
-          if (this.isSyncContextCurrent(context)) {
-            this._mapDataRevision += 1;
-            this._syncStatus = finalStatus;
-            this.notify();
-          }
-          result.status = finalStatus;
-          return result;
-        }
-
-        if (this.isSyncContextCurrent(context)) {
-          this._syncStatus = 'syncing';
-          this.notify();
-        }
-
-        const refreshOutcome = await this.refreshProjectsPhase(
-          context,
-          credentials.instance,
-          credentials.token,
-        );
-        result.phases.projectRefresh = refreshOutcome.phase;
-
-        if (refreshOutcome.projects) {
-          result.phases.geojsonSync = await this.syncGeoJSONPhase(
-            context,
-            refreshOutcome.projects,
-            true,
-          );
-          result.phases.overlaySync = await this.syncMapOverlaysPhase(
-            context,
-            credentials.instance,
-            credentials.token,
-          );
-          // The overlay caches (incl. landmarks) were just rewritten from the
-          // server. `lastSyncedAt` already fired during the earlier project
-          // refresh phase (before this rewrite), so bump the overlay revision
-          // now to make the UI re-read the freshly written cache. Without this,
-          // a landmark deleted/added elsewhere would not appear after a resync.
-          if (
-            this.isSyncContextCurrent(context)
-            && result.phases.overlaySync.status !== 'skipped'
-          ) {
-            this.bumpLandmarksRevision();
-          }
-          // Refresh the server GPS-track list (best-effort; mirrors overlays).
-          await this.syncGpsTracksPhase(context, credentials.instance, credentials.token);
-          result.phases.tilePrefetch = await this.scheduleTilePrefetchPhase(
-            context,
-            refreshOutcome.projects,
-          );
-        } else {
-          // Even when the refresh failed, matching legacy bytes from the cached
-          // project list must cross the validation gateway while offline. Never
-          // download or attribute unversioned bytes in this fallback.
-          result.phases.geojsonSync = await this.syncGeoJSONPhase(
-            context,
-            this._projects,
-            false,
-          );
-          result.phases.overlaySync = this.createSkippedOverlaySyncPhase(
-            result.phases.projectRefresh.reason,
-          );
-          result.phases.tilePrefetch = this.createSkippedTilePrefetchPhase(
-            result.phases.projectRefresh.reason,
-          );
-        }
-
-        const finalStatus = this.deriveSyncCompletionStatus(result.phases.projectRefresh);
-        if (this.isSyncContextCurrent(context)) {
-          this._mapDataRevision += 1;
-          this._syncStatus = finalStatus;
-          this.notify();
-        }
-        result.status = finalStatus;
-        return result;
-      } catch (error) {
-        if (isAbortError(error) || !this.isSyncContextCurrent(context)) {
-          return this.finalizeAbortedSyncResult(result);
-        }
-
-        console.warn('syncProjects: unexpected sync failure:', error);
-        const finalStatus = this.deriveSyncCompletionStatus(result.phases.projectRefresh);
-        if (this.isSyncContextCurrent(context)) {
-          this._mapDataRevision += 1;
-          this._syncStatus = finalStatus;
-          this.notify();
-        }
-        result.status = finalStatus;
-        return result;
-      } finally {
-        if (this.activeSyncContext === context) {
-          this.activeSyncContext = null;
-        }
-      }
-    })());
+    return this.trackOperation(this.projectSyncCoordinator.sync());
   }
 
   /**
@@ -1256,19 +1101,10 @@ export class SpeleoDBController {
    * and session-blocked entries are fail-closed.
    */
   async getProjectMapData(projectId: string): Promise<ProjectGeoJSONMapData | null> {
-    const project = this._projects.find((candidate) => candidate.id === projectId);
-    if (!project) return null;
-    const commitId = project.latest_commit.id;
-    if (this.blockedProjectGeoJSONCommits.has(this.projectGeoJSONKey(projectId, commitId))) {
-      return null;
-    }
-    const record = await this.cache.getProjectGeoJSONRecord(projectId);
-    if (record.state !== 'active' || record.commitId !== commitId) return null;
-    return {
-      commitId,
-      featureCollection: record.data,
-      bounds: record.analysis.bounds,
-    };
+    return this.projectGeoJSONCoordinator.getMapData(
+      this.projectSyncCoordinator.projects,
+      projectId,
+    );
   }
 
   /** Backward-compatible data-only accessor; still enforces validation. */
@@ -1278,33 +1114,7 @@ export class SpeleoDBController {
 
   /** Persist acknowledgement for the exact warning versions currently shown. */
   async acknowledgeProjectGeoJSONWarnings(): Promise<ProjectGeoJSONAcknowledgementResult> {
-    const warnings = [...this._projectGeoJSONWarnings];
-    const acknowledgedKeys = new Set((await Promise.all(warnings.map(async (warning) => {
-      const key = this.projectGeoJSONKey(warning.projectId, warning.commitId);
-      if (!warning.persistent) {
-        const disposition = this.blockedProjectGeoJSONCommits.get(key);
-        if (disposition) disposition.warningAcknowledged = true;
-        return key;
-      }
-      const didPersist = await this.cache.acknowledgeProjectGeoJSONQuarantine(
-        warning.projectId,
-        warning.commitId,
-      );
-      return didPersist ? key : null;
-    }))).filter((key): key is string => key !== null));
-    if (acknowledgedKeys.size === 0) {
-      return { acknowledgedCount: 0, failedCount: warnings.length };
-    }
-    this._projectGeoJSONWarnings = this._projectGeoJSONWarnings.filter(
-      (warning) => !acknowledgedKeys.has(
-        this.projectGeoJSONKey(warning.projectId, warning.commitId),
-      ),
-    );
-    this.notify();
-    return {
-      acknowledgedCount: acknowledgedKeys.size,
-      failedCount: warnings.length - acknowledgedKeys.size,
-    };
+    return this.projectGeoJSONCoordinator.acknowledgeWarnings();
   }
 
   /**
@@ -1990,7 +1800,6 @@ export class SpeleoDBController {
     try {
       const response = await this.service.getGpsTracks(instance, token, { signal: context.signal });
       context.throwIfAborted();
-      if (!this.isSyncContextCurrent(context)) return;
       if (!isSuccessfulStatus(response.status)) return;
       const tracks = parseRemoteGpsTracks(response.data);
       await this.cache.setGpsTracks(tracks);
@@ -2415,895 +2224,15 @@ export class SpeleoDBController {
    *
    * Uses a simple worker-pool to limit concurrency to 3 parallel downloads.
    */
-  private createSyncProjectsResult(runId: number): SyncProjectsResult {
-    return {
-      runId,
-      status: 'done',
-      phases: {
-        cacheLoad: {
-          phase: 'cache_load',
-          status: 'skipped',
-          reason: 'no_cached_projects',
-          cachedProjectCount: 0,
-        },
-        projectRefresh: {
-          phase: 'project_refresh',
-          status: 'skipped',
-          reason: 'missing_credentials',
-          projectCount: 0,
-          httpStatus: null,
-          cacheWriteSucceeded: false,
-          preservedCachedProjects: false,
-        },
-        geojsonSync: this.createSkippedGeoJSONPhase('no_geojson_candidates'),
-        overlaySync: this.createSkippedOverlaySyncPhase('no_overlay_sync_needed'),
-        tilePrefetch: this.createSkippedTilePrefetchPhase('no_prefetch_candidates'),
-      },
-    };
-  }
-
-  private createSkippedGeoJSONPhase(reason: GeoJSONSyncPhaseResult['reason']): GeoJSONSyncPhaseResult {
-    return {
-      phase: 'geojson_sync',
-      status: reason === 'aborted' ? 'aborted' : 'skipped',
-      reason,
-      eligibleProjectCount: 0,
-      downloadedProjectCount: 0,
-      validatedProjectCount: 0,
-      quarantinedProjectCount: 0,
-      skippedProjectCount: 0,
-      failedProjectCount: 0,
-    };
-  }
-
-  private createSkippedOverlaySyncPhase(
-    reason: OverlaySyncPhaseResult['reason'],
-  ): OverlaySyncPhaseResult {
-    return {
-      phase: 'overlay_sync',
-      status: reason === 'aborted' ? 'aborted' : 'skipped',
-      reason,
-      attemptedOverlayCount: 0,
-      syncedOverlayCount: 0,
-      failedOverlayCount: 0,
-    };
-  }
-
   private createSkippedTilePrefetchPhase(
     reason: TilePrefetchPhaseResult['reason'],
   ): TilePrefetchPhaseResult {
-    return {
-      phase: 'tile_prefetch',
-      status: reason === 'aborted' ? 'aborted' : 'skipped',
-      reason,
-      eligibleProjectCount: 0,
-      scheduledProjectCount: 0,
-      failedProjectCount: 0,
-    };
-  }
-
-  private finalizeAbortedSyncResult(result: SyncProjectsResult): SyncProjectsResult {
-    if (result.phases.projectRefresh.status === 'skipped') {
-      result.phases.projectRefresh = {
-        phase: 'project_refresh',
-        status: 'aborted',
-        reason: 'aborted',
-        projectCount: 0,
-        httpStatus: null,
-        cacheWriteSucceeded: false,
-        preservedCachedProjects: this._projects.length > 0,
-      };
-    }
-    if (result.phases.geojsonSync.status === 'skipped') {
-      result.phases.geojsonSync = this.createSkippedGeoJSONPhase('aborted');
-    }
-    if (result.phases.overlaySync.status === 'skipped') {
-      result.phases.overlaySync = this.createSkippedOverlaySyncPhase('aborted');
-    }
-    if (result.phases.tilePrefetch.status === 'skipped') {
-      result.phases.tilePrefetch = this.createSkippedTilePrefetchPhase('aborted');
-    }
-    result.status = 'aborted';
-    return result;
-  }
-
-  private deriveSyncCompletionStatus(
-    projectRefreshPhase: ProjectRefreshPhaseResult,
-  ): 'done' | 'error' {
-    if (
-      projectRefreshPhase.status === 'applied' ||
-      (projectRefreshPhase.status === 'failed' &&
-        projectRefreshPhase.reason === 'project_list_cache_write_failed')
-    ) {
-      return 'done';
-    }
-
-    return this._projects.length > 0 ? 'done' : 'error';
+    return createSkippedTilePrefetchPhase(reason);
   }
 
   private getSyncCredentials(): { token: string; instance: string } | null {
     const session = this.prefs.session.getSession();
     return session ? { token: session.token, instance: session.instance } : null;
-  }
-
-  private async loadCachedProjectsPhase(
-    context: CancellationContext,
-  ): Promise<CacheLoadPhaseResult> {
-    try {
-      const cached = await this.cache.getProjects({ signal: context.signal });
-      context.throwIfAborted();
-
-      if (cached === null) {
-        return {
-          phase: 'cache_load',
-          status: 'skipped',
-          reason: 'no_cached_projects',
-          cachedProjectCount: 0,
-        };
-      }
-
-      this._projects = cached;
-      this.notify();
-      return {
-        phase: 'cache_load',
-        status: 'applied',
-        reason: 'cached_projects_loaded',
-        cachedProjectCount: cached.length,
-      };
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error;
-      }
-
-      console.warn('Failed to load cached projects:', error);
-      return {
-        phase: 'cache_load',
-        status: 'failed',
-        reason: 'cache_load_failed',
-        cachedProjectCount: 0,
-      };
-    }
-  }
-
-  private async refreshProjectsPhase(
-    context: CancellationContext,
-    instance: string,
-    token: string,
-  ): Promise<{ phase: ProjectRefreshPhaseResult; projects: Project[] | null }> {
-    try {
-      const response = await this.service.getProjectsGeoJSON(
-        instance,
-        token,
-        { signal: context.signal },
-      );
-      context.throwIfAborted();
-
-      if (!isSuccessfulStatus(response.status)) {
-        console.warn(
-          `syncProjects: refresh skipped (status=${response.status}); preserving cached projects.`,
-        );
-        // A 4xx means the server is reachable (auth/validation issue) and never
-        // triggers logout here per the v2 contract -- keep current behavior. A
-        // 5xx / non-4xx status means the backend is unreachable, so flip the
-        // app offline (shows the offline modal + reveals Go Online).
-        if (!isClientErrorStatus(response.status)) {
-          this.enterOfflineMode();
-        }
-        return {
-          phase: {
-            phase: 'project_refresh',
-            status: 'failed',
-            reason: 'project_refresh_rejected',
-            projectCount: 0,
-            httpStatus: response.status,
-            cacheWriteSucceeded: false,
-            preservedCachedProjects: this._projects.length > 0,
-          },
-          projects: null,
-        };
-      }
-
-      if (!Array.isArray(response.data)) {
-        console.warn(
-          `syncProjects: refresh skipped (status=${response.status}); preserving cached projects.`,
-        );
-        return {
-          phase: {
-            phase: 'project_refresh',
-            status: 'failed',
-            reason: 'project_refresh_malformed',
-            projectCount: 0,
-            httpStatus: response.status,
-            cacheWriteSucceeded: false,
-            preservedCachedProjects: this._projects.length > 0,
-          },
-          projects: null,
-        };
-      }
-
-      const freshProjects = response.data;
-      this._projects = freshProjects;
-      this.sessionCoordinator.markOnline(false);
-      const cacheWriteSucceeded = await this.cache.setProjects(
-        freshProjects,
-        { signal: context.signal },
-      );
-      context.throwIfAborted();
-      if (cacheWriteSucceeded) {
-        this.recordSuccessfulSync();
-      }
-      this.notify();
-
-      return {
-        phase: {
-          phase: 'project_refresh',
-          status: cacheWriteSucceeded ? 'applied' : 'failed',
-          reason: cacheWriteSucceeded
-            ? 'project_list_refreshed'
-            : 'project_list_cache_write_failed',
-          projectCount: freshProjects.length,
-          httpStatus: response.status,
-          cacheWriteSucceeded,
-          preservedCachedProjects: false,
-        },
-        projects: freshProjects,
-      };
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error;
-      }
-      // A superseded or logged-out sync is always aborted. Rethrow as an abort
-      // so a stale, non-abort completion can never flip global offline state
-      // (e.g. re-lock offline after logout cleared it). Mirrors the success and
-      // non-2xx branches, which are already guarded by throwIfAborted above.
-      context.throwIfAborted();
-
-      console.warn('syncProjects: API fetch failed:', error);
-      // Timeout / transport failure: the backend is unreachable, so flip the
-      // app offline. Cache is preserved; no logout.
-      this.enterOfflineMode();
-      return {
-        phase: {
-          phase: 'project_refresh',
-          status: 'failed',
-          reason: 'project_refresh_rejected',
-          projectCount: 0,
-          httpStatus: null,
-          cacheWriteSucceeded: false,
-          preservedCachedProjects: this._projects.length > 0,
-        },
-        projects: null,
-      };
-    }
-  }
-
-  /**
-   * Download geojson files for all eligible projects, skipping those whose
-   * cached version already matches the latest commit.
-   *
-   * Uses a simple worker-pool to limit concurrency to 3 parallel downloads.
-   */
-  private async syncGeoJSONPhase(
-    context: CancellationContext,
-    projects: Project[],
-    allowDownloads: boolean,
-  ): Promise<GeoJSONSyncPhaseResult> {
-    const eligible = projects.filter(
-      (p) => p.geojson_file && !p.exclude_geojson,
-    );
-    if (eligible.length === 0) {
-      this._projectGeoJSONWarnings = [];
-      this.blockedProjectGeoJSONCommits.clear();
-      return this.createSkippedGeoJSONPhase('no_geojson_candidates');
-    }
-
-    const currentKeys = new Set(eligible.map((project) =>
-      this.projectGeoJSONKey(project.id, project.latest_commit.id)));
-    this._projectGeoJSONWarnings = this._projectGeoJSONWarnings.filter((warning) =>
-      currentKeys.has(this.projectGeoJSONKey(warning.projectId, warning.commitId)));
-    for (const key of this.blockedProjectGeoJSONCommits.keys()) {
-      if (!currentKeys.has(key)) this.blockedProjectGeoJSONCommits.delete(key);
-    }
-
-    let downloadedProjectCount = 0;
-    let validatedProjectCount = 0;
-    let quarantinedProjectCount = 0;
-    let skippedProjectCount = 0;
-    let failedProjectCount = 0;
-    let performedLocalWork = false;
-
-    const queue = [...eligible];
-    const worker = async (): Promise<void> => {
-      while (queue.length > 0) {
-        context.throwIfAborted();
-
-        const project = queue.shift();
-        if (!project) return;
-
-        try {
-          const commitId = project.latest_commit.id;
-          const commitKey = this.projectGeoJSONKey(project.id, commitId);
-
-          // Session-only dispositions are authoritative for the lifetime of
-          // this process. Check them before touching IndexedDB so a known
-          // storage/worker failure is not retried on every sync.
-          const sessionDisposition = this.blockedProjectGeoJSONCommits.get(commitKey);
-          if (
-            sessionDisposition?.retryWhenOnline
-            && allowDownloads
-            && this.hasNetworkAccess()
-          ) {
-            this.blockedProjectGeoJSONCommits.delete(commitKey);
-          } else if (sessionDisposition) {
-            await this.removeProjectPrefetchTarget(project.id, context);
-            context.throwIfAborted();
-            this.logProjectGeoJSON(
-              project,
-              sessionDisposition.diagnostics,
-              'cache',
-              'quarantined',
-              sessionDisposition.reason,
-            );
-            if (!sessionDisposition.warningAcknowledged) {
-              this.addProjectGeoJSONWarning(
-                project,
-                sessionDisposition.reason,
-                sessionDisposition.diagnostics,
-                false,
-              );
-            }
-            quarantinedProjectCount += 1;
-            failedProjectCount += 1;
-            skippedProjectCount += 1;
-            continue;
-          }
-
-          let record: ProjectGeoJSONCacheRecord;
-          try {
-            record = await this.cache.getProjectGeoJSONRecord(
-              project.id,
-              { signal: context.signal },
-            );
-          } catch (error) {
-            if (isAbortError(error)) throw error;
-            const diagnostics = this.emptyProjectGeoJSONDiagnostics();
-            this.blockProjectGeoJSONForSession(project, 'validation_unavailable', diagnostics);
-            await this.removeProjectPrefetchTarget(project.id, context);
-            context.throwIfAborted();
-            this.logProjectGeoJSON(
-              project,
-              diagnostics,
-              'cache',
-              'quarantined',
-              'validation_unavailable',
-            );
-            this.addProjectGeoJSONWarning(
-              project,
-              'validation_unavailable',
-              diagnostics,
-              false,
-            );
-            quarantinedProjectCount += 1;
-            failedProjectCount += 1;
-            skippedProjectCount += 1;
-            continue;
-          }
-          context.throwIfAborted();
-
-          if (
-            record.state === 'legacy'
-            && record.commitId === null
-            && (!allowDownloads || !this.hasNetworkAccess())
-          ) {
-            const diagnostics = this.emptyProjectGeoJSONDiagnostics();
-            this.blockProjectGeoJSONForSession(
-              project,
-              'validation_unavailable',
-              diagnostics,
-              true,
-            );
-            await this.removeProjectPrefetchTarget(project.id, context);
-            context.throwIfAborted();
-            this.logProjectGeoJSON(
-              project,
-              diagnostics,
-              'cache',
-              'quarantined',
-              'validation_unavailable',
-            );
-            this.addProjectGeoJSONWarning(
-              project,
-              'validation_unavailable',
-              diagnostics,
-              false,
-            );
-            quarantinedProjectCount += 1;
-            failedProjectCount += 1;
-            skippedProjectCount += 1;
-            continue;
-          }
-
-          if (record.commitId === commitId) {
-            if (record.state === 'active') {
-              this.logProjectGeoJSON(project, record.analysis, 'cache', 'active');
-              skippedProjectCount += 1;
-              continue;
-            }
-            if (record.state === 'quarantined') {
-              this.logProjectGeoJSON(
-                project,
-                record.diagnostics,
-                'cache',
-                'quarantined',
-                record.reason,
-              );
-              await this.removeProjectPrefetchTarget(project.id, context);
-              context.throwIfAborted();
-              if (!record.warningAcknowledged) {
-                this.addProjectGeoJSONWarning(project, record.reason, record.diagnostics, true);
-              }
-              quarantinedProjectCount += 1;
-              failedProjectCount += 1;
-              skippedProjectCount += 1;
-              continue;
-            }
-            if (record.state === 'legacy') {
-              performedLocalWork = true;
-              const normalizedLegacy = normalizeGeoJSON(record.data);
-              if (!normalizedLegacy) {
-                await this.quarantineProjectGeoJSON(
-                  context,
-                  project,
-                  'invalid_geojson',
-                  this.emptyProjectGeoJSONDiagnostics(),
-                );
-                quarantinedProjectCount += 1;
-                failedProjectCount += 1;
-                continue;
-              }
-              const outcome = await this.validateProjectGeoJSON(
-                context,
-                project,
-                normalizedLegacy,
-              );
-              if (outcome === 'active') validatedProjectCount += 1;
-              else {
-                quarantinedProjectCount += 1;
-                failedProjectCount += 1;
-              }
-              continue;
-            }
-          }
-
-          if (!allowDownloads || !this.hasNetworkAccess()) {
-            skippedProjectCount += 1;
-            continue;
-          }
-
-          const response = await this.service.downloadJSON(
-            project.geojson_file!,
-            { signal: context.signal },
-          );
-          context.throwIfAborted();
-          if (!isSuccessfulStatus(response.status)) {
-            failedProjectCount += 1;
-            console.warn(`Skipping project GeoJSON cache: status ${response.status}`);
-            continue;
-          }
-          downloadedProjectCount += 1;
-
-          const normalized = normalizeGeoJSON(response.data);
-          if (!normalized) {
-            await this.quarantineProjectGeoJSON(
-              context,
-              project,
-              'invalid_geojson',
-              this.emptyProjectGeoJSONDiagnostics(),
-            );
-            performedLocalWork = true;
-            quarantinedProjectCount += 1;
-            failedProjectCount += 1;
-            continue;
-          }
-
-          performedLocalWork = true;
-          const outcome = await this.validateProjectGeoJSON(
-            context,
-            project,
-            normalized,
-          );
-          if (outcome === 'active') {
-            validatedProjectCount += 1;
-          } else {
-            quarantinedProjectCount += 1;
-            failedProjectCount += 1;
-          }
-        } catch (error) {
-          if (isAbortError(error)) {
-            throw error;
-          }
-
-          failedProjectCount += 1;
-          console.warn('Failed to cache project GeoJSON:', error);
-        }
-      }
-    };
-
-    const concurrency = Math.min(3, eligible.length);
-    await Promise.all(Array.from({ length: concurrency }, () => worker()));
-
-    if (!allowDownloads && !performedLocalWork && failedProjectCount === 0) {
-      return {
-        phase: 'geojson_sync',
-        status: 'skipped',
-        reason: 'offline_locked',
-        eligibleProjectCount: eligible.length,
-        downloadedProjectCount,
-        validatedProjectCount,
-        quarantinedProjectCount,
-        skippedProjectCount,
-        failedProjectCount,
-      };
-    }
-
-    return {
-      phase: 'geojson_sync',
-      status: failedProjectCount > 0 ? 'failed' : 'applied',
-      reason: failedProjectCount > 0 ? 'geojson_sync_partial_failure' : 'geojson_synced',
-      eligibleProjectCount: eligible.length,
-      downloadedProjectCount,
-      validatedProjectCount,
-      quarantinedProjectCount,
-      skippedProjectCount,
-      failedProjectCount,
-    };
-  }
-
-  private projectGeoJSONKey(projectId: string, commitId: string): string {
-    return `${projectId}\u0000${commitId}`;
-  }
-
-  private emptyProjectGeoJSONDiagnostics(): ProjectGeoJSONFailureDiagnostics {
-    return { bounds: null, widthKm: null, heightKm: null, durationMs: null };
-  }
-
-  private projectGeoJSONDiagnosticsFromAnalysis(
-    analysis: ProjectGeoJSONAnalysis,
-  ): ProjectGeoJSONFailureDiagnostics {
-    return {
-      bounds: analysis.bounds,
-      widthKm: analysis.widthKm,
-      heightKm: analysis.heightKm,
-      durationMs: analysis.durationMs,
-    };
-  }
-
-  private isProjectGeoJSONFileFailure(
-    reason: ProjectGeoJSONFailureReason,
-  ): reason is ProjectGeoJSONFileFailureReason {
-    return reason !== 'validation_unavailable';
-  }
-
-  private blockProjectGeoJSONForSession(
-    project: Project,
-    reason: ProjectGeoJSONFailureReason,
-    diagnostics: ProjectGeoJSONFailureDiagnostics,
-    retryWhenOnline = false,
-  ): void {
-    this.blockedProjectGeoJSONCommits.set(
-      this.projectGeoJSONKey(project.id, project.latest_commit.id),
-      { reason, diagnostics, warningAcknowledged: false, retryWhenOnline },
-    );
-  }
-
-  private logProjectGeoJSON(
-    project: Project,
-    diagnostics: ProjectGeoJSONAnalysis | ProjectGeoJSONFailureDiagnostics,
-    source: 'computed' | 'cache',
-    status: 'active' | 'quarantined',
-    reason?: ProjectGeoJSONFailureReason,
-  ): void {
-    const details = {
-      projectId: project.id,
-      projectName: project.name,
-      commitId: project.latest_commit.id,
-      source,
-      widthKm: diagnostics.widthKm,
-      heightKm: diagnostics.heightKm,
-      durationMs: diagnostics.durationMs,
-      status,
-      ...(reason ? { reason } : {}),
-    };
-    if (status === 'active') console.info('[project-geojson:bbox]', details);
-    else console.warn('[project-geojson:bbox]', details);
-  }
-
-  private addProjectGeoJSONWarning(
-    project: Project,
-    reason: ProjectGeoJSONFailureReason,
-    diagnostics: ProjectGeoJSONFailureDiagnostics,
-    persistent: boolean,
-  ): void {
-    const warning: ProjectGeoJSONWarning = {
-      projectId: project.id,
-      projectName: project.name,
-      commitId: project.latest_commit.id,
-      reason,
-      widthKm: diagnostics.widthKm,
-      heightKm: diagnostics.heightKm,
-      durationMs: diagnostics.durationMs,
-      persistent,
-    };
-    const existing = this._projectGeoJSONWarnings.find(
-      (candidate) => candidate.projectId === warning.projectId
-        && candidate.commitId === warning.commitId,
-    );
-    if (
-      existing
-      && existing.projectName === warning.projectName
-      && existing.reason === warning.reason
-      && existing.widthKm === warning.widthKm
-      && existing.heightKm === warning.heightKm
-      && existing.durationMs === warning.durationMs
-      && existing.persistent === warning.persistent
-    ) {
-      return;
-    }
-    // Only the latest file version for a project is actionable. Replacing an
-    // older unacknowledged warning also avoids an acknowledgement race after
-    // the cache record has already advanced to the newer commit.
-    const next = this._projectGeoJSONWarnings.filter(
-      (candidate) => candidate.projectId !== project.id,
-    );
-    next.push(warning);
-    next.sort((left, right) => left.projectName.localeCompare(right.projectName));
-    this._projectGeoJSONWarnings = next;
-    this.notify();
-  }
-
-  private async removeProjectPrefetchTarget(
-    projectId: string,
-    context: CancellationContext,
-  ): Promise<void> {
-    try {
-      await this.tilePrefetch.removeTarget(projectId, { signal: context.signal });
-    } catch (error) {
-      if (isAbortError(error)) throw error;
-      console.warn('Failed removing project map prefetch:', error);
-    }
-  }
-
-  private async quarantineProjectGeoJSON(
-    context: CancellationContext,
-    project: Project,
-    reason: ProjectGeoJSONFailureReason,
-    diagnostics: ProjectGeoJSONFailureDiagnostics,
-  ): Promise<void> {
-    const key = this.projectGeoJSONKey(project.id, project.latest_commit.id);
-    let didPersist = false;
-    const fileScoped = this.isProjectGeoJSONFileFailure(reason);
-    if (fileScoped) {
-      didPersist = await this.cache.setQuarantinedProjectGeoJSON(
-        project.id,
-        project.latest_commit.id,
-        reason,
-        diagnostics,
-        { signal: context.signal },
-      );
-      context.throwIfAborted();
-    }
-    if (didPersist) this.blockedProjectGeoJSONCommits.delete(key);
-    else this.blockProjectGeoJSONForSession(project, reason, diagnostics);
-
-    await this.removeProjectPrefetchTarget(project.id, context);
-    context.throwIfAborted();
-    this.logProjectGeoJSON(project, diagnostics, 'computed', 'quarantined', reason);
-    this.addProjectGeoJSONWarning(project, reason, diagnostics, didPersist);
-    if (fileScoped && !didPersist) {
-      console.warn('[project-geojson:quarantine-persistence-failed]', {
-        projectId: project.id,
-        projectName: project.name,
-        commitId: project.latest_commit.id,
-      });
-    }
-  }
-
-  private async validateProjectGeoJSON(
-    context: CancellationContext,
-    project: Project,
-    featureCollection: GeoJSON.FeatureCollection,
-  ): Promise<'active' | 'quarantined'> {
-    let analysis: ProjectGeoJSONAnalysis;
-    try {
-      analysis = await this.projectGeoJSONAnalyzer.analyze(
-        featureCollection,
-        { signal: context.signal },
-      );
-      context.throwIfAborted();
-    } catch (error) {
-      if (isAbortError(error)) throw error;
-      if (error instanceof ProjectGeoJSONAnalysisError) {
-        await this.quarantineProjectGeoJSON(
-          context,
-          project,
-          error.reason,
-          error.diagnostics,
-        );
-        return 'quarantined';
-      }
-      await this.quarantineProjectGeoJSON(
-        context,
-        project,
-        'bbox_error',
-        this.emptyProjectGeoJSONDiagnostics(),
-      );
-      return 'quarantined';
-    }
-
-    if (isProjectGeoJSONOversized(analysis)) {
-      await this.quarantineProjectGeoJSON(
-        context,
-        project,
-        'bbox_too_large',
-        this.projectGeoJSONDiagnosticsFromAnalysis(analysis),
-      );
-      return 'quarantined';
-    }
-
-    const didCache = await this.cache.setValidatedProjectGeoJSON(
-      project.id,
-      featureCollection,
-      project.latest_commit.id,
-      analysis,
-      { signal: context.signal },
-    );
-    context.throwIfAborted();
-    if (!didCache) {
-      await this.quarantineProjectGeoJSON(
-        context,
-        project,
-        'validation_unavailable',
-        this.projectGeoJSONDiagnosticsFromAnalysis(analysis),
-      );
-      return 'quarantined';
-    }
-
-    const key = this.projectGeoJSONKey(project.id, project.latest_commit.id);
-    this.blockedProjectGeoJSONCommits.delete(key);
-    this._projectGeoJSONWarnings = this._projectGeoJSONWarnings.filter(
-      (warning) => warning.projectId !== project.id,
-    );
-    this.logProjectGeoJSON(project, analysis, 'computed', 'active');
-    return 'active';
-  }
-
-  /**
-   * Sync shared map overlays so read-only icons remain available offline.
-   */
-  private async syncMapOverlaysPhase(
-    context: CancellationContext,
-    instance: string,
-    token: string,
-  ): Promise<OverlaySyncPhaseResult> {
-    if (!this.hasNetworkAccess()) {
-      return this.createSkippedOverlaySyncPhase('offline_locked');
-    }
-
-    let syncedOverlayCount = 0;
-    let failedOverlayCount = 0;
-
-    await Promise.all(MAP_OVERLAYS.map(async (overlay) => {
-      context.throwIfAborted();
-      if (!this.hasNetworkAccess()) return;
-      if (overlay.id === 'landmarks' && await this.shouldSkipLandmarkOverlaySync()) {
-        return;
-      }
-
-      try {
-        const response = await this.fetchOverlayGeoJSON(
-          overlay.id,
-          instance,
-          token,
-          context,
-        );
-        context.throwIfAborted();
-
-        if (!isSuccessfulStatus(response.status)) {
-          failedOverlayCount += 1;
-          console.warn(
-            `Overlay sync skipped for ${overlay.id}: status ${response.status}`,
-          );
-          return;
-        }
-
-        const normalized = normalizeGeoJSON(response.data);
-        if (!normalized) {
-          failedOverlayCount += 1;
-          console.warn(`Overlay sync skipped for ${overlay.id}: malformed 2xx payload`);
-          return;
-        }
-
-        const didCacheOverlay = await this.cache.setOverlayGeoJSON(
-          overlay.id,
-          normalized,
-          { signal: context.signal },
-        );
-        context.throwIfAborted();
-
-        if (didCacheOverlay) {
-          syncedOverlayCount += 1;
-        } else {
-          failedOverlayCount += 1;
-        }
-      } catch (error) {
-        if (isAbortError(error)) {
-          throw error;
-        }
-
-        failedOverlayCount += 1;
-        console.warn(`Failed to sync overlay ${overlay.id}:`, error);
-      }
-    }));
-
-    // Best-effort: cache the writable collection list so an offline create can
-    // still pick a collection. Never fails the overlay phase.
-    try {
-      context.throwIfAborted();
-      const collectionsResponse = await this.service.getLandmarkCollections(instance, token, {
-        signal: context.signal,
-      });
-      context.throwIfAborted();
-      if (isSuccessfulStatus(collectionsResponse.status)) {
-        await this.cache.setLandmarkCollections(mapLandmarkCollections(collectionsResponse.data));
-      }
-    } catch (error) {
-      if (isAbortError(error)) throw error;
-      console.warn('Failed to cache landmark collections during sync:', error);
-    }
-
-    return {
-      phase: 'overlay_sync',
-      status: failedOverlayCount > 0 ? 'failed' : 'applied',
-      reason: failedOverlayCount > 0 ? 'overlay_sync_partial_failure' : 'overlays_synced',
-      attemptedOverlayCount: MAP_OVERLAYS.length,
-      syncedOverlayCount,
-      failedOverlayCount,
-    };
-  }
-
-  private async shouldSkipLandmarkOverlaySync(): Promise<boolean> {
-    if (this.offlineQueue.isReplaying) return true;
-    try {
-      await this.offlineQueue.load();
-    } catch (error) {
-      console.warn('Skipping landmarks overlay sync because pending ops could not be loaded:', error);
-      return true;
-    }
-    return this.offlineQueue.count > 0;
-  }
-
-  private fetchOverlayGeoJSON(
-    overlayId: MapOverlayId,
-    instance: string,
-    token: string,
-    context: CancellationContext,
-  ): ReturnType<SpeleoDBService['getLandmarksGeoJSON']> {
-    switch (overlayId) {
-      case 'landmarks':
-        return this.service.getLandmarksGeoJSON(instance, token, { signal: context.signal });
-      case 'subsurfaceStations':
-        return this.service.getSubsurfaceStationsGeoJSON(instance, token, { signal: context.signal });
-      case 'surfaceStations':
-        return this.service.getSurfaceStationsGeoJSON(instance, token, { signal: context.signal });
-      case 'explorationLeads':
-        return this.service.getExplorationLeadsGeoJSON(instance, token, { signal: context.signal });
-      case 'cylinderInstalls':
-        return this.service.getCylinderInstallsGeoJSON(instance, token, { signal: context.signal });
-      default: {
-        const exhaustiveCheck: never = overlayId;
-        throw new Error(`Unsupported overlay id: ${exhaustiveCheck}`);
-      }
-    }
   }
 
   /**
@@ -3439,7 +2368,7 @@ export class SpeleoDBController {
       try {
         context.throwIfAborted();
         const commitId = project.latest_commit.id;
-        if (this.blockedProjectGeoJSONCommits.has(this.projectGeoJSONKey(project.id, commitId))) {
+        if (this.projectGeoJSONCoordinator.isBlocked(project.id, commitId)) {
           failedCount += 1;
           continue;
         }
@@ -3532,34 +2461,6 @@ export class SpeleoDBController {
   }
 
   // ---- Private helpers ------------------------------------------------------
-
-  /** Restore the non-secret successful-sync timestamp at construction time. */
-  private restoreLastSyncedAt(): void {
-    try {
-      const prefs = this.prefs.getPreferences();
-      if (
-        this.sessionCoordinator.isAuthenticated
-        && typeof prefs.lastSyncedAt === 'number'
-        && Number.isFinite(prefs.lastSyncedAt)
-        && prefs.lastSyncedAt > 0
-      ) {
-        this._lastSyncedAt = prefs.lastSyncedAt;
-        this._lastSyncedAtSnapshot = this._lastSyncedAt;
-      }
-    } catch (error) {
-      console.error('Failed to load last sync state:', error);
-    }
-  }
-
-  /** Record a successful project-list refresh and persist its timestamp. */
-  private recordSuccessfulSync(): void {
-    this._lastSyncedAt = Date.now();
-    try {
-      this.prefs.setPreferences({ lastSyncedAt: this._lastSyncedAt });
-    } catch (error) {
-      console.warn('Failed to persist lastSyncedAt:', error);
-    }
-  }
 
   private hasNetworkAccess(): boolean {
     return this.sessionCoordinator.hasNetworkAccess;

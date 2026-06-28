@@ -11,6 +11,8 @@ This folder contains product and engineering documentation for core app behavior
   rollback, backup boundaries, and platform verification.
 - `session-coordination.md`: ownership boundaries for authentication, startup
   validation, offline lock, reconnect, cancellation, and logout.
+- `project-sync-coordination.md`: project-list, GeoJSON quarantine, overlay,
+  cancellation, publication, and downstream phase ownership.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `ci.md`: GitHub Actions stages, Vitest non-watch requirements, integration-test secrets, and native build verification.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding
