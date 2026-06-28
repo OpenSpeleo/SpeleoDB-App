@@ -77,6 +77,14 @@ restores `user: null`; a stored email reconstructs the lightweight user
 identity. Startup then validates the secure token using the rules in
 `docs/networking.md`.
 
+On iOS, `AppBridgeViewController` registers the first-party credential plugin
+as a concrete bridge instance. This registration path must coexist with
+Capacitor's automatic discovery for packaged plugins; type registration is not
+used because Capacitor 8 ignores it while automatic discovery is enabled. A
+missing plugin is treated as a storage failure, so even a successful server
+response leaves the app unauthenticated instead of retaining a token only in
+memory.
+
 Upgrades migrate the legacy `localStorage` token in a strict order: read legacy
 metadata, write the native vault, then rewrite preferences without the token.
 If the final rewrite fails, the previous native value is restored and the
@@ -123,6 +131,9 @@ are never logged or parsed.
   rejection of seeded legacy plaintext credentials during a transport failure.
 - Session-store tests cover fresh writes, account replacement, legacy migration,
   interrupted migration, orphan cleanup, rollback, rollback failure, and logout.
+- An iOS integration test loads the production bridge controller and proves the
+  JavaScript-visible `CredentialStore` plugin is registered before the WebView
+  uses it; the separate Keychain tests retain ownership of persistence behavior.
 - Login component tests cover tab semantics and keyboard navigation, masked
   token entry, shared instance submission, feedback, redirects, and solid
   button variants.

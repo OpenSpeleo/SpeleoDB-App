@@ -3,6 +3,7 @@ import Capacitor
 @objc(AppBridgeViewController)
 final class AppBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
-        bridge?.registerPluginType(CredentialStorePlugin.self)
+        // Type registration is ignored while Capacitor package discovery is enabled.
+        bridge?.registerPluginInstance(CredentialStorePlugin())
     }
 }
