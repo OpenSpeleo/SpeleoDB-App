@@ -44,6 +44,11 @@ coordinator. Its credential and metadata adapters exist only in memory, so
 login remains testable without weakening the native persistence boundary and
 reload always returns to an unauthenticated state.
 
+SpeleoDB passwords are never persisted. Bootstrap deletes the obsolete
+`speleo_users_db` plaintext record before restoring any session, and the
+controller has no local-password parsing or synthetic-token path. Offline use
+continues only from a token already restored through the secure-session store.
+
 Legacy upgrades are transactional:
 
 1. Read the legacy token without exposing it through `getPreferences()`.

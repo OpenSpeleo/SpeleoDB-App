@@ -8,8 +8,8 @@ This document defines how the app creates and restores SpeleoDB sessions.
 - Validate every user-supplied OAuth token before storing or using it.
 - Keep authentication state transitions in `SpeleoDBController`; the login page
   only collects credentials and presents controller results.
-- Preserve the existing offline email/password fallback without allowing an
-  unverified token to become an offline session.
+- Permit offline use only through a secure session that was validated online
+  before the current network failure.
 - Never log, display, or include token values in error messages.
 
 ## Login methods
@@ -21,13 +21,14 @@ SpeleoDB instance.
 
 `SpeleoDBController.login()` sends the credentials to
 `POST /api/v2/user/auth-token/`. A successful response supplies both the token
-and the email used for the in-memory `User` identity. Password-manager autofill,
-forgot-password links, and the local offline-login fallback belong exclusively
-to this flow.
+and the email used for the in-memory `User` identity. Password-manager autofill
+and forgot-password links belong exclusively to this flow. Passwords are sent
+only to the selected SpeleoDB instance and are never stored by the app.
 
-If the server cannot be reached, the controller may authenticate against the
-existing local users database. This is the only login method with an offline
-fallback.
+If the server cannot be reached, password login fails with an explicit message.
+The app never authenticates against a local password copy and never generates a
+synthetic offline token. Users who already have a securely restored session can
+continue through the normal startup offline-lock flow in `docs/offline-mode.md`.
 
 ### OAuth token
 
@@ -101,10 +102,15 @@ call logout or purge caches because it never created a session.
 Token login adds one validation request and one bounded native vault write. It
 adds no polling, cache scan, or background task.
 
+Bootstrap removes the obsolete `speleo_users_db` record before session restore.
+Failure to remove that residue fails session initialization closed; raw values
+are never logged or parsed.
+
 ## Verification strategy
 
-- Controller unit tests cover validation, trimming, fail-closed persistence, identity-free
-  restoration, and every response class.
+- Controller unit tests cover validation, trimming, fail-closed persistence,
+  identity-free restoration, every response class, and rejection of seeded
+  legacy plaintext credentials during a transport failure.
 - Session-store tests cover fresh writes, account replacement, legacy migration,
   interrupted migration, orphan cleanup, rollback, rollback failure, and logout.
 - Login component tests cover tab semantics and keyboard navigation, masked

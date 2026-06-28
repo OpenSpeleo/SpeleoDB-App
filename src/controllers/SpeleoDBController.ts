@@ -156,6 +156,9 @@ interface SessionProjectGeoJSONDisposition {
   retryWhenOnline: boolean;
 }
 
+const OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE =
+  'Unable to reach SpeleoDB. Offline access requires a previously validated session.';
+
 // ==================== Preferences interface (for DI) ====================
 
 /** The slice of PreferencesService the controller needs. */
@@ -185,12 +188,6 @@ export interface PreferencesPort {
   clearPreferences(): void;
   session: SessionStore;
 }
-
-// ==================== Storage keys (offline) ====================
-
-const STORAGE_KEYS = {
-  USERS_DB: 'speleo_users_db',
-} as const;
 
 function isSuccessfulStatus(status: number): boolean {
   return status >= 200 && status < 300;
@@ -1000,9 +997,7 @@ export class SpeleoDBController {
 
   // ---- Actions --------------------------------------------------------------
 
-  /**
-   * Login: validates inputs, calls the API, falls back to offline if needed.
-   */
+  /** Login validates credentials against the server and never stores passwords locally. */
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
     const { email, password, instance } = credentials;
 
@@ -1052,14 +1047,18 @@ export class SpeleoDBController {
           extractAuthErrorMessage(response.data) ??
           (response.status === HTTP_STATUS.UNAUTHORIZED ? 'Invalid email or password' : 'Login failed');
         return { success: false, message };
-      } catch (error) {
-        // Network failure -- fall through to offline login
-        console.warn('Online login failed, trying offline...', error);
+      } catch {
+        return {
+          success: false,
+          message: OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE,
+        };
       }
     }
 
-    // Offline fallback
-    return this.offlineLogin(email, password, instance);
+    return {
+      success: false,
+      message: OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE,
+    };
   }
 
   /**
@@ -3829,59 +3828,6 @@ export class SpeleoDBController {
     this.setOfflineLocked(false);
     this.notify();
     return user;
-  }
-
-  /** Attempt login against the local users DB (offline). */
-  private async offlineLogin(
-    email: string,
-    password: string,
-    instance: string,
-  ): Promise<AuthResponse> {
-    const localUsers = this.getLocalUsers();
-    const localUser = localUsers[email.toLowerCase()];
-
-    if (localUser && localUser.password === password) {
-      const token = this.generateOfflineToken();
-      const normalizedInstance = instance.trim() || this.prefs.getPreferences().instance;
-      if (!normalizedInstance) {
-        return { success: false, message: 'SpeleoDB instance URL is required' };
-      }
-      try {
-        await this.prefs.session.establish({
-          email: localUser.user.email,
-          token,
-          instance: normalizedInstance,
-        });
-      } catch {
-        return {
-          success: false,
-          message: 'Login succeeded, but the secure session could not be saved.',
-        };
-      }
-      this.invalidateAsyncOperations();
-      this._authState = { isAuthenticated: true, user: localUser.user, token };
-      this.notify();
-      return { success: true, message: 'Login successful (offline)', user: localUser.user, token };
-    }
-
-    return { success: false, message: 'Invalid email or password' };
-  }
-
-  // ---- Local users DB -------------------------------------------------------
-
-  private getLocalUsers(): Record<string, { password: string; user: User }> {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEYS.USERS_DB);
-      return stored ? JSON.parse(stored) : {};
-    } catch {
-      return {};
-    }
-  }
-
-  // ---- ID generators --------------------------------------------------------
-
-  private generateOfflineToken(): string {
-    return 'offline_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
   }
 
   private hasNetworkAccess(): boolean {

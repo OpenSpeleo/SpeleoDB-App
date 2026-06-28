@@ -36,6 +36,7 @@ import {
   isLayerOfflineSyncEnabled,
   setLayerOfflineSyncPreference,
   sessionMetadataStore,
+  removeLegacyPlaintextCredentials,
   type UserPreferences,
 } from './PreferencesService';
 import { DEFAULT_MAP_LAYER_ID, PREFERENCES } from '../constants';
@@ -186,6 +187,20 @@ describe('PreferencesService', () => {
         legacyToken: undefined,
       });
       expect(getProjectVisibilityPreferences()).toEqual({ retained: false });
+    });
+  });
+
+  describe('legacy credential cleanup', () => {
+    it('deletes the plaintext password database without touching unrelated storage', () => {
+      localStorage.setItem('speleo_users_db', JSON.stringify({
+        'legacy@example.com': { password: 'plaintext' },
+      }));
+      localStorage.setItem('unrelated', 'retained');
+
+      removeLegacyPlaintextCredentials();
+
+      expect(localStorage.getItem('speleo_users_db')).toBeNull();
+      expect(localStorage.getItem('unrelated')).toBe('retained');
     });
   });
 

@@ -66,7 +66,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Security] Remove the vulnerable asset generation toolchain`
 - [x] `[Feature] Add native secure credential storage`
 - [x] `[Security] Migrate authenticated sessions to secure storage`
-- [ ] `[Security] Remove plaintext offline password authentication`
+- [x] `[Security] Remove plaintext offline password authentication`
 - [ ] `[Security] Harden URLs backups and diagnostics`
 - [ ] `[Refactoring] Extract session and startup coordination`
 - [ ] `[Refactoring] Extract project synchronization coordination`
@@ -180,7 +180,7 @@ and physical-device evidence.
 
 ### Migrate authenticated sessions to secure storage
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `b083ebb` (`[Security] Migrate authenticated sessions to secure storage`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android `lintDebug`/`testDebugUnitTest`/release APK/AAB, five hosted
@@ -193,3 +193,16 @@ and physical-device evidence.
   fails closed without erasing unrelated preferences, and logout revokes the
   in-process session even when native deletion reports failure. Browser preview
   login remains functional through a deliberately non-persistent memory store.
+
+### Remove plaintext offline password authentication
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS Keychain XCTests, and iOS
+  Release compilation.
+- Result: all gates pass. Vitest passes 1,494/1,494 tests across 84 files;
+  Android passes 9/9 native tests and iOS passes 5/5 native tests.
+- Findings closed: MH-002. No production path reads or compares a local
+  password or creates a synthetic offline token; bootstrap removes legacy
+  plaintext residue and offline continuity requires a restored secure session.

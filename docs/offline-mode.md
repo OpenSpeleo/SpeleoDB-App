@@ -5,6 +5,7 @@ This document defines the offline cache feature, user-facing offline modal behav
 ## Goal
 
 - Allow users with a previously valid local session to continue working when network connectivity is poor or unavailable.
+- Never store passwords or use password entry to create a new offline session.
 - Log out users and clear local data only when auth is definitively invalid (HTTP 4xx from token validation).
 - Keep offline UX non-blocking: user can acknowledge offline mode and keep using cached data.
 
@@ -23,6 +24,11 @@ This document defines the offline cache feature, user-facing offline modal behav
 - If logout or unmount happens while startup validation is still pending, the delayed banner timer is cleared and the controller cancels the in-flight validation context so stale completions cannot mutate startup/offline UI.
 
 ## Offline mode user experience
+
+Offline mode is session continuity, not offline authentication. The secure
+token must already have been restored at startup. A user on the login screen
+must reach the selected SpeleoDB instance to establish a session; a cached or
+locally entered password can never unlock offline data.
 
 - Offline modal includes a `Go Offline` action.
 - `Go Offline` means:

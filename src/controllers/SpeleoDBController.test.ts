@@ -476,6 +476,28 @@ describe('SpeleoDBController', () => {
       expect(controller.isAuthenticated()).toBe(false);
       expect(prefs.session.establish).toHaveBeenCalledOnce();
     });
+
+    it('rejects a transport failure even when legacy plaintext credentials exist', async () => {
+      localStorage.setItem('speleo_users_db', JSON.stringify({
+        'user@example.com': {
+          password: 'pass',
+          user: { id: 'legacy', email: 'user@example.com', name: 'Legacy' },
+        },
+      }));
+      service = createMockService({
+        authenticate: vi.fn(async () => { throw new Error('network unavailable'); }),
+      });
+      controller = new SpeleoDBController(service, prefs, cache);
+
+      const result = await controller.login(validCreds);
+
+      expect(result).toEqual({
+        success: false,
+        message: 'Unable to reach SpeleoDB. Offline access requires a previously validated session.',
+      });
+      expect(controller.isAuthenticated()).toBe(false);
+      expect(prefs.session.establish).not.toHaveBeenCalled();
+    });
   });
 
   // ---- OAuth token login ---------------------------------------------------
@@ -2739,7 +2761,7 @@ describe('SpeleoDBController', () => {
   });
 
   describe('disconnect login behavior', () => {
-    it('preserves offline users after disconnect timeout', async () => {
+    it('preserves the validated secure session but refuses password reauthentication', async () => {
       const validateToken = vi.fn(async () => {
         throw new Error('timeout');
       });
@@ -2765,7 +2787,12 @@ describe('SpeleoDBController', () => {
 
       const result = await controller.login(validCreds);
 
-      expect(result.success).toBe(true);
+      expect(result).toEqual({
+        success: false,
+        message: 'Unable to reach SpeleoDB. Offline access requires a previously validated session.',
+      });
+      expect(controller.isAuthenticated()).toBe(true);
+      expect(controller.authState.token).toBe('tok');
       expect(service.authenticate).not.toHaveBeenCalled();
     });
   });

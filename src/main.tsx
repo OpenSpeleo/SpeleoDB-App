@@ -5,6 +5,7 @@ import App from './App';
 import { AppErrorBoundary } from './monitoring/AppErrorBoundary';
 import { initSentry } from './monitoring/sentry';
 import { appSessionStore } from './services/AppSessionStore';
+import { removeLegacyPlaintextCredentials } from './services/PreferencesService';
 
 /**
  * On Android the WebView always returns 0 for CSS `env(safe-area-inset-*)`.
@@ -47,6 +48,7 @@ async function bootstrap(): Promise<void> {
   initSentry();
   initAndroidSafeArea();
   try {
+    removeLegacyPlaintextCredentials();
     await appSessionStore.initialize();
   } catch {
     // Fail closed to the login screen. Native storage details and credentials

@@ -18,6 +18,8 @@ import {
 } from '../types/measurementUnit';
 import type { SessionMetadataStore } from './SecureSessionStore';
 
+const LEGACY_PLAINTEXT_CREDENTIALS_KEY = 'speleo_users_db';
+
 export interface UserPreferences {
   email?: string;
   instance?: string;
@@ -699,4 +701,9 @@ export function clearPreferences(): void {
   } catch (error) {
     console.error('Failed to clear preferences:', error);
   }
+}
+
+/** Remove credential residue created by pre-secure-storage app versions. */
+export function removeLegacyPlaintextCredentials(): void {
+  localStorage.removeItem(LEGACY_PLAINTEXT_CREDENTIALS_KEY);
 }
