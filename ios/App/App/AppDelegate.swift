@@ -5,8 +5,14 @@ import Capacitor
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
-        return true
+        do {
+            try SensitiveDataProtection.apply()
+            return true
+        } catch {
+            // Fail closed: offline maps, tracks, and WebView storage must not
+            // launch in a state where iCloud/iTunes backup exclusion failed.
+            return false
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

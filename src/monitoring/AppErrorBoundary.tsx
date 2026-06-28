@@ -1,5 +1,6 @@
 import React from 'react'
 import { captureSentryException } from './sentry'
+import { errorToLogDetails, redactDiagnosticText } from '../utils/errorDiagnostics'
 
 interface AppErrorBoundaryProps {
   children: React.ReactNode
@@ -23,12 +24,9 @@ export class AppErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     const componentStack = info.componentStack ?? undefined
-    // Always surface the real error to the console so it shows up in the device
-    // web inspector / Xcode / logcat -- otherwise a render crash only renders a
-    // bare "Something went wrong" with no clue what failed.
-    console.error('[AppErrorBoundary] Uncaught render error:', error)
-    if (componentStack) {
-      console.error('[AppErrorBoundary] Component stack:', componentStack)
+    console.error('[AppErrorBoundary] Uncaught render error:', errorToLogDetails(error))
+    if (componentStack && import.meta.env.DEV) {
+      console.error('[AppErrorBoundary] Component stack:', redactDiagnosticText(componentStack))
     }
     this.setState({ componentStack: componentStack ?? null })
     void captureSentryException(error, componentStack)
@@ -44,7 +42,7 @@ export class AppErrorBoundary extends React.Component<
     const name = error?.name ?? 'Error'
     const details = [error?.stack, componentStack].filter(Boolean).join('\n\n')
     // Only surface the raw error + stack on-screen in dev builds; production
-    // shows a clean message (the full error always goes to the console + Sentry).
+    // shows a clean message; production diagnostics receive only redacted data.
     const showDetails = Boolean(import.meta.env?.DEV)
 
     // Inline styles only: the app's CSS/components may be exactly what broke, so

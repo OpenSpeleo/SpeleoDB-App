@@ -21,6 +21,20 @@ has no browser or `localStorage` fallback. Values must contain between 1 and
 16,384 UTF-8 bytes. Reads fail closed when ciphertext, Keychain data, or the
 native response is malformed.
 
+## Transport and redirect boundary
+
+Release requests are HTTPS-only. Remote instance values entered with `http://`
+are upgraded to HTTPS, while HTTP loopback is permitted only in development.
+Request URLs with embedded username/password values and non-HTTP schemes are
+rejected before either transport runs. Android also declares
+`usesCleartextTraffic=false`; iOS explicitly disables arbitrary App Transport
+Security loads.
+
+Authenticated requests and every body-bearing request use manual/no-redirect
+mode on both web fetch and CapacitorHttp. A `3xx` is returned to the caller as a
+normal response, so an authorization header, password body, landmark payload,
+or GPX document is never replayed automatically to a redirect target.
+
 Capacitor native logging is disabled because bridge debug logs include plugin
 arguments. Native store failures return stable error codes and never include
 tokens, ciphertext, coordinates, or operating-system error details.
@@ -49,6 +63,27 @@ SpeleoDB passwords are never persisted. Bootstrap deletes the obsolete
 controller has no local-password parsing or synthetic-token path. Offline use
 continues only from a token already restored through the secure-session store.
 
+## Backup and diagnostics boundary
+
+Android disables application backup and cleartext traffic in the manifest. Its
+legacy and Android 12+ backup rule files also exclude every root, file,
+database, shared-preference, external, and device-protected domain as defense
+in depth. Offline project data, map tiles, GPS tracks, pending mutations, and
+WebView storage therefore do not enter cloud backup or device transfer.
+
+iOS applies `NSFileProtectionCompleteUntilFirstUserAuthentication` by default,
+which keeps background GPS compatible after the first unlock. At every launch,
+the app marks Library, Documents, Application Support, and Caches as excluded
+from backup; launch fails closed if that policy cannot be applied.
+
+`installDiagnosticRedaction()` wraps every console method before monitoring or
+React starts. It bounds diagnostic size and redacts authorization values,
+tokens, passwords, cookies, emails, identifiers, project/track names,
+coordinates, geometry, headers, request bodies, and payload fields. Sentry
+drops HTTP breadcrumbs, request/user/context/extra data, and captures a newly
+created sanitized error rather than the original error object. Deep-link URLs
+are never logged.
+
 Legacy upgrades are transactional:
 
 1. Read the legacy token without exposing it through `getPreferences()`.
@@ -68,10 +103,15 @@ account replacement use the same secure-first ordering and rollback contract.
 - Session tests prove commit ordering, legacy and interrupted migration,
   rollback to empty and prior vault states, rollback failure reporting, orphan
   cleanup, account replacement, and destructive logout semantics.
+- Transport and diagnostic tests prove HTTPS policy, credential-bearing URL
+  rejection, redirect suppression, recursive redaction, bounded output, and
+  sanitized Sentry events.
 - Android unit tests exercise the production AES-GCM implementation, randomized
   encryption, authentication-tag failure, missing keys, replacement, clearing,
   and token bounds.
 - iOS Keychain tests exercise empty reads, replacement, clearing, byte limits,
   and malformed stored data on a simulator Keychain.
+- iOS storage-policy tests exercise backup exclusion on existing, missing, and
+  duplicate directories; Android lint validates both backup rule schemas.
 - Every native change requires Android unit/release compilation and an iOS
   simulator test/release build in addition to the complete web CI gate.

@@ -378,7 +378,7 @@ async function loadMapImage(
         if (error || !image) {
           if (!OVERLAY_ICON_WARNED.has(id)) {
             OVERLAY_ICON_WARNED.add(id);
-            console.warn(`Failed to load map icon ${id} (${url})`, error ?? fetchError);
+            console.warn('Failed to load a map icon.', error ?? fetchError);
           }
           resolve(false);
           return;
@@ -816,7 +816,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             };
           }
         } catch (err) {
-          console.warn(`Failed to load GeoJSON for ${project.id}:`, err);
+          console.warn('Failed to load project GeoJSON:', err);
         }
       }
 
@@ -848,7 +848,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 : normalized;
           }
         } catch (error) {
-          console.warn(`Failed to load cached overlay ${overlay.id}:`, error);
+          console.warn('Failed to load a cached overlay:', error);
         }
       }
 

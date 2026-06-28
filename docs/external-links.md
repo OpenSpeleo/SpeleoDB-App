@@ -21,6 +21,11 @@ The app uses `@capacitor/browser` (`Browser.open()`) to open external URLs. This
 | iOS      | SFSafariViewController |
 | Web      | `window.open` |
 
+`openExternalUrl()` rejects non-HTTP schemes, embedded URL credentials, and
+remote cleartext HTTP before invoking the plugin. Development HTTP is allowed
+only for loopback. Callers must not bypass this validation or log the target
+URL because account/deep-link URLs may contain private signed parameters.
+
 ## API
 
 ```typescript

@@ -1206,11 +1206,11 @@ describe('Dashboard', () => {
 
   it('uses fallback non-icon layers for exploration leads and cylinders when icons fail to load', async () => {
     allowConsoleWarn(
-      expect.stringContaining('Failed to load map icon exploration-lead-icon'),
+      'Failed to load a map icon.',
       expect.any(Error),
     );
     allowConsoleWarn(
-      expect.stringContaining('Failed to load map icon cylinder-icon'),
+      'Failed to load a map icon.',
       expect.any(Error),
     );
     mockProjects = [makeProject({ id: 'p1', name: 'Fallback Project' })];

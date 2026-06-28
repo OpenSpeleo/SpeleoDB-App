@@ -63,8 +63,9 @@ const AppRoutes: React.FC = () => {
 
 const App: React.FC = () => {
   useEffect(() => {
-    const listener = CapApp.addListener('appUrlOpen', (event) => {
-      console.debug('[DeepLink] opened via:', event.url);
+    const listener = CapApp.addListener('appUrlOpen', () => {
+      // The full URL may contain signed paths, reset tokens, or user data.
+      console.debug('[DeepLink] URL received.');
     });
     return () => { listener.then((h) => h.remove()); };
   }, []);

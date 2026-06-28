@@ -63,6 +63,7 @@ export interface HttpResponse<T = unknown> {
 
 export interface HttpClientDeps {
   isNativePlatform?: () => boolean;
+  isProduction?: () => boolean;
   nativeHttp?: Pick<typeof CapacitorHttp, 'request'>;
 }
 
@@ -174,6 +175,34 @@ function findHeaderKey(
 ): string | undefined {
   const normalizedTarget = target.toLowerCase();
   return Object.keys(headers).find((key) => key.toLowerCase() === normalizedTarget);
+}
+
+function hasSensitiveRequestData(req: HttpRequest): boolean {
+  const headers = req.headers ?? {};
+  const hasSensitiveHeader = Object.keys(headers).some((key) =>
+    ['authorization', 'cookie', 'proxy-authorization'].includes(key.toLowerCase()),
+  );
+  return hasSensitiveHeader
+    || req.data !== undefined
+    || req.formData !== undefined
+    || req.multipart !== undefined;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '[::1]';
+}
+
+export function assertSafeRequestUrl(url: string, isProduction: boolean): void {
+  const parsed = new URL(url);
+  if (parsed.username || parsed.password) {
+    throw new TypeError('Request URLs must not contain embedded credentials');
+  }
+  if (parsed.protocol === 'https:') return;
+  if (parsed.protocol === 'http:' && !isProduction && isLoopbackHostname(parsed.hostname)) return;
+  throw new TypeError('Requests must use HTTPS');
 }
 
 function getWebUserAgent(): string {
@@ -311,6 +340,7 @@ export class HttpClient {
    */
   async request<T = unknown>(req: HttpRequest): Promise<HttpResponse<T>> {
     const timeout = req.timeoutMs ?? NETWORK.REQUEST_TIMEOUT_MS;
+    assertSafeRequestUrl(req.url, (this.deps.isProduction ?? (() => import.meta.env.PROD))());
 
     if ((this.deps.isNativePlatform ?? isNativePlatform)()) {
       return this.nativeRequest<T>(req, timeout);
@@ -347,6 +377,7 @@ export class HttpClient {
         data,
         connectTimeout: timeout,
         readTimeout: timeout,
+        disableRedirects: hasSensitiveRequestData(req),
       }),
       req.signal,
     );
@@ -401,7 +432,7 @@ export class HttpClient {
       const init: RequestInit = {
         method: req.method,
         signal: controller.signal,
-        redirect: 'follow',
+        redirect: hasSensitiveRequestData(req) ? 'manual' : 'follow',
       };
 
       // Prefer FormData when provided (e.g. login); otherwise send JSON body.

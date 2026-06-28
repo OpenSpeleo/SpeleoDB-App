@@ -18,8 +18,18 @@ describe('getInstanceBaseUrl', () => {
     expect(getInstanceBaseUrl('https://speleodb.org')).toBe('https://speleodb.org');
   });
 
-  it('preserves explicit http://', () => {
-    expect(getInstanceBaseUrl('http://localhost:8000')).toBe('http://localhost:8000');
+  it('allows explicit loopback HTTP only for development', () => {
+    expect(getInstanceBaseUrl('http://localhost:8000', true)).toBe('http://localhost:8000');
+    expect(getInstanceBaseUrl('http://localhost:8000', false)).toBe('https://localhost:8000');
+  });
+
+  it('upgrades remote HTTP instances to HTTPS', () => {
+    expect(getInstanceBaseUrl('http://speleodb.org', true)).toBe('https://speleodb.org');
+  });
+
+  it('rejects non-HTTP schemes and embedded credentials', () => {
+    expect(() => getInstanceBaseUrl('javascript://alert', true)).toThrow(/HTTP/);
+    expect(() => getInstanceBaseUrl('https://user:pass@speleodb.org', true)).toThrow(/credentials/);
   });
 
   it('trims whitespace', () => {
@@ -52,5 +62,12 @@ describe('openExternalUrl', () => {
   it('is called exactly once per invocation', async () => {
     await openExternalUrl('https://example.com');
     expect(mockBrowserOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects unsafe external schemes and embedded credentials', async () => {
+    await expect(openExternalUrl('http://example.com')).rejects.toThrow(/HTTPS/);
+    await expect(openExternalUrl('https://user:pass@example.com')).rejects.toThrow(/credentials/);
+    await expect(openExternalUrl('javascript:alert(1)')).rejects.toThrow(/HTTP/);
+    expect(mockBrowserOpen).not.toHaveBeenCalled();
   });
 });

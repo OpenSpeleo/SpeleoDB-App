@@ -67,6 +67,14 @@ describe('Login page', () => {
     expect(screen.getByLabelText(/speleodb instance/i)).toBeInTheDocument();
   });
 
+  it('documents secure session continuity instead of offline password sign-in', () => {
+    renderLogin();
+
+    expect(screen.getByText(/offline access requires a previously validated secure session/i))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/offline sign-in/i)).not.toBeInTheDocument();
+  });
+
   it('renders accessible login tabs and switches credential fields', async () => {
     renderLogin();
     const passwordTab = screen.getByRole('tab', { name: /email & password/i });

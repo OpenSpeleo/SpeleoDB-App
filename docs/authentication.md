@@ -24,6 +24,8 @@ SpeleoDB instance.
 and the email used for the in-memory `User` identity. Password-manager autofill
 and forgot-password links belong exclusively to this flow. Passwords are sent
 only to the selected SpeleoDB instance and are never stored by the app.
+Remote instances are normalized to HTTPS before the request. Cleartext HTTP is
+available only for a loopback development server and never in a release build.
 
 If the server cannot be reached, password login fails with an explicit message.
 The app never authenticates against a local password copy and never generates a

@@ -77,7 +77,13 @@ const Login: React.FC = () => {
     (nextMethod === 'password' ? passwordTabRef : tokenTabRef).current?.focus();
   };
 
-  const instanceBase = getInstanceBaseUrl(instance);
+  let instanceBase: string = PREFERENCES.DEFAULT_INSTANCE;
+  try {
+    instanceBase = getInstanceBaseUrl(instance);
+  } catch {
+    // Keep external account links safe and renderable while the user is still
+    // typing an incomplete or invalid instance URL.
+  }
   const signupUrl = instanceBase + INSTANCE_PATHS.SIGNUP;
   const forgotPasswordUrl = instanceBase + INSTANCE_PATHS.PASSWORD_RESET;
 
@@ -298,11 +304,11 @@ const Login: React.FC = () => {
                 </p>
               </div>
 
-              {/* Offline auth note */}
+              {/* Offline session note */}
               {loginMethod === 'password' && (
                 <div className="mt-8 text-center">
                   <p className="text-xs text-slate-500">
-                    Offline sign-in is available with locally stored credentials.
+                    Offline access requires a previously validated secure session.
                   </p>
                 </div>
               )}

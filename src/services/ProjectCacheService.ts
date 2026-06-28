@@ -244,7 +244,7 @@ export class ProjectCacheService {
       if (isAbortError(error) || options.signal?.aborted) {
         throwIfAborted(options.signal)
       }
-      console.error(`ProjectCacheService.getGeoJSON(${projectId}) failed:`, error);
+      console.error('ProjectCacheService.getGeoJSON failed:', error);
       return null;
     }
   }
@@ -269,7 +269,7 @@ export class ProjectCacheService {
       if (isAbortError(error) || options.signal?.aborted) {
         throwIfAborted(options.signal)
       }
-      console.error(`ProjectCacheService.setGeoJSON(${projectId}) failed:`, error);
+      console.error('ProjectCacheService.setGeoJSON failed:', error);
       return false
     }
   }
@@ -361,7 +361,7 @@ export class ProjectCacheService {
       return true;
     } catch (error) {
       if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
-      console.error(`ProjectCacheService.setValidatedProjectGeoJSON(${projectId}) failed:`, error);
+      console.error('ProjectCacheService.setValidatedProjectGeoJSON failed:', error);
       return false;
     }
   }
@@ -401,7 +401,7 @@ export class ProjectCacheService {
       return true;
     } catch (error) {
       if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
-      console.error(`ProjectCacheService.setQuarantinedProjectGeoJSON(${projectId}) failed:`, error);
+      console.error('ProjectCacheService.setQuarantinedProjectGeoJSON failed:', error);
       return false;
     }
   }
@@ -485,7 +485,7 @@ export class ProjectCacheService {
       if (isAbortError(error) || options.signal?.aborted) {
         throwIfAborted(options.signal)
       }
-      console.error(`ProjectCacheService.getOverlayGeoJSON(${overlayId}) failed:`, error);
+      console.error('ProjectCacheService.getOverlayGeoJSON failed:', error);
       return null;
     }
   }
@@ -508,7 +508,7 @@ export class ProjectCacheService {
       if (isAbortError(error) || options.signal?.aborted) {
         throwIfAborted(options.signal)
       }
-      console.error(`ProjectCacheService.setOverlayGeoJSON(${overlayId}) failed:`, error);
+      console.error('ProjectCacheService.setOverlayGeoJSON failed:', error);
       return false
     }
   }
@@ -581,7 +581,7 @@ export class ProjectCacheService {
       if (isAbortError(error) || options.signal?.aborted) {
         throwIfAborted(options.signal)
       }
-      console.error(`ProjectCacheService.getGpsTrackGeoJSON(${trackId}) failed:`, error);
+      console.error('ProjectCacheService.getGpsTrackGeoJSON failed:', error);
       return null;
     }
   }
@@ -604,7 +604,7 @@ export class ProjectCacheService {
       if (isAbortError(error) || options.signal?.aborted) {
         throwIfAborted(options.signal)
       }
-      console.error(`ProjectCacheService.setGpsTrackGeoJSON(${trackId}) failed:`, error);
+      console.error('ProjectCacheService.setGpsTrackGeoJSON failed:', error);
       return false
     }
   }
@@ -614,7 +614,7 @@ export class ProjectCacheService {
     try {
       await this.store.delete('geojson', this.getGpsTrackGeoJSONKey(trackId));
     } catch (error) {
-      console.error(`ProjectCacheService.removeGpsTrackGeoJSON(${trackId}) failed:`, error);
+      console.error('ProjectCacheService.removeGpsTrackGeoJSON failed:', error);
     }
   }
 

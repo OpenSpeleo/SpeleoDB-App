@@ -353,7 +353,7 @@ export class TilePrefetchService implements TilePrefetchServiceLike {
     } catch (error) {
       // The generation tombstone keeps this runtime fail-closed even when the
       // durable cleanup fails. Surface the failure for diagnostics/recovery.
-      console.error(`TilePrefetchService.removeTarget(${targetId}) failed:`, error);
+      console.error('TilePrefetchService.removeTarget failed:', error);
     }
     throwIfAborted(options.signal);
   }

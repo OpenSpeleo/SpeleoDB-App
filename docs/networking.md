@@ -69,6 +69,17 @@ The app enters offline mode only as a result of a failed server probe, never fro
 - Network errors, timeouts, and non-`4xx` failures must preserve session and local cache.
 - Logout invalidates and cancels in-flight startup/sync work before cache purge, so stale validation or sync completions cannot re-lock offline mode or repopulate cache after logout.
 
+## HTTPS and redirects
+
+- Production API and download requests must use absolute HTTPS URLs. Remote
+  `http://` instance input is upgraded; development HTTP is limited to loopback.
+- URL userinfo (`https://user:pass@host`) and non-HTTP schemes are rejected.
+- Requests carrying authorization/cookies or any body disable automatic
+  redirects in fetch and CapacitorHttp. This prevents credential and payload
+  replay to same-origin or cross-origin redirect targets.
+- External account links apply the same HTTPS/userinfo policy before opening a
+  browser surface.
+
 ## API contract (v2)
 
 All `/api/v2/*` endpoints return the raw payload on success and a flat error object on failure. The legacy v1 envelope (`data`, `success`, `timestamp`, `url`) is no longer present and must not be parsed.

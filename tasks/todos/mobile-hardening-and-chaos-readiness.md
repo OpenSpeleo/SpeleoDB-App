@@ -56,6 +56,9 @@ regression test, verification commands, commit, and final disposition.
 | MH-008 | P2 | Coverage has no threshold and branch coverage is 76.54%. | Reach and enforce justified per-file 100% runtime coverage. |
 | MH-009 | P2 | README, Make, CI, simulator, PWA, and feature documentation contain stale claims. | Reconcile every document with implementation. |
 | MH-010 | P2 | Asset-generation development dependencies contain known advisories. | Remove the vulnerable routine toolchain. |
+| MH-011 | P0 | Offline/WebView data is eligible for platform backup and device transfer. | Disable Android backup and exclude protected iOS data directories. |
+| MH-012 | P0 | Raw errors, deep links, identifiers, coordinates, and payload-shaped data can reach console/Sentry diagnostics. | Enforce one redacted diagnostic boundary. |
+| MH-013 | P0 | Remote cleartext instances and automatic redirects can expose credentials or request bodies. | Require release HTTPS and disable redirects for sensitive requests. |
 
 ## Commit checklist
 
@@ -67,7 +70,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Feature] Add native secure credential storage`
 - [x] `[Security] Migrate authenticated sessions to secure storage`
 - [x] `[Security] Remove plaintext offline password authentication`
-- [ ] `[Security] Harden URLs backups and diagnostics`
+- [x] `[Security] Harden URLs backups and diagnostics`
 - [ ] `[Refactoring] Extract session and startup coordination`
 - [ ] `[Refactoring] Extract project synchronization coordination`
 - [ ] `[Refactoring] Extract offline mutation and tile coordination`
@@ -196,7 +199,7 @@ and physical-device evidence.
 
 ### Remove plaintext offline password authentication
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `ea4916a` (`[Security] Remove plaintext offline password authentication`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS Keychain XCTests, and iOS
@@ -206,3 +209,16 @@ and physical-device evidence.
 - Findings closed: MH-002. No production path reads or compares a local
   password or creates a synthetic offline token; bootstrap removes legacy
   plaintext residue and offline continuity requires a restored secure session.
+
+### Harden URLs backups and diagnostics
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
+  compilation with processed entitlement and built ATS inspection.
+- Result: all gates pass. Vitest passes 1,510/1,510 tests across 86 files;
+  Android passes 9/9 native tests and iOS passes 7/7 native tests.
+- Findings closed: MH-011, MH-012, and MH-013. Backups/transfers exclude app
+  data, release traffic is HTTPS-only, sensitive requests do not redirect, and
+  console/Sentry diagnostics receive bounded redacted values only.

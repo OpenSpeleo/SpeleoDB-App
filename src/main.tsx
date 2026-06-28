@@ -6,6 +6,7 @@ import { AppErrorBoundary } from './monitoring/AppErrorBoundary';
 import { initSentry } from './monitoring/sentry';
 import { appSessionStore } from './services/AppSessionStore';
 import { removeLegacyPlaintextCredentials } from './services/PreferencesService';
+import { installDiagnosticRedaction } from './utils/errorDiagnostics';
 
 /**
  * On Android the WebView always returns 0 for CSS `env(safe-area-inset-*)`.
@@ -45,6 +46,7 @@ function registerServiceWorker(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  installDiagnosticRedaction();
   initSentry();
   initAndroidSafeArea();
   try {

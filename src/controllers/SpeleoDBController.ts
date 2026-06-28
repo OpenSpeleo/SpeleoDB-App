@@ -1938,7 +1938,7 @@ export class SpeleoDBController {
       return normalized;
     } catch (error) {
       if (isAbortError(error)) throw error;
-      console.warn(`Failed to download GPS track GeoJSON ${id}:`, error);
+      console.warn('Failed to download GPS track GeoJSON:', error);
       return null;
     }
   }
@@ -3119,7 +3119,7 @@ export class SpeleoDBController {
           context.throwIfAborted();
           if (!isSuccessfulStatus(response.status)) {
             failedProjectCount += 1;
-            console.warn(`Skipping geojson cache for project ${project.id}: status ${response.status}`);
+            console.warn(`Skipping project GeoJSON cache: status ${response.status}`);
             continue;
           }
           downloadedProjectCount += 1;
@@ -3156,7 +3156,7 @@ export class SpeleoDBController {
           }
 
           failedProjectCount += 1;
-          console.warn(`Failed to cache geojson for project ${project.id}:`, error);
+          console.warn('Failed to cache project GeoJSON:', error);
         }
       }
     };
@@ -3301,7 +3301,7 @@ export class SpeleoDBController {
       await this.tilePrefetch.removeTarget(projectId, { signal: context.signal });
     } catch (error) {
       if (isAbortError(error)) throw error;
-      console.warn(`Failed removing map prefetch for project ${projectId}:`, error);
+      console.warn('Failed removing project map prefetch:', error);
     }
   }
 
@@ -3695,7 +3695,7 @@ export class SpeleoDBController {
         }
 
         failedCount += 1;
-        console.warn(`Failed preparing map prefetch for project ${project.id}:`, error);
+        console.warn('Failed preparing project map prefetch:', error);
       }
     }
 

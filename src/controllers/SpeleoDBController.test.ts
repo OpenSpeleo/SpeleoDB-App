@@ -2341,7 +2341,7 @@ describe('SpeleoDBController', () => {
 
     it('continues project sync when geojson downloads fail', async () => {
       allowConsoleWarn(
-        expect.stringContaining('Failed to cache geojson for project p1:'),
+        'Failed to cache project GeoJSON:',
         expect.any(Error),
       );
       // Default mock returns a single project with id 'p1' and a non-null
@@ -2367,7 +2367,7 @@ describe('SpeleoDBController', () => {
 
     it('skips project geojson cache writes for non-2xx download responses', async () => {
       allowConsoleWarn(
-        expect.stringContaining('Skipping geojson cache for project p1: status 403'),
+        'Skipping project GeoJSON cache: status 403',
       );
       service = createMockService({
         downloadJSON: vi.fn(async <T = unknown>() => ({

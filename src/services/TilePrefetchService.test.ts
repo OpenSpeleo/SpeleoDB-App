@@ -1005,7 +1005,7 @@ describe('TilePrefetchService queue behavior', () => {
 
     expect(service.getSnapshot()).toEqual([]);
     expect(consoleError).toHaveBeenCalledWith(
-      'TilePrefetchService.removeTarget(p1) failed:',
+      'TilePrefetchService.removeTarget failed:',
       error,
     );
     consoleError.mockRestore();

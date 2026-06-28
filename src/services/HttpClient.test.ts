@@ -4,6 +4,7 @@ import {
   __resetNativeUserAgentCacheForTests,
   buildMultipartString,
   HttpClient,
+  assertSafeRequestUrl,
   type HttpRequest,
 } from './HttpClient';
 import { clearPreferences, setPreferences } from './PreferencesService';
@@ -135,6 +136,23 @@ describe('HttpClient (web transport)', () => {
     await expect(
       client.request({ url: 'https://unreachable.test', method: 'GET' })
     ).rejects.toThrow('Failed to fetch');
+  });
+
+  it('disables redirects for body-bearing and authenticated requests', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 307,
+      json: async () => ({}),
+    } as Response);
+
+    await client.request({
+      url: 'https://api.test/api/v2/resource',
+      method: 'POST',
+      headers: { Authorization: 'Token secret' },
+      data: { private: true },
+    });
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    expect(init.redirect).toBe('manual');
   });
 
   it('injects web app User-Agent for current instance URLs', async () => {
@@ -362,6 +380,7 @@ describe('HttpClient (native transport)', () => {
     expect(body.endsWith(`--${boundary}--\r\n`)).toBe(true);
     // Auth header survives the multipart header merge.
     expect(headers['Authorization']).toBe('Token abc');
+    expect(nativeRequest.mock.calls[0][0].disableRedirects).toBe(true);
   });
 
   it('does not inject app User-Agent when host differs and URL is not API', async () => {
@@ -376,6 +395,22 @@ describe('HttpClient (native transport)', () => {
 
     const [{ headers: headersObject = {} }] = nativeRequest.mock.calls[0];
     expect(Object.keys(headersObject).some((key) => key.toLowerCase() === 'user-agent')).toBe(false);
+  });
+});
+
+describe('assertSafeRequestUrl', () => {
+  it('requires absolute HTTPS in production', () => {
+    expect(() => assertSafeRequestUrl('https://api.test/path', true)).not.toThrow();
+    expect(() => assertSafeRequestUrl('http://localhost:8000/path', true)).toThrow(/HTTPS/);
+    expect(() => assertSafeRequestUrl('http://api.test/path', true)).toThrow(/HTTPS/);
+  });
+
+  it('allows development HTTP only on loopback and rejects URL credentials', () => {
+    expect(() => assertSafeRequestUrl('http://localhost:8000/path', false)).not.toThrow();
+    expect(() => assertSafeRequestUrl('http://127.0.0.1/path', false)).not.toThrow();
+    expect(() => assertSafeRequestUrl('http://api.test/path', false)).toThrow(/HTTPS/);
+    expect(() => assertSafeRequestUrl('https://user:pass@api.test/path', false)).toThrow(/credentials/);
+    expect(() => assertSafeRequestUrl('file:///private/data', false)).toThrow(/HTTPS/);
   });
 });
 

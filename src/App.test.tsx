@@ -2,6 +2,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import App from './App';
 
+const deepLinkState = vi.hoisted(() => ({
+  callback: null as ((event: { url: string }) => void) | null,
+}));
+
+vi.mock('@capacitor/app', () => ({
+  App: {
+    addListener: vi.fn(async (_event: string, callback: (event: { url: string }) => void) => {
+      deepLinkState.callback = callback;
+      return { remove: vi.fn() };
+    }),
+  },
+}));
+
 vi.mock('@capacitor/splash-screen', () => ({
   SplashScreen: { hide: vi.fn().mockResolvedValue(undefined) },
 }));
@@ -40,7 +53,9 @@ vi.mock('./services/AppSessionStore', () => ({
 
 describe('App', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     localStorage.clear();
+    deepLinkState.callback = null;
   });
 
   it('renders without crashing', () => {
@@ -59,5 +74,18 @@ describe('App', () => {
     await waitFor(() => {
       expect(SplashScreen.hide).toHaveBeenCalled();
     });
+  });
+
+  it('never writes a deep-link URL to diagnostics', () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    render(<App />);
+
+    deepLinkState.callback?.({
+      url: 'speleodb://reset?token=private-token&email=user@example.com',
+    });
+
+    expect(debug).toHaveBeenCalledWith('[DeepLink] URL received.');
+    expect(JSON.stringify(debug.mock.calls)).not.toContain('private-token');
+    expect(JSON.stringify(debug.mock.calls)).not.toContain('user@example.com');
   });
 });

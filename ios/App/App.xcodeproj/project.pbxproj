@@ -15,7 +15,9 @@
 		A10000000000000000000001 /* AppBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* AppBridgeViewController.swift */; };
 		A10000000000000000000002 /* CredentialStorePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* CredentialStorePlugin.swift */; };
 		A10000000000000000000003 /* KeychainCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* KeychainCredentialStore.swift */; };
+		A10000000000000000000004 /* SensitiveDataProtection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SensitiveDataProtection.swift */; };
 		B10000000000000000000001 /* KeychainCredentialStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* KeychainCredentialStoreTests.swift */; };
+		B10000000000000000000002 /* SensitiveDataProtectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* SensitiveDataProtectionTests.swift */; };
 		504EC30D1FED79650016851F /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30B1FED79650016851F /* Main.storyboard */; };
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
@@ -42,8 +44,10 @@
 		A10000000000000000000011 /* AppBridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBridgeViewController.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* CredentialStorePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStorePlugin.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* KeychainCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCredentialStore.swift; sourceTree = "<group>"; };
+		A10000000000000000000014 /* SensitiveDataProtection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataProtection.swift; sourceTree = "<group>"; };
 		B10000000000000000000010 /* AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000000000000000000011 /* KeychainCredentialStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCredentialStoreTests.swift; sourceTree = "<group>"; };
+		B10000000000000000000012 /* SensitiveDataProtectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataProtectionTests.swift; sourceTree = "<group>"; };
 		504EC30C1FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
 		504EC30E1FED79650016851F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -100,6 +104,7 @@
 				A10000000000000000000011 /* AppBridgeViewController.swift */,
 				A10000000000000000000012 /* CredentialStorePlugin.swift */,
 				A10000000000000000000013 /* KeychainCredentialStore.swift */,
+				A10000000000000000000014 /* SensitiveDataProtection.swift */,
 				50A1B2C21FED79650016851F /* SceneDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
@@ -124,6 +129,7 @@
 			isa = PBXGroup;
 			children = (
 				B10000000000000000000011 /* KeychainCredentialStoreTests.swift */,
+				B10000000000000000000012 /* SensitiveDataProtectionTests.swift */,
 			);
 			path = AppTests;
 			sourceTree = "<group>";
@@ -275,6 +281,7 @@
 				A10000000000000000000001 /* AppBridgeViewController.swift in Sources */,
 				A10000000000000000000002 /* CredentialStorePlugin.swift in Sources */,
 				A10000000000000000000003 /* KeychainCredentialStore.swift in Sources */,
+				A10000000000000000000004 /* SensitiveDataProtection.swift in Sources */,
 				50A1B2C31FED79650016851F /* SceneDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -284,6 +291,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B10000000000000000000001 /* KeychainCredentialStoreTests.swift in Sources */,
+				B10000000000000000000002 /* SensitiveDataProtectionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
