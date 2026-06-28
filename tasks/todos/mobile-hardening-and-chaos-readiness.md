@@ -75,7 +75,8 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Extract project synchronization coordination`
 - [x] `[Refactoring] Extract offline mutation and tile coordination`
 - [x] `[Refactoring] Extract GPS recording coordination`
-- [ ] `[Refactoring] Extract GPS recording and track coordination`
+- [x] `[Refactoring] Extract GPS track coordination`
+- [x] `[Refactoring] Extract GPS recording and track coordination`
 - [ ] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [ ] `[Fix] Stop inactive page effects and polling`
 - [ ] `[Fix] Harden authentication and network state machines`
@@ -280,7 +281,7 @@ and physical-device evidence.
 
 ### Extract GPS recording coordination
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `735d07a` (`[Refactoring] Extract GPS recording coordination`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -295,3 +296,21 @@ and physical-device evidence.
   1,706 lines, and the new production module is 298 lines.
 - Findings closed: the recording-state portion of MH-007. Local/remote track,
   GPX, upload, and server-sync ownership remain in the next split objective.
+
+### Extract GPS track coordination
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
+  compilation.
+- Result: local/remote state, persistence serialization, geometry/GPX, optimistic
+  snapshots, upload/edit/delete policy, and abort-aware server synchronization
+  now live in two focused coordinators behind the unchanged controller façade.
+  All gates pass: Vitest passes 1,584/1,584 tests across 90 files with aggregate
+  coverage of 86.32% statements, 78.89% branches, 89.47% functions, and 89.00%
+  lines; Android passes 9/9 native tests and iOS passes 7/7. Both direct suites
+  have 100% statement, branch, function, and line coverage. Production modules
+  are 341 and 269 lines; the controller shrinks from 1,706 to 1,237 lines.
+- Findings closed: the remaining GPS ownership slice of MH-007. Dashboard
+  rendering and interaction ownership is next.

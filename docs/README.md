@@ -17,6 +17,8 @@ This folder contains product and engineering documentation for core app behavior
   revisions, tile scheduling, consent, layer settings, and logout teardown.
 - `gps-recording-coordination.md`: recording-state ownership, watcher and
   persistence ports, permission-loss recovery, sampling, and logout invariants.
+- `gps-track-coordination.md`: local/remote track state, serialized persistence,
+  server mutation policy, cancellation, geometry, GPX, and snapshot ownership.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `ci.md`: GitHub Actions stages, Vitest non-watch requirements, integration-test secrets, and native build verification.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding

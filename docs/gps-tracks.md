@@ -95,7 +95,9 @@ limitations, and the test strategy.
 | Offline op queue (create/edit/delete) | `src/offline/OfflineOpQueue.ts`, `src/offline/ops/{Create,Update,Delete}GpsTrackOp.ts`, `src/offline/gpsTrackSnapshot.ts` (see `docs/offline-op-queue.md`) |
 | Per-track visibility preference (default OFF) | `src/services/PreferencesService.ts` (`gpsTrackVisibility`) |
 | Recording state machine | `src/controllers/GpsRecordingCoordinator.ts` |
-| Track list, server operations, and public façade | `src/controllers/SpeleoDBController.ts` |
+| Track state, persistence, geometry, GPX, snapshots | `src/controllers/GpsTrackCoordinator.ts` |
+| Upload/edit/delete and server sync | `src/controllers/GpsTrackMutationCoordinator.ts` |
+| Public façade | `src/controllers/SpeleoDBController.ts` |
 | React bridge | `src/context/useSpeleoDB.ts`, `src/context/SpeleoDBStoreProvider.tsx` |
 | Averaging session hook | `src/hooks/useGpsAveraging.ts` |
 | UI | `src/components/GpsPanel.tsx`, `src/components/GpsRecordingScreen.tsx`, `src/components/GpsAveragingModal.tsx`, `src/components/GpsScreenHeader.tsx`, `src/components/AppTabBar.tsx` |
@@ -123,7 +125,7 @@ flowchart TD
   mut --> q["OfflineOpQueue: Create/Update/DeleteGpsTrackOp"]
   q --> pend["Pending page (shared)"]
   sync["syncProjects -> syncGpsTracksPhase / syncGpsTracks"] --> gt["cache gps-tracks ground truth (RemoteGpsTrack[])"]
-  gt --> list["controller.gpsTracks (fold ops over remote + local recordings)"]
+  gt --> list["GpsTrackCoordinator snapshot (fold ops over remote + local recordings)"]
   list --> rows["GpsPanel unified rows (local/remote badge + toggle)"]
   rows -->|"toggle ON"| dl["controller.getGpsTrackPoints (lazy download + cache)"]
   dl --> tline["Dashboard gps-tracks-line (dashed, data-driven color)"]
@@ -132,14 +134,16 @@ flowchart TD
 State ownership follows `docs/implementation-guidelines.md` and
 `docs/gps-recording-coordination.md`: `GpsRecordingCoordinator` owns the
 recording/watch state machine and delegates durable writes and publication
-through narrow controller ports. `SpeleoDBController` owns the unified track
-list, server sync, and GPS replay-port wiring;
+through narrow track-coordinator ports. `GpsTrackCoordinator` owns the unified
+track list, persistence, geometry, GPX preparation, and snapshots;
+`GpsTrackMutationCoordinator` owns server sync and mutation policy;
+`SpeleoDBController` retains only the public façade and replay-port wiring;
 `GeolocationWatcher`/`GpsTrackStore`/`GpxFileService` perform side effects;
 `GpsPanel`/`GpsAveragingModal` are presentational;
 `useGpsAveraging` isolates
 the averaging session's side effects from the modal.
 
-The unified `controller.gpsTracks` snapshot is **rebuilt only when
+The unified `controller.gpsTracks` snapshot, produced by `GpsTrackCoordinator`, is **rebuilt only when
 `gpsTracksRevision` changes** (a recording/edit/delete/sync or a queue change),
 not on every `notify()`. Unrelated notifies (tile-prefetch progress,
 online/sync status) reuse the same array reference, so the Dashboard's
@@ -245,7 +249,7 @@ interchange/export/upload format generated on demand from `RecordedPoint[]`.
 - The backend turns GPX tracks into `GPSTrack` rows (default a random palette
   `color`) and dedupes on the file **sha256**, so re-importing the same GPX is
   idempotent (returns zeros) -- which is what makes the create-op replay safe.
-- On a confirmed success the controller **deletes the local recording** and
+- On a confirmed success `GpsTrackMutationCoordinator` **deletes the local recording** and
   calls `syncGpsTracks()` so the server copy replaces it.
 - **Force-quit window (online create).** The online path runs
   `upload -> delete local -> re-sync` without enqueuing an op. A crash *between*
@@ -586,6 +590,10 @@ left the recorder sitting at "Recording - 0 pts" forever with no feedback.
 - Recording coordinator: `src/controllers/GpsRecordingCoordinator.test.ts` —
   100% statement/branch/function/line coverage of recording transitions,
   watcher failures, timing, persistence ports, and logout races.
+- Track coordinators: `src/controllers/GpsTrackCoordinator.test.ts` and
+  `src/controllers/GpsTrackMutationCoordinator.test.ts` — 100%
+  statement/branch/function/line coverage of state, persistence, geometry, GPX,
+  mutation policy, synchronization, and cancellation commit gates.
 - Controller integration (incl. chaos): `src/controllers/SpeleoDBController.test.ts` —
   public recording façade, **instant first fix + 15 s throttle**, permission denial,
   cancel/discard, pause/resume, serialized incremental persistence,
@@ -602,8 +610,8 @@ left the recorder sitting at "Recording - 0 pts" forever with no feedback.
 
 ## Change checklist (GPS)
 
-1. Keep `GpsRecordingCoordinator` the source of truth for the recording state
-   machine and the controller the source of truth for the unified track list;
+1. Keep `GpsRecordingCoordinator` the source of truth for recording and
+   `GpsTrackCoordinator` the source of truth for the unified track list;
    ground truth (local store + server cache) is written only by confirmed results.
 2. Route **every** track mutation through the shared offline op queue
    (`docs/offline-op-queue.md`) — never add a GPS-specific offline mechanism.

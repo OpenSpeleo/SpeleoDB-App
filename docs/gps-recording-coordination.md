@@ -17,18 +17,19 @@ silently lose accepted points or leave a watcher running.
 - the live point buffer and incremental crash-recovery writes;
 - stop, discard, fatal-permission finalization, and logout teardown.
 
-The controller supplies narrow ports for persistence serialization, completed
-track publication, revision notification, ID/name generation, and time. Local
-and remote track lists, GPX operations, server synchronization, and offline
-mutation replay remain outside the recording coordinator and are extracted in
-the next objective.
+`GpsTrackCoordinator` supplies narrow ports for persistence serialization,
+completed-track publication, and revision notification; the controller supplies
+ID/name generation and time. Local and remote lists, GPX operations, server
+synchronization, and offline mutation replay remain outside the recording
+coordinator.
 
 ## State and persistence invariants
 
 - A non-idle session always has an ID, name, color, and start timestamp.
 - No empty track is written before the first accepted fix.
-- Accepted fixes are persisted incrementally through the controller's serialized
-  write seam, so an older slow write cannot replace a newer point buffer.
+- Accepted fixes are persisted incrementally through the track coordinator's
+  serialized write seam, so an older slow write cannot replace a newer point
+  buffer.
 - Stop waits for queued writes before publishing the finalized track.
 - Discard and logout invalidate queued writes before removing or clearing the
   active session.
