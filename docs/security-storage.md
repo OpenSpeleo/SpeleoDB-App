@@ -42,10 +42,13 @@ tokens, ciphertext, coordinates, or operating-system error details.
 ## Lifecycle and ownership
 
 `CapacitorCredentialStore` owns the TypeScript/native boundary. The iOS plugin
-is registered by `AppBridgeViewController`; the Android plugin is registered by
-`MainActivity`. Native cryptography and persistence remain behind platform
-store implementations so session coordination does not depend on Security or
-Android Keystore APIs.
+is registered as an explicit instance by `AppBridgeViewController`; the Android
+plugin is registered by `MainActivity`. Instance registration is intentional:
+Capacitor 8 ignores `registerPluginType` while its default automatic package
+plugin discovery is enabled, but this first-party plugin is compiled directly
+into the app target and is not in the generated package plugin list. Native
+cryptography and persistence remain behind platform store implementations so
+session coordination does not depend on Security or Android Keystore APIs.
 
 `SecureSessionStore` combines that vault with non-secret metadata from
 `PreferencesService`. Application bootstrap initializes it before React mounts;
@@ -111,6 +114,10 @@ account replacement use the same secure-first ordering and rollback contract.
   and token bounds.
 - iOS Keychain tests exercise empty reads, replacement, clearing, byte limits,
   and malformed stored data on a simulator Keychain.
+- An iOS bridge integration test loads the production
+  `AppBridgeViewController` and requires its live bridge to resolve
+  `CredentialStore` to `CredentialStorePlugin`. This guards the native
+  registration seam separately from Keychain CRUD behavior.
 - iOS storage-policy tests exercise backup exclusion on existing, missing, and
   duplicate directories; Android lint validates both backup rule schemas.
 - Every native change requires Android unit/release compilation and an iOS
