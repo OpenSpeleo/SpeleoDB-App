@@ -23,6 +23,8 @@ This folder contains product and engineering documentation for core app behavior
   hit testing, and orientation invariants extracted from Dashboard rendering.
 - `dashboard-map-layers.md`: focused project, overlay, GPS-track, recording, and
   user-location MapLibre layer composition.
+- `dashboard-map-interactions.md`: touch/pen tap, long-press, empty-spot,
+  marker-detail, depth-probe, timer, and cancellation ownership.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `ci.md`: GitHub Actions stages, Vitest non-watch requirements, integration-test secrets, and native build verification.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding

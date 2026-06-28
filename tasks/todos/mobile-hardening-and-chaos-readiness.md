@@ -79,6 +79,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Extract GPS recording and track coordination`
 - [x] `[Refactoring] Extract dashboard map utilities`
 - [x] `[Refactoring] Extract dashboard map layers`
+- [x] `[Refactoring] Extract dashboard map interactions`
 - [ ] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [ ] `[Fix] Stop inactive page effects and polling`
 - [ ] `[Fix] Harden authentication and network state machines`
@@ -341,7 +342,7 @@ and physical-device evidence.
 
 ### Extract dashboard map layers
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `0ca8a62` (`[Refactoring] Extract dashboard map layers`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -359,3 +360,24 @@ and physical-device evidence.
 - Findings closed: the declarative map-layer slice of MH-007. Interaction
   orchestration, GPS presentation, modals, chrome, and panel-state unification
   remain scheduled as independently reviewable splits.
+
+### Extract dashboard map interactions
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
+  compilation.
+- Result: touch/pen tap, long-press, empty-spot validation, marker selection,
+  loading-ring, depth-probe, timer, and cancellation state now live in a focused
+  hook. Its direct and Dashboard characterization coverage is 100% for
+  statements, branches, functions, and lines. All web gates pass: Vitest passes
+  1,608/1,608 tests across 93 files with aggregate coverage of 86.90%
+  statements, 79.67% branches, 89.75% functions, and 89.47% lines. Dashboard
+  shrinks from 2,166 to 1,860 lines; the production hook is 295 lines.
+  Capacitor sync introduces no tracked native drift; Android passes 9/9 native
+  tests plus lint/APK/AAB builds, and iOS passes 7/7 native tests plus Release
+  compilation.
+- Findings closed: the map-interaction slice of MH-007. GPS presentation,
+  modals, chrome, and panel-state unification remain scheduled as independently
+  reviewable splits.

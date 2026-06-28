@@ -82,34 +82,18 @@ import {
   attachDepthToFeatureCollection,
 } from '../utils/depthColoring';
 import { useDepthProbe } from '../hooks/useDepthProbe';
-import {
-  INTERACTIVE_OVERLAY_LAYER_IDS,
-  formatLatLng,
-} from '../utils/overlayMarkerDetails';
 import type {
-  InteractiveOverlayFeature,
   LandmarkDetails,
-  MapLongPressDetails,
-  MarkerParseContext,
-  OverlayMarkerDetails,
 } from '../utils/overlayMarkerDetails';
 import {
-  MAP_MARKER_HIT_RADIUS_PX_TOUCH,
-  MAP_TOUCH_TAP_MAX_DURATION_MS,
-  MAP_TOUCH_TAP_MAX_MOVEMENT_PX,
   DEFAULT_OVERLAY_ICON_AVAILABILITY,
-  LONG_PRESS_BLOCKING_STATIC_LAYER_IDS,
   OVERLAY_ICON_SOURCES,
   boundsFromPoints,
   computeBounds,
   filterOverlayByProjectVisibility,
-  getClickedOverlayMarkerDetails,
-  getMarkerHitQueryBounds,
   loadMapImage,
   lockMapOrientation,
   normalizeOverlayGeoJSON,
-  type MapPointerTapCandidate,
-  type OverlayFeatureQueryMap,
   type OverlayImageMap,
   type OverlayIconAvailability,
   type OverlayIconId,
@@ -118,6 +102,7 @@ import {
 import { ProjectMapLayers } from './dashboard/ProjectMapLayers';
 import { OverlayMapLayers } from './dashboard/OverlayMapLayers';
 import { GpsMapLayers } from './dashboard/GpsMapLayers';
+import { useDashboardMapInteractions } from './dashboard/useDashboardMapInteractions';
 
 // ==================== GeoJSON type alias ====================
 
@@ -183,16 +168,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   const didFitRef = useRef(false);
   const knownVisibilityProjectIdsRef = useRef<Set<string>>(new Set());
   const mapRef = useRef<MapRef>(null);
-  const mapPointerTapCandidateRef = useRef<MapPointerTapCandidate | null>(null);
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longPressRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const [selectedOverlayMarkerDetail, setSelectedOverlayMarkerDetail] =
-    useState<OverlayMarkerDetails | null>(null);
 
   // ---- Landmark CRUD state --------------------------------------------------
-  // Circular long-press loading ring position (viewport px), null when idle.
-  const [longPressRing, setLongPressRing] = useState<{ x: number; y: number } | null>(null);
   // Create/edit form: non-null means open. Delete confirm target: non-null open.
   const [landmarkForm, setLandmarkForm] = useState<
     { mode: LandmarkFormMode; initialValues: LandmarkFormInitialValues; editId: string | null } | null
@@ -577,10 +554,6 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // ---- Handlers -------------------------------------------------------------
 
-  const projectPointLayerIds = useMemo(
-    () => [...effectiveActiveProjectIds].map((id) => `project-${id}-point`),
-    [effectiveActiveProjectIds],
-  );
   const projectGeometryLayerIds = useMemo(
     () =>
       [...effectiveActiveProjectIds].flatMap((id) => [
@@ -606,295 +579,20 @@ const Dashboard: React.FC<DashboardProps> = ({
     projectGeometryLayerIds,
   );
 
-  const allInteractiveLayerIds = useMemo(
-    () => [...INTERACTIVE_OVERLAY_LAYER_IDS, ...projectPointLayerIds] as readonly string[],
-    [projectPointLayerIds],
-  );
-  const longPressBlockingLayerIds = useMemo(
-    () =>
-      [
-        ...LONG_PRESS_BLOCKING_STATIC_LAYER_IDS,
-        ...projectPointLayerIds,
-      ] as readonly string[],
-    [projectPointLayerIds],
-  );
-
-  const markerParseContext = useMemo<MarkerParseContext>(() => {
-    const nameByLayer = new globalThis.Map<string, string>();
-    for (const project of sortedProjects) {
-      nameByLayer.set(`project-${project.id}-point`, project.name);
-    }
-    return { projectNameByPointLayerId: nameByLayer };
-  }, [sortedProjects]);
-
-  const openOverlayMarkerDetailsAtMapPoint = useCallback((
-    point: { x: number; y: number },
-    hitRadiusPx: number,
-  ) => {
-    const map = mapRef.current?.getMap() as unknown as OverlayFeatureQueryMap | undefined;
-    if (!map?.queryRenderedFeatures || !map.getLayer || !map.getZoom) {
-      return;
-    }
-
-    const zoom = map.getZoom();
-    if (!Number.isFinite(zoom) || zoom < MAP.MARKER_INTERACTION_MIN_ZOOM) {
-      return;
-    }
-
-    // Filter to only layers that currently exist on the map to avoid
-    // maplibre-gl throwing on non-existent layer IDs (icon-layer and
-    // fallback-layer are conditionally rendered, never both present).
-    const existingLayers = allInteractiveLayerIds.filter(
-      (id) => map.getLayer(id) != null,
-    );
-
-    if (existingLayers.length === 0) {
-      return;
-    }
-
-    let features: InteractiveOverlayFeature[];
-    try {
-      features = map.queryRenderedFeatures(
-        getMarkerHitQueryBounds(point, hitRadiusPx),
-        { layers: existingLayers as string[] },
-      );
-    } catch (err) {
-      console.warn('[overlay-tap] queryRenderedFeatures error', err);
-      return;
-    }
-
-    if (!features || features.length === 0) {
-      return;
-    }
-
-    const details = getClickedOverlayMarkerDetails(features, allInteractiveLayerIds, markerParseContext);
-    if (!details) {
-      return;
-    }
-
-    setSelectedOverlayMarkerDetail(details);
-  }, [allInteractiveLayerIds, markerParseContext]);
-
-  const openOverlayMarkerDetailsAtClientPoint = useCallback((
-    clientX: number,
-    clientY: number,
-    hitRadiusPx: number,
-  ) => {
-    const map = mapRef.current?.getMap() as unknown as OverlayFeatureQueryMap | undefined;
-    const canvasRect = map?.getCanvas()?.getBoundingClientRect();
-    if (!canvasRect) {
-      return;
-    }
-
-    openOverlayMarkerDetailsAtMapPoint({
-      x: clientX - canvasRect.left,
-      y: clientY - canvasRect.top,
-    }, hitRadiusPx);
-  }, [openOverlayMarkerDetailsAtMapPoint]);
-
-  const openLongPressGpsDetail = useCallback((clientX: number, clientY: number) => {
-    const map = mapRef.current?.getMap() as unknown as OverlayFeatureQueryMap | undefined;
-    if (!map?.getCanvas || !map.unproject) {
-      return;
-    }
-    const canvasRect = map.getCanvas()?.getBoundingClientRect();
-    if (!canvasRect) {
-      return;
-    }
-    const mapPoint = {
-      x: clientX - canvasRect.left,
-      y: clientY - canvasRect.top,
-    };
-    const lngLat = map.unproject(mapPoint);
-    const detail: MapLongPressDetails = {
-      type: 'mapLongPress',
-      gpsCoordinate: formatLatLng(lngLat.lat, lngLat.lng),
-      latitude: lngLat.lat,
-      longitude: lngLat.lng,
-    };
-    setSelectedOverlayMarkerDetail(detail);
-  }, []);
-
-  const isMarkerInteractionZoom = useCallback((): boolean => {
-    const map = mapRef.current?.getMap() as unknown as OverlayFeatureQueryMap | undefined;
-    if (!map?.getZoom) {
-      return false;
-    }
-    const zoom = map.getZoom();
-    return Number.isFinite(zoom) && zoom >= MAP.MARKER_INTERACTION_MIN_ZOOM;
-  }, []);
-
-  const isEmptyMapSpotAtClientPoint = useCallback((clientX: number, clientY: number): boolean => {
-    const map = mapRef.current?.getMap() as unknown as OverlayFeatureQueryMap | undefined;
-    if (!map?.queryRenderedFeatures || !map.getLayer || !map.getCanvas || !map.getZoom) {
-      return false;
-    }
-    const zoom = map.getZoom();
-    if (!Number.isFinite(zoom) || zoom < MAP.MARKER_INTERACTION_MIN_ZOOM) {
-      return false;
-    }
-
-    const canvasRect = map.getCanvas()?.getBoundingClientRect();
-    if (!canvasRect) {
-      return false;
-    }
-    const mapPoint = {
-      x: clientX - canvasRect.left,
-      y: clientY - canvasRect.top,
-    };
-
-    const existingLayers = longPressBlockingLayerIds.filter(
-      (id) => map.getLayer(id) != null,
-    );
-    if (existingLayers.length === 0) {
-      return true;
-    }
-
-    try {
-      const features = map.queryRenderedFeatures(
-        getMarkerHitQueryBounds(mapPoint, MAP.LONG_PRESS_EMPTY_SPOT_RADIUS_PX),
-        { layers: existingLayers as string[] },
-      );
-      return features.length === 0;
-    } catch {
-      return false;
-    }
-  }, [longPressBlockingLayerIds]);
-
-  const clearLongPressTimer = useCallback(() => {
-    if (longPressTimerRef.current !== null) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-    if (longPressRingTimerRef.current !== null) {
-      clearTimeout(longPressRingTimerRef.current);
-      longPressRingTimerRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => clearLongPressTimer();
-  }, [clearLongPressTimer]);
-
-  const handleMapGestureStart = useCallback((
-    event: React.PointerEvent<HTMLDivElement>,
-  ) => {
-    clearLongPressTimer();
-
-    if (event.pointerType === 'touch' || event.pointerType === 'pen') {
-      const isMultiTouch = mapPointerTapCandidateRef.current !== null;
-      mapPointerTapCandidateRef.current = {
-        pointerId: event.pointerId,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        startedAtMs: Date.now(),
-        moved: false,
-        pointerType: event.pointerType,
-      };
-
-      if (!isMultiTouch) {
-        sampleDepthAtClientPoint(event.clientX, event.clientY);
-        const cx = event.clientX;
-        const cy = event.clientY;
-        // Only arm the long-press when the map is
-        // zoomed in far enough that a landmark can be created. Below the marker
-        // interaction zoom, creation is impossible, so the ring must not appear
-        // at all. The empty-spot requirement is enforced when the timer fires.
-        if (isMarkerInteractionZoom()) {
-          const pointerId = event.pointerId;
-          longPressRingTimerRef.current = setTimeout(() => {
-            longPressRingTimerRef.current = null;
-            const candidate = mapPointerTapCandidateRef.current;
-            if (!candidate || candidate.pointerId !== pointerId || candidate.moved) {
-              return;
-            }
-            if (!isEmptyMapSpotAtClientPoint(cx, cy)) {
-              return;
-            }
-            setLongPressRing({ x: cx, y: cy });
-          }, MAP.LONG_PRESS_RING_REVEAL_DELAY_MS);
-          longPressTimerRef.current = setTimeout(() => {
-            clearLongPressTimer();
-            longPressTimerRef.current = null;
-            mapPointerTapCandidateRef.current = null;
-            setLongPressRing(null);
-            if (!isEmptyMapSpotAtClientPoint(cx, cy)) {
-              return;
-            }
-            Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {});
-            openLongPressGpsDetail(cx, cy);
-          }, MAP.LONG_PRESS_DURATION_MS);
-        }
-      } else {
-        setLongPressRing(null);
-        clearProbedDepth();
-      }
-    } else {
-      mapPointerTapCandidateRef.current = null;
-    }
-  }, [clearLongPressTimer, clearProbedDepth, isEmptyMapSpotAtClientPoint, isMarkerInteractionZoom, openLongPressGpsDetail, sampleDepthAtClientPoint]);
-
-  const handleMapGestureMove = useCallback((
-    event: React.PointerEvent<HTMLDivElement>,
-  ) => {
-    const candidate = mapPointerTapCandidateRef.current;
-    if (!candidate || candidate.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const distance = Math.hypot(
-      event.clientX - candidate.startClientX,
-      event.clientY - candidate.startClientY,
-    );
-    if (distance > MAP_TOUCH_TAP_MAX_MOVEMENT_PX) {
-      candidate.moved = true;
-      clearLongPressTimer();
-      setLongPressRing(null);
-    }
-    if (candidate.pointerType === 'touch' || candidate.pointerType === 'pen') {
-      sampleDepthAtClientPoint(event.clientX, event.clientY);
-    }
-  }, [clearLongPressTimer, sampleDepthAtClientPoint]);
-
-  const handleMapGestureEnd = useCallback((
-    event: React.PointerEvent<HTMLDivElement>,
-  ) => {
-    clearLongPressTimer();
-    setLongPressRing(null);
-
-    const candidate = mapPointerTapCandidateRef.current;
-    if (!candidate || candidate.pointerId !== event.pointerId) {
-      return;
-    }
-
-    mapPointerTapCandidateRef.current = null;
-    if (candidate.pointerType === 'touch' || candidate.pointerType === 'pen') {
-      clearProbedDepth();
-    }
-
-    if (event.type !== 'pointerup') {
-      return;
-    }
-
-    const durationMs = Date.now() - candidate.startedAtMs;
-    const distance = Math.hypot(
-      event.clientX - candidate.startClientX,
-      event.clientY - candidate.startClientY,
-    );
-    const isTap = !candidate.moved
-      && distance <= MAP_TOUCH_TAP_MAX_MOVEMENT_PX
-      && durationMs <= MAP_TOUCH_TAP_MAX_DURATION_MS;
-
-    if (!isTap || (candidate.pointerType !== 'touch' && candidate.pointerType !== 'pen')) {
-      return;
-    }
-
-    openOverlayMarkerDetailsAtClientPoint(
-      event.clientX,
-      event.clientY,
-      MAP_MARKER_HIT_RADIUS_PX_TOUCH,
-    );
-  }, [clearLongPressTimer, clearProbedDepth, openOverlayMarkerDetailsAtClientPoint]);
+  const {
+    selectedMarkerDetail: selectedOverlayMarkerDetail,
+    clearSelectedMarkerDetail,
+    longPressRing,
+    handleMapGestureStart,
+    handleMapGestureMove,
+    handleMapGestureEnd,
+  } = useDashboardMapInteractions({
+    mapRef,
+    activeProjectIds: effectiveActiveProjectIds,
+    projects: sortedProjects,
+    clearProbedDepth,
+    sampleDepthAtClientPoint,
+  });
 
   const handleToggleProject = useCallback((projectId: string) => {
     Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
@@ -1099,10 +797,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     [onLandmarkPanelChange],
   );
 
-  const handleDismissOverlayMarkerDetailsModal = useCallback(() => {
-    setSelectedOverlayMarkerDetail(null);
-  }, []);
-
   // ---- Landmark CRUD handlers -----------------------------------------------
 
   useEffect(() => {
@@ -1141,7 +835,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const handleOpenCreateLandmark = useCallback(() => {
     const detail = selectedOverlayMarkerDetail;
     if (!detail || detail.type !== 'mapLongPress') return;
-    setSelectedOverlayMarkerDetail(null);
+    clearSelectedMarkerDetail();
     setLandmarkFormError(null);
     setLandmarkForm({
       mode: 'create',
@@ -1152,12 +846,12 @@ const Dashboard: React.FC<DashboardProps> = ({
       },
     });
     loadLandmarkCollections();
-  }, [selectedOverlayMarkerDetail, loadLandmarkCollections]);
+  }, [clearSelectedMarkerDetail, selectedOverlayMarkerDetail, loadLandmarkCollections]);
 
   const handleOpenEditLandmark = useCallback(() => {
     const detail = selectedOverlayMarkerDetail;
     if (!detail || detail.type !== 'landmark') return;
-    setSelectedOverlayMarkerDetail(null);
+    clearSelectedMarkerDetail();
     setLandmarkFormError(null);
     setLandmarkForm({
       mode: 'edit',
@@ -1172,14 +866,14 @@ const Dashboard: React.FC<DashboardProps> = ({
       },
     });
     loadLandmarkCollections();
-  }, [selectedOverlayMarkerDetail, loadLandmarkCollections]);
+  }, [clearSelectedMarkerDetail, selectedOverlayMarkerDetail, loadLandmarkCollections]);
 
   const handleOpenDeleteLandmark = useCallback(() => {
     const detail = selectedOverlayMarkerDetail;
     if (!detail || detail.type !== 'landmark') return;
-    setSelectedOverlayMarkerDetail(null);
+    clearSelectedMarkerDetail();
     setLandmarkDeleteTarget(detail);
-  }, [selectedOverlayMarkerDetail]);
+  }, [clearSelectedMarkerDetail, selectedOverlayMarkerDetail]);
 
   const handleCancelLandmarkForm = useCallback(() => {
     if (landmarkFormBusy) return;
@@ -1940,7 +1634,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
           <OverlayMarkerDetailsModal
             detail={selectedOverlayMarkerDetail}
-            onClose={handleDismissOverlayMarkerDetailsModal}
+            onClose={clearSelectedMarkerDetail}
             onCreateLandmark={handleOpenCreateLandmark}
             onEditLandmark={handleOpenEditLandmark}
             onDeleteLandmark={handleOpenDeleteLandmark}

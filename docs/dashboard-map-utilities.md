@@ -19,10 +19,11 @@ The utility module owns:
 - project and GPS-track bounds, including antimeridian-aware project bounds;
 - touch thresholds, long-press blocking layer IDs, and north-up orientation.
 
-Dashboard still owns React state, refs, event scheduling, modals, and user
-interaction orchestration. Focused components under `src/pages/dashboard/`
-own MapLibre layer composition; see `docs/dashboard-map-layers.md`. Service and
-cache ownership remains outside these presentation modules.
+Dashboard still owns page state and modal composition. Focused components under
+`src/pages/dashboard/` own MapLibre layer composition, and
+`useDashboardMapInteractions` owns pointer state, timers, and marker selection;
+see `docs/dashboard-map-layers.md` and `docs/dashboard-map-interactions.md`.
+Service and cache ownership remains outside these presentation modules.
 
 ## Invariants
 

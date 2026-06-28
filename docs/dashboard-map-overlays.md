@@ -35,12 +35,13 @@ Implementation lives in:
 
 ## Rendering contract (Django parity)
 
-Dashboard owns React state and event orchestration in `src/pages/Dashboard.tsx`.
+Dashboard owns page composition in `src/pages/Dashboard.tsx`.
 `OverlayMapLayers.tsx` owns declarative overlay sources and layers, while
 deterministic map policy is isolated in `dashboardMapUtils.ts`: overlay
 normalization and project filtering, marker hit boxes, icon registration,
 project/track bounds, and north-up orientation. See
-`docs/dashboard-map-layers.md` and `docs/dashboard-map-utilities.md`.
+`docs/dashboard-map-layers.md`, `docs/dashboard-map-interactions.md`, and
+`docs/dashboard-map-utilities.md`.
 
 ## Zoom and size configuration (source of truth: `src/constants.ts`)
 
@@ -202,6 +203,9 @@ Project GeoJSON star features do not carry the project name in their GeoJSON pro
   - quick tap/click on interactive markers opens the modal,
   - map drag/pan and pinch-zoom remain map interactions and do not open marker details.
 - A wrapper div over the map canvas captures pointer events (`onPointerDownCapture`/`onPointerUpCapture`).
+- `useDashboardMapInteractions` owns the pointer candidate, timers, hit queries,
+  selected marker detail, and loading-ring state; Dashboard only wires its
+  returned handlers and state into the page.
 - Tap recognition uses movement threshold (`12px`) and duration limit (`550ms`) to distinguish taps from drags.
 - maplibre-gl's `queryRenderedFeatures` with a bounding box (`26px` radius) tests whether the tap hit an interactive layer.
 - The layer ID list is filtered through `map.getLayer()` before querying, because icon-layer and fallback-layer are mutually exclusive (only one exists at a time), and passing a non-existent layer ID to `queryRenderedFeatures` throws.

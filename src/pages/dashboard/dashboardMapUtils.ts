@@ -53,7 +53,6 @@ export type MapPointerTapCandidate = {
   startClientY: number;
   startedAtMs: number;
   moved: boolean;
-  pointerType: string;
 };
 
 export type OverlayImageMap = {
