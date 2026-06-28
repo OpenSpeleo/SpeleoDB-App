@@ -11,7 +11,6 @@ import { useHistory } from 'react-router-dom';
 import {
   IonPage,
   IonContent,
-  IonModal,
 } from '@ionic/react';
 import Map from 'react-map-gl/maplibre';
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
@@ -47,15 +46,13 @@ import {
 import ProjectPanel from '../components/ProjectPanel';
 import LandmarkPanel from '../components/LandmarkPanel';
 import GpsPanel from '../components/GpsPanel';
-import GpsRecordingScreen from '../components/GpsRecordingScreen';
 import { BatteryOptimizationGuard } from '../services/BatteryOptimizationGuard';
-import GpsAveragingModal, { type GpsAveragingPhase } from '../components/GpsAveragingModal';
+import type { GpsAveragingPhase } from '../components/GpsAveragingModal';
 import AppTabBar from '../components/AppTabBar';
 import { useGpsAveraging } from '../hooks/useGpsAveraging';
 import { GpxFileService } from '../services/GpxFileService';
 import { errorToLogDetails } from '../utils/errorDiagnostics';
 import type { GpsTrackListItem, RecordedPoint } from '../types/gpsTrack';
-import { TRACK_COLOR_PALETTE, readableInkColor } from '../utils/gpsTrackColors';
 import {
   buildLandmarkCollectionGroups,
   type LandmarkListItem,
@@ -103,6 +100,8 @@ import { ProjectMapLayers } from './dashboard/ProjectMapLayers';
 import { OverlayMapLayers } from './dashboard/OverlayMapLayers';
 import { GpsMapLayers } from './dashboard/GpsMapLayers';
 import { useDashboardMapInteractions } from './dashboard/useDashboardMapInteractions';
+import { DashboardGpsActivity } from './dashboard/DashboardGpsActivity';
+import { DashboardGpsTrackDialogs } from './dashboard/DashboardGpsTrackDialogs';
 
 // ==================== GeoJSON type alias ====================
 
@@ -1553,83 +1552,43 @@ const Dashboard: React.FC<DashboardProps> = ({
             onDeleteTrack={handleDeleteTrack}
           />
 
-          {/* ---- GPS recording screen (full-screen, with a back button) ---- */}
-          <GpsRecordingScreen
-            isOpen={isRecorderOpen}
-            recordingState={gpsRecordingState}
-            recordingElapsedMs={gpsRecordingElapsedMs}
-            recordingElapsedUpdatedAt={gpsRecordingElapsedUpdatedAt}
-            currentPoints={currentTrackPoints}
-            measurementUnit={measurementUnit}
-            onBack={() => setIsRecorderOpen(false)}
-            onStart={handleStartRecording}
-            onPause={handlePauseRecording}
-            onResume={handleResumeRecording}
-            onStop={handleStopRecordingFromScreen}
-            onCancel={handleCancelRecording}
-            showBatteryOptimizationHint={showBatteryHint}
-            onFixBatteryOptimization={handleFixBatteryOptimization}
-            onDismissBatteryOptimizationHint={handleDismissBatteryHint}
-          />
-
-          <ConfirmDialog
-            isOpen={showRecordingCancelConfirm}
-            title="Discard recording"
-            message="This stops the current recording and discards the track. This cannot be undone."
-            confirmLabel="Discard"
-            cancelLabel="Keep recording"
-            danger
-            onConfirm={handleConfirmRecordingCancel}
-            onCancel={handleDismissRecordingCancel}
-            testId="gps-recording-cancel-confirm"
-          />
-
-          <GpsAveragingModal
-            isOpen={isAveragingOpen}
-            status={averaging.status}
-            result={averaging.result}
-            gnss={averaging.gnss}
-            measurementUnit={measurementUnit}
-            phase={averagingPhase}
-            onStart={handleStartAveraging}
-            onStop={handleStopAveraging}
-            onReset={handleRequestAveragingReset}
-            onCancel={handleCancelAveraging}
-            onSave={handleAveragingSave}
-          />
-
-          <ConfirmDialog
-            isOpen={showAveragingResetConfirm}
-            title="Reset GPS Point"
-            message="This clears all the GPS readings collected so far and starts the average over from zero."
-            confirmLabel="Reset"
-            cancelLabel="Cancel"
-            danger
-            onConfirm={handleConfirmAveragingReset}
-            onCancel={handleCancelAveragingReset}
-            testId="gps-averaging-reset-confirm"
-          />
-
-          <ConfirmDialog
-            isOpen={uploadTarget !== null}
-            title="Upload GPS Track"
-            message={
-              <>
-                Upload{' '}
-                <span className="font-semibold text-slate-100">
-                  {uploadTarget?.name ?? 'this track'}
-                </span>{' '}
-                to SpeleoDB?
-              </>
-            }
-            warning="This sends the GPX track to the active SpeleoDB instance. If you are offline, it will be queued and uploaded after reconnect."
-            confirmLabel="Upload"
-            cancelLabel="Cancel"
-            busy={uploadBusy}
-            busyLabel={'Uploading\u2026'}
-            onConfirm={handleConfirmUploadTrack}
-            onCancel={handleCancelUploadTrack}
-            testId="gps-upload-confirm"
+          <DashboardGpsActivity
+            recording={{
+              isOpen: isRecorderOpen,
+              recordingState: gpsRecordingState,
+              recordingElapsedMs: gpsRecordingElapsedMs,
+              recordingElapsedUpdatedAt: gpsRecordingElapsedUpdatedAt,
+              currentPoints: currentTrackPoints,
+              measurementUnit,
+              onBack: () => setIsRecorderOpen(false),
+              onStart: handleStartRecording,
+              onPause: handlePauseRecording,
+              onResume: handleResumeRecording,
+              onStop: handleStopRecordingFromScreen,
+              onCancel: handleCancelRecording,
+              showBatteryOptimizationHint: showBatteryHint,
+              onFixBatteryOptimization: handleFixBatteryOptimization,
+              onDismissBatteryOptimizationHint: handleDismissBatteryHint,
+            }}
+            recordingCancelOpen={showRecordingCancelConfirm}
+            onConfirmRecordingCancel={handleConfirmRecordingCancel}
+            onDismissRecordingCancel={handleDismissRecordingCancel}
+            averaging={{
+              isOpen: isAveragingOpen,
+              status: averaging.status,
+              result: averaging.result,
+              gnss: averaging.gnss,
+              measurementUnit,
+              phase: averagingPhase,
+              onStart: handleStartAveraging,
+              onStop: handleStopAveraging,
+              onReset: handleRequestAveragingReset,
+              onCancel: handleCancelAveraging,
+              onSave: handleAveragingSave,
+            }}
+            averagingResetOpen={showAveragingResetConfirm}
+            onConfirmAveragingReset={handleConfirmAveragingReset}
+            onCancelAveragingReset={handleCancelAveragingReset}
           />
 
           <OverlayMarkerDetailsModal
@@ -1678,134 +1637,24 @@ const Dashboard: React.FC<DashboardProps> = ({
             testId="delete-landmark-confirm"
           />
 
-          <ConfirmDialog
-            isOpen={deleteTarget !== null}
-            title="Delete GPS Track"
-            message={
-              <>
-                Are you sure you want to delete{' '}
-                <span className="font-semibold text-slate-100">
-                  {deleteTarget?.name ?? 'this track'}
-                </span>
-                {deleteTarget?.origin === 'remote' ? ' from SpeleoDB' : ''}?
-              </>
-            }
-            warning={
-              deleteTarget?.origin === 'remote'
-                ? 'This removes the track from SpeleoDB. If you are offline it is queued in Pending changes.'
-                : 'This removes the recording from this device. This action cannot be undone.'
-            }
-            confirmLabel="Delete"
-            cancelLabel="Cancel"
-            danger
-            busy={deleteBusy}
-            busyLabel={'Deleting\u2026'}
-            onConfirm={handleConfirmDeleteTrack}
-            onCancel={handleCancelDeleteTrack}
-            testId="gps-delete-confirm"
+          <DashboardGpsTrackDialogs
+            uploadTarget={uploadTarget}
+            uploadBusy={uploadBusy}
+            onConfirmUpload={handleConfirmUploadTrack}
+            onCancelUpload={handleCancelUploadTrack}
+            deleteTarget={deleteTarget}
+            deleteBusy={deleteBusy}
+            onConfirmDelete={handleConfirmDeleteTrack}
+            onCancelDelete={handleCancelDeleteTrack}
+            editTarget={editTarget}
+            editName={editName}
+            editColor={editColor}
+            editBusy={editBusy}
+            onEditNameChange={setEditName}
+            onEditColorChange={setEditColor}
+            onConfirmEdit={handleConfirmEditTrack}
+            onCancelEdit={handleCancelEditTrack}
           />
-
-          {editTarget && (
-            <IonModal
-              isOpen
-              onDidDismiss={() => { if (!editBusy) setEditTarget(null); }}
-            >
-              <IonContent className="ion-padding">
-                {/* Top-anchored (NOT vertically centered): when the keyboard
-                    opens, IonContent shrinks; a `justify-center` layout would
-                    re-center the now-shorter form and make everything lurch.
-                    Anchoring to the top keeps the Name field steady. */}
-                <div
-                  data-testid="gps-edit-modal"
-                  className="flex flex-col h-full max-w-sm mx-auto"
-                  // Clear the device safe area (notch/status bar) plus a generous
-                  // gap so "Edit Track" never sits against the top "danger area".
-                  style={{ paddingTop: 'calc(3.5rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)))' }}
-                >
-                  <h2 className="text-xl font-semibold text-slate-100 mb-5 text-center">
-                    Edit GPS Track
-                  </h2>
-                  <label className="text-xs font-medium text-slate-400 mb-1">Name</label>
-                  <input
-                    type="text"
-                    value={editName}
-                    maxLength={120}
-                    autoFocus
-                    onChange={(e) => setEditName(e.target.value)}
-                    data-testid="gps-edit-name-input"
-                    className="w-full px-4 py-2.5 text-sm text-slate-200 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-500"
-                    placeholder="Track name"
-                  />
-                  <label className="text-xs font-medium text-slate-400 mt-4 mb-2">Color</label>
-                  <div className="grid grid-cols-10 gap-2.5" data-testid="gps-edit-color-swatches">
-                    {TRACK_COLOR_PALETTE.map((color) => {
-                      // `String(...)` guards against a track recorded by an older
-                      // build whose persisted record has no `color` (undefined),
-                      // which would otherwise throw on `.toLowerCase()`.
-                      const selected = String(editColor).toLowerCase() === color.toLowerCase();
-                      return (
-                        <button
-                          key={color}
-                          type="button"
-                          aria-label={`Color ${color}`}
-                          aria-pressed={selected}
-                          onClick={() => setEditColor(color)}
-                          data-testid={`gps-edit-color-${color}`}
-                          className="relative flex aspect-square w-full items-center justify-center rounded-full transition-transform"
-                          style={{
-                            backgroundColor: color,
-                            // Selection cue that works on ANY swatch (dark or
-                            // light): a contrasting checkmark inside, plus a
-                            // dark-gap + white outer ring drawn with box-shadow
-                            // (reliable on old Android WebViews, unlike a same-
-                            // color border that vanishes on light swatches).
-                            transform: selected ? 'scale(1.12)' : undefined,
-                            boxShadow: selected
-                              ? '0 0 0 2px #0f172a, 0 0 0 4px #f8fafc'
-                              : undefined,
-                          }}
-                        >
-                          {selected && (
-                            <svg
-                              viewBox="0 0 24 24"
-                              className="h-3.5 w-3.5"
-                              fill="none"
-                              stroke={readableInkColor(color)}
-                              strokeWidth={3.5}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <path d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 mt-6">
-                    <button
-                      type="button"
-                      onClick={handleCancelEditTrack}
-                      data-testid="gps-edit-cancel"
-                      className="app-btn app-btn--secondary"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleConfirmEditTrack}
-                      disabled={editBusy}
-                      data-testid="gps-edit-save"
-                      className="app-btn app-btn--primary"
-                    >
-                      {editBusy ? 'Saving\u2026' : 'Save'}
-                    </button>
-                  </div>
-                </div>
-              </IonContent>
-            </IonModal>
-          )}
 
           {landmarkToast && (
             <div
