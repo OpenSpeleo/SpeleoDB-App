@@ -1,0 +1,208 @@
+import type { CredentialStore } from './CredentialStore';
+
+export interface StoredSession {
+  email?: string;
+  instance: string;
+  token: string;
+}
+
+export interface SessionMetadata {
+  email?: string;
+  hasStoredSession: boolean;
+  instance?: string;
+  legacyToken?: string;
+}
+
+export interface SessionMetadataStore {
+  read(): SessionMetadata;
+  commit(session: Omit<StoredSession, 'token'>): void;
+  clear(): void;
+}
+
+export interface SessionStore {
+  initialize(): Promise<StoredSession | null>;
+  getSession(): StoredSession | null;
+  establish(session: StoredSession): Promise<void>;
+  clear(): Promise<void>;
+}
+
+export class SessionStoreError extends Error {
+  constructor(
+    public readonly code: 'not-initialized' | 'persistence-failed' | 'rollback-failed',
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = 'SessionStoreError';
+  }
+}
+
+function normalizeSession(session: StoredSession): StoredSession {
+  const token = session.token.trim();
+  const instance = session.instance.trim();
+  if (!token || !instance) {
+    throw new SessionStoreError(
+      'persistence-failed',
+      'A valid token and instance are required for a stored session',
+    );
+  }
+  const email = session.email?.trim();
+  return { token, instance, ...(email ? { email } : {}) };
+}
+
+/** Coordinates secure token writes with non-secret local session metadata. */
+export class SecureSessionStore implements SessionStore {
+  private current: StoredSession | null = null;
+  private initialized = false;
+  private initialization: Promise<StoredSession | null> | null = null;
+
+  constructor(
+    private readonly credentials: CredentialStore,
+    private readonly metadata: SessionMetadataStore,
+  ) {}
+
+  initialize(): Promise<StoredSession | null> {
+    if (this.initialization) return this.initialization;
+    this.initialization = this.initializeOnce();
+    return this.initialization;
+  }
+
+  getSession(): StoredSession | null {
+    if (!this.initialized) {
+      throw new SessionStoreError(
+        'not-initialized',
+        'Secure session storage must be initialized before use',
+      );
+    }
+    return this.current ? { ...this.current } : null;
+  }
+
+  async establish(session: StoredSession): Promise<void> {
+    this.assertInitialized();
+    const normalized = normalizeSession(session);
+    const previousToken = await this.credentials.readToken();
+
+    await this.credentials.writeToken(normalized.token);
+    try {
+      this.metadata.commit({
+        email: normalized.email,
+        instance: normalized.instance,
+      });
+    } catch (error) {
+      await this.rollbackCredential(previousToken, error);
+      throw new SessionStoreError(
+        'persistence-failed',
+        'Unable to persist secure session metadata',
+        { cause: error },
+      );
+    }
+    this.current = normalized;
+  }
+
+  async clear(): Promise<void> {
+    this.assertInitialized();
+    try {
+      await this.credentials.clearToken();
+    } finally {
+      // Even a native deletion failure must revoke in-process access. The
+      // retained metadata lets the next startup retry the native clear.
+      this.current = null;
+    }
+    try {
+      this.metadata.clear();
+    } catch (error) {
+      throw new SessionStoreError(
+        'persistence-failed',
+        'The secure token was cleared but session metadata could not be removed',
+        { cause: error },
+      );
+    }
+  }
+
+  private async initializeOnce(): Promise<StoredSession | null> {
+    try {
+      const metadata = this.metadata.read();
+      const secureToken = await this.credentials.readToken();
+      const legacyToken = metadata.legacyToken?.trim();
+      const instance = metadata.instance?.trim();
+
+      if (legacyToken && instance) {
+        const migrated = normalizeSession({
+          email: metadata.email,
+          instance,
+          token: legacyToken,
+        });
+        await this.migrateLegacySession(migrated, secureToken);
+        this.current = migrated;
+        return { ...migrated };
+      }
+
+      if (metadata.hasStoredSession && instance && secureToken) {
+        const restored = normalizeSession({
+          email: metadata.email,
+          instance,
+          token: secureToken,
+        });
+        this.current = restored;
+        return { ...restored };
+      }
+
+      if (secureToken) {
+        await this.credentials.clearToken();
+      }
+      if (metadata.hasStoredSession || metadata.legacyToken) {
+        this.metadata.clear();
+      }
+      this.current = null;
+      return null;
+    } finally {
+      this.initialized = true;
+    }
+  }
+
+  private async migrateLegacySession(
+    session: StoredSession,
+    previousToken: string | null,
+  ): Promise<void> {
+    if (previousToken !== session.token) {
+      await this.credentials.writeToken(session.token);
+    }
+    try {
+      this.metadata.commit({ email: session.email, instance: session.instance });
+    } catch (error) {
+      if (previousToken !== session.token) {
+        await this.rollbackCredential(previousToken, error);
+      }
+      throw new SessionStoreError(
+        'persistence-failed',
+        'Unable to remove the legacy session token',
+        { cause: error },
+      );
+    }
+  }
+
+  private async rollbackCredential(previousToken: string | null, cause: unknown): Promise<void> {
+    try {
+      if (previousToken === null) {
+        await this.credentials.clearToken();
+      } else {
+        await this.credentials.writeToken(previousToken);
+      }
+    } catch (rollbackError) {
+      throw new SessionStoreError(
+        'rollback-failed',
+        'Secure session rollback failed',
+        { cause: new AggregateError([cause, rollbackError]) },
+      );
+    }
+  }
+
+  private assertInitialized(): void {
+    if (!this.initialized) {
+      throw new SessionStoreError(
+        'not-initialized',
+        'Secure session storage must be initialized before use',
+      );
+    }
+  }
+}

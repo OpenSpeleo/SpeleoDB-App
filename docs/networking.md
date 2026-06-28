@@ -58,7 +58,9 @@ The app enters offline mode only as a result of a failed server probe, never fro
 ## Auth and logout
 
 - A user-supplied OAuth token is persisted only after `GET /api/v2/user/auth-token/`
-  returns `2xx`. A `4xx`, timeout, transport error, or other server failure
+  returns `2xx`, and is committed to native secure storage before non-secret
+  session metadata is updated. A `4xx`, timeout, transport error, storage
+  failure, or other server failure
   leaves the app on the login page without creating an offline session.
 - Pre-login token validation failure does not purge local data. It never
   established a session, so it returns a form error rather than calling the

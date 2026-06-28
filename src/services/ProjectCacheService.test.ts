@@ -60,14 +60,25 @@ function persistenceService(
 }
 
 function persistencePreferences(): PreferencesPort {
+  const session = {
+    email: 'user@example.com',
+    token: 'token',
+    instance: 'https://api.example.com',
+  };
   return {
     getPreferences: () => ({
       email: 'user@example.com',
-      token: 'token',
       instance: 'https://api.example.com',
+      hasStoredSession: true,
     }),
     setPreferences: vi.fn(),
     clearPreferences: vi.fn(),
+    session: {
+      initialize: vi.fn(async () => session),
+      getSession: vi.fn(() => ({ ...session })),
+      establish: vi.fn(async () => {}),
+      clear: vi.fn(async () => {}),
+    },
   };
 }
 

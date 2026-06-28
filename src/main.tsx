@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import App from './App';
 import { AppErrorBoundary } from './monitoring/AppErrorBoundary';
 import { initSentry } from './monitoring/sentry';
+import { appSessionStore } from './services/AppSessionStore';
 
 /**
  * On Android the WebView always returns 0 for CSS `env(safe-area-inset-*)`.
@@ -19,9 +20,6 @@ function initAndroidSafeArea(): void {
   if (Capacitor.getPlatform() !== 'android') return;
   document.documentElement.style.setProperty('--safe-area-inset-bottom', '40px');
 }
-
-initSentry();
-initAndroidSafeArea();
 
 function registerServiceWorker(): void {
   if (import.meta.env.DEV) return;
@@ -45,14 +43,27 @@ function registerServiceWorker(): void {
   });
 }
 
-const container = document.getElementById('root');
-const root = createRoot(container!);
-root.render(
-  <React.StrictMode>
-    <AppErrorBoundary>
-      <App />
-    </AppErrorBoundary>
-  </React.StrictMode>
-);
+async function bootstrap(): Promise<void> {
+  initSentry();
+  initAndroidSafeArea();
+  try {
+    await appSessionStore.initialize();
+  } catch {
+    // Fail closed to the login screen. Native storage details and credentials
+    // must never be written to diagnostics.
+    console.error('Secure session initialization failed.');
+  }
 
-registerServiceWorker();
+  const container = document.getElementById('root');
+  const root = createRoot(container!);
+  root.render(
+    <React.StrictMode>
+      <AppErrorBoundary>
+        <App />
+      </AppErrorBoundary>
+    </React.StrictMode>,
+  );
+  registerServiceWorker();
+}
+
+void bootstrap();

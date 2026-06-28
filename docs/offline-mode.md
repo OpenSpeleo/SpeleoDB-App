@@ -14,7 +14,9 @@ This document defines the offline cache feature, user-facing offline modal behav
 - During startup, the app validates the stored token against the backend.
 - If the request times out or fails due to transport/network/server conditions, the app must enter offline mode and keep the local session.
 - Timeout must never trigger logout or cache clearing.
-- Startup validation is attempted once per app launch when persisted preferences contain a `token` and `instance`. `email` is not part of the gate.
+- Startup validation is attempted once per app launch when non-secret preferences
+  contain `hasStoredSession: true` and an `instance`. The token is restored from
+  native secure storage before React mounts; `email` is not part of the gate.
 - While startup validation is in flight, the startup UI coordinator (`src/context/useStartupUiCoordinator.ts`, rendered by `SpeleoDBProvider`) schedules a small `Connecting to SpeleoDB…` floating card (`data-testid="connecting-banner"`) **after a 1s gate**, so fast networks never see it but slow networks get clear visual feedback that the app is still trying. The banner is removed as soon as `validateSession()` resolves (success or failure).
 - The native splash (`launchAutoHide: false`, opaque `#0f172a`) is hidden at the same instant the banner is shown. This is non-negotiable: the splash sits above the React tree and would otherwise hide the banner for the entire timeout window. On fast networks the banner timer is cancelled and the splash hides only via the validation `.finally()` (single hide call). On slow networks the splash hides at ~1s and `.finally()` calls hide again on resolution; both calls are idempotent and any plugin warning is swallowed by `hideSplashScreenSafely`.
 - The offline modal is suppressed while startup validation is still pending, so users see either the `Connecting to SpeleoDB…` card or the offline modal, never both at once.
@@ -50,7 +52,7 @@ Both paths are explicit and user-initiated. The app still does **not** subscribe
 
 | Condition | Startup result | Logout | Cache purge | UX |
 | --- | --- | --- | --- | --- |
-| Persisted auth prefs missing `instance` | `unauthorized` | Yes (preferences cleared as invalid) | No | Continue unauthenticated; user must log in again |
+| Session metadata or secure token is missing/inconsistent | No validation; bootstrap fails closed | Local session metadata is cleared | No | Continue unauthenticated; user must log in again |
 | HTTP 2xx | `ok` | No | No | Continue online |
 | HTTP 4xx | `unauthorized` | Yes | Yes | Redirect to home/login |
 | HTTP 5xx or non-4xx error status | `network_error` | No | No | Offline modal shown (acknowledge once with `Go Offline`) |

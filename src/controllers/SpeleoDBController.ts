@@ -20,6 +20,7 @@ import {
 } from '../constants';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
+import type { SessionStore } from '../services/SecureSessionStore';
 import { GpsTrackStore } from '../services/GpsTrackStore';
 import { MultipartPayloadError } from '../services/HttpClient';
 import {
@@ -161,8 +162,8 @@ interface SessionProjectGeoJSONDisposition {
 export interface PreferencesPort {
   getPreferences(): {
     email?: string;
-    token?: string;
     instance?: string;
+    hasStoredSession?: boolean;
     lastSyncedAt?: number;
     tileCacheOverLimitApproved?: boolean;
     tileCacheOverLimitPromptAcknowledged?: boolean;
@@ -172,8 +173,8 @@ export interface PreferencesPort {
   setPreferences(
     prefs: Partial<{
       email?: string;
-      token?: string;
       instance?: string;
+      hasStoredSession?: boolean;
       lastSyncedAt?: number;
       tileCacheOverLimitApproved?: boolean;
       tileCacheOverLimitPromptAcknowledged?: boolean;
@@ -182,6 +183,7 @@ export interface PreferencesPort {
     }>,
   ): void;
   clearPreferences(): void;
+  session: SessionStore;
 }
 
 // ==================== Storage keys (offline) ====================
@@ -1024,11 +1026,19 @@ export class SpeleoDBController {
           const userEmail = typeof response.data.user === 'string' && response.data.user.trim()
             ? response.data.user
             : email;
-          const user = this.establishAuthenticatedSession(
-            authToken,
-            instance,
-            userEmail,
-          );
+          let user: User | null;
+          try {
+            user = await this.establishAuthenticatedSession(
+              authToken,
+              instance,
+              userEmail,
+            );
+          } catch {
+            return {
+              success: false,
+              message: 'Login succeeded, but the secure session could not be saved.',
+            };
+          }
           return {
             success: true,
             message: 'Login successful',
@@ -1072,7 +1082,14 @@ export class SpeleoDBController {
       const response = await this.service.validateToken(instance, token);
 
       if (isSuccessfulStatus(response.status)) {
-        this.establishAuthenticatedSession(token, instance);
+        try {
+          await this.establishAuthenticatedSession(token, instance);
+        } catch {
+          return {
+            success: false,
+            message: 'Login succeeded, but the secure session could not be saved.',
+          };
+        }
         return { success: true, message: 'Login successful', token };
       }
 
@@ -1138,15 +1155,11 @@ export class SpeleoDBController {
   private async validateSessionAgainstServer(): Promise<'ok' | 'unauthorized' | 'network_error'> {
     const validationGeneration = this.captureAsyncGeneration();
     const context = this.beginValidationContext();
-    const prefs = this.prefs.getPreferences();
-    const token = prefs.token;
-    const instance = prefs.instance?.trim();
-    if (!token || !instance) {
-      if (prefs.token && !instance) {
-        this.prefs.clearPreferences();
-      }
+    const session = this.prefs.session.getSession();
+    if (!session) {
       return 'unauthorized';
     }
+    const { instance, token } = session;
 
     try {
       const response = await this.service.validateToken(
@@ -1214,6 +1227,7 @@ export class SpeleoDBController {
     if (this._isPurgingLocalData) return;
     this._isPurgingLocalData = true;
     this.invalidateAsyncOperations();
+    let sessionClearError: unknown;
     try {
       const prefetchAtPurgeStart = this.tilePrefetch;
 
@@ -1258,7 +1272,11 @@ export class SpeleoDBController {
       this._tileCacheOverLimitPromptAcknowledged = false;
       this._storageConsentRequested = false;
       setTileCacheOverLimitApprovedRuntime(false);
-      this.prefs.clearPreferences();
+      try {
+        await this.prefs.session.clear();
+      } catch (error) {
+        sessionClearError = error;
+      }
 
       try {
         localStorage.clear();
@@ -1296,6 +1314,9 @@ export class SpeleoDBController {
       this.offlineQueue = this.buildOfflineQueue();
       this._pendingOpsRevision += 1;
       this.notify();
+      if (sessionClearError) {
+        throw new Error('Secure credential deletion failed during logout.');
+      }
     } finally {
       this._isPurgingLocalData = false;
     }
@@ -2733,14 +2754,8 @@ export class SpeleoDBController {
   }
 
   private getSyncCredentials(): { token: string; instance: string } | null {
-    const prefs = this.prefs.getPreferences();
-    const token = prefs.token;
-    const instance = prefs.instance?.trim();
-    if (!token || !instance) {
-      return null;
-    }
-
-    return { token, instance };
+    const session = this.prefs.session.getSession();
+    return session ? { token: session.token, instance: session.instance } : null;
   }
 
   private async loadCachedProjectsPhase(
@@ -3756,16 +3771,13 @@ export class SpeleoDBController {
   private restoreSession(): void {
     try {
       const prefs = this.prefs.getPreferences();
-      if (prefs.token && !prefs.instance) {
-        this.prefs.clearPreferences();
-        return;
-      }
-      if (prefs.token && prefs.instance) {
-        const email = prefs.email?.trim() ?? '';
+      const session = this.prefs.session.getSession();
+      if (session) {
+        const email = session.email?.trim() ?? '';
         this._authState = {
           isAuthenticated: true,
           user: email ? { id: 'restored', email, name: email } : null,
-          token: prefs.token,
+          token: session.token,
         };
         if (
           typeof prefs.lastSyncedAt === 'number' &&
@@ -3794,11 +3806,11 @@ export class SpeleoDBController {
   }
 
   /** Publish and persist a validated online session from either login method. */
-  private establishAuthenticatedSession(
+  private async establishAuthenticatedSession(
     token: string,
     instance: string,
     email?: string,
-  ): User | null {
+  ): Promise<User | null> {
     const normalizedToken = token.trim();
     const normalizedInstance = instance.trim();
     const normalizedEmail = email?.trim() ?? '';
@@ -3806,33 +3818,48 @@ export class SpeleoDBController {
       ? { id: 'auth', email: normalizedEmail, name: normalizedEmail }
       : null;
 
+    await this.prefs.session.establish({
+      email: normalizedEmail || undefined,
+      token: normalizedToken,
+      instance: normalizedInstance,
+    });
     this.invalidateAsyncOperations();
     this._authState = { isAuthenticated: true, user, token: normalizedToken };
     this._isOnline = true;
     this.setOfflineLocked(false);
-    this.prefs.setPreferences({
-      email: normalizedEmail,
-      token: normalizedToken,
-      instance: normalizedInstance,
-    });
     this.notify();
     return user;
   }
 
   /** Attempt login against the local users DB (offline). */
-  private offlineLogin(email: string, password: string, instance: string): AuthResponse {
+  private async offlineLogin(
+    email: string,
+    password: string,
+    instance: string,
+  ): Promise<AuthResponse> {
     const localUsers = this.getLocalUsers();
     const localUser = localUsers[email.toLowerCase()];
 
     if (localUser && localUser.password === password) {
       const token = this.generateOfflineToken();
+      const normalizedInstance = instance.trim() || this.prefs.getPreferences().instance;
+      if (!normalizedInstance) {
+        return { success: false, message: 'SpeleoDB instance URL is required' };
+      }
+      try {
+        await this.prefs.session.establish({
+          email: localUser.user.email,
+          token,
+          instance: normalizedInstance,
+        });
+      } catch {
+        return {
+          success: false,
+          message: 'Login succeeded, but the secure session could not be saved.',
+        };
+      }
       this.invalidateAsyncOperations();
       this._authState = { isAuthenticated: true, user: localUser.user, token };
-      this.prefs.setPreferences({
-        email: localUser.user.email,
-        token,
-        instance: instance.trim() || this.prefs.getPreferences().instance,
-      });
       this.notify();
       return { success: true, message: 'Login successful (offline)', user: localUser.user, token };
     }

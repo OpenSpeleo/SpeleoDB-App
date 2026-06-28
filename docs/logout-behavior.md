@@ -27,6 +27,7 @@ Logout must not be triggered by transient network conditions:
 `logout()` purges local user data, including:
 
 - auth state and preferences,
+- the native secure authentication token and its non-secret session marker,
 - `localStorage` and `sessionStorage`,
 - cached projects and GeoJSON (including dashboard overlay GeoJSON),
 - cached map tiles,
@@ -36,6 +37,9 @@ Implementation notes:
 
 - logout invalidates and cancels controller-owned startup validation and sync run contexts before the destructive cache wipe starts,
 - UI auth/session state resets immediately so the app stops rendering the old session,
+- native credential deletion runs before session metadata deletion; any failure
+  still revokes the in-process token, completes local cache cleanup, and is
+  reported to the caller instead of being hidden,
 - cache purge waits for already-started tracked sync work to settle before `clearAll()` / tile cleanup runs, so stale writes cannot repopulate local data after logout completes,
 - service/cache layers must treat aborts as authoritative: once logout starts, no stale state mutation, cache write, or tile-prefetch scheduling may be published from the cancelled run.
 

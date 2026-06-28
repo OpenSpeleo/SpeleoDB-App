@@ -35,6 +35,7 @@ import {
   getLayerOfflineSyncPreferences,
   isLayerOfflineSyncEnabled,
   setLayerOfflineSyncPreference,
+  sessionMetadataStore,
   type UserPreferences,
 } from './PreferencesService';
 import { DEFAULT_MAP_LAYER_ID, PREFERENCES } from '../constants';
@@ -43,9 +44,8 @@ describe('PreferencesService', () => {
   const VALID_INSTANCE = 'https://example.org';
 
   function seedValidAuth(): void {
-    setPreferences({
+    sessionMetadataStore.commit({
       email: 'auth-user@example.com',
-      token: 'auth-token',
       instance: VALID_INSTANCE,
     });
   }
@@ -59,80 +59,133 @@ describe('PreferencesService', () => {
       const prefs = getPreferences();
       expect(prefs.instance).toBeUndefined();
       expect(prefs.email).toBeUndefined();
-      expect(prefs.token).toBeUndefined();
+      expect(prefs.hasStoredSession).toBeUndefined();
       expect(prefs.hasCompletedGuidedTour).toBeUndefined();
     });
 
-    it('keeps instance undefined when stored object has no auth token', () => {
+    it('preserves non-secret preferences without inventing a session', () => {
       localStorage.setItem(
         PREFERENCES.STORAGE_KEY,
         JSON.stringify({ email: 'a@b.com' })
       );
       const prefs = getPreferences();
       expect(prefs.instance).toBeUndefined();
-      expect(prefs.email).toBeUndefined();
-      expect(prefs.token).toBeUndefined();
+      expect(prefs.email).toBe('a@b.com');
+      expect(prefs.hasStoredSession).toBeUndefined();
     });
 
     it('returns stored instance when present', () => {
-      setPreferences({ token: 'tok', instance: 'https://custom.example.com' });
+      setPreferences({ instance: 'https://custom.example.com' });
       const prefs = getPreferences();
       expect(prefs.instance).toBe('https://custom.example.com');
     });
 
-    it('clears invalid auth preferences when instance is missing', () => {
+    it('scrubs invalid auth metadata without erasing unrelated preferences', () => {
       localStorage.setItem(
         PREFERENCES.STORAGE_KEY,
-        JSON.stringify({ email: 'a@b.com', token: 'tok' })
+        JSON.stringify({
+          email: 'a@b.com',
+          projectVisibility: { retained: false },
+          token: 'tok',
+        })
       );
 
       const prefs = getPreferences();
       expect(prefs.instance).toBeUndefined();
       expect(prefs.email).toBeUndefined();
-      expect(prefs.token).toBeUndefined();
-      expect(localStorage.getItem(PREFERENCES.STORAGE_KEY)).toBeNull();
+      expect(prefs.projectVisibility).toEqual({ retained: false });
+      expect(localStorage.getItem(PREFERENCES.STORAGE_KEY)).not.toContain('tok');
     });
   });
 
   describe('setPreferences', () => {
-    it('round-trips email, token, instance', () => {
+    it('round-trips only non-secret session metadata', () => {
       const data: UserPreferences = {
         email: 'user@example.com',
-        token: 'secret-token',
         instance: 'https://www.speleodb.org',
+        hasStoredSession: true,
       };
       setPreferences(data);
       const prefs = getPreferences();
       expect(prefs.email).toBe(data.email);
-      expect(prefs.token).toBe(data.token);
       expect(prefs.instance).toBe(data.instance);
+      expect(prefs.hasStoredSession).toBe(true);
+      expect(localStorage.getItem(PREFERENCES.STORAGE_KEY)).not.toContain('secret-token');
     });
 
     it('merges partial updates', () => {
-      setPreferences({ email: 'first@x.com', token: 'old-token', instance: 'https://first.org' });
-      setPreferences({ token: 'new-token' });
+      setPreferences({ email: 'first@x.com', instance: 'https://first.org' });
+      setPreferences({ email: 'second@x.com' });
       const prefs = getPreferences();
-      expect(prefs.email).toBe('first@x.com');
+      expect(prefs.email).toBe('second@x.com');
       expect(prefs.instance).toBe('https://first.org');
-      expect(prefs.token).toBe('new-token');
     });
 
     it('keeps projectVisibility across unrelated partial updates', () => {
       seedValidAuth();
       setProjectVisibilityPreference('p1', false);
-      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      setPreferences({ instance: 'https://example.org' });
       const prefs = getPreferences();
-      expect(prefs.token).toBe('tok');
       expect(prefs.projectVisibility).toEqual({ p1: false });
     });
 
     it('keeps guided tour completion across unrelated partial updates', () => {
       seedValidAuth();
       setHasCompletedGuidedTour(true);
-      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      setPreferences({ instance: 'https://example.org' });
       const prefs = getPreferences();
-      expect(prefs.token).toBe('tok');
       expect(prefs.hasCompletedGuidedTour).toBe(true);
+    });
+  });
+
+  describe('session metadata migration adapter', () => {
+    it('exposes a legacy token only to the migration boundary', () => {
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify({
+        email: 'legacy@example.com',
+        instance: VALID_INSTANCE,
+        token: 'legacy-secret',
+      }));
+
+      expect(sessionMetadataStore.read()).toEqual({
+        email: 'legacy@example.com',
+        hasStoredSession: false,
+        instance: VALID_INSTANCE,
+        legacyToken: 'legacy-secret',
+      });
+      expect(getPreferences()).not.toHaveProperty('token');
+    });
+
+    it('atomically replaces a legacy token with non-secret session metadata', () => {
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify({
+        instance: VALID_INSTANCE,
+        projectVisibility: { p1: false },
+        token: 'legacy-secret',
+      }));
+
+      sessionMetadataStore.commit({ email: 'new@example.com', instance: VALID_INSTANCE });
+
+      const raw = JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY) ?? '{}');
+      expect(raw).not.toHaveProperty('token');
+      expect(raw).toMatchObject({
+        email: 'new@example.com',
+        hasStoredSession: true,
+        instance: VALID_INSTANCE,
+        projectVisibility: { p1: false },
+      });
+    });
+
+    it('strictly clears session metadata without erasing unrelated preferences', () => {
+      seedValidAuth();
+      setProjectVisibilityPreference('retained', false);
+
+      sessionMetadataStore.clear();
+
+      expect(sessionMetadataStore.read()).toMatchObject({
+        email: undefined,
+        hasStoredSession: false,
+        legacyToken: undefined,
+      });
+      expect(getProjectVisibilityPreferences()).toEqual({ retained: false });
     });
   });
 
@@ -152,8 +205,8 @@ describe('PreferencesService', () => {
     it('bulk updates merge and preserve other preferences', () => {
       setPreferences({
         email: 'user@example.com',
-        token: 'tok',
         instance: 'https://example.org',
+        hasStoredSession: true,
       });
       setProjectVisibilityPreferences({
         p1: true,
@@ -194,13 +247,12 @@ describe('PreferencesService', () => {
 
   describe('clearPreferences', () => {
     it('wipes storage so getPreferences has no auth instance', () => {
-      setPreferences({ email: 'x@y.com', token: 't', instance: 'https://x.org' });
+      setPreferences({ email: 'x@y.com', instance: 'https://x.org' });
       setCountryVisibilityPreference('FR', false);
       setCountryCollapsedPreference('FR', true);
       clearPreferences();
       const prefs = getPreferences();
       expect(prefs.email).toBeUndefined();
-      expect(prefs.token).toBeUndefined();
       expect(prefs.instance).toBeUndefined();
       expect(getHasCompletedGuidedTour()).toBe(false);
       expect(getShowLandmarks()).toBe(true);
@@ -242,7 +294,7 @@ describe('PreferencesService', () => {
       await Promise.all([
         Promise.resolve().then(() => setHasCompletedGuidedTour(true)),
         Promise.resolve().then(() => setProjectVisibilityPreference('p1', true)),
-        Promise.resolve().then(() => setPreferences({ email: 'user@example.com', token: 'auth-token', instance: VALID_INSTANCE })),
+        Promise.resolve().then(() => setPreferences({ email: 'user@example.com', instance: VALID_INSTANCE })),
       ]);
 
       const prefs = getPreferences();
@@ -281,9 +333,7 @@ describe('PreferencesService', () => {
     it('preserves value across unrelated partial updates', () => {
       seedValidAuth();
       setShowLandmarks(false);
-      setPreferences({ token: 'tok', instance: 'https://example.org' });
-      const prefs = getPreferences();
-      expect(prefs.token).toBe('tok');
+      setPreferences({ instance: 'https://example.org' });
       expect(getShowLandmarks()).toBe(false);
     });
 
@@ -292,7 +342,7 @@ describe('PreferencesService', () => {
       await Promise.all([
         Promise.resolve().then(() => setShowLandmarks(false)),
         Promise.resolve().then(() => setProjectVisibilityPreference('p1', true)),
-        Promise.resolve().then(() => setPreferences({ email: 'user@example.com', token: 'auth-token', instance: VALID_INSTANCE })),
+        Promise.resolve().then(() => setPreferences({ email: 'user@example.com', instance: VALID_INSTANCE })),
       ]);
 
       const prefs = getPreferences();
@@ -331,7 +381,7 @@ describe('PreferencesService', () => {
     it('preserves value across unrelated updates', () => {
       seedValidAuth();
       setColorMode('depth');
-      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      setPreferences({ instance: 'https://example.org' });
       expect(getColorMode()).toBe('depth');
     });
   });
@@ -365,7 +415,7 @@ describe('PreferencesService', () => {
     it('preserves value across unrelated updates', () => {
       seedValidAuth();
       setMeasurementUnit('meters');
-      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      setPreferences({ instance: 'https://example.org' });
       expect(getMeasurementUnit()).toBe('meters');
     });
   });
@@ -390,8 +440,8 @@ describe('PreferencesService', () => {
     it('bulk update merges and preserves other preferences', () => {
       setPreferences({
         email: 'u@example.com',
-        token: 'tok',
         instance: 'https://example.org',
+        hasStoredSession: true,
       });
       setCountryVisibilityPreferences({ FR: false, US: true });
       setCountryVisibilityPreference('CA', false);
@@ -436,7 +486,7 @@ describe('PreferencesService', () => {
     it('preserves country visibility across unrelated partial updates', () => {
       seedValidAuth();
       setCountryVisibilityPreference('FR', false);
-      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      setPreferences({ instance: 'https://example.org' });
       expect(getCountryVisibilityPreferences()).toEqual({ FR: false });
     });
   });
@@ -461,8 +511,8 @@ describe('PreferencesService', () => {
     it('merges multiple sequential updates and preserves other preferences', () => {
       setPreferences({
         email: 'u@example.com',
-        token: 'tok',
         instance: 'https://example.org',
+        hasStoredSession: true,
       });
       setCountryCollapsedPreference('FR', true);
       setCountryCollapsedPreference('US', false);
@@ -486,7 +536,7 @@ describe('PreferencesService', () => {
     it('preserves country collapse across unrelated partial updates', () => {
       seedValidAuth();
       setCountryCollapsedPreference('FR', true);
-      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      setPreferences({ instance: 'https://example.org' });
       expect(getCountryCollapsedPreferences()).toEqual({ FR: true });
     });
   });
@@ -529,7 +579,7 @@ describe('PreferencesService', () => {
     it('preserves collection visibility across unrelated partial updates', () => {
       seedValidAuth();
       setLandmarkCollectionVisibilityPreference('col-1', false);
-      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      setPreferences({ instance: 'https://example.org' });
       expect(getLandmarkCollectionVisibilityPreferences()).toEqual({ 'col-1': false });
     });
 
@@ -550,7 +600,7 @@ describe('PreferencesService', () => {
       setGpsTrackVisibilityPreference('', true);
       expect(getGpsTrackVisibilityPreferences()).toEqual({});
       setGpsTrackVisibilityPreference('g2', true);
-      setPreferences({ token: 'tok', instance: 'https://example.org' });
+      setPreferences({ instance: 'https://example.org' });
       expect(getGpsTrackVisibilityPreferences()).toEqual({ g2: true });
     });
   });
@@ -582,7 +632,6 @@ describe('PreferencesService', () => {
     it('round-trips a finite positive epoch', () => {
       setPreferences({
         email: 'u@example.com',
-        token: 'tok',
         instance: VALID_INSTANCE,
         lastSyncedAt: 1_710_000_000_000,
       });
@@ -621,18 +670,16 @@ describe('PreferencesService', () => {
     it('preserves lastSyncedAt across unrelated partial updates', () => {
       setPreferences({
         email: 'u@example.com',
-        token: 'tok',
         instance: VALID_INSTANCE,
         lastSyncedAt: 1_710_000_000_000,
       });
-      setPreferences({ token: 'tok', instance: VALID_INSTANCE });
+      setPreferences({ instance: VALID_INSTANCE });
       expect(getPreferences().lastSyncedAt).toBe(1_710_000_000_000);
     });
 
     it('clearPreferences wipes lastSyncedAt', () => {
       setPreferences({
         email: 'u@example.com',
-        token: 'tok',
         instance: VALID_INSTANCE,
         lastSyncedAt: 1_710_000_000_000,
       });

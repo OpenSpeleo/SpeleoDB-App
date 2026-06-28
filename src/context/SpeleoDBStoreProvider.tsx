@@ -3,6 +3,7 @@ import { useState, useSyncExternalStore, type ReactNode } from 'react'
 import { HttpClient } from '../services/HttpClient'
 import { SpeleoDBService } from '../services/SpeleoDBService'
 import { ProjectCacheService } from '../services/ProjectCacheService'
+import { appSessionStore } from '../services/AppSessionStore'
 import {
   getPreferences,
   setPreferences,
@@ -23,7 +24,12 @@ export function SpeleoDBStoreProvider({ children }: SpeleoDBStoreProviderProps) 
     const projectCache = new ProjectCacheService()
     return new SpeleoDBController(
       service,
-      { getPreferences, setPreferences, clearPreferences },
+      {
+        getPreferences,
+        setPreferences,
+        clearPreferences,
+        session: appSessionStore,
+      },
       projectCache,
     )
   })

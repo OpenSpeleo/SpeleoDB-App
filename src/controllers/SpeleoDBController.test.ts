@@ -17,6 +17,7 @@ import type { GeolocationWatcher } from '../services/GeolocationWatcher';
 import type { RecordingNotificationPermissionGuard } from '../services/RecordingNotificationPermissionGuard';
 import { ProjectGeoJSONAnalysisError } from '../services/ProjectGeoJSONAnalyzer';
 import type { LocalGpsTrack, RecordedPoint } from '../types/gpsTrack';
+import type { SessionStore, StoredSession } from '../services/SecureSessionStore';
 
 function createProjectFixture(
   overrides: Omit<Partial<Project>, 'latest_commit'> & {
@@ -123,6 +124,7 @@ type StoredPrefs = {
   email?: string;
   token?: string;
   instance?: string;
+  hasStoredSession?: boolean;
   lastSyncedAt?: number;
   tileCacheOverLimitApproved?: boolean;
   tileCacheOverLimitPromptAcknowledged?: boolean;
@@ -131,13 +133,47 @@ type StoredPrefs = {
 };
 
 function createMockPrefs(initial?: StoredPrefs): PreferencesPort {
-  let store: StoredPrefs = initial ?? {};
+  const { token: initialToken, ...initialPreferences } = initial ?? {};
+  let store: StoredPrefs = {
+    ...initialPreferences,
+    hasStoredSession:
+      initialToken && initialPreferences.instance
+        ? true
+        : initialPreferences.hasStoredSession,
+  };
+  let currentSession: StoredSession | null =
+    initialToken && initialPreferences.instance
+      ? {
+        email: initialPreferences.email,
+        instance: initialPreferences.instance,
+        token: initialToken,
+      }
+      : null;
+  const clearPreferences = vi.fn(() => { store = {}; });
+  const session: SessionStore = {
+    initialize: vi.fn(async () => currentSession),
+    getSession: vi.fn(() => currentSession ? { ...currentSession } : null),
+    establish: vi.fn(async (next) => {
+      currentSession = { ...next };
+      store = {
+        ...store,
+        email: next.email,
+        instance: next.instance,
+        hasStoredSession: true,
+      };
+    }),
+    clear: vi.fn(async () => {
+      currentSession = null;
+      clearPreferences();
+    }),
+  };
   return {
     getPreferences: vi.fn(() => ({ ...store })),
     setPreferences: vi.fn((p: Partial<StoredPrefs>) => {
       store = { ...store, ...p };
     }),
-    clearPreferences: vi.fn(() => { store = {}; }),
+    clearPreferences,
+    session,
   };
 }
 
@@ -343,7 +379,7 @@ describe('SpeleoDBController', () => {
         validCreds.email,
         validCreds.password,
       );
-      expect(prefs.setPreferences).toHaveBeenCalledWith({
+      expect(prefs.session.establish).toHaveBeenCalledWith({
         email: 'u@x.com',
         token: 'tok',
         instance: validCreds.instance,
@@ -365,7 +401,7 @@ describe('SpeleoDBController', () => {
       expect(result.token).toBe('created-token');
       expect(controller.isAuthenticated()).toBe(true);
       expect(controller.currentUser?.email).toBe('created@x.com');
-      expect(prefs.setPreferences).toHaveBeenCalledWith({
+      expect(prefs.session.establish).toHaveBeenCalledWith({
         email: 'created@x.com',
         token: 'created-token',
         instance: validCreds.instance,
@@ -427,6 +463,19 @@ describe('SpeleoDBController', () => {
       expect(result.message).toContain('instance');
       expect(service.authenticate).not.toHaveBeenCalled();
     });
+
+    it('fails closed when a validated login cannot be committed securely', async () => {
+      vi.mocked(prefs.session.establish).mockRejectedValueOnce(new Error('vault unavailable'));
+
+      const result = await controller.login(validCreds);
+
+      expect(result).toEqual({
+        success: false,
+        message: 'Login succeeded, but the secure session could not be saved.',
+      });
+      expect(controller.isAuthenticated()).toBe(false);
+      expect(prefs.session.establish).toHaveBeenCalledOnce();
+    });
   });
 
   // ---- OAuth token login ---------------------------------------------------
@@ -455,8 +504,8 @@ describe('SpeleoDBController', () => {
       expect(controller.isAuthenticated()).toBe(true);
       expect(controller.currentUser).toBeNull();
       expect(controller.isOnline).toBe(true);
-      expect(prefs.setPreferences).toHaveBeenCalledWith({
-        email: '',
+      expect(prefs.session.establish).toHaveBeenCalledWith({
+        email: undefined,
         token: 'oauth-token',
         instance: 'https://custom.speleodb.org/',
       });
@@ -558,6 +607,21 @@ describe('SpeleoDBController', () => {
       expect(controller.isOfflineLocked).toBe(false);
       expect(prefs.setPreferences).not.toHaveBeenCalled();
     });
+
+    it('fails closed when a validated OAuth token cannot be committed securely', async () => {
+      vi.mocked(prefs.session.establish).mockRejectedValueOnce(new Error('vault unavailable'));
+
+      const result = await controller.loginWithToken({
+        token: 'oauth-token',
+        instance: validCreds.instance,
+      });
+
+      expect(result).toEqual({
+        success: false,
+        message: 'Login succeeded, but the secure session could not be saved.',
+      });
+      expect(controller.isAuthenticated()).toBe(false);
+    });
   });
 
   // ---- logout ---------------------------------------------------------------
@@ -572,6 +636,19 @@ describe('SpeleoDBController', () => {
       expect(controller.isAuthenticated()).toBe(false);
       expect(controller.currentUser).toBeNull();
       expect(prefs.clearPreferences).toHaveBeenCalledOnce();
+    });
+
+    it('finishes local revocation but reports a native credential deletion failure', async () => {
+      await controller.login(validCreds);
+      vi.mocked(prefs.session.clear).mockRejectedValueOnce(new Error('vault unavailable'));
+
+      await expect(controller.logout()).rejects.toThrow(
+        'Secure credential deletion failed during logout.',
+      );
+
+      expect(controller.isAuthenticated()).toBe(false);
+      expect(controller.currentUser).toBeNull();
+      expect(localStorage.length).toBe(0);
     });
 
     it('clears local pending sync queue and offline users on logout', async () => {
@@ -705,7 +782,7 @@ describe('SpeleoDBController', () => {
       expect(fresh.currentUser).toBeNull();
     });
 
-    it('clears preferences when token exists without instance', () => {
+    it('stays unauthenticated when the initialized session store rejected invalid metadata', () => {
       const invalidPrefs = createMockPrefs({
         email: 'restored@example.com',
         token: 'saved-token',
@@ -714,7 +791,6 @@ describe('SpeleoDBController', () => {
       const fresh = new SpeleoDBController(service, invalidPrefs, cache);
 
       expect(fresh.isAuthenticated()).toBe(false);
-      expect(invalidPrefs.clearPreferences).toHaveBeenCalledOnce();
     });
 
     it('restores lastSyncedAt from preferences', () => {
@@ -848,16 +924,15 @@ describe('SpeleoDBController', () => {
         expect.any(Error),
       );
       const failingPrefs: PreferencesPort = {
-        getPreferences: vi.fn(() => ({
+        ...createMockPrefs({
           token: 'tok',
           instance: 'https://www.speleodb.org',
-        })),
+        }),
         setPreferences: vi.fn(({ lastSyncedAt }: { lastSyncedAt?: number }) => {
           if (typeof lastSyncedAt === 'number') {
             throw new Error('storage unavailable');
           }
         }) as unknown as PreferencesPort['setPreferences'],
-        clearPreferences: vi.fn(),
       };
       const ctrl = new SpeleoDBController(service, failingPrefs, cache);
 
@@ -944,7 +1019,7 @@ describe('SpeleoDBController', () => {
       expect(result).toBe('unauthorized');
     });
 
-    it('returns "unauthorized" and clears preferences when token has no instance', async () => {
+    it('returns "unauthorized" when the session store rejected a token without an instance', async () => {
       const withInvalidPrefs = createMockPrefs({
         token: 't',
       });
@@ -952,7 +1027,6 @@ describe('SpeleoDBController', () => {
 
       const result = await ctrl.validateSession();
       expect(result).toBe('unauthorized');
-      expect(withInvalidPrefs.clearPreferences).toHaveBeenCalled();
     });
 
     it('keeps session on disconnect and does not retry in-process while offline-locked', async () => {
@@ -1917,7 +1991,7 @@ describe('SpeleoDBController', () => {
         features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } }],
       }));
 
-      prefs.setPreferences({
+      await prefs.session.establish({
         token: 'tok',
         instance: 'https://www.speleodb.org',
       });
@@ -1964,7 +2038,7 @@ describe('SpeleoDBController', () => {
           : null,
       );
 
-      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       const result = await controller.syncProjects();
@@ -1994,7 +2068,7 @@ describe('SpeleoDBController', () => {
 
       cache.getOverlayGeoJSON = vi.fn(async () => ({ type: 'FeatureCollection', features: [] }));
 
-      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       const result = await controller.syncProjects();
@@ -2023,7 +2097,7 @@ describe('SpeleoDBController', () => {
           : null,
       );
 
-      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.syncProjects();
@@ -2048,11 +2122,11 @@ describe('SpeleoDBController', () => {
         features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } }],
       }));
 
-      prefs.setPreferences({
+      await prefs.session.establish({
         token: 'tok',
         instance: 'https://www.speleodb.org',
-        layerOfflineSync: { 'esri-world-hillshade': true },
       });
+      prefs.setPreferences({ layerOfflineSync: { 'esri-world-hillshade': true } });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.syncProjects();
@@ -2087,7 +2161,7 @@ describe('SpeleoDBController', () => {
         features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } }],
       }));
 
-      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.syncProjects();
@@ -2114,7 +2188,7 @@ describe('SpeleoDBController', () => {
         features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [2.3, 46.6] } }],
       }));
 
-      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
       await controller.syncProjects();
       enqueueProjects.mockClear();
@@ -2138,11 +2212,11 @@ describe('SpeleoDBController', () => {
         subscribe: vi.fn(() => () => {}),
       } as unknown as TilePrefetchService;
 
-      prefs.setPreferences({
+      await prefs.session.establish({
         token: 'tok',
         instance: 'https://www.speleodb.org',
-        layerOfflineSync: { 'esri-world-hillshade': true },
       });
+      prefs.setPreferences({ layerOfflineSync: { 'esri-world-hillshade': true } });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       const hillTileUrl =
@@ -2169,7 +2243,7 @@ describe('SpeleoDBController', () => {
         subscribe: vi.fn(() => () => {}),
       } as unknown as TilePrefetchService;
 
-      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.setLayerOfflineSync('esri-satellite', false);
@@ -2191,7 +2265,7 @@ describe('SpeleoDBController', () => {
         ],
       }));
 
-      prefs.setPreferences({ token: 'tok', instance: 'https://www.speleodb.org' });
+      await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
       await controller.syncProjects();
       enqueueProjects.mockClear();

@@ -10,15 +10,40 @@ import { HttpClient } from '../services/HttpClient';
 import { SpeleoDBService } from '../services/SpeleoDBService';
 import { ProjectCacheService } from '../services/ProjectCacheService';
 import { SpeleoDBController, type PreferencesPort } from '../controllers/SpeleoDBController';
+import type { StoredSession } from '../services/SecureSessionStore';
 import { canRunIntegrationTests, isGitHubActionsPasswordLoginBlocked, TEST_ENV } from './env';
 
 /** In-memory preferences (mirrors PreferencesService without touching localStorage). */
 function createMemoryPrefs(initial?: Partial<{ email: string; token: string; instance: string }>): PreferencesPort {
-  let store: { email?: string; token?: string; instance?: string } = { ...initial };
+  let store: { email?: string; instance?: string; hasStoredSession?: boolean } = {
+    email: initial?.email,
+    instance: initial?.instance,
+    hasStoredSession: Boolean(initial?.token && initial.instance),
+  };
+  let session: StoredSession | null = initial?.token && initial.instance
+    ? { email: initial.email, instance: initial.instance, token: initial.token }
+    : null;
+  const clearPreferences = () => { store = {}; };
   return {
     getPreferences: () => ({ ...store }),
     setPreferences: (p) => { store = { ...store, ...p }; },
-    clearPreferences: () => { store = {}; },
+    clearPreferences,
+    session: {
+      initialize: async () => session,
+      getSession: () => session ? { ...session } : null,
+      establish: async (next) => {
+        session = { ...next };
+        store = {
+          email: next.email,
+          instance: next.instance,
+          hasStoredSession: true,
+        };
+      },
+      clear: async () => {
+        session = null;
+        clearPreferences();
+      },
+    },
   };
 }
 
@@ -80,7 +105,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
 
       // Preferences are persisted
       const saved = prefs.getPreferences();
-      expect(saved.token).toBe(result.token);
+      expect(prefs.session.getSession()?.token).toBe(result.token);
       expect(saved.email).toBeTruthy();
       expect(saved.instance).toBe(instance);
     }, TEST_ENV.timeoutMs);
@@ -103,8 +128,8 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
       expect(controller.isOnline).toBe(true);
 
       const saved = prefs.getPreferences();
-      expect(saved.token).toBe(oauthToken);
-      expect(saved.email).toBe('');
+      expect(prefs.session.getSession()?.token).toBe(oauthToken);
+      expect(saved.email).toBeUndefined();
       expect(saved.instance).toBe(instance.trim());
     }, TEST_ENV.timeoutMs);
   });
@@ -114,7 +139,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
   describe('validateSession', () => {
     it('returns "ok" when preferences hold a valid token', async () => {
       // Seed preferences with the known-good OAuth token from .env
-      prefs.setPreferences({ token: oauthToken, instance, email });
+      await prefs.session.establish({ token: oauthToken, instance, email });
 
       const http = new HttpClient();
       const service = new SpeleoDBService(http);
@@ -127,7 +152,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
     }, TEST_ENV.timeoutMs);
 
     it('returns "unauthorized" for an invalid token', async () => {
-      prefs.setPreferences({ token: 'invalid-token', instance, email });
+      await prefs.session.establish({ token: 'invalid-token', instance, email });
 
       const http = new HttpClient();
       const service = new SpeleoDBService(http);
@@ -176,7 +201,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
 
       expect(controller.isAuthenticated()).toBe(false);
       expect(controller.currentUser).toBeNull();
-      expect(prefs.getPreferences().token).toBeUndefined();
+      expect(prefs.session.getSession()).toBeNull();
     }, TEST_ENV.timeoutMs);
   });
 });

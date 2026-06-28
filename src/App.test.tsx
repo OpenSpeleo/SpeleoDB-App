@@ -29,6 +29,15 @@ vi.mock('@capacitor/share', () => ({
   Share: { share: vi.fn().mockResolvedValue(undefined) },
 }));
 
+vi.mock('./services/AppSessionStore', () => ({
+  appSessionStore: {
+    initialize: vi.fn(async () => null),
+    getSession: vi.fn(() => null),
+    establish: vi.fn(async () => {}),
+    clear: vi.fn(async () => {}),
+  },
+}));
+
 describe('App', () => {
   beforeEach(() => {
     localStorage.clear();

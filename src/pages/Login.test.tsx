@@ -143,7 +143,7 @@ describe('Login page', () => {
   });
 
   it('pre-fills instance with persisted instance preference when available', () => {
-    setPreferences({ token: 'tok', instance: 'https://custom.instance.example' });
+    setPreferences({ instance: 'https://custom.instance.example' });
 
     renderLogin();
     const instanceInput = screen.getByLabelText(/speleodb instance/i);
@@ -288,7 +288,7 @@ describe('Login page', () => {
   });
 
   it('uses Browser.open with custom instance for external links', async () => {
-    setPreferences({ token: 'tok', instance: 'https://custom.speleodb.org' });
+    setPreferences({ instance: 'https://custom.speleodb.org' });
     renderLogin();
 
     await userEvent.click(screen.getByText(/forgot\?/i));

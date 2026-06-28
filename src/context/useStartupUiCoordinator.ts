@@ -38,7 +38,7 @@ interface UseStartupUiCoordinatorOptions {
   history: Pick<History, 'replace'>
   location: Pick<Location, 'pathname'>
   getPreferences: () => {
-    token?: string
+    hasStoredSession?: boolean
     instance?: string
   }
   hideSplashScreenSafely: (reason: string) => void
@@ -172,6 +172,7 @@ export function useStartupUiCoordinator({
   storageConsentRequired = false,
   hasProjectGeoJSONWarnings = false,
 }: UseStartupUiCoordinatorOptions): StartupUiCoordinatorResult {
+  const initialPreferences = getPreferences()
   const initialPathnameRef = useRef(location.pathname)
   const mountedRef = useRef(true)
   const startupValidationStartedRef = useRef(false)
@@ -180,7 +181,9 @@ export function useStartupUiCoordinator({
   const prevAuthenticatedRef = useRef(authState.isAuthenticated)
   const [state, dispatch] = useReducer(
     startupUiReducer,
-    createInitialState(Boolean(getPreferences().token?.trim() && getPreferences().instance?.trim())),
+    createInitialState(
+      Boolean(initialPreferences.hasStoredSession && initialPreferences.instance?.trim()),
+    ),
   )
 
   useEffect(() => {
@@ -241,7 +244,7 @@ export function useStartupUiCoordinator({
     startupValidationStartedRef.current = true
 
     const prefs = getPreferences()
-    const hasStoredSession = Boolean(prefs.token?.trim() && prefs.instance?.trim())
+    const hasStoredSession = Boolean(prefs.hasStoredSession && prefs.instance?.trim())
     if (!hasStoredSession) {
       hideSplashScreenSafely('no stored credentials')
       return

@@ -65,7 +65,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Security] Separate compile smoke artifacts from trusted releases`
 - [x] `[Security] Remove the vulnerable asset generation toolchain`
 - [x] `[Feature] Add native secure credential storage`
-- [ ] `[Security] Migrate authenticated sessions to secure storage`
+- [x] `[Security] Migrate authenticated sessions to secure storage`
 - [ ] `[Security] Remove plaintext offline password authentication`
 - [ ] `[Security] Harden URLs backups and diagnostics`
 - [ ] `[Refactoring] Extract session and startup coordination`
@@ -169,7 +169,7 @@ and physical-device evidence.
 
 ### Add native secure credential storage
 
-- Commit: recorded after commit creation.
+- Commit: `071de85` (`[Feature] Add native secure credential storage`).
 - Verification: `make ci` under Node 22.22.2; Android `lintDebug`,
   `testDebugUnitTest`, `assembleRelease`, and `bundleRelease`; five hosted
   Keychain XCTests on iPhone 17 Pro/iOS 26.5; and an iOS Release simulator build.
@@ -177,3 +177,19 @@ and physical-device evidence.
   the new iOS suite passes 5/5 with no skips or retries.
 - Findings closed: none. This establishes the secure native boundary required
   to close MH-001; session migration remains the next objective.
+
+### Migrate authenticated sessions to secure storage
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android `lintDebug`/`testDebugUnitTest`/release APK/AAB, five hosted
+  Keychain XCTests on iPhone 17 Pro/iOS 26.5, and iOS Release compilation.
+- Result: all gates pass. Vitest passes 1,492/1,492 tests across 84 files;
+  `SecureSessionStore` has 100% statements/functions/lines and 97.14% branch
+  coverage. Android passes 9/9 native tests and iOS passes 5/5 native tests.
+- Findings closed: MH-001. Existing plaintext tokens migrate with rollback,
+  fresh sessions never write a token to WebView storage, inconsistent state
+  fails closed without erasing unrelated preferences, and logout revokes the
+  in-process session even when native deletion reports failure. Browser preview
+  login remains functional through a deliberately non-persistent memory store.

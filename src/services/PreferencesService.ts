@@ -1,5 +1,6 @@
 /**
- * User preferences persistence (email, token, SDB instance).
+ * Non-secret user preferences persistence. Authentication tokens are accepted
+ * only as a legacy migration input and are never returned or newly written.
  * Single localStorage key; can be swapped for @capacitor/preferences later.
  */
 
@@ -15,11 +16,12 @@ import {
   isMeasurementUnit,
   type MeasurementUnit,
 } from '../types/measurementUnit';
+import type { SessionMetadataStore } from './SecureSessionStore';
 
 export interface UserPreferences {
   email?: string;
-  token?: string;
   instance?: string;
+  hasStoredSession?: boolean;
   projectVisibility?: Record<string, boolean>;
   countryVisibility?: Record<string, boolean>;
   countryCollapsed?: Record<string, boolean>;
@@ -51,6 +53,11 @@ export interface UserPreferences {
    * Gates the one-time auto popup so it never auto-reappears across app starts.
    */
   tileCacheOverLimitPromptAcknowledged?: boolean;
+}
+
+interface StoredPreferences extends UserPreferences {
+  /** Legacy-only migration input. Normal preference writes preserve but never create it. */
+  token?: string;
 }
 
 function clearStoredPreferencesSilently(): void {
@@ -123,9 +130,10 @@ function normalizeLastSyncedAt(value: unknown): number | undefined {
   return value;
 }
 
-function emptyPreferences(): UserPreferences {
+function emptyPreferences(): StoredPreferences {
   return {
     instance: undefined,
+    hasStoredSession: undefined,
     projectVisibility: {},
     countryVisibility: {},
     countryCollapsed: {},
@@ -144,7 +152,7 @@ function emptyPreferences(): UserPreferences {
   };
 }
 
-function readRawPreferences(): UserPreferences {
+function readRawPreferences(): StoredPreferences {
   try {
     const raw = localStorage.getItem(getStorageKey());
     if (!raw) {
@@ -152,19 +160,16 @@ function readRawPreferences(): UserPreferences {
       return emptyPreferences();
     }
 
-    const parsed = JSON.parse(raw) as UserPreferences;
-    const hasAuthToken = typeof parsed.token === 'string' && parsed.token.trim().length > 0;
+    const parsed = JSON.parse(raw) as StoredPreferences;
+    const hasLegacyToken = typeof parsed.token === 'string' && parsed.token.trim().length > 0;
+    const hasStoredSession = parsed.hasStoredSession === true;
     const hasInstance = typeof parsed.instance === 'string' && parsed.instance.trim().length > 0;
-    if (!hasAuthToken || !hasInstance) {
-      // Corrupted auth preferences are invalid by contract. Clear storage so
-      // startup never restores an authenticated session without an instance.
-      clearStoredPreferencesSilently();
-      return emptyPreferences();
-    }
-    return {
-      email: parsed.email,
-      token: parsed.token,
-      instance: parsed.instance,
+    const hasInvalidSessionMetadata = (hasLegacyToken || hasStoredSession) && !hasInstance;
+    const normalized: StoredPreferences = {
+      email: hasInvalidSessionMetadata ? undefined : parsed.email,
+      token: hasLegacyToken && !hasInvalidSessionMetadata ? parsed.token : undefined,
+      instance: hasInstance ? parsed.instance : undefined,
+      hasStoredSession: (hasStoredSession && !hasInvalidSessionMetadata) || undefined,
       projectVisibility: normalizeProjectVisibility(parsed.projectVisibility),
       countryVisibility: normalizeCountryVisibility(parsed.countryVisibility),
       countryCollapsed: normalizeCountryCollapsed(parsed.countryCollapsed),
@@ -187,17 +192,24 @@ function readRawPreferences(): UserPreferences {
         parsed.tileCacheOverLimitPromptAcknowledged,
       ),
     };
+    if (hasInvalidSessionMetadata) {
+      // Scrub unusable authentication data without destroying unrelated user
+      // settings. If this write fails, the catch below removes the unsafe raw
+      // record rather than leaving a plaintext token behind.
+      writePreferences(normalized);
+    }
+    return normalized;
   } catch {
     clearStoredPreferencesSilently();
     return emptyPreferences();
   }
 }
 
-function writePreferences(next: UserPreferences): void {
+function writePreferences(next: StoredPreferences): void {
   localStorage.setItem(getStorageKey(), JSON.stringify(next));
 }
 
-type PreferencesMutation = (current: UserPreferences) => UserPreferences;
+type PreferencesMutation = (current: StoredPreferences) => StoredPreferences;
 
 const mutationQueue: PreferencesMutation[] = [];
 let isProcessingQueue = false;
@@ -216,10 +228,11 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
       const nextMutation = mutationQueue.shift()!;
       const current = readRawPreferences();
       const mutated = nextMutation(current);
-      const next: UserPreferences = {
+      const next: StoredPreferences = {
         email: mutated.email,
         token: mutated.token,
         instance: mutated.instance,
+        hasStoredSession: mutated.hasStoredSession === true || undefined,
         projectVisibility: normalizeProjectVisibility(mutated.projectVisibility),
         countryVisibility: normalizeCountryVisibility(mutated.countryVisibility),
         countryCollapsed: normalizeCountryCollapsed(mutated.countryCollapsed),
@@ -255,8 +268,41 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
  * Returns current preferences. Applies default instance when missing.
  */
 export function getPreferences(): UserPreferences {
-  return readRawPreferences();
+  const { token: _legacyToken, ...preferences } = readRawPreferences();
+  return preferences;
 }
+
+/** Strict metadata adapter used by SecureSessionStore's transactional boundary. */
+export const sessionMetadataStore: SessionMetadataStore = {
+  read: () => {
+    const stored = readRawPreferences();
+    return {
+      email: stored.email,
+      instance: stored.instance,
+      hasStoredSession: stored.hasStoredSession === true,
+      legacyToken: stored.token,
+    };
+  },
+  commit: ({ email, instance }) => {
+    const current = readRawPreferences();
+    writePreferences({
+      ...current,
+      email,
+      instance,
+      hasStoredSession: true,
+      token: undefined,
+    });
+  },
+  clear: () => {
+    const current = readRawPreferences();
+    writePreferences({
+      ...current,
+      email: undefined,
+      hasStoredSession: undefined,
+      token: undefined,
+    });
+  },
+};
 
 /**
  * Merges partial preferences into storage. Does not log or expose token.

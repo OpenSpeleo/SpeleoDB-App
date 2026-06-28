@@ -129,6 +129,15 @@ vi.mock('../services/PreferencesService', () => ({
   clearPreferences: mockClearPreferences,
 }));
 
+vi.mock('../services/AppSessionStore', () => ({
+  appSessionStore: {
+    initialize: vi.fn(async () => null),
+    getSession: vi.fn(() => null),
+    establish: vi.fn(async () => {}),
+    clear: vi.fn(async () => {}),
+  },
+}));
+
 vi.mock('../controllers/SpeleoDBController', () => {
   class SpeleoDBController {
     validateSession = mockValidateSession;
@@ -189,7 +198,7 @@ describe('SpeleoDBProvider', () => {
 
     mockGetPreferences.mockReturnValue({
       email: 'user@example.com',
-      token: 'tok',
+      hasStoredSession: true,
       instance: 'https://www.speleodb.org',
     });
     mockValidateSession.mockResolvedValue('ok');
@@ -351,7 +360,7 @@ describe('SpeleoDBProvider', () => {
       mockIsAuthenticated.mockReturnValue(true);
       mockGetPreferences.mockReturnValue({
         email: 'user@example.com',
-        token: 'tok',
+        hasStoredSession: true,
         instance: 'https://www.speleodb.org',
       });
       emitStoreUpdate();
@@ -728,9 +737,9 @@ describe('SpeleoDBProvider', () => {
       }
     });
 
-    it('still validates startup when stored prefs include only token and instance', async () => {
+    it('validates startup when non-secret metadata marks a stored session', async () => {
       mockGetPreferences.mockReturnValue({
-        token: 'tok',
+        hasStoredSession: true,
         instance: 'https://www.speleodb.org',
       });
       authStateSnapshotRef.current = {

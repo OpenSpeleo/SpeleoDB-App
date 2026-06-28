@@ -59,15 +59,30 @@ form state while the login screen remains mounted.
 ## Session persistence and restoration
 
 Successful online login from either method uses one controller session-setup
-path. It marks the app authenticated and online, stores the normalized instance
-and token, and notifies controller subscribers.
+path. `SecureSessionStore` writes the normalized token to the native vault
+first, commits only non-secret metadata (`instance`, optional `email`, and a
+session-presence marker) to `PreferencesService`, and only then publishes the
+authenticated controller state. A storage failure leaves the caller
+unauthenticated and restores the previous secure token.
 
-Email/password login also stores the authenticated email. Token login stores an
-empty email so stale identity cannot leak from a previous session. On restart,
-a valid token/instance pair restores authentication; an empty email restores
-`user: null`, while a stored email reconstructs the existing lightweight user
-identity. Startup then validates the stored token using the rules in
+Email/password login also stores the authenticated email. Token login omits the
+email so stale identity cannot leak from a previous session. Before React
+mounts, startup restores the token from iOS Keychain or Android Keystore-backed
+storage and combines it with the non-secret instance metadata. A missing email
+restores `user: null`; a stored email reconstructs the lightweight user
+identity. Startup then validates the secure token using the rules in
 `docs/networking.md`.
+
+Upgrades migrate the legacy `localStorage` token in a strict order: read legacy
+metadata, write the native vault, then rewrite preferences without the token.
+If the final rewrite fails, the previous native value is restored and the
+legacy record remains intact for a later retry. Conflicting/orphaned state fails
+closed instead of inventing a session.
+
+The browser development preview has no native vault. It therefore uses a
+memory-only session that supports login for the lifetime of the page and is
+discarded on reload. It never creates a persistent session marker or stores a
+token in browser storage. Durable session restoration is a native-app feature.
 
 Logout and invalid stored-session handling remain destructive operations as
 defined in `docs/logout-behavior.md`. A failed pre-login token attempt does not
@@ -77,17 +92,21 @@ call logout or purge caches because it never created a session.
 
 - `src/pages/Login.tsx` owns tab selection and form presentation only.
 - `SpeleoDBController` owns validation outcomes, session state, and persistence.
+- `SecureSessionStore` owns migration, commit ordering, rollback, and revocation.
+- `PreferencesService` owns non-secret metadata and exposes legacy token bytes
+  only to the one migration adapter.
 - `SpeleoDBService.validateToken()` owns the API request and authorization
   header; there is no separate token-login transport path.
 
-Token login adds one validation request and no background work, polling, cache
-scan, or additional storage layer. Reusing the existing endpoint keeps native
-and web behavior identical.
+Token login adds one validation request and one bounded native vault write. It
+adds no polling, cache scan, or background task.
 
 ## Verification strategy
 
-- Controller unit tests cover validation, trimming, persistence, identity-free
+- Controller unit tests cover validation, trimming, fail-closed persistence, identity-free
   restoration, and every response class.
+- Session-store tests cover fresh writes, account replacement, legacy migration,
+  interrupted migration, orphan cleanup, rollback, rollback failure, and logout.
 - Login component tests cover tab semantics and keyboard navigation, masked
   token entry, shared instance submission, feedback, redirects, and solid
   button variants.

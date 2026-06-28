@@ -33,14 +33,36 @@ is registered by `AppBridgeViewController`; the Android plugin is registered by
 store implementations so session coordination does not depend on Security or
 Android Keystore APIs.
 
-This boundary is intentionally introduced before session migration. Until the
-session migration change lands, existing authentication behavior remains
-unchanged and the secure store is unused by the controller.
+`SecureSessionStore` combines that vault with non-secret metadata from
+`PreferencesService`. Application bootstrap initializes it before React mounts;
+the controller then reads credentials only from its in-memory secure-session
+snapshot. Preferences contain `instance`, optional `email`, and
+`hasStoredSession`, never a newly written token.
+
+Non-native browser development uses a separate volatile instance of the same
+coordinator. Its credential and metadata adapters exist only in memory, so
+login remains testable without weakening the native persistence boundary and
+reload always returns to an unauthenticated state.
+
+Legacy upgrades are transactional:
+
+1. Read the legacy token without exposing it through `getPreferences()`.
+2. Write it to the native vault.
+3. Rewrite preferences with the token removed and the session marker set.
+
+If step 3 fails, the prior vault value is restored. A matching vault value from
+an interrupted attempt is reused without rewriting. Orphaned vault values,
+incomplete metadata, and malformed responses fail closed. Scrubbing invalid
+session metadata preserves unrelated map and UI preferences. Fresh login and
+account replacement use the same secure-first ordering and rollback contract.
 
 ## Verification
 
 - TypeScript contract tests prove native-only fail-closed behavior, response
   validation, byte limits, and exact single-call semantics.
+- Session tests prove commit ordering, legacy and interrupted migration,
+  rollback to empty and prior vault states, rollback failure reporting, orphan
+  cleanup, account replacement, and destructive logout semantics.
 - Android unit tests exercise the production AES-GCM implementation, randomized
   encryption, authentication-tag failure, missing keys, replacement, clearing,
   and token bounds.
