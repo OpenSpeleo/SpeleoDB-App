@@ -13,16 +13,15 @@ import {
   IonContent,
   IonModal,
 } from '@ionic/react';
-import Map, { Layer, Source } from 'react-map-gl/maplibre';
+import Map from 'react-map-gl/maplibre';
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
 import type { Map as MaplibreMap } from 'maplibre-gl';
-import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { Geolocation } from '@capacitor/geolocation';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 import { useSpeleoDB } from '../context/useSpeleoDB';
-import { COLORS, DEFAULT_MAP_LAYER_ID, MAP, MAP_LAYERS, MAP_OVERLAYS, PROJECT_LAYERS } from '../constants';
-import type { MapOverlayGeoJsonRecord, MapOverlayId, MapOverlaySizes } from '../types/mapOverlay';
+import { DEFAULT_MAP_LAYER_ID, MAP, MAP_LAYERS, MAP_OVERLAYS } from '../constants';
+import type { MapOverlayGeoJsonRecord } from '../types/mapOverlay';
 import type { MapLayerId } from '../types/mapLayer';
 import type { ProjectGeoJSONBounds } from '../types/projectGeoJSON';
 import { registerTileCacheProtocol, getCachedLayerStyle } from '../services/TileCacheService';
@@ -74,14 +73,13 @@ import type { LandmarkCollection } from '../types/landmark';
 import { LandmarkMutationError } from '../types/landmark';
 import { ensureLandmarkPropertyIds, type NormalizedLandmarkInput } from '../utils/landmarkMutations';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
-import { createProjectColorState, getProjectColor } from '../utils/projectColors';
+import { createProjectColorState } from '../utils/projectColors';
 import { trackPointsToFeatureCollection, trackPointsToLineStringFeature } from '../utils/gpsTrackGeoJson';
 import type { MapColorMode } from '../types/mapColorMode';
 import type { MeasurementUnit } from '../types/measurementUnit';
 import {
   DEPTH_PROPERTY_KEY,
   attachDepthToFeatureCollection,
-  createDepthColorExpression,
 } from '../utils/depthColoring';
 import { useDepthProbe } from '../hooks/useDepthProbe';
 import {
@@ -117,25 +115,9 @@ import {
   type OverlayIconId,
   type ProjectBoundsRecord,
 } from './dashboard/dashboardMapUtils';
-
-// Color landmark markers/labels by their collection color (mirrors the web map
-// viewer). Falls back to the neutral palette color when a feature has no valid
-// collection color. The halo flips to a dark slate when the marker itself is
-// white so it stays visible against bright tiles.
-const LANDMARK_COLLECTION_COLOR_EXPRESSION = [
-  'coalesce',
-  ['get', 'collection_color'],
-  COLORS.FALLBACK,
-] as ExpressionSpecification;
-
-const LANDMARK_COLLECTION_HALO_EXPRESSION = [
-  'case',
-  // Case-insensitive + null-safe: a white marker (any hex casing) gets a dark
-  // halo so labels stay visible against bright tiles.
-  ['==', ['downcase', ['coalesce', ['get', 'collection_color'], '']], '#ffffff'],
-  '#0f172a',
-  '#ffffff',
-] as ExpressionSpecification;
+import { ProjectMapLayers } from './dashboard/ProjectMapLayers';
+import { OverlayMapLayers } from './dashboard/OverlayMapLayers';
+import { GpsMapLayers } from './dashboard/GpsMapLayers';
 
 // ==================== GeoJSON type alias ====================
 
@@ -146,28 +128,6 @@ interface LoadedProjectMapData {
   bounds: ProjectGeoJSONBounds;
 }
 type ProjectMapDataRecord = Record<string, LoadedProjectMapData>;
-
-const PROJECT_LAYER_ORDER_ANCHOR_SOURCE_ID = 'project-layer-order-anchor-source';
-const PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID = 'project-layer-order-anchor';
-const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
-  type: 'FeatureCollection',
-  features: [],
-};
-
-// ==================== Helpers ====================
-
-function getOverlayMarkerMinZoom(overlayId: MapOverlayId): number {
-  return MAP_OVERLAYS.find((overlay) => overlay.id === overlayId)?.markerMinZoom ?? 12;
-}
-
-function getOverlayLabelMinZoom(overlayId: MapOverlayId): number | null {
-  const zoom = MAP_OVERLAYS.find((overlay) => overlay.id === overlayId)?.labelMinZoom;
-  return typeof zoom === 'number' ? zoom : null;
-}
-
-function getOverlaySizes(overlayId: MapOverlayId): MapOverlaySizes {
-  return MAP_OVERLAYS.find((o) => o.id === overlayId)?.sizes ?? {};
-}
 
 // ==================== Register tile caching protocol once ====================
 
@@ -1757,488 +1717,29 @@ const Dashboard: React.FC<DashboardProps> = ({
                 onMouseMove={handleMapMouseMove}
                 onMouseLeave={handleMapMouseLeave}
               >
-                <Source
-                  id={PROJECT_LAYER_ORDER_ANCHOR_SOURCE_ID}
-                  type="geojson"
-                  data={EMPTY_FEATURE_COLLECTION}
-                >
-                  <Layer
-                    id={PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID}
-                    type="circle"
-                    paint={{
-                      'circle-opacity': 0,
-                      'circle-radius': 0,
-                    }}
-                  />
-                </Source>
+                <ProjectMapLayers
+                  projects={sortedProjects}
+                  activeProjectIds={effectiveActiveProjectIds}
+                  geoJsonData={geoJsonData}
+                  projectColorsById={projectColorsById}
+                  colorMode={colorMode}
+                  depthDomain={depthDomain}
+                />
 
-                {/* GeoJSON layers for each effectively-visible project */}
-                {sortedProjects.map((project) => {
-                  if (!effectiveActiveProjectIds.has(project.id) || !geoJsonData[project.id]) {
-                    return null;
-                  }
-                  const color = getProjectColor(project.id, projectColorsById);
-                  const lineAndFillColor = colorMode === 'depth'
-                    ? createDepthColorExpression(depthDomain, color, DEPTH_PROPERTY_KEY)
-                    : color;
-                  const sourceId = `project-${project.id}`;
+                <OverlayMapLayers
+                  visibleOverlayGeoJsonData={visibleOverlayGeoJsonData}
+                  visibleLandmarksGeoJSON={visibleLandmarksGeoJSON}
+                  showLandmarks={showLandmarks}
+                  iconsLoaded={overlayIconsLoaded}
+                  iconAvailability={overlayIconAvailability}
+                />
 
-                  return (
-                    <Source
-                      key={project.id}
-                      id={sourceId}
-                      type="geojson"
-                      data={geoJsonData[project.id]}
-                    >
-                      {/* Polygon fills */}
-                      <Layer
-                        id={`${sourceId}-fill`}
-                        type="fill"
-                        beforeId={PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID}
-                        filter={[
-                          'match',
-                          ['geometry-type'],
-                          ['Polygon', 'MultiPolygon'],
-                          true,
-                          false,
-                        ]}
-                        paint={{
-                          'fill-color': lineAndFillColor,
-                          'fill-opacity': 0.25,
-                        }}
-                      />
-
-                      {/* Lines + polygon outlines */}
-                      <Layer
-                        id={`${sourceId}-line`}
-                        type="line"
-                        beforeId={PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID}
-                        minzoom={PROJECT_LAYERS.lineMinZoom}
-                        filter={[
-                          'match',
-                          ['geometry-type'],
-                          ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'],
-                          true,
-                          false,
-                        ]}
-                        paint={{
-                          'line-color': lineAndFillColor,
-                          'line-width': 2.5,
-                        }}
-                      />
-
-                      {/* Point entries: Django parity star symbol */}
-                      <Layer
-                        id={`${sourceId}-point`}
-                        type="symbol"
-                        beforeId={PROJECT_LAYER_ORDER_ANCHOR_LAYER_ID}
-                        filter={[
-                          'match',
-                          ['geometry-type'],
-                          ['Point', 'MultiPoint'],
-                          true,
-                          false,
-                        ]}
-                        minzoom={PROJECT_LAYERS.entrySymbolMinZoom}
-                        layout={{
-                          'text-field': '★',
-                          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-                          'text-size': PROJECT_LAYERS.entrySymbolTextSize,
-                          'text-allow-overlap': true,
-                          'text-ignore-placement': true,
-                        }}
-                        paint={{
-                          'text-color': '#F5E027',
-                          'text-halo-color': '#000000',
-                          'text-halo-width': 1.5,
-                        }}
-                      />
-                    </Source>
-                  );
-                })}
-
-                {showLandmarks && visibleLandmarksGeoJSON && (
-                  <Source
-                    id="landmarks-source"
-                    type="geojson"
-                    data={visibleLandmarksGeoJSON}
-                  >
-                    <Layer
-                      id="landmarks-layer"
-                      type="symbol"
-                      minzoom={getOverlayMarkerMinZoom('landmarks')}
-                      layout={{
-                        'text-field': '▼',
-                        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-                        'text-size': getOverlaySizes('landmarks').markerTextSize,
-                        'text-allow-overlap': true,
-                        'text-ignore-placement': true,
-                      }}
-                      paint={{
-                        'text-color': LANDMARK_COLLECTION_COLOR_EXPRESSION,
-                        'text-halo-color': LANDMARK_COLLECTION_HALO_EXPRESSION,
-                        'text-halo-width': 2,
-                        'text-halo-blur': 0.5,
-                      }}
-                    />
-                    <Layer
-                      id="landmarks-labels"
-                      type="symbol"
-                      minzoom={getOverlayLabelMinZoom('landmarks') ?? 16}
-                      layout={{
-                        'text-field': ['get', 'name'],
-                        'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
-                        'text-offset': [0, 1.5],
-                        'text-size': getOverlaySizes('landmarks').labelTextSize,
-                        'text-anchor': 'top',
-                        'text-allow-overlap': false,
-                        'text-ignore-placement': false,
-                      }}
-                      paint={{
-                        'text-color': LANDMARK_COLLECTION_COLOR_EXPRESSION,
-                        'text-halo-color': LANDMARK_COLLECTION_HALO_EXPRESSION,
-                        'text-halo-width': 1.5,
-                      }}
-                    />
-                  </Source>
-                )}
-
-                {visibleOverlayGeoJsonData.surfaceStations && (
-                  <Source
-                    id="surface-stations-source"
-                    type="geojson"
-                    data={visibleOverlayGeoJsonData.surfaceStations}
-                  >
-                    <Layer
-                      id="surface-stations-layer"
-                      type="symbol"
-                      minzoom={getOverlayMarkerMinZoom('surfaceStations')}
-                      layout={{
-                        'text-field': '◆',
-                        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-                        'text-size': getOverlaySizes('surfaceStations').markerTextSize,
-                        'text-allow-overlap': true,
-                        'text-ignore-placement': true,
-                      }}
-                      paint={{
-                        'text-color': ['coalesce', ['get', 'color'], '#fb923c'],
-                        'text-halo-color': '#ffffff',
-                        'text-halo-width': 2,
-                        'text-halo-blur': 0.5,
-                      }}
-                    />
-                    <Layer
-                      id="surface-stations-labels"
-                      type="symbol"
-                      minzoom={getOverlayLabelMinZoom('surfaceStations') ?? 16}
-                      layout={{
-                        'text-field': ['get', 'name'],
-                        'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
-                        'text-offset': [0, 1.2],
-                        'text-size': getOverlaySizes('surfaceStations').labelTextSize,
-                        'text-anchor': 'top',
-                        'text-allow-overlap': false,
-                        'text-ignore-placement': false,
-                      }}
-                      paint={{
-                        'text-color': '#222',
-                        'text-halo-color': '#ffffff',
-                        'text-halo-width': 2,
-                      }}
-                    />
-                  </Source>
-                )}
-
-                {visibleOverlayGeoJsonData.subsurfaceStations && (
-                  <Source
-                    id="subsurface-stations-source"
-                    type="geojson"
-                    data={visibleOverlayGeoJsonData.subsurfaceStations}
-                  >
-                    <Layer
-                      id="subsurface-stations-circles"
-                      type="circle"
-                      filter={[
-                        'any',
-                        ['!', ['has', 'type']],
-                        ['==', ['get', 'type'], null],
-                        ['==', ['get', 'type'], 'sensor'],
-                      ]}
-                      minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
-                      paint={{
-                        'circle-radius': getOverlaySizes('subsurfaceStations').markerCircleRadius,
-                        'circle-color': ['coalesce', ['get', 'color'], '#fb923c'],
-                        'circle-stroke-width': 2,
-                        'circle-stroke-color': '#ffffff',
-                        'circle-opacity': 1,
-                      }}
-                    />
-
-                    {overlayIconsLoaded && overlayIconAvailability['biology-station-icon'] && (
-                      <Layer
-                        id="subsurface-stations-biology-icons"
-                        type="symbol"
-                        filter={['==', ['get', 'type'], 'biology']}
-                        minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
-                        layout={{
-                          'icon-image': 'biology-station-icon',
-                          'icon-size': getOverlaySizes('subsurfaceStations').markerIconSize,
-                          'icon-allow-overlap': true,
-                          'icon-ignore-placement': true,
-                        }}
-                        paint={{ 'icon-opacity': 1 }}
-                      />
-                    )}
-
-                    {overlayIconsLoaded && overlayIconAvailability['bone-station-icon'] && (
-                      <Layer
-                        id="subsurface-stations-bone-icons"
-                        type="symbol"
-                        filter={['==', ['get', 'type'], 'bone']}
-                        minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
-                        layout={{
-                          'icon-image': 'bone-station-icon',
-                          'icon-size': getOverlaySizes('subsurfaceStations').markerIconSize,
-                          'icon-allow-overlap': true,
-                          'icon-ignore-placement': true,
-                        }}
-                        paint={{ 'icon-opacity': 1 }}
-                      />
-                    )}
-
-                    {overlayIconsLoaded && overlayIconAvailability['artifact-station-icon'] && (
-                      <Layer
-                        id="subsurface-stations-artifact-icons"
-                        type="symbol"
-                        filter={['==', ['get', 'type'], 'artifact']}
-                        minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
-                        layout={{
-                          'icon-image': 'artifact-station-icon',
-                          'icon-size': getOverlaySizes('subsurfaceStations').markerIconSize,
-                          'icon-allow-overlap': true,
-                          'icon-ignore-placement': true,
-                        }}
-                        paint={{ 'icon-opacity': 1 }}
-                      />
-                    )}
-
-                    {overlayIconsLoaded && overlayIconAvailability['geology-station-icon'] && (
-                      <Layer
-                        id="subsurface-stations-geology-icons"
-                        type="symbol"
-                        filter={['==', ['get', 'type'], 'geology']}
-                        minzoom={getOverlayMarkerMinZoom('subsurfaceStations')}
-                        layout={{
-                          'icon-image': 'geology-station-icon',
-                          'icon-size': getOverlaySizes('subsurfaceStations').markerIconSize,
-                          'icon-allow-overlap': true,
-                          'icon-ignore-placement': true,
-                        }}
-                        paint={{ 'icon-opacity': 1 }}
-                      />
-                    )}
-
-                    <Layer
-                      id="subsurface-stations-labels"
-                      type="symbol"
-                      minzoom={getOverlayLabelMinZoom('subsurfaceStations') ?? 16}
-                      layout={{
-                        'text-field': ['get', 'name'],
-                        'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
-                        'text-offset': [0, 1.2],
-                        'text-size': getOverlaySizes('subsurfaceStations').labelTextSize,
-                        'text-anchor': 'top',
-                        'text-allow-overlap': false,
-                        'text-ignore-placement': false,
-                      }}
-                      paint={{
-                        'text-color': '#222',
-                        'text-halo-color': '#ffffff',
-                        'text-halo-width': 2,
-                      }}
-                    />
-                  </Source>
-                )}
-
-                {visibleOverlayGeoJsonData.explorationLeads && (
-                  <Source
-                    id="exploration-leads-source"
-                    type="geojson"
-                    data={visibleOverlayGeoJsonData.explorationLeads}
-                  >
-                    {overlayIconsLoaded && overlayIconAvailability['exploration-lead-icon'] && (
-                      <Layer
-                        id="exploration-leads-icon-layer"
-                        type="symbol"
-                        minzoom={getOverlayMarkerMinZoom('explorationLeads')}
-                        layout={{
-                          'icon-image': 'exploration-lead-icon',
-                          'icon-size': getOverlaySizes('explorationLeads').markerIconSize,
-                          'icon-allow-overlap': true,
-                          'icon-ignore-placement': true,
-                        }}
-                        paint={{ 'icon-opacity': 1 }}
-                      />
-                    )}
-                    {overlayIconsLoaded && !overlayIconAvailability['exploration-lead-icon'] && (
-                      <Layer
-                        id="exploration-leads-fallback-layer"
-                        type="circle"
-                        minzoom={getOverlayMarkerMinZoom('explorationLeads')}
-                        paint={{
-                          'circle-radius': getOverlaySizes('explorationLeads').fallbackCircleRadius,
-                          'circle-color': '#EF4444',
-                          'circle-stroke-width': 2,
-                          'circle-stroke-color': '#ffffff',
-                          'circle-opacity': 1,
-                        }}
-                      />
-                    )}
-                  </Source>
-                )}
-
-                {visibleOverlayGeoJsonData.cylinderInstalls && (
-                  <Source
-                    id="cylinder-installs-source"
-                    type="geojson"
-                    data={visibleOverlayGeoJsonData.cylinderInstalls}
-                  >
-                    {overlayIconsLoaded && overlayIconAvailability['cylinder-icon'] && (
-                      <Layer
-                        id="cylinder-installs-icon-layer"
-                        type="symbol"
-                        minzoom={getOverlayMarkerMinZoom('cylinderInstalls')}
-                        layout={{
-                          'icon-image': 'cylinder-icon',
-                          'icon-size': getOverlaySizes('cylinderInstalls').markerIconSize,
-                          'icon-allow-overlap': true,
-                          'icon-ignore-placement': true,
-                        }}
-                        paint={{ 'icon-opacity': 1 }}
-                      />
-                    )}
-                    {overlayIconsLoaded && !overlayIconAvailability['cylinder-icon'] && (
-                      <Layer
-                        id="cylinder-installs-fallback-layer"
-                        type="symbol"
-                        minzoom={getOverlayMarkerMinZoom('cylinderInstalls')}
-                        layout={{
-                          'text-field': '●',
-                          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-                          'text-size': getOverlaySizes('cylinderInstalls').fallbackTextSize,
-                          'text-allow-overlap': true,
-                          'text-ignore-placement': true,
-                        }}
-                        paint={{
-                          'text-color': '#FF6B00',
-                          'text-halo-color': '#ffffff',
-                          'text-halo-width': 2,
-                        }}
-                      />
-                    )}
-
-                    <Layer
-                      id="cylinder-installs-labels"
-                      type="symbol"
-                      minzoom={getOverlayLabelMinZoom('cylinderInstalls') ?? 16}
-                      layout={{
-                        'text-field': [
-                          'concat',
-                          ['coalesce', ['to-string', ['get', 'install_date']], ''],
-                          ' @ ',
-                          ['coalesce', ['to-string', ['get', 'pressure']], ''],
-                          ' ',
-                          [
-                            'case',
-                            ['==', ['get', 'pressure_unit_system'], 'imperial'],
-                            'PSI',
-                            'BAR',
-                          ],
-                        ],
-                        'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
-                        'text-size': getOverlaySizes('cylinderInstalls').labelTextSize,
-                        'text-offset': [0, 1.5],
-                        'text-anchor': 'top',
-                        'text-allow-overlap': false,
-                        'text-ignore-placement': false,
-                      }}
-                      paint={{
-                        'text-color': '#000000',
-                        'text-halo-color': '#ffffff',
-                        'text-halo-width': 1.5,
-                      }}
-                    />
-                  </Source>
-                )}
-
-                {savedTrackFeatureCollection.features.length > 0 && (
-                  <Source
-                    id="gps-tracks-source"
-                    type="geojson"
-                    data={savedTrackFeatureCollection}
-                  >
-                    <Layer
-                      id="gps-tracks-line"
-                      type="line"
-                      layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-                      paint={{
-                        'line-color': ['coalesce', ['get', 'color'], '#38bdf8'],
-                        'line-width': ['interpolate', ['linear'], ['zoom'], 6, 3, 14, 5, 18, 7],
-                        'line-opacity': 1,
-                        // Dashed pattern distinguishes GPS tracks from solid survey
-                        // lines. Units are line-widths; keep these clearly visible
-                        // (sub-pixel dashes render invisibly in the Android WebView).
-                        'line-dasharray': [2, 2],
-                      }}
-                    />
-                  </Source>
-                )}
-
-                {gpsRecordingState !== 'idle' && currentTrackFeatureCollection.features.length > 0 && (
-                  <Source
-                    id="gps-recording-track-source"
-                    type="geojson"
-                    data={currentTrackFeatureCollection}
-                  >
-                    <Layer
-                      id="gps-recording-track-line"
-                      type="line"
-                      layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-                      paint={{
-                        'line-color': '#ef4444',
-                        'line-width': 4,
-                        'line-opacity': 0.9,
-                      }}
-                    />
-                  </Source>
-                )}
-
-                {userLocation && (
-                  <Source
-                    id="user-location-source"
-                    type="geojson"
-                    data={{
-                      type: 'FeatureCollection',
-                      features: [{
-                        type: 'Feature',
-                        geometry: { type: 'Point', coordinates: [userLocation.lng, userLocation.lat] },
-                        properties: {},
-                      }],
-                    }}
-                  >
-                    <Layer
-                      id="user-location-dot"
-                      type="circle"
-                      paint={{
-                        'circle-radius': 8,
-                        'circle-color': '#4285F4',
-                        'circle-stroke-width': 3,
-                        'circle-stroke-color': '#ffffff',
-                        'circle-opacity': 0.9,
-                      }}
-                    />
-                  </Source>
-                )}
+                <GpsMapLayers
+                  savedTrackFeatureCollection={savedTrackFeatureCollection}
+                  currentTrackFeatureCollection={currentTrackFeatureCollection}
+                  recordingState={gpsRecordingState}
+                  userLocation={userLocation}
+                />
               </Map>
             )}
 

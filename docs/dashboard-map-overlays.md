@@ -35,12 +35,12 @@ Implementation lives in:
 
 ## Rendering contract (Django parity)
 
-Dashboard owns React rendering in `src/pages/Dashboard.tsx`. Deterministic map
-policy is isolated in `src/pages/dashboard/dashboardMapUtils.ts`: overlay
+Dashboard owns React state and event orchestration in `src/pages/Dashboard.tsx`.
+`OverlayMapLayers.tsx` owns declarative overlay sources and layers, while
+deterministic map policy is isolated in `dashboardMapUtils.ts`: overlay
 normalization and project filtering, marker hit boxes, icon registration,
-project/track bounds, and north-up orientation. This boundary keeps MapLibre
-and React lifecycle state in the page while making map policy independently
-testable. See `docs/dashboard-map-utilities.md`.
+project/track bounds, and north-up orientation. See
+`docs/dashboard-map-layers.md` and `docs/dashboard-map-utilities.md`.
 
 ## Zoom and size configuration (source of truth: `src/constants.ts`)
 
