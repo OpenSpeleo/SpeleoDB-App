@@ -15,6 +15,8 @@ This folder contains product and engineering documentation for core app behavior
   cancellation, publication, and downstream phase ownership.
 - `offline-tile-coordination.md`: offline queue lifecycle, replay ports, pending
   revisions, tile scheduling, consent, layer settings, and logout teardown.
+- `gps-recording-coordination.md`: recording-state ownership, watcher and
+  persistence ports, permission-loss recovery, sampling, and logout invariants.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `ci.md`: GitHub Actions stages, Vitest non-watch requirements, integration-test secrets, and native build verification.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding

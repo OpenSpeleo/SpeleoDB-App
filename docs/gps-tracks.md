@@ -24,8 +24,9 @@ limitations, and the test strategy.
   time**, so pausing for ten minutes does not inflate the saved recording timer.
   A **back button** on the
   top-left leaves the screen *without* stopping the recording (recording lives
-  in the controller and keeps running in the background -- including with the
-  screen locked or the app backgrounded, see *Background recording* below); a separate
+  in the recording coordinator and keeps running in the background -- including
+  with the screen locked or the app backgrounded, see *Background recording*
+  below); a separate
   **Cancel**
   button *abandons* the recording -- when recording/paused it confirms first and
   then **discards** the in-progress track, when idle it simply closes the
@@ -93,7 +94,8 @@ limitations, and the test strategy.
 | Transport | `src/services/SpeleoDBService.ts` (`uploadGpx`, `getGpsTracks`, `updateGpsTrack`, `deleteGpsTrack`) + `src/services/HttpClient.ts` (native multipart) |
 | Offline op queue (create/edit/delete) | `src/offline/OfflineOpQueue.ts`, `src/offline/ops/{Create,Update,Delete}GpsTrackOp.ts`, `src/offline/gpsTrackSnapshot.ts` (see `docs/offline-op-queue.md`) |
 | Per-track visibility preference (default OFF) | `src/services/PreferencesService.ts` (`gpsTrackVisibility`) |
-| State + business logic | `src/controllers/SpeleoDBController.ts` |
+| Recording state machine | `src/controllers/GpsRecordingCoordinator.ts` |
+| Track list, server operations, and public façade | `src/controllers/SpeleoDBController.ts` |
 | React bridge | `src/context/useSpeleoDB.ts`, `src/context/SpeleoDBStoreProvider.tsx` |
 | Averaging session hook | `src/hooks/useGpsAveraging.ts` |
 | UI | `src/components/GpsPanel.tsx`, `src/components/GpsRecordingScreen.tsx`, `src/components/GpsAveragingModal.tsx`, `src/components/GpsScreenHeader.tsx`, `src/components/AppTabBar.tsx` |
@@ -107,7 +109,7 @@ flowchart TD
   panel --> rec["controller.startTrackRecording"]
   rec --> watch["LocationWatcher raw fixes (background native, foreground web)"]
   watch --> gate["shouldAcceptFix gate (shared) — drop pre-session + throttle 15s"]
-  gate --> buf["controller buffer + incremental persist"]
+  gate --> buf["GpsRecordingCoordinator buffer + incremental persist port"]
   buf --> store["GpsTrackStore (IndexedDB gps_tracks)"]
   buf --> geojson["gpsTrackGeoJson (Turf helpers)"]
   geojson --> line["Dashboard live track line on map"]
@@ -127,10 +129,13 @@ flowchart TD
   dl --> tline["Dashboard gps-tracks-line (dashed, data-driven color)"]
 ```
 
-State ownership follows `docs/implementation-guidelines.md`: `SpeleoDBController`
-owns the recording state machine, the unified track list, server sync, and the
-GPS replay-port wiring; `GeolocationWatcher`/`GpsTrackStore`/`GpxFileService`
-perform side effects; `GpsPanel`/`GpsAveragingModal` are presentational;
+State ownership follows `docs/implementation-guidelines.md` and
+`docs/gps-recording-coordination.md`: `GpsRecordingCoordinator` owns the
+recording/watch state machine and delegates durable writes and publication
+through narrow controller ports. `SpeleoDBController` owns the unified track
+list, server sync, and GPS replay-port wiring;
+`GeolocationWatcher`/`GpsTrackStore`/`GpxFileService` perform side effects;
+`GpsPanel`/`GpsAveragingModal` are presentational;
 `useGpsAveraging` isolates
 the averaging session's side effects from the modal.
 
@@ -162,7 +167,7 @@ The **only** difference between the two features is the cadence:
 | Feature | `minIntervalMs` | Why |
 | --- | --- | --- |
 | High-Accuracy GPS Point (`useGpsAveraging`) | `GPS.AVERAGING_MIN_SAMPLE_INTERVAL_MS` (1 s) | Wants many samples to average down error. |
-| GPS Track Recording (`SpeleoDBController`) | `GPS.TRACK_SAMPLE_INTERVAL_MS` (15 s) | A surface walking path doesn't need dense points; keeps tracks small. |
+| GPS Track Recording (`GpsRecordingCoordinator`) | `GPS.TRACK_SAMPLE_INTERVAL_MS` (15 s) | A surface walking path doesn't need dense points; keeps tracks small. |
 
 **Why this matters (regression fixed):** recording previously used the watcher's
 `minDistanceMeters: 2` filter. The watcher's "last kept" was set to the OS's
@@ -578,8 +583,11 @@ left the recorder sitting at "Recording - 0 pts" forever with no feedback.
   replay, optimistic fold, conflict detection, coalescing, mixed-entity runs,
   persistence round-trip.
 - Hook: `src/hooks/useGpsAveraging.test.ts`.
-- Controller (incl. chaos): `src/controllers/SpeleoDBController.test.ts` —
-  recording lifecycle, **instant first fix + 15 s throttle**, permission denial,
+- Recording coordinator: `src/controllers/GpsRecordingCoordinator.test.ts` —
+  100% statement/branch/function/line coverage of recording transitions,
+  watcher failures, timing, persistence ports, and logout races.
+- Controller integration (incl. chaos): `src/controllers/SpeleoDBController.test.ts` —
+  public recording façade, **instant first fix + 15 s throttle**, permission denial,
   cancel/discard, pause/resume, serialized incremental persistence,
   **force-quit mid-recording recovery**, the unified local+remote list, edit +
   delete (local in-place vs server PATCH/DELETE, online + offline + conflict),
@@ -594,9 +602,9 @@ left the recorder sitting at "Recording - 0 pts" forever with no feedback.
 
 ## Change checklist (GPS)
 
-1. Keep the controller the source of truth for the recording state machine and
-   the unified track list; ground truth (local store + server cache) is written
-   only by confirmed results.
+1. Keep `GpsRecordingCoordinator` the source of truth for the recording state
+   machine and the controller the source of truth for the unified track list;
+   ground truth (local store + server cache) is written only by confirmed results.
 2. Route **every** track mutation through the shared offline op queue
    (`docs/offline-op-queue.md`) — never add a GPS-specific offline mechanism.
 3. Preserve the offline-first guarantees (no silent data loss; the Pending page
