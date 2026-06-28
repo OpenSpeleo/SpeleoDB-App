@@ -19,6 +19,8 @@ This folder contains product and engineering documentation for core app behavior
   persistence ports, permission-loss recovery, sampling, and logout invariants.
 - `gps-track-coordination.md`: local/remote track state, serialized persistence,
   server mutation policy, cancellation, geometry, GPX, and snapshot ownership.
+- `dashboard-map-utilities.md`: pure map bounds, overlay filtering, icon loading,
+  hit testing, and orientation invariants extracted from Dashboard rendering.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `ci.md`: GitHub Actions stages, Vitest non-watch requirements, integration-test secrets, and native build verification.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding

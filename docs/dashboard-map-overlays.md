@@ -30,11 +30,17 @@ Implementation lives in:
 - `src/controllers/ProjectSyncCoordinator.ts`
 - `src/services/ProjectCacheService.ts`
 - `src/utils/overlayMarkerDetails.ts`
+- `src/pages/dashboard/dashboardMapUtils.ts`
 - `src/components/OverlayMarkerDetailsModal.tsx`
 
 ## Rendering contract (Django parity)
 
-Dashboard map rendering is in `src/pages/Dashboard.tsx`.
+Dashboard owns React rendering in `src/pages/Dashboard.tsx`. Deterministic map
+policy is isolated in `src/pages/dashboard/dashboardMapUtils.ts`: overlay
+normalization and project filtering, marker hit boxes, icon registration,
+project/track bounds, and north-up orientation. This boundary keeps MapLibre
+and React lifecycle state in the page while making map policy independently
+testable. See `docs/dashboard-map-utilities.md`.
 
 ## Zoom and size configuration (source of truth: `src/constants.ts`)
 

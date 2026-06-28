@@ -77,6 +77,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Extract GPS recording coordination`
 - [x] `[Refactoring] Extract GPS track coordination`
 - [x] `[Refactoring] Extract GPS recording and track coordination`
+- [x] `[Refactoring] Extract dashboard map utilities`
 - [ ] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [ ] `[Fix] Stop inactive page effects and polling`
 - [ ] `[Fix] Harden authentication and network state machines`
@@ -299,7 +300,7 @@ and physical-device evidence.
 
 ### Extract GPS track coordination
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `3838b4c` (`[Refactoring] Extract GPS track coordination`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -314,3 +315,25 @@ and physical-device evidence.
   are 341 and 269 lines; the controller shrinks from 1,706 to 1,237 lines.
 - Findings closed: the remaining GPS ownership slice of MH-007. Dashboard
   rendering and interaction ownership is next.
+
+### Extract dashboard map utilities
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
+  compilation.
+- Result: deterministic overlay normalization/filtering, marker hit testing,
+  icon loading, geographic bounds, touch thresholds, and map orientation now
+  live in a focused module. Its direct suite has 100% statement, branch,
+  function, and line coverage, while the existing Dashboard suite remains the
+  rendering characterization boundary. All gates pass: Vitest passes
+  1,598/1,598 tests across 91 files with aggregate coverage of 86.64%
+  statements, 79.26% branches, 89.62% functions, and 89.23% lines; Android
+  passes 9/9 native tests plus lint/APK/AAB builds, and iOS passes 7/7 native
+  tests plus Release compilation. Capacitor sync introduces no tracked native
+  drift. Dashboard shrinks from 2,967 to 2,665 lines; the production utility is
+  299 lines.
+- Findings closed: the deterministic map-policy slice of MH-007. Dashboard
+  layer rendering, interaction state, GPS presentation, modals, and chrome
+  remain scheduled as independently reviewable splits.
