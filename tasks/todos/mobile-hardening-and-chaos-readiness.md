@@ -63,7 +63,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Docs] Tighten repository engineering instructions`
 - [x] `[Fix] Align local development commands with CI`
 - [x] `[Security] Separate compile smoke artifacts from trusted releases`
-- [ ] `[Security] Remove the vulnerable asset generation toolchain`
+- [x] `[Security] Remove the vulnerable asset generation toolchain`
 - [ ] `[Feature] Add native secure credential storage`
 - [ ] `[Security] Migrate authenticated sessions to secure storage`
 - [ ] `[Security] Remove plaintext offline password authentication`
@@ -152,8 +152,17 @@ and physical-device evidence.
 
 ### Separate compile smoke artifacts from trusted releases
 
-- Commit: recorded after commit creation.
+- Commit: `bc93f7f` (`[Security] Separate compile smoke artifacts from trusted releases`).
 - Verification: workflow YAML parse, `make ci` under Node 22.22.2, Android
   `assembleRelease bundleRelease`, and iOS Release simulator build.
 - Result: all web and native compile gates pass; 1,443 tests pass.
 - Findings closed: MH-003; disposable credentials can no longer publish a GitHub release.
+
+### Remove the vulnerable asset generation toolchain
+
+- Commit: recorded after commit creation.
+- Verification: clean Node 22 install, production/full npm audits, `make ci`,
+  Android release compilation, and iOS Release build.
+- Result: clean Node 22 install and both audits report zero vulnerabilities;
+  all 1,443 tests and web/native release builds pass.
+- Findings closed: MH-010; the dependency and self-installing target are removed.

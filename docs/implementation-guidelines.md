@@ -104,6 +104,16 @@ This document defines high-level architecture boundaries and coding expectations
 6. Record physical Android/iOS checks separately when behavior crosses worker,
    WebView, native modal, network, or persistence boundaries.
 
+## Native asset ownership
+
+Source artwork under `resources/` and the generated Android/iOS icon and splash
+assets are checked in. Routine installs and builds must not install or execute a
+native-asset generator. Asset changes require an explicitly reviewed tool,
+inspection of every generated native diff, and Android/iOS launch-screen and
+icon verification before those generated files are committed. This keeps an
+infrequent design operation out of the application dependency and advisory
+surface.
+
 ## Related docs
 
 - `docs/networking.md`

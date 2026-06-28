@@ -21,7 +21,7 @@ BUILD_DIR       := build
 .PHONY: help install clean dev build quality lint typecheck test test-ci ci \
         pre-commit \
         sync ios-open ios-build ios-release ios-sim ios-sim-run ios-sim-boot \
-        ios-sim-shutdown ios-device ios-live ios-log cap-doctor generate-assets \
+        ios-sim-shutdown ios-device ios-live ios-log cap-doctor \
         dependencies
 
 # ── Help ──────────────────────────────────────────────────────
@@ -186,10 +186,6 @@ ios-log: ## Stream logs from the booted simulator
 		exit 1; \
 	fi
 	xcrun simctl spawn $(DEVICE_UDID) log stream --level debug --predicate 'processImagePath CONTAINS "$(SCHEME)"'
-
-generate-assets: ## Regenerate native assets (temporary tool; removal tracked by hardening plan)
-	npm install @capacitor/assets --save-dev
-	npx capacitor-assets generate --iconBackgroundColor "#0f182a"
 
 dependencies: ## Report dependency drift without modifying manifests or the lockfile
 	npm outdated
