@@ -75,7 +75,7 @@ jobs:
           retention-days: 7
 
   build-android:
-    name: Build Android
+    name: Android Release Compile Smoke
     needs: [web-build]
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -117,25 +117,25 @@ jobs:
             echo "ANDROID_KEY_ALIAS=ci-release-key"
             echo "ANDROID_KEY_ALIAS_PASS=android"
           } >> "$GITHUB_ENV"
-      - name: Android Debug Build (APK)
+      - name: Android CI smoke APK (temporary key)
         run: npx cap build android --androidreleasetype=APK --keystorepath="$ANDROID_KEYSTORE_PATH" --keystorepass="$ANDROID_KEYSTORE_PASS" --keystorealias="$ANDROID_KEY_ALIAS" --keystorealiaspass="$ANDROID_KEY_ALIAS_PASS"
-      - name: Android Release Build (AAB)
+      - name: Android CI smoke AAB (temporary key)
         run: npx cap build android --androidreleasetype=AAB --keystorepath="$ANDROID_KEYSTORE_PATH" --keystorepass="$ANDROID_KEYSTORE_PASS" --keystorealias="$ANDROID_KEY_ALIAS" --keystorealiaspass="$ANDROID_KEY_ALIAS_PASS"
       - uses: actions/upload-artifact@v7
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: android-apk
+          name: android-ci-smoke-apk
           path: android/app/build/outputs/apk/release/*.apk
-          retention-days: 14
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: android-aab
+          name: android-ci-smoke-aab
           path: android/app/build/outputs/bundle/release/*.aab
-          retention-days: 14
+          retention-days: 7
 
   build-ios:
-    name: Build iOS
+    name: iOS Release Compile Smoke
     needs: [web-build]
     runs-on: macos-latest
     timeout-minutes: 35
@@ -223,7 +223,7 @@ jobs:
             echo "IOS_SIGNING_KEYCHAIN=$KEYCHAIN_PATH"
             echo "IOS_SIGNING_KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD"
           } >> "$GITHUB_ENV"
-      - name: iOS release build (IPA)
+      - name: iOS CI smoke archive (temporary identity)
         run: |
           set -euo pipefail
 
@@ -253,38 +253,27 @@ jobs:
           codesign --force --deep --keychain "$IOS_SIGNING_KEYCHAIN" --sign "$IOS_SIGNING_IDENTITY" --timestamp=none output/Payload/App.app
           codesign --verify --deep --strict output/Payload/App.app
           cd output
-          zip -r App-temporary-signed.ipa Payload
+          zip -r App-ci-smoke-temporary-signed.ipa Payload
       - uses: actions/upload-artifact@v7
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: ios-ipa
+          name: ios-ci-smoke-ipa
           path: ios/App/output/*.ipa
-          retention-days: 14
+          retention-days: 7
 
-  release:
-    name: Create Release
+  release-integrity:
+    name: Confirm Tag Artifacts Are Smoke-Only
     if: startsWith(github.ref, 'refs/tags/')
     needs: [unit-tests, build-android, build-ios]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: android-apk
-          path: artifacts/android-apk
-      - uses: actions/download-artifact@v8
-        with:
-          name: android-aab
-          path: artifacts/android-aab
-      - uses: actions/download-artifact@v8
-        with:
-          name: ios-ipa
-          path: artifacts/ios-ipa
-      - uses: softprops/action-gh-release@v3
-        with:
-          generate_release_notes: true
-          files: |
-            artifacts/android-apk/*.apk
-            artifacts/android-aab/*.aab
-            artifacts/ios-ipa/*.ipa
+      - name: Record release-integrity boundary
+        run: |
+          {
+            echo "## Release integrity"
+            echo
+            echo "This tag passed Android and iOS release-configuration compile smoke checks."
+            echo "The retained workflow artifacts use disposable CI signing credentials."
+            echo "They are not distributable releases and are not attached to a GitHub release."
+            echo "Publishing requires a separate trusted-signing workflow plus installation verification."
+          } >> "$GITHUB_STEP_SUMMARY"

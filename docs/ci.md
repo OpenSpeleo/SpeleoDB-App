@@ -16,13 +16,31 @@ builds. The workflow lives in `.github/workflows/ci.yml`.
    requests with the same account from a GitHub-hosted runner.
 3. **Production Web Build** runs `npm run build` and uploads `dist/` for native
    jobs.
-4. **Build Android** downloads `dist/`, runs `npx cap sync android`, and builds
-   release APK/AAB artifacts with a temporary CI keystore.
-5. **Build iOS** downloads `dist/`, runs `npx cap sync ios`, archives the Xcode
-   project, then creates and verifies a temporarily signed IPA.
+4. **Android Release Compile Smoke** downloads `dist/`, runs `npx cap sync
+   android`, and builds release-configuration APK/AAB files with a disposable
+   CI keystore.
+5. **iOS Release Compile Smoke** downloads `dist/`, runs `npx cap sync ios`,
+   archives the Xcode project, then verifies an IPA signed by a disposable CI
+   identity.
 
-Pull requests and pushes to `main` run all five stages. Version tags also keep
-the release artifact upload path.
+Pull requests and pushes to `main` run all five stages. Version tags retain the
+explicitly named `*-ci-smoke-*` workflow artifacts for seven days. They are
+compile evidence only and are never attached to a GitHub release.
+
+## Release Integrity
+
+Disposable CI credentials prove that release configurations compile and that
+the resulting bundles can be structurally signed. They do not establish
+publisher identity, store eligibility, update compatibility, entitlements, or
+installation on a target device. Accordingly:
+
+- this CI workflow has no `contents: write` permission and never creates a
+  GitHub release;
+- smoke artifacts are named `android-ci-smoke-*` and `ios-ci-smoke-*`;
+- smoke artifacts must never be distributed to users or submitted to stores;
+- a future publishing workflow must use protected trusted-signing credentials,
+  verify the expected certificate/team identity, install the exact artifacts,
+  validate symbols/mappings, and require the physical-device release checklist.
 
 ## Vitest Wrapper
 
@@ -55,10 +73,10 @@ accept the runner-side password-auth block only after validating
 `SPELEODB_OAUTH_TOKEN` against the same instance. Local runs remain strict for
 password login.
 
-Native builds use `SENTRY_DSN_ANDROID` and `SENTRY_DSN_IOS` when the secrets are
-available. Pull requests from forks cannot read repository secrets, so CI uses a
-non-secret placeholder DSN for native compile verification only. Release builds
-from trusted refs should provide the real per-platform DSNs.
+Native compile-smoke builds use `SENTRY_DSN_ANDROID` and `SENTRY_DSN_IOS` when
+the secrets are available. Pull requests from forks cannot read repository
+secrets, so CI uses a non-secret placeholder DSN. This workflow does not produce
+trusted releases, regardless of whether real DSNs are present.
 
 ## Local Verification
 
