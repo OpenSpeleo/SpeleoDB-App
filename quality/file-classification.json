@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "classifications": [
+    {
+      "id": "production-typescript",
+      "owner": "mobile",
+      "verification": ["lint", "typecheck", "unit", "integration", "coverage", "e2e-as-applicable"],
+      "patterns": ["^src/.*\\.(?:ts|tsx)$"],
+      "excludePatterns": [
+        "^src/.*\\.(?:test|spec)\\.(?:ts|tsx)$",
+        "^src/(?:test|tests)/",
+        "^src/setupTests\\.ts$",
+        "^src/.*\\.d\\.ts$"
+      ]
+    },
+    {
+      "id": "typescript-tests",
+      "owner": "mobile",
+      "verification": ["lint", "typecheck", "unit", "console-guard", "flake-guard"],
+      "patterns": [
+        "^src/.*\\.(?:test|spec)\\.(?:ts|tsx)$",
+        "^src/(?:test|tests)/.*\\.ts$",
+        "^src/setupTests\\.ts$"
+      ]
+    },
+    {
+      "id": "typescript-declarations",
+      "owner": "mobile",
+      "verification": ["typecheck", "build"],
+      "patterns": ["^src/.*\\.d\\.ts$"]
+    },
+    {
+      "id": "android",
+      "owner": "android",
+      "verification": ["gradle-lint", "unit", "instrumentation", "appium", "release-build", "physical-device"],
+      "patterns": ["^android/"]
+    },
+    {
+      "id": "ios",
+      "owner": "ios",
+      "verification": ["xcode-analyze", "xctest", "xcuitest", "appium", "archive", "physical-device"],
+      "patterns": ["^ios/"]
+    },
+    {
+      "id": "static-assets",
+      "owner": "mobile",
+      "verification": ["build", "asset-reference-check", "visual", "e2e"],
+      "patterns": ["^(?:icons|public|resources|src/assets|static)/", "^index\\.html$"],
+      "excludePatterns": ["^src/assets/.*\\.d\\.ts$"]
+    },
+    {
+      "id": "production-styles",
+      "owner": "mobile",
+      "verification": ["build", "style-guard", "visual", "accessibility", "e2e"],
+      "patterns": ["^src/.*\\.css$"]
+    },
+    {
+      "id": "documentation",
+      "owner": "maintainers",
+      "verification": ["documentation-review", "link-check", "source-contract-check"],
+      "patterns": [
+        "^(?:AGENTS|DESCRIPTION|GPS_NATIVE_RELEASE_CHECKLIST|README)\\.md$",
+        "^LICENSE$",
+        "^(?:docs|tasks/(?:lessons|todos))/.*\\.md$"
+      ]
+    },
+    {
+      "id": "build-and-quality-tooling",
+      "owner": "maintainers",
+      "verification": ["clean-install", "lint", "test", "build", "native-build", "self-check"],
+      "patterns": [
+        "^\\.browserslistrc$",
+        "^\\.cursor/",
+        "^\\.env\\.dist$",
+        "^\\.github/",
+        "^\\.gitignore$",
+        "^\\.husky/",
+        "^\\.pre-commit-config\\.yaml$",
+        "^\\.vscode/",
+        "^Makefile$",
+        "^capacitor\\.config\\.ts$",
+        "^eslint\\.config\\.js$",
+        "^ionic\\.config\\.json$",
+        "^package(?:-lock)?\\.json$",
+        "^postcss\\.config\\.js$",
+        "^quality/",
+        "^scripts/",
+        "^tailwind\\.config\\.js$",
+        "^tsconfig(?:\\.node)?\\.json$",
+        "^vite\\.config\\.ts$"
+      ]
+    }
+  ]
+}

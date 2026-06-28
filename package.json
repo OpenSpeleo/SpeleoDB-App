@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "bundle:report": "npm run build && node ./scripts/report-bundle-stats.mjs",
+    "quality:inventory": "node ./scripts/verify-quality-inventory.mjs",
     "build:native:ios:assets": "node scripts/build-native-assets.mjs ios",
     "build:native:android:assets": "node scripts/build-native-assets.mjs android",
     "preview": "vite preview",
