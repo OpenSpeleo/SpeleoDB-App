@@ -7,25 +7,29 @@ correct changes without re-discovering architecture every session.
 
 ## Core Principles
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
-- **No Laziness**: Find root causes. No temporary fixes. Principal Engineer standards
-- **Minimat Impact**: Changes should only touch what's necessary. Avoid introducing bugs
-or changing unrelated parts of the code.
+- **No Laziness**: Find root causes. No temporary fixes. Principal Engineer standards.
+- **Minimal Impact**: Changes should only touch what is necessary. Avoid introducing
+  bugs or changing unrelated parts of the code.
 - **Readability & Maintainability**: Preserve product behavior while improving
 maintainability.
 - **Performance Conscious**: Be aware of the performance impact of your changes and try
 to minimize the impact on performance, whether it's N+1 SQL queries or heavy compute.
 - **Refactor as necessary**: Prefer centralized logic over duplicated conditionals or
 per-call custom checks.
-- **Tests are cheap**: Every behavior should be tested. Untested code is broken code.
+- **Tests are evidence**: Every behavior change needs a test at the production seam
+  that owns the invariant. A test that only mirrors implementation is not evidence.
 
 ## Task Management
 
-1. **Plan First**: Write plan to `tasks/todos/` with checkable items
-2. **Verify Plan**: Check in before starting implementation
-3. **Track Progress**: Mark items complete as you go
-4. **Explain Changes**: High-level summary at each step
-5. **Document Results**: Add review section to tasks/todo.md"
-6. **Capture Lessons**: Update `tasks/lessons/` after corrections
+1. **Plan First**: Write non-trivial task plans to a task-specific file under
+   `tasks/todos/` with checkable items and explicit verification gates.
+2. **Verify Plan**: Check in before starting implementation.
+3. **Track Progress**: Mark items complete as they are proven, not merely edited.
+4. **Explain Changes**: Provide a high-level summary at each implementation step.
+5. **Document Results**: Add a review section to the task plan with commands,
+   results, limitations, and commit references.
+6. **Capture Lessons**: Update `tasks/lessons/` only when a correction exposes a
+   reusable failure pattern. Do not create lesson noise for one-off preferences.
 7. **Documentation is Key**: Document each feature and design inside `docs/`.
 What is the feature being implemented, the design space and intents and a
 rapid summary of the approach taken with key APIs & concepts.
@@ -38,23 +42,33 @@ rapid summary of the approach taken with key APIs & concepts.
 - Use plan mode for verification steps, not just building
 - Write detailed specs upfront to reduce ambiguity
 
-### 2. Subagent Strategy
-- Use subagents liberally to keep main context window clean
-- Offload research, exploration, and parallel analysis to subagents
-- For complex problems, throw more compute at it via subagents
-- One tack per subagent for focused execution
+### 2. Delegation Strategy
+- Delegate only concrete, independently verifiable work with non-overlapping ownership.
+- Do not delegate merely to reduce context or "throw more compute" at a problem.
+- Keep one objective per delegate and define expected evidence before work starts.
+- Avoid concurrent edits to shared files. The primary agent owns integration,
+  repository-wide verification, and the final correctness claim.
+- Follow the active execution environment's authorization rules; repository guidance
+  never grants permission to create agents or perform external side effects.
 
 ### 3. Self-Improvement Loop
-- After ANY correction from the user: update `tasks/lessons/` with the pattern
-- Write rules for yourself that prevent the same mistake
-- Ruthlessly iterate on these lessons until mistake rate drops
-- Review lessons at session start for relevant project
+- After a correction, determine whether it reveals a durable engineering pattern.
+- For durable patterns, write a concise preventive rule under `tasks/lessons/` and
+  link it from the relevant task review or coding rule.
+- Do not encode subjective, temporary, or task-specific preferences as permanent rules.
+- Review relevant lessons at session start.
 
 ### 4. Verification Before Done
 - Never mark a task complete without proving it works
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
-- Run tests, check logs, demonstrate correctness
+- Run lint, type checking/build, focused tests, and the complete automated suite.
+- For persistence, concurrency, cancellation, native lifecycle, WebView rendering,
+  or background behavior, test the authoritative seam and record device evidence
+  when compilation cannot prove runtime behavior.
+- A green build is not a substitute for tests. Coverage is not a substitute for
+  assertions at the owning seam. Manual evidence is not a substitute for automatable
+  regression coverage.
 
 ### 5. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
@@ -62,11 +76,21 @@ rapid summary of the approach taken with key APIs & concepts.
 - Skip this for simple, obvious fixes - don't over-engineer
 - Challenge your own work before presenting it
 
-### 6. Autonomous Bug Fizing
+### 6. Autonomous Bug Fixing
 - When given a bug report: just fix it. Don't ask for hand-holding
 - Point at logs, errors, failing tests - then resolve them
 - Zero context switching required from the user
 - Go fix failing CI tests without being told how
+
+### 7. Change Hygiene
+- Keep each commit focused on one high-level objective and independently green.
+- Inspect both unstaged and staged diffs. Stage explicit paths so unrelated user work
+  is never captured accidentally.
+- Do not run blanket dependency upgrades or dependency swaps without a diagnosed need,
+  compatibility review, lockfile inspection, and focused verification.
+- Treat Capacitor-generated native files as reviewable output. After `cap sync`, inspect
+  every tracked native diff and keep only changes owned by the task.
+- Do not hide flaky tests with retries, sleeps, skipped tests, or relaxed assertions.
 
 ## JavaScript Workspace Contract
 
@@ -78,8 +102,19 @@ The repository now uses a single Node workspace at the repo root.
 
 ## Testing Requirements
 
-Everything must be fully tested end-to-end after each feature or bug fix.
-That includes code linting.
+Every feature or bug fix must pass the verification layers applicable to its risk:
+
+1. lint and TypeScript/build validation;
+2. focused unit or component tests for local behavior;
+3. authoritative integration tests for storage, network, concurrency, and lifecycle seams;
+4. full repository tests with coverage;
+5. native unit/instrumentation/UI tests for Android or iOS behavior;
+6. physical-device verification for behavior that simulators and builds cannot prove.
+
+Document why an inapplicable layer is unnecessary. Do not claim "fully tested" without
+listing the exact commands and device evidence. Tests must be deterministic in blocking
+CI: no `.skip`, `.only`, retry-dependent success, unexpected console output, or leaked
+timers/listeners.
 
 ## Documentation Expectations for Agents
 

@@ -60,7 +60,7 @@ regression test, verification commands, commit, and final disposition.
 ## Commit checklist
 
 - [x] `[Chore] Establish the mobile hardening audit ledger`
-- [ ] `[Docs] Tighten repository engineering instructions`
+- [x] `[Docs] Tighten repository engineering instructions`
 - [ ] `[Fix] Align local development commands with CI`
 - [ ] `[Security] Separate compile smoke artifacts from trusted releases`
 - [ ] `[Security] Remove the vulnerable asset generation toolchain`
@@ -127,8 +127,16 @@ and physical-device evidence.
 
 ### Establish the audit ledger
 
-- Commit: recorded after commit creation.
+- Commit: `88a86f3` (`[Chore] Establish the mobile hardening audit ledger`).
 - Verification: `npm run quality:inventory`, `npm run lint`,
   `npm run test.unit -- --run --coverage --no-file-parallelism`, `npm run build`.
 - Result: all checks pass; 1,443 tests pass and the baseline coverage is unchanged.
 - Findings closed: none; this commit establishes classification and tracking.
+
+### Tighten repository engineering instructions
+
+- Commit: recorded after commit creation.
+- Verification: `npm run quality:inventory`, `npm run lint`,
+  `npm run test.unit -- --run --coverage --no-file-parallelism`, `npm run build`.
+- Result: all checks pass; 1,443 tests pass and coverage remains at the baseline.
+- Findings closed: none; this commit strengthens repository-wide prevention rules.
