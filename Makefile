@@ -10,18 +10,19 @@ XCODEPROJ       := ios/App/App.xcodeproj
 WORKSPACE       := ios/App/App.xcworkspace
 BUNDLE_ID       := org.speleodb.app
 
-# Default simulator (override with: make ios-sim SIMULATOR="iPhone 17 Pro Max")
-SIMULATOR       ?= iPhone 17 Pro
-IOS_RUNTIME     ?= iOS-26-2
+# Optional preferred simulator. When omitted, use the first available iPhone.
+SIMULATOR       ?=
 
 # Derived
-DEVICE_UDID     = $(shell xcrun simctl list devices available | grep "$(SIMULATOR)" | head -1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
+DEVICE_UDID     = $(shell node scripts/resolve-ios-simulator.mjs "$(SIMULATOR)" 2>/dev/null)
+SIMULATOR_LABEL = $(if $(SIMULATOR),$(SIMULATOR),auto-selected iPhone)
 BUILD_DIR       := build
 
-.PHONY: help install clean dev build lint typecheck test test-ci test.e2e ci \
+.PHONY: help install clean dev build quality lint typecheck test test-ci ci \
         pre-commit \
-        sync ios-open ios-build ios-sim ios-sim-run ios-sim-boot ios-sim-shutdown \
-        ios-device ios-log cap-doctor
+        sync ios-open ios-build ios-release ios-sim ios-sim-run ios-sim-boot \
+        ios-sim-shutdown ios-device ios-live ios-log cap-doctor generate-assets \
+        dependencies
 
 # ── Help ──────────────────────────────────────────────────────
 help: ## Show this help
@@ -34,14 +35,14 @@ help: ## Show this help
 
 # ── Dependencies ──────────────────────────────────────────────
 install: ## Install npm dependencies
-	npm install
+	npm ci
 
 # ── Web ───────────────────────────────────────────────────────
 dev: ## Start Vite dev server with live reload
-	npx ionic serve
+	npm run dev
 
 build: ## Build the web app for production
-	npx ionic build --prod
+	npm run build
 
 clean: ## Remove build artifacts
 	rm -rf dist $(BUILD_DIR) node_modules/.vite
@@ -50,26 +51,29 @@ clean: ## Remove build artifacts
 lint: ## Run ESLint
 	npm run lint
 
+quality: ## Verify every tracked file has a quality classification
+	npm run quality:inventory
+
 typecheck: ## Run TypeScript type checking
-	npx tsc --noEmit
+	npm run typecheck
 
 # ── Tests ─────────────────────────────────────────────────────
 test: ## Run unit tests (Vitest)
 	npm run test.unit
 
 test-ci: ## Run unit tests (Vitest, one-shot)
-	npm run test.unit -- --run
+	npm run test:ci
 
 # ── CI ────────────────────────────────────────────────────────
-ci: lint typecheck test-ci build ## Run the full CI pipeline locally
+ci: quality lint typecheck test-ci build ## Run the full web CI pipeline locally
 
 # ── Git hooks (prek) ──────────────────────────────────────────
 pre-commit: ## Run all pre-commit hooks against the entire repo
 	npx prek run --all-files
 
 # ── Capacitor ─────────────────────────────────────────────────
-sync: build ## Build web + sync to native platforms
-	npx cap sync ios
+sync: build ## Build web + sync to both native platforms
+	npx cap sync
 
 cap-doctor: ## Run Capacitor doctor diagnostics
 	npx cap doctor
@@ -119,9 +123,9 @@ ios-release: sync ## Build iOS app via xcodebuild (Release)
 		build
 
 ios-sim-boot: ## Boot the iOS simulator
-	@echo "Booting simulator: $(SIMULATOR)…"
+	@echo "Booting simulator: $(SIMULATOR_LABEL)…"
 	@if [ -z "$(DEVICE_UDID)" ]; then \
-		echo "Error: Simulator '$(SIMULATOR)' not found. Available:"; \
+		echo "Error: No matching iPhone simulator found. Available:"; \
 		xcrun simctl list devices available | grep iPhone; \
 		exit 1; \
 	fi
@@ -183,10 +187,9 @@ ios-log: ## Stream logs from the booted simulator
 	fi
 	xcrun simctl spawn $(DEVICE_UDID) log stream --level debug --predicate 'processImagePath CONTAINS "$(SCHEME)"'
 
-generate-assets:
+generate-assets: ## Regenerate native assets (temporary tool; removal tracked by hardening plan)
 	npm install @capacitor/assets --save-dev
 	npx capacitor-assets generate --iconBackgroundColor "#0f182a"
 
-update:
-	npx --yes npm-check-updates -u --peer
-	npm install
+dependencies: ## Report dependency drift without modifying manifests or the lockfile
+	npm outdated

@@ -61,7 +61,7 @@ regression test, verification commands, commit, and final disposition.
 
 - [x] `[Chore] Establish the mobile hardening audit ledger`
 - [x] `[Docs] Tighten repository engineering instructions`
-- [ ] `[Fix] Align local development commands with CI`
+- [x] `[Fix] Align local development commands with CI`
 - [ ] `[Security] Separate compile smoke artifacts from trusted releases`
 - [ ] `[Security] Remove the vulnerable asset generation toolchain`
 - [ ] `[Feature] Add native secure credential storage`
@@ -135,8 +135,17 @@ and physical-device evidence.
 
 ### Tighten repository engineering instructions
 
-- Commit: recorded after commit creation.
+- Commit: `e889854` (`[Docs] Tighten repository engineering instructions`).
 - Verification: `npm run quality:inventory`, `npm run lint`,
   `npm run test.unit -- --run --coverage --no-file-parallelism`, `npm run build`.
 - Result: all checks pass; 1,443 tests pass and coverage remains at the baseline.
 - Findings closed: none; this commit strengthens repository-wide prevention rules.
+
+### Align local development commands with CI
+
+- Commit: recorded after commit creation.
+- Verification: clean `npm ci` and `make ci` under Node 22.22.2, simulator
+  resolver against CoreSimulator, and Make dry-run/help inspection.
+- Result: all checks pass; 1,443 tests pass and both-platform sync resolves to
+  `npx cap sync` without a platform restriction.
+- Findings closed: stale Node, sync, simulator, Cypress, and dependency-update contracts.

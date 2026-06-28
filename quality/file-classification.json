@@ -75,6 +75,7 @@
         "^\\.github/",
         "^\\.gitignore$",
         "^\\.husky/",
+        "^\\.node-version$",
         "^\\.pre-commit-config\\.yaml$",
         "^\\.vscode/",
         "^Makefile$",

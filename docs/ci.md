@@ -65,10 +65,13 @@ from trusted refs should provide the real per-platform DSNs.
 Before changing CI-sensitive code, run the same core commands locally:
 
 ```bash
+node --version # must be Node 22
+make ci
 PREK_HOME=/private/tmp/prek npx prek run -a --show-diff-on-failure
-npm run test.unit -- --run --reporter=verbose --coverage --no-file-parallelism
-npm run build
 ```
 
-Run Android Gradle or iOS `xcodebuild` locally as needed when changing native
-configuration.
+`make ci` verifies the tracked-file quality inventory, lint, type checking, the
+full one-shot Vitest suite with coverage and serialized test files, and the
+production web build. Run Android Gradle and iOS `xcodebuild` locally when
+changing native configuration or platform-facing behavior. `make sync` updates
+both native projects; inspect every tracked Android/iOS diff after it runs.

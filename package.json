@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "engines": {
+    "node": ">=22.12 <23"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -11,6 +14,8 @@
     "build:native:ios:assets": "node scripts/build-native-assets.mjs ios",
     "build:native:android:assets": "node scripts/build-native-assets.mjs android",
     "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test:ci": "npm run test.unit -- --run --coverage --no-file-parallelism",
     "test.unit": "bash ./scripts/run-vitest.sh",
     "lint": "eslint",
     "postinstall": "node scripts/patch-sentry-capacitor-package.mjs"

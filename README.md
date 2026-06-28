@@ -7,18 +7,18 @@ A mobile-first speleology database app built with **Ionic**, **React**, **Capaci
 | Layer       | Technology                          |
 | ----------- | ----------------------------------- |
 | Framework   | Ionic 8 + React 19                  |
-| Styling     | Tailwind CSS 3.4                    |
-| Bundler     | Vite 7                              |
-| Native      | Capacitor 8 (iOS)                   |
-| Tests       | Vitest (unit) / Cypress (e2e)       |
+| Styling     | Tailwind CSS 4                       |
+| Bundler     | Vite 8                              |
+| Native      | Capacitor 8 (Android + iOS)         |
+| Tests       | Vitest                              |
 | Linting     | ESLint 9                            |
 
 ## Prerequisites
 
-- **Node.js** >= 18 (managed via [nvm](https://github.com/nvm-sh/nvm) recommended)
+- **Node.js** 22.12 or newer within the Node 22 release line (see `.node-version`)
 - **npm**
-- **Xcode** (for iOS builds) with Command Line Tools installed
-- **Ionic CLI** -- `npm install -g @ionic/cli`
+- **Xcode** with Command Line Tools installed for iOS builds
+- **Android SDK** and **Java 21** for Android builds
 - *(optional)* [xcbeautify](https://github.com/cpisciotta/xcbeautify) for prettier xcodebuild output
 
 ## Getting Started
@@ -62,7 +62,7 @@ Run `make help` to see all targets. Here is the full reference:
 
 | Command        | Description                        |
 | -------------- | ---------------------------------- |
-| `make install` | Install npm dependencies           |
+| `make install` | Reproducibly install locked npm dependencies |
 | `make dev`     | Start Vite dev server (live reload)|
 | `make build`   | Build the web app for production   |
 | `make clean`   | Remove `dist/`, `build/`, Vite cache |
@@ -73,13 +73,12 @@ Run `make help` to see all targets. Here is the full reference:
 | Command          | Description                    |
 | ---------------- | ------------------------------ |
 | `make test`      | Run unit tests (Vitest)        |
-| `make test.e2e`  | Run end-to-end tests (Cypress) |
 
 ### Capacitor
 
 | Command          | Description                              |
 | ---------------- | ---------------------------------------- |
-| `make sync`      | Build web app + sync to iOS native project |
+| `make sync`      | Build web app + sync both native projects |
 | `make cap-doctor` | Run Capacitor doctor diagnostics        |
 
 ## Native Credential Association Files
