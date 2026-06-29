@@ -44,7 +44,7 @@ exists only in the web viewer.
 
 ## Approach / data flow
 
-1. Dashboard loads the cached landmarks `FeatureCollection`
+1. `useDashboardMapData` loads the cached landmarks `FeatureCollection`
    (`controller.getOverlayGeoJSON('landmarks')`) like every other overlay.
 2. `buildLandmarkCollectionGroups(featureCollection)` (`src/utils/landmarkCollections.ts`)
    groups features by `collection`, producing `LandmarkCollectionGroup[]`
@@ -55,16 +55,16 @@ exists only in the web viewer.
    per-collection visibility `IonToggle`. Each landmark row only flies the map
    to that landmark; the read-only details modal is reachable solely by tapping
    the marker on the map (see "Tap behavior" below).
-4. The map filters drawn landmarks to visible collections via the
-   `visibleLandmarksGeoJSON` memo in `Dashboard.tsx`, and colors markers/labels
-   by `collection_color` (`LANDMARK_COLLECTION_COLOR_EXPRESSION`).
+4. `useDashboardLandmarkActions` filters drawn landmarks to visible
+   collections, and `OverlayMapLayers` colors markers/labels by
+   `collection_color` (`LANDMARK_COLLECTION_COLOR_EXPRESSION`).
 
 ```mermaid
 flowchart TD
   cache["IndexedDB overlay:landmarks (cached GeoJSON)"] --> groups["buildLandmarkCollectionGroups"]
   groups --> panel["LandmarkPanel (groups + toggles + locate)"]
   panel -->|toggle| prefs["PreferencesService.landmarkCollectionVisibility"]
-  prefs --> visible["visibleLandmarksGeoJSON memo (master showLandmarks AND collection visible)"]
+  prefs --> visible["useDashboardLandmarkActions visibility projection"]
   visible --> layers["landmarks-layer / labels (color = collection_color)"]
   panel -->|locate row| fly["map.flyTo only (no details modal)"]
 ```
@@ -84,7 +84,8 @@ flowchart TD
   `get/set` helpers mirroring project visibility. Missing key ⇒ visible /
   expanded.
 - **Map color expressions:** `LANDMARK_COLLECTION_COLOR_EXPRESSION` and
-  `LANDMARK_COLLECTION_HALO_EXPRESSION` in `src/pages/Dashboard.tsx`.
+  `LANDMARK_COLLECTION_HALO_EXPRESSION` in
+  `src/pages/dashboard/OverlayMapLayers.tsx`.
 - **Details enrichment:** `LandmarkDetails.collectionName` /
   `isPersonalCollection` (`src/utils/overlayMarkerDetails.ts`), rendered as a
   Collection field + Private badge in `OverlayMarkerDetailsModal.tsx`.

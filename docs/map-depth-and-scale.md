@@ -107,7 +107,7 @@ Depth domain (`min`, `max`) is computed from active (visible) project feature co
 Implementation:
 
 - `src/components/map/DistanceScale.tsx`
-- rendered from `src/pages/Dashboard.tsx`
+- rendered by `src/pages/dashboard/DashboardMapCanvas.tsx`
 
 ## Depth gauge behavior
 
@@ -125,7 +125,9 @@ The gauge is visible only when `colorMode === 'depth'`.
 Implementation:
 
 - `src/components/map/DepthGauge.tsx`
-- probe/data flow in `src/pages/Dashboard.tsx`
+- probe state from `src/hooks/useDepthProbe.ts`, connected by
+  `src/pages/Dashboard.tsx` and rendered by
+  `src/pages/dashboard/DashboardMapCanvas.tsx`
 
 ## Mobile and touch interaction contract
 

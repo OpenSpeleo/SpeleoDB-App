@@ -63,11 +63,16 @@ Replaced the single `depthDomain` useMemo with a two-stage computation:
 - Cost: O(active projects) per toggle -- iterates project IDs, not features.
 - Output type and semantics unchanged from before.
 
-Downstream consumers (`DepthGauge`, `createDepthColorExpression` in Dashboard render) require no changes.
+Downstream consumers (`DepthGauge`, `createDepthColorExpression` in focused map
+layers) require no changes.
 
-### `src/pages/Dashboard.tsx`
+### Dashboard map composition
 
-No changes. The Dashboard render block already uses `depthDomain` from the hook. When `depthDomain` changes (merged domain shifts because a project was toggled), React re-renders `Layer` components with updated `paint` props. react-map-gl diffs the paint and pushes the new style expression to maplibre-gl automatically.
+`Dashboard.tsx` connects `depthDomain` to `DashboardMapCanvas`, which passes it
+to `ProjectMapLayers` and `DepthGauge`. When the merged domain shifts because a
+project was toggled, React re-renders `Layer` components with updated `paint`
+props. react-map-gl diffs the paint and pushes the new style expression to
+maplibre-gl automatically.
 
 ## Performance analysis
 

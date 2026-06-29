@@ -35,16 +35,17 @@ Implementation lives in:
 
 ## Rendering contract (Django parity)
 
-Dashboard owns page composition in `src/pages/Dashboard.tsx`.
+Dashboard owns domain orchestration in `src/pages/Dashboard.tsx`, while
+`DashboardMapCanvas.tsx` owns MapLibre and map-chrome composition.
 `useDashboardMapData.ts` owns revision-driven cached overlay reads,
 normalization, stale-completion suppression, and atomic publication; see
 `docs/dashboard-map-data.md`.
 `OverlayMapLayers.tsx` owns declarative overlay sources and layers, while
 deterministic map policy is isolated in `dashboardMapUtils.ts`: overlay
-normalization and project filtering, marker hit boxes, icon registration,
+normalization and project filtering, marker hit boxes, per-icon image loading,
 project/track bounds, and north-up orientation. See
-`docs/dashboard-map-layers.md`, `docs/dashboard-map-interactions.md`, and
-`docs/dashboard-map-utilities.md`.
+`docs/dashboard-map-shell.md`, `docs/dashboard-map-layers.md`,
+`docs/dashboard-map-interactions.md`, and `docs/dashboard-map-utilities.md`.
 
 ## Zoom and size configuration (source of truth: `src/constants.ts`)
 

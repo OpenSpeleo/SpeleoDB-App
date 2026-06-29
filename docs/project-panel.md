@@ -181,7 +181,8 @@ When no projects are available, the list area shows "No projects available" cent
 ```
 src/components/ProjectPanel.tsx   -- Presentational component (stateless)
 src/App.tsx                       -- Shared panel state owner + prop wiring (`isProjectPanelOpen`)
-src/pages/Dashboard.tsx           -- Loads map data and connects visibility outputs to consumers
+src/pages/Dashboard.tsx           -- Connects map data and visibility outputs to consumers
+src/pages/dashboard/useDashboardMapData.ts -- Loads commit-matched cached map data
 src/pages/dashboard/useDashboardProjectVisibility.ts -- Visibility state + actions
 src/components/AppTabBar.tsx      -- Navigation trigger (Projects tab calls `onProjectPanelChange`)
 ```

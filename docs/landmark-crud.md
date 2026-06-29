@@ -155,12 +155,13 @@ While the user holds the map, a circular ring renders at the touch point after
 animation. It then fills over the remaining hold time before
 `MAP.LONG_PRESS_DURATION_MS`. Moving past the tap threshold cancels the press
 (and the ring). On completion, a heavy haptic fires and the Map Point modal
-opens. The ring is purely presentational and reuses the existing long-press
-timer in `Dashboard.tsx`.
+opens. The ring is purely presentational and reuses the long-press timers in
+`useDashboardMapInteractions`.
 
 The ring only appears when a landmark could actually be created: the press is
 armed only at/above `MAP.MARKER_INTERACTION_MIN_ZOOM` (`isMarkerInteractionZoom`
-in `Dashboard.tsx`), so at low zoom ("high altitude") no ring shows at all. The
+in `useDashboardMapInteractions`), so at low zoom ("high altitude") no ring
+shows at all. The
 empty-spot requirement is enforced before the ring reveal and again when the
 timer fires (`isEmptyMapSpotAtClientPoint`), so a long-press on an existing
 landmark/overlay marker shows no ring and does not open Map Point. Project

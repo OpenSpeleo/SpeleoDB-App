@@ -18,7 +18,7 @@ All safe area references use the pattern `var(--safe-area-inset-bottom, env(safe
 
 - `src/components/AppTabBar.tsx` -- tab bar bottom padding
 - `src/components/ProjectPanel.tsx` -- panel top padding
-- `src/pages/Dashboard.tsx` -- My Location button top offset
+- `src/pages/dashboard/DashboardMapCanvas.tsx` -- My Location button top offset
 - `src/pages/Login.tsx` -- login form top padding
 
 ## Source files

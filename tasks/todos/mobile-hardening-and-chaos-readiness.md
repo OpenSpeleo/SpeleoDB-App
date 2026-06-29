@@ -89,6 +89,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Extract dashboard landmark actions`
 - [x] `[Refactoring] Extract dashboard project visibility actions`
 - [x] `[Refactoring] Extract dashboard map data lifecycle`
+- [x] `[Refactoring] Extract dashboard map shell`
 - [ ] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [ ] `[Fix] Stop inactive page effects and polling`
 - [ ] `[Fix] Harden authentication and network state machines`
@@ -542,7 +543,7 @@ and physical-device evidence.
 
 ### Extract dashboard map data lifecycle
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `55904fe` (`[Refactoring] Extract dashboard map data lifecycle`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -564,3 +565,30 @@ and physical-device evidence.
 - Findings closed: the map-data lifecycle slice of MH-007. Map-shell state,
   chrome, and panel-state unification remain scheduled as independently
   reviewable splits.
+
+### Extract dashboard map shell
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, focused hook/canvas and
+  Dashboard characterization coverage, full one-shot Vitest with coverage and
+  live API contracts, production build, both-platform Capacitor sync, Android
+  lint/unit/release builds, signed iOS XCTest, and iOS Release compilation.
+- Result: cached map-style loading, layer selection, icon registration,
+  orientation locking, finite viewport metrics, foreground location, user-map
+  flight, map/loading/chrome composition, and location error presentation now
+  live behind `DashboardMapCanvas` and an injectable eight-operation hook port.
+  The hook and canvas each have 100% statement, branch, function, and line
+  coverage; Dashboard's 106 characterization tests remain green. Dashboard
+  shrinks from 801 to 584 lines, the canvas is 248 lines, the hook is 183 lines,
+  and every production function remains below 80 lines. Vitest passes
+  1,681/1,681 tests across 100 files with aggregate coverage of 89.27%
+  statements, 82.25% branches, 92.58% functions, and 91.34% lines. The
+  Dashboard lazy chunk is 159.65 KiB (51.45 KiB gzip), 2.50 KiB (0.97 KiB
+  gzip) above the prior modular boundary but still far below the starting
+  bundle baseline. Capacitor sync introduces no tracked native drift; Android
+  passes 9/9 first-party native tests plus lint, APK, and AAB builds, and iOS
+  passes 9/9 signed native tests on iPhone 17 Pro/iOS 26.5 plus Release
+  compilation.
+- Findings closed: the map-shell and page-size slices of MH-007. Dashboard is
+  now within the 600-line production-module budget; modal composition and
+  panel-state unification remain scheduled as independently reviewable splits.

@@ -132,7 +132,12 @@ Required for all network operations: API authentication, project sync, GeoJSON d
 
 - iOS permissions: `ios/App/App/Info.plist`
 - Android permissions: `android/app/src/main/AndroidManifest.xml`
-- Geolocation usage: `src/pages/Dashboard.tsx` (`handleGoToMyLocation`), GPS track recording + averaging (`src/services/GeolocationWatcher.ts`, `src/services/BackgroundGeolocationWatcher.ts`, `src/hooks/useGpsAveraging.ts`, `src/controllers/SpeleoDBController.ts`); see `docs/gps-tracks.md`
+- Geolocation usage: `src/pages/dashboard/useDashboardMapShell.ts` (foreground
+  My Location), GPS track recording + averaging
+  (`src/services/GeolocationWatcher.ts`,
+  `src/services/BackgroundGeolocationWatcher.ts`,
+  `src/hooks/useGpsAveraging.ts`, `src/controllers/SpeleoDBController.ts`); see
+  `docs/dashboard-map-shell.md` and `docs/gps-tracks.md`
 - Background tracking notification config: `capacitor.config.ts` (`android.useLegacyBridge`), `android/app/src/main/res/values/strings.xml`, `src/constants.ts` (`GPS.BACKGROUND_TRACKING_*`)
 - Battery-optimization nudge (Android): `src/services/BatteryOptimizationGuard.ts`, recording-screen banner in `src/components/GpsRecordingScreen.tsx`, plugin `@capawesome-team/capacitor-android-battery-optimization`
 - Geolocation error modal: `src/components/GeolocationErrorModal.tsx`

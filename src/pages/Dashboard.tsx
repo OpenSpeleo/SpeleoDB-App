@@ -6,34 +6,22 @@
  * can be toggled on/off via the ProjectPanel.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useHistory } from 'react-router-dom';
 import {
   IonPage,
   IonContent,
 } from '@ionic/react';
-import Map from 'react-map-gl/maplibre';
-import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
-import type { Map as MaplibreMap } from 'maplibre-gl';
-import { Geolocation } from '@capacitor/geolocation';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import type { MapRef } from 'react-map-gl/maplibre';
 
 import { useSpeleoDB } from '../context/useSpeleoDB';
-import { DEFAULT_MAP_LAYER_ID, MAP, MAP_LAYERS } from '../constants';
+import { DEFAULT_MAP_LAYER_ID, MAP } from '../constants';
 import type { MapLayerId } from '../types/mapLayer';
-import { registerTileCacheProtocol, getCachedLayerStyle } from '../services/TileCacheService';
-import MapLayerControl from '../components/map/MapLayerControl';
-import {
-  setSelectedMapLayerId as persistSelectedMapLayerId,
-} from '../services/PreferencesService';
+import { registerTileCacheProtocol } from '../services/TileCacheService';
 import ProjectPanel from '../components/ProjectPanel';
 import LandmarkPanel from '../components/LandmarkPanel';
 import GpsPanel from '../components/GpsPanel';
 import AppTabBar from '../components/AppTabBar';
-import GeolocationErrorModal from '../components/GeolocationErrorModal';
-import DistanceScale from '../components/map/DistanceScale';
-import DepthGauge from '../components/map/DepthGauge';
-import { PERMISSION_DENIED_SENTINEL } from '../utils/geolocationError';
 import OverlayMarkerDetailsModal from '../components/OverlayMarkerDetailsModal';
 import LandmarkFormModal from '../components/LandmarkFormModal';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -41,19 +29,7 @@ import LongPressRing from '../components/LongPressRing';
 import type { MapColorMode } from '../types/mapColorMode';
 import type { MeasurementUnit } from '../types/measurementUnit';
 import { useDepthProbe } from '../hooks/useDepthProbe';
-import {
-  DEFAULT_OVERLAY_ICON_AVAILABILITY,
-  OVERLAY_ICON_SOURCES,
-  computeBounds,
-  loadMapImage,
-  lockMapOrientation,
-  type OverlayImageMap,
-  type OverlayIconAvailability,
-  type OverlayIconId,
-} from './dashboard/dashboardMapUtils';
-import { ProjectMapLayers } from './dashboard/ProjectMapLayers';
-import { OverlayMapLayers } from './dashboard/OverlayMapLayers';
-import { GpsMapLayers } from './dashboard/GpsMapLayers';
+import { computeBounds } from './dashboard/dashboardMapUtils';
 import { useDashboardMapInteractions } from './dashboard/useDashboardMapInteractions';
 import { DashboardGpsActivity } from './dashboard/DashboardGpsActivity';
 import { DashboardGpsTrackDialogs } from './dashboard/DashboardGpsTrackDialogs';
@@ -65,6 +41,7 @@ import {
   useDashboardMapData,
   useVisibleDashboardOverlays,
 } from './dashboard/useDashboardMapData';
+import { DashboardMapCanvas } from './dashboard/DashboardMapCanvas';
 
 // ==================== Register tile caching protocol once ====================
 
@@ -120,19 +97,6 @@ const Dashboard: React.FC<DashboardProps> = ({
   const didFitRef = useRef(false);
   const mapRef = useRef<MapRef>(null);
 
-  const [mapViewMetrics, setMapViewMetrics] = useState<{ zoom: number; latitude: number }>(() => ({
-    zoom: MAP.DEFAULT_ZOOM,
-    latitude: MAP.DEFAULT_CENTER[1],
-  }));
-
-  const [overlayIconAvailability, setOverlayIconAvailability] = useState<OverlayIconAvailability>(
-    DEFAULT_OVERLAY_ICON_AVAILABILITY,
-  );
-  const [overlayIconsLoaded, setOverlayIconsLoaded] = useState(false);
-
-  // Map style (loaded from cache/network)
-  const [mapStyle, setMapStyle] = useState<Record<string, unknown> | null>(null);
-
   // ---- Auth guard -----------------------------------------------------------
 
   useEffect(() => {
@@ -140,30 +104,6 @@ const Dashboard: React.FC<DashboardProps> = ({
       history.push('/login');
     }
   }, [history, controller]);
-
-  // ---- Load map style -------------------------------------------------------
-
-  useEffect(() => {
-    let cancelled = false;
-    getCachedLayerStyle(selectedMapLayerId)
-      .then((style) => {
-        if (!cancelled) setMapStyle(style);
-      })
-      .catch((err) => console.error('Failed to load map style:', err));
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedMapLayerId]);
-
-  const handleSelectMapLayer = useCallback(
-    (layerId: string) => {
-      const nextLayerId = (MAP_LAYERS.find((layer) => layer.id === layerId)?.id ??
-        DEFAULT_MAP_LAYER_ID) as MapLayerId;
-      persistSelectedMapLayerId(nextLayerId);
-      onSelectedMapLayerIdChange(nextLayerId);
-    },
-    [onSelectedMapLayerIdChange],
-  );
 
   // ---- Sync projects on mount -----------------------------------------------
 
@@ -228,20 +168,6 @@ const Dashboard: React.FC<DashboardProps> = ({
       ),
     [currentProjectMapData, tilePrefetchJobs],
   );
-  const loadOverlayIcons = useCallback(async () => {
-    const map = mapRef.current?.getMap() as unknown as OverlayImageMap | undefined;
-    if (!map) return;
-
-    setOverlayIconsLoaded(false);
-    const availability: OverlayIconAvailability = { ...DEFAULT_OVERLAY_ICON_AVAILABILITY };
-    const iconEntries = Object.entries(OVERLAY_ICON_SOURCES) as Array<[OverlayIconId, string]>;
-    for (const [iconId, iconSrc] of iconEntries) {
-      availability[iconId] = await loadMapImage(map, iconId, iconSrc);
-    }
-    setOverlayIconAvailability(availability);
-    setOverlayIconsLoaded(true);
-  }, []);
-
   const visibleOverlayGeoJsonData = useVisibleDashboardOverlays(
     overlayGeoJsonData,
     effectiveActiveProjectIds,
@@ -341,58 +267,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     onClosePanel: closeLandmarkPanel,
   });
 
-  const handleMapLoad = useCallback(() => {
-    lockMapOrientation(mapRef.current);
-    void loadOverlayIcons();
-  }, [loadOverlayIcons]);
-
-  const handleMapMove = useCallback((event: ViewStateChangeEvent) => {
-    const { zoom, latitude } = event.viewState;
-    if (!Number.isFinite(zoom) || !Number.isFinite(latitude)) {
-      return;
-    }
-    setMapViewMetrics((prev) => {
-      if (prev.zoom === zoom && prev.latitude === latitude) {
-        return prev;
-      }
-      return { zoom, latitude };
-    });
-  }, []);
-
-  const [isLocating, setIsLocating] = useState(false);
-  const [userLocation, setUserLocation] = useState<{ lng: number; lat: number } | null>(null);
-  const [geoError, setGeoError] = useState<unknown>(null);
-  const handleGoToMyLocation = useCallback(async () => {
-    setIsLocating(true);
-    try {
-      const perms = await Geolocation.requestPermissions({ permissions: ['location'] });
-      if (perms.location !== 'granted') {
-        setGeoError(PERMISSION_DENIED_SENTINEL);
-        return;
-      }
-      const position = await Geolocation.getCurrentPosition({
-        enableHighAccuracy: true,
-        timeout: 10_000,
-      });
-      const lng = position.coords.longitude;
-      const lat = position.coords.latitude;
-      setUserLocation({ lng, lat });
-      const map = mapRef.current;
-      if (map) {
-        (map.getMap() as MaplibreMap).flyTo({
-          center: [lng, lat],
-          zoom: 15,
-          duration: 1200,
-        });
-      }
-      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
-    } catch (err: unknown) {
-      setGeoError(err);
-    } finally {
-      setIsLocating(false);
-    }
-  }, []);
-
   const closeGpsPanel = useCallback(() => onGpsPanelChange(false), [onGpsPanelChange]);
   const {
     trackVisibility: gpsTrackVisibility,
@@ -475,121 +349,41 @@ const Dashboard: React.FC<DashboardProps> = ({
       <IonContent fullscreen className="ion-no-padding" scrollY={false}>
         <div className="flex flex-col w-full h-full">
           <div className="relative flex-1 min-h-0 dashboard-map-container">
-          <div
-            className="relative w-full h-full dashboard-map-touch-surface"
-            onPointerDownCapture={handleMapGestureStart}
-            onPointerMoveCapture={handleMapGestureMove}
-            onPointerUpCapture={handleMapGestureEnd}
-            onPointerCancelCapture={handleMapGestureEnd}
-          >
-            {/* ---- Map ---- */}
-            {mapStyle && (
-              <Map
-                ref={mapRef}
-                initialViewState={{
-                  longitude: MAP.DEFAULT_CENTER[0],
-                  latitude: MAP.DEFAULT_CENTER[1],
-                  zoom: MAP.DEFAULT_ZOOM,
-                  ...MAP.NORTH_UP_ORIENTATION,
-                }}
-                maxZoom={MAP.MAX_ZOOM}
-                {...MAP.ROTATION_LOCK_INTERACTIONS}
-                style={{ width: '100%', height: '100%' }}
-                mapStyle={mapStyle as maplibregl.StyleSpecification}
-                attributionControl={{ compact: true }}
-                onLoad={handleMapLoad}
-                onMove={handleMapMove}
-                onMouseMove={handleMapMouseMove}
-                onMouseLeave={handleMapMouseLeave}
-              >
-                <ProjectMapLayers
-                  projects={sortedProjects}
-                  activeProjectIds={effectiveActiveProjectIds}
-                  geoJsonData={geoJsonData}
-                  projectColorsById={projectColorsById}
-                  colorMode={colorMode}
-                  depthDomain={depthDomain}
-                />
-
-                <OverlayMapLayers
-                  visibleOverlayGeoJsonData={visibleOverlayGeoJsonData}
-                  visibleLandmarksGeoJSON={visibleLandmarksGeoJSON}
-                  showLandmarks={showLandmarks}
-                  iconsLoaded={overlayIconsLoaded}
-                  iconAvailability={overlayIconAvailability}
-                />
-
-                <GpsMapLayers
-                  savedTrackFeatureCollection={savedTrackFeatureCollection}
-                  currentTrackFeatureCollection={currentTrackFeatureCollection}
-                  recordingState={gpsRecordingState}
-                  userLocation={userLocation}
-                />
-              </Map>
-            )}
-
-            <div
-              className="absolute bottom-2 left-2 z-10"
-            >
-              <DistanceScale
-                zoom={mapViewMetrics.zoom}
-                latitude={mapViewMetrics.latitude}
-                measurementUnit={measurementUnit}
-              />
-            </div>
-
-            {colorMode === 'depth' && (
-              <div
-                className="absolute right-3 z-10"
-                style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 64px)' }}
-              >
-                <DepthGauge
-                  depthDomain={depthDomain}
-                  currentDepth={probedDepth}
-                  measurementUnit={measurementUnit}
-                />
-              </div>
-            )}
-
-          </div>
-
-          {/* ---- My Location FAB ---- */}
-          <button
-            onClick={handleGoToMyLocation}
-            disabled={isLocating}
-            className="absolute right-3 z-10 w-11 h-11 flex items-center justify-center
-                       rounded-full bg-slate-900/80 backdrop-blur-sm border border-slate-600/60
-                       text-slate-200 hover:bg-slate-800/90 disabled:opacity-50
-                       transition-colors shadow-lg shadow-black/40"
-            style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 12px)' }}
-            aria-label="Go to my location"
-            data-testid="my-location-button"
-          >
-            {isLocating ? (
-              <div className="w-5 h-5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M12 2v2m0 16v2m10-10h-2M4 12H2" />
-              </svg>
-            )}
-          </button>
-
-          {/* ---- Map Layer switcher (under My Location FAB) ---- */}
-          <div
-            className="absolute right-3 z-10"
-            style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 64px)' }}
-          >
-            <MapLayerControl
-              layers={MAP_LAYERS}
-              selectedLayerId={selectedMapLayerId}
-              isOfflineLocked={isOfflineLocked}
-              layerOfflineSync={layerOfflineSync}
-              onSelectLayer={handleSelectMapLayer}
-            />
-          </div>
+          <DashboardMapCanvas
+            mapRef={mapRef}
+            selectedMapLayerId={selectedMapLayerId}
+            onSelectedMapLayerIdChange={onSelectedMapLayerIdChange}
+            isOfflineLocked={isOfflineLocked}
+            layerOfflineSync={layerOfflineSync}
+            projectLayers={{
+              projects: sortedProjects,
+              activeProjectIds: effectiveActiveProjectIds,
+              geoJsonData,
+              projectColorsById,
+              colorMode,
+              depthDomain,
+            }}
+            overlayLayers={{
+              visibleOverlayGeoJsonData,
+              visibleLandmarksGeoJSON,
+              showLandmarks,
+            }}
+            gpsLayers={{
+              savedTrackFeatureCollection,
+              currentTrackFeatureCollection,
+              recordingState: gpsRecordingState,
+            }}
+            gestures={{
+              onStart: handleMapGestureStart,
+              onMove: handleMapGestureMove,
+              onEnd: handleMapGestureEnd,
+              onMouseMove: handleMapMouseMove,
+              onMouseLeave: handleMapMouseLeave,
+            }}
+            colorMode={colorMode}
+            measurementUnit={measurementUnit}
+            probedDepth={probedDepth}
+          />
 
           {/* ---- Project panel ---- */}
           <ProjectPanel
@@ -769,17 +563,6 @@ const Dashboard: React.FC<DashboardProps> = ({
             />
           )}
 
-          <GeolocationErrorModal error={geoError} onDismiss={() => setGeoError(null)} />
-
-          {/* ---- Loading state when style not yet loaded ---- */}
-          {!mapStyle && (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                <span className="text-sm text-slate-400">Loading map…</span>
-              </div>
-            </div>
-          )}
           </div>
           <AppTabBar
             isProjectPanelOpen={isProjectPanelOpen}

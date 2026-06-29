@@ -62,9 +62,10 @@ fetching a remote style document:
   URLs to the `cached-https://` protocol so every tile request flows through the
   offline cache + missing-tile check. Because the config is bundled, the style
   resolves offline with no cached style document required.
-- The Dashboard's style effect depends on `selectedMapLayerId`; switching layers
-  rebuilds `mapStyle` and react-map-gl re-applies it. `public/map-style-satellite.json`
-  remains only as a static satellite fallback / service-worker precache entry.
+- `useDashboardMapShell` loads style state from `selectedMapLayerId`; switching
+  layers rebuilds `mapStyle` and react-map-gl re-applies it.
+  `public/map-style-satellite.json` remains only as a static satellite fallback
+  / service-worker precache entry.
 
 ## Layer switcher (Dashboard)
 
@@ -181,7 +182,9 @@ layers compete for the same pinned budget and honor the user's override.
 - Layer config: `src/constants.ts` (`MAP_LAYERS`, `MAP.MISSING_TILE_SHA256_HASHES`), `src/types/mapLayer.ts`
 - Layer accessors + style: `src/services/MapLayersService.ts`
 - Style cache wrapper + magic hash: `src/services/TileCacheService.ts`
-- Switcher UI: `src/components/map/MapLayerControl.tsx`, `src/pages/Dashboard.tsx`
+- Switcher UI/state: `src/components/map/MapLayerControl.tsx`,
+  `src/pages/dashboard/DashboardMapCanvas.tsx`,
+  `src/pages/dashboard/useDashboardMapShell.ts`
 - Settings section: `src/pages/Settings.tsx`
 - Shared state: `src/AuthenticatedAppShell.tsx`
 - Preferences: `src/services/PreferencesService.ts`
@@ -201,7 +204,10 @@ layers compete for the same pinned budget and honor the user's override.
 - `src/services/PreferencesService.test.ts`: `selectedMapLayerId` + `layerOfflineSync` normalization, forced-layer semantics.
 - `src/controllers/SpeleoDBController.test.ts`: satellite-first ordering, `setLayerOfflineSync` enqueue/cleanup, offline skip.
 - `src/pages/Settings.test.tsx`: Layers toggles (satellite forced) + per-layer %.
-- `src/components/map/MapLayerControl.test.tsx` + `src/pages/Dashboard.test.tsx`: switcher, persistence, offline disable.
+- `src/components/map/MapLayerControl.test.tsx`,
+  `src/pages/dashboard/useDashboardMapShell.test.ts`, and
+  `src/pages/Dashboard.test.tsx`: switcher, persistence, offline disable, style,
+  location, and map-shell integration.
 
 ## Residual risks & manual device test plan (iOS + Android)
 

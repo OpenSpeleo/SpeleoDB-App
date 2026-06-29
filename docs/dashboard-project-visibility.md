@@ -21,8 +21,8 @@ The hook owns:
 - show-all, hide-all, project, country, and collapse actions; and
 - zoom activation, country-gate recovery, panel close, and bounded map fit.
 
-`Dashboard.tsx` remains responsible for loading commit-matched project map data
-and supplying its GeoJSON and prevalidated bounds. `ProjectPanel.tsx` only
+`useDashboardMapData` supplies commit-matched GeoJSON and prevalidated bounds;
+`Dashboard.tsx` connects those values to this hook. `ProjectPanel.tsx` only
 renders values and invokes callbacks. `PreferencesService` remains the single
 serialization boundary for non-secret visibility settings.
 

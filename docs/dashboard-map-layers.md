@@ -17,6 +17,9 @@ expand the Dashboard state machine.
   sources and layers.
 - `useDashboardMapData` supplies normalized, commit-gated project and overlay
   data; see `docs/dashboard-map-data.md`.
+- `DashboardMapCanvas.tsx` composes these focused layers with cached map style,
+  icon readiness, viewport chrome, and user location; see
+  `docs/dashboard-map-shell.md`.
 - `Dashboard.tsx` connects already-derived data and visibility state. It owns no
   layer paint/layout declaration. Pointer interaction orchestration is owned by
   `useDashboardMapInteractions`; see `docs/dashboard-map-interactions.md`.

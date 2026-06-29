@@ -2,11 +2,10 @@
 
 ## Intent
 
-`Dashboard.tsx` remains the React and MapLibre composition root, but it must not
-also own every deterministic map policy. `dashboardMapUtils.ts` isolates the
-policy that can be evaluated without mounting the page. This is the first
-bounded step in decomposing Dashboard; it does not change map behavior or the
-public UI contract.
+`DashboardMapCanvas.tsx` is the focused MapLibre composition root, but it must
+not also own every deterministic map policy. `dashboardMapUtils.ts` isolates
+the policy that can be evaluated without mounting the shell. This separation
+does not change map behavior or the public UI contract.
 
 ## Ownership boundary
 
@@ -14,15 +13,17 @@ The utility module owns:
 
 - station color normalization and project-linked overlay filtering;
 - ordered marker-detail selection and touch hit-box construction;
-- overlay icon sources, registration, fetch/Image/MapLibre fallback, and
-  one-warning-per-icon diagnostics;
+- overlay icon sources, per-icon registration, fetch/Image/MapLibre fallback,
+  and one-warning-per-icon diagnostics;
 - project and GPS-track bounds, including antimeridian-aware project bounds;
 - touch thresholds, long-press blocking layer IDs, and north-up orientation.
 
-Dashboard still owns page state and modal composition. Focused components under
-`src/pages/dashboard/` own MapLibre layer composition, and
-`useDashboardMapInteractions` owns pointer state, timers, and marker selection;
-see `docs/dashboard-map-layers.md` and `docs/dashboard-map-interactions.md`.
+Dashboard still owns domain orchestration and modal composition.
+`DashboardMapCanvas` and its focused child components own MapLibre composition,
+and `useDashboardMapInteractions` owns pointer state, timers, and marker
+selection;
+see `docs/dashboard-map-shell.md`, `docs/dashboard-map-layers.md`, and
+`docs/dashboard-map-interactions.md`.
 Service and cache ownership remains outside these presentation modules.
 
 ## Invariants
