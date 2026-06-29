@@ -71,6 +71,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-023 | P1 | Web body parsing can swallow cancellation as an empty success, while native preparation is outside the request timeout and can poison the metadata cache permanently. | Closed: one deadline signal owns preparation, transport, parsing, publication, and cache recovery. |
 | MH-024 | P1 | Instance input accepts paths/queries/fragments even though services append fixed API paths, producing malformed authenticated targets and misleading network errors. | Closed: enforce and persist a canonical origin before transport. |
 | MH-025 | P2 | Signed JSON downloads accept a custom timeout but silently drop it before the transport boundary. | Closed: forward complete request ownership options. |
+| MH-026 | P0 | Untrusted authentication error bodies can reflect submitted token/password/email bytes directly into the login UI. | Closed: exact-value redaction and bounded message normalization before publication. |
 
 ## Commit checklist
 
@@ -116,6 +117,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Enforce request deadlines through response publication`
 - [x] `[Fix] Reject non-origin API instance URLs`
 - [x] `[Fix] Forward signed-download request deadlines`
+- [x] `[Security] Redact reflected credentials from auth errors`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -981,7 +983,7 @@ and physical-device evidence.
 
 ### Forward signed-download request deadlines
 
-- Commit: recorded after this objective is committed.
+- Commit: `e388099` (`[Fix] Forward signed-download request deadlines`).
 - Reproduction: `SpeleoDBService.downloadJSON()` exposed the shared
   `ServiceRequestOptions` contract but forwarded only `signal`, silently
   replacing any caller-supplied timeout with the transport default.
@@ -998,4 +1000,30 @@ and physical-device evidence.
   unsigned simulator Release compilation succeeds. Exact staged pre-commit and
   CI evidence is recorded immediately before commit.
 - Findings closed: MH-025. The broader authentication/network audit remains
+  open.
+
+### Redact reflected credentials from auth errors
+
+- Commit: recorded after this objective is committed.
+- Reproduction: password and OAuth-token login returned backend `detail`,
+  `message`, or `errors.non_field_errors` text directly to the Login component.
+  A server/proxy response containing the submitted credential therefore placed
+  secret bytes in the rendered UI, violating the documented auth boundary.
+- Correction: the session coordinator treats server error text as untrusted,
+  replaces exact raw/trimmed/URL-encoded submitted values, neutralizes control
+  characters, and caps the published message while preserving generic
+  fallbacks. The reusable rule is in
+  `tasks/lessons/untrusted-error-reflection.md`.
+- Verification: coordinator regressions prove reflected email/password values
+  are absent after control-character normalization, reflected raw and encoded
+  OAuth tokens are absent, messages are bounded, and normal response-shape
+  behavior remains intact. The focused suite passes 63/63 tests. Node 22 CI
+  passes 1,746/1,746 tests across 103 files with 89.61% statements, 82.52%
+  branches, 93.04% functions, and 91.69% lines. Capacitor synchronization
+  produces no native-source drift. Android lint, 9 first-party unit tests,
+  release APK assembly, and release AAB bundling pass. All 9 iOS XCTest cases
+  pass on an iPhone 17 Pro simulator running iOS 26.5, and unsigned simulator
+  Release compilation succeeds. Exact staged pre-commit and CI evidence is
+  recorded immediately before commit.
+- Findings closed: MH-026. The broader authentication/network audit remains
   open.

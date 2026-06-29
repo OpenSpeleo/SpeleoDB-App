@@ -149,7 +149,9 @@ Implementation notes:
   GeoJSON downloads, forward both caller cancellation and custom deadlines to
   that transport boundary.
 - Login error parsing in `SessionCoordinator.login` reads `detail` / `message` /
-  `errors.non_field_errors` directly off `response.data` (already v2-shaped).
+  `errors.non_field_errors` directly off `response.data` (already v2-shaped),
+  then removes exact submitted credential values and bounds the untrusted text
+  before it can be displayed.
 - Direct token login reuses `SpeleoDBService.validateToken`; `2xx` establishes
   an identity-free session, while every failure remains unauthenticated and
   never falls back offline.

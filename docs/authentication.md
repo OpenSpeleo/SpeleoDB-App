@@ -59,6 +59,12 @@ Token login requires a live server response:
 - timeout, transport error, or non-`4xx` server failure: remain on the login
   page, show a validation/connectivity error, and do not enter offline mode.
 
+Server error bodies are untrusted display input. Before an authentication
+message reaches React, exact submitted token/password/email values (including
+URL-encoded forms) are replaced, control characters are neutralized, and the
+result is bounded. Unsupported or empty shapes use the documented generic
+fallbacks; credential bytes are never reflected into the UI.
+
 An unvalidated token is never persisted. The token input is masked, disables
 browser autofill and autocapitalization, and preserves its value only in React
 form state while the login screen remains mounted.
@@ -165,7 +171,8 @@ are never logged or parsed.
 
 - Coordinator unit tests cover every branch of validation, trimming,
   fail-closed persistence, latest-attempt cancellation, serialized secure
-  writes, logout exclusion, reconnect, and state publication.
+  writes, logout exclusion, reconnect, reflected-credential redaction, and
+  state publication.
 - Controller characterization tests cover the stable façade and its integration
   with destructive purge, project sync, and application-wide invalidation.
 - Together they cover identity-free restoration, every response class, and

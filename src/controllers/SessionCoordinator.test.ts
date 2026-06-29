@@ -289,6 +289,30 @@ describe('SessionCoordinator', () => {
       expect(result).toEqual({ success: false, message });
     });
 
+    it('redacts reflected email and password values from server errors', async () => {
+      const transport = createTransport({
+        authenticate: vi.fn(async () => ({
+          status: 401,
+          data: {
+            detail: 'Rejected user@example.com with p@ss word\nTry again',
+          },
+        })),
+      });
+      const { coordinator } = createHarness({ transport });
+
+      const result = await coordinator.login({
+        email: 'user@example.com',
+        password: 'p@ss word',
+        instance: 'https://example.com',
+      });
+
+      expect(result.message).toBe(
+        'Rejected [REDACTED] with [REDACTED] Try again',
+      );
+      expect(result.message).not.toContain('user@example.com');
+      expect(result.message).not.toContain('p@ss word');
+    });
+
     it('rejects malformed success bodies and non-auth server failures', async () => {
       const transport = createTransport({
         authenticate: vi.fn()
@@ -403,6 +427,35 @@ describe('SessionCoordinator', () => {
       await expect(coordinator.loginWithToken({ token: 'token', instance: 'https://example.com' }))
         .resolves.toEqual({ success: false, message });
       expect(store.establish).not.toHaveBeenCalled();
+    });
+
+    it('redacts raw and encoded token reflection and bounds the displayed error', async () => {
+      const token = 'oauth token/secret';
+      const encodedToken = encodeURIComponent(token);
+      const lowercaseEscapes = encodedToken.replace(
+        /%[0-9A-F]{2}/g,
+        (escape) => escape.toLowerCase(),
+      );
+      const transport = createTransport({
+        validateToken: vi.fn(async () => ({
+          status: 403,
+          data: {
+            detail: `${token} ${encodedToken} ${lowercaseEscapes} ${'x'.repeat(400)}`,
+          },
+        })),
+      });
+      const { coordinator } = createHarness({ transport });
+
+      const result = await coordinator.loginWithToken({
+        token,
+        instance: 'https://example.com',
+      });
+
+      expect(result.message).not.toContain(token);
+      expect(result.message).not.toContain(encodedToken);
+      expect(result.message).not.toContain(lowercaseEscapes);
+      expect(result.message).toContain('[REDACTED]');
+      expect(result.message).toHaveLength(256);
     });
 
     it('reports transport and secure-storage failures without authenticating', async () => {
