@@ -660,30 +660,43 @@ export class SpeleoDBController {
     if (this._isPurgingLocalData) return;
     this._isPurgingLocalData = true;
     this.invalidateAsyncOperations();
-    let sessionClearError: unknown;
-    try {
+    let sessionClearFailed = false;
+    let cleanupFailed = false;
+    const notifySafely = (): void => {
       try {
-        await this.tileCoordinator.stopForLogout();
+        this.notify();
       } catch {
-        // Continue cleanup even if best-effort tile worker teardown fails.
+        cleanupFailed = true;
       }
-
-      await this.gpsRecordingCoordinator.stopForLogout();
-      this.gpsTrackCoordinator.resetForLogout();
-
-      // Reset in-memory state first so UI reflects the wipe immediately.
+    };
+    try {
+      // Revoke all published user state before awaiting fallible native or
+      // persistence teardown. Cleanup failures are reported only after every
+      // independent wipe step has been attempted.
       this.sessionCoordinator.reset();
       this.projectSyncCoordinator.reset();
+      this.gpsTrackCoordinator.resetForLogout();
+      this.offlineMutations.reset();
+      notifySafely();
+
+      const teardownTasks: Promise<void>[] = [
+        Promise.resolve().then(() => this.tileCoordinator.stopForLogout()).catch(() => {
+          cleanupFailed = true;
+        }),
+        Promise.resolve().then(() => this.gpsRecordingCoordinator.stopForLogout()).catch(() => {
+          cleanupFailed = true;
+        }),
+      ];
       try {
         await this.prefs.session.clear();
-      } catch (error) {
-        sessionClearError = error;
+      } catch {
+        sessionClearFailed = true;
       }
 
       try {
         localStorage.clear();
-      } catch (error) {
-        console.error('Failed to clear local storage user data:', error);
+      } catch {
+        cleanupFailed = true;
       }
 
       try {
@@ -691,14 +704,19 @@ export class SpeleoDBController {
           sessionStorage.clear();
         }
       } catch {
-        // no-op in environments where sessionStorage is unavailable.
+        cleanupFailed = true;
       }
 
-      this.notify();
+      notifySafely();
 
+      await Promise.all(teardownTasks);
       await this.waitForTrackedOperations();
       if (this.gpsTrackCoordinator.hasPendingPersistence) {
-        await this.gpsTrackCoordinator.waitForPersistence();
+        try {
+          await this.gpsTrackCoordinator.waitForPersistence();
+        } catch {
+          cleanupFailed = true;
+        }
       }
 
       const cleanupResults = await Promise.allSettled([
@@ -707,17 +725,21 @@ export class SpeleoDBController {
       ]);
       for (const result of cleanupResults) {
         if (result.status === 'rejected') {
-          console.error('Failed to wipe local cache data:', result.reason);
+          cleanupFailed = true;
         }
       }
 
-      this.tileCoordinator.restartAfterLogout();
-      // Rebuild the offline queue so its in-memory ops are dropped along with
-      // the persisted store (cleared by cache.clearAll above).
-      this.offlineMutations.reset();
-      this.notify();
-      if (sessionClearError) {
+      try {
+        this.tileCoordinator.restartAfterLogout();
+      } catch {
+        cleanupFailed = true;
+      }
+      notifySafely();
+      if (sessionClearFailed) {
         throw new Error('Secure credential deletion failed during logout.');
+      }
+      if (cleanupFailed) {
+        throw new Error('Local data deletion did not complete during logout.');
       }
     } finally {
       this._isPurgingLocalData = false;

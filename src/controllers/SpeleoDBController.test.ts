@@ -684,6 +684,51 @@ describe('SpeleoDBController', () => {
       expect(localStorage.length).toBe(0);
     });
 
+    it('continues destructive cleanup when GPS teardown fails and reports the failure', async () => {
+      const harness = gpsControllerWith();
+      vi.mocked(harness.watcher.stop).mockRejectedValueOnce(new Error('native stop failed'));
+      localStorage.setItem('private', 'data');
+
+      await expect(harness.controller.logout()).rejects.toThrow(
+        'Local data deletion did not complete during logout.',
+      );
+
+      expect(harness.controller.isAuthenticated()).toBe(false);
+      expect(harness.prefs.session.clear).toHaveBeenCalledOnce();
+      expect(harness.cache.clearAll).toHaveBeenCalledOnce();
+      expect(localStorage.length).toBe(0);
+    });
+
+    it('attempts every wipe step and reports failed durable cache deletion', async () => {
+      await controller.login(validCreds);
+      cache.clearAll = vi.fn(async () => { throw new Error('cache clear failed'); });
+      localStorage.setItem('private', 'data');
+
+      await expect(controller.logout()).rejects.toThrow(
+        'Local data deletion did not complete during logout.',
+      );
+
+      expect(controller.isAuthenticated()).toBe(false);
+      expect(prefs.session.clear).toHaveBeenCalledOnce();
+      expect(cache.clearAll).toHaveBeenCalledOnce();
+      expect(localStorage.length).toBe(0);
+    });
+
+    it('continues destructive cleanup when a state subscriber throws', async () => {
+      await controller.login(validCreds);
+      controller.subscribe(() => { throw new Error('subscriber failed'); });
+      localStorage.setItem('private', 'data');
+
+      await expect(controller.logout()).rejects.toThrow(
+        'Local data deletion did not complete during logout.',
+      );
+
+      expect(controller.isAuthenticated()).toBe(false);
+      expect(prefs.session.clear).toHaveBeenCalledOnce();
+      expect(cache.clearAll).toHaveBeenCalledOnce();
+      expect(localStorage.length).toBe(0);
+    });
+
     it('clears local pending sync queue and offline users on logout', async () => {
       localStorage.setItem('speleo_pending_sync', JSON.stringify([{ type: 'signup' }]));
       localStorage.setItem(

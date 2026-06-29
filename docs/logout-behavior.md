@@ -40,6 +40,8 @@ Implementation notes:
 - logout closes admission for new login and validation requests before it
   dispatches cancellation, preventing abort-listener re-entry from starting a
   new session transition,
+- published auth, project, GPS-track, and pending-operation state is revoked
+  before awaiting native watcher or tile-worker teardown,
 - in-flight login transports and startup validation are cancelled immediately;
   logout waits for every accepted authentication operation and secure-store
   rollback before entering destructive purge,
@@ -48,10 +50,15 @@ Implementation notes:
 - logout invalidates and cancels coordinator-owned startup validation and
   controller-owned sync run contexts before the destructive cache wipe starts,
 - UI auth/session state resets immediately so the app stops rendering the old session,
-- native credential deletion runs before session metadata deletion; any failure
-  still revokes the in-process token, completes local cache cleanup, and is
-  reported to the caller instead of being hidden,
+- native credential deletion and session-marker deletion are both attempted;
+  marker deletion still runs when vault deletion fails, so a retained orphan
+  token cannot be restored on restart. Any failure still revokes in-process
+  access and is reported after the remaining cleanup steps finish,
 - cache purge waits for already-started tracked sync work to settle before `clearAll()` / tile cleanup runs, so stale writes cannot repopulate local data after logout completes,
+- GPS/tile teardown, pending GPS persistence, cache deletion, storage clearing,
+  and tile-runtime restart are independent cleanup steps. A failure in one may
+  not skip the others; logout rejects with a generic retryable error only after
+  every step has been attempted,
 - service/cache layers must treat aborts as authoritative: once logout starts, no stale state mutation, cache write, or tile-prefetch scheduling may be published from the cancelled run.
 
 ## Offline mode interaction

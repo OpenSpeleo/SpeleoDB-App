@@ -407,18 +407,23 @@ describe('SecureSessionStore', () => {
     expect(store.getSession()).toBeNull();
   });
 
-  it('revokes memory but does not delete metadata when secure-token deletion fails', async () => {
-    const { credentials, metadataStore, store } = createHarness({
+  it('revokes metadata and cannot restore the session when secure-token deletion fails', async () => {
+    const { credentials, getMetadata, metadataStore, store } = createHarness({
       secureToken: 'token',
       metadata: { hasStoredSession: true, instance: 'https://speleodb.org' },
     });
     await store.initialize();
     vi.mocked(credentials.clearToken).mockRejectedValueOnce(new Error('vault failure'));
 
-    await expect(store.clear()).rejects.toThrow('vault failure');
+    await expect(store.clear()).rejects.toMatchObject({ code: 'persistence-failed' });
 
-    expect(metadataStore.clear).not.toHaveBeenCalled();
+    expect(metadataStore.clear).toHaveBeenCalledOnce();
+    expect(getMetadata()).toEqual({ hasStoredSession: false });
     expect(store.getSession()).toBeNull();
+
+    const restartedStore = new SecureSessionStore(credentials, metadataStore);
+    await expect(restartedStore.initialize()).resolves.toBeNull();
+    expect(credentials.clearToken).toHaveBeenCalledTimes(2);
   });
 
   it('fails closed in memory when metadata deletion fails after token deletion', async () => {
@@ -433,6 +438,24 @@ describe('SecureSessionStore', () => {
 
     await expect(store.clear()).rejects.toMatchObject({ code: 'persistence-failed' });
 
+    expect(store.getSession()).toBeNull();
+  });
+
+  it('aggregates token and metadata deletion failures after revoking memory', async () => {
+    const { credentials, metadataStore, store } = createHarness({
+      secureToken: 'token',
+      metadata: { hasStoredSession: true, instance: 'https://speleodb.org' },
+    });
+    await store.initialize();
+    vi.mocked(credentials.clearToken).mockRejectedValueOnce(new Error('vault failure'));
+    vi.mocked(metadataStore.clear).mockImplementationOnce(() => {
+      throw new Error('metadata failure');
+    });
+
+    await expect(store.clear()).rejects.toMatchObject({
+      code: 'persistence-failed',
+      cause: expect.any(AggregateError),
+    });
     expect(store.getSession()).toBeNull();
   });
 

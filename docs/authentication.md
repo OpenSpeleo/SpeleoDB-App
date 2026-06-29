@@ -122,6 +122,10 @@ Once logout begins, new login and validation probes are rejected until purge
 finishes. Logout cancels in-flight authentication and validation, waits for all
 authentication operations (including secure-store rollback) to settle, and
 only then enters the destructive purge boundary.
+Secure-session clear always revokes its in-process snapshot and attempts both
+vault-token and non-secret marker deletion. If the native vault refuses
+deletion, the marker is still removed; a later startup treats any surviving
+token as an orphan to delete, never as a restorable authenticated session.
 
 ## Architecture and performance
 

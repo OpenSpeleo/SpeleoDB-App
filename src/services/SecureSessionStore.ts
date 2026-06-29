@@ -118,20 +118,27 @@ export class SecureSessionStore implements SessionStore {
 
   async clear(): Promise<void> {
     this.assertInitialized();
+    this.current = null;
+    const failures: unknown[] = [];
     try {
       await this.credentials.clearToken();
-    } finally {
-      // Even a native deletion failure must revoke in-process access. The
-      // retained metadata lets the next startup retry the native clear.
-      this.current = null;
+    } catch (error) {
+      failures.push(error);
     }
     try {
       this.metadata.clear();
     } catch (error) {
+      failures.push(error);
+    }
+    if (failures.length > 0) {
       throw new SessionStoreError(
         'persistence-failed',
-        'The secure token was cleared but session metadata could not be removed',
-        { cause: error },
+        'Unable to completely remove the secure session',
+        {
+          cause: failures.length === 1
+            ? failures[0]
+            : new AggregateError(failures),
+        },
       );
     }
   }
