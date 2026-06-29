@@ -60,6 +60,8 @@ const OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE =
 const SUPERSEDED_AUTHENTICATION_MESSAGE = 'Authentication attempt was superseded.';
 const LOGOUT_IN_PROGRESS_MESSAGE = 'Sign out is in progress. Please try again.';
 const INVALID_INSTANCE_MESSAGE = 'Enter a valid SpeleoDB instance origin URL.';
+const SESSION_SETUP_FAILED_MESSAGE =
+  'Login succeeded, but the session could not be established safely.';
 
 function normalizeInstance(instance: string): string | null {
   try {
@@ -221,7 +223,7 @@ export class SessionCoordinator {
           }
           return {
             success: false,
-            message: 'Login succeeded, but the secure session could not be saved.',
+            message: SESSION_SETUP_FAILED_MESSAGE,
           };
         }
       }
@@ -278,7 +280,7 @@ export class SessionCoordinator {
           }
           return {
             success: false,
-            message: 'Login succeeded, but the secure session could not be saved.',
+            message: SESSION_SETUP_FAILED_MESSAGE,
           };
         }
       }
@@ -355,20 +357,7 @@ export class SessionCoordinator {
   /** Reset session state during the controller's all-data purge. */
   reset(notify = false): void {
     this._authState = EMPTY_AUTH_STATE;
-    this._isOnline = false;
-    this._isOfflineLocked = false;
-    try {
-      this.dependencies.hooks.setOfflineRuntime(false);
-    } catch {
-      // Revocation remains authoritative when a runtime adapter is unavailable.
-    }
-    if (notify) {
-      try {
-        this.dependencies.hooks.notifyStateChanged();
-      } catch {
-        // Subscribers cannot interrupt destructive session revocation.
-      }
-    }
+    this.setConnectivity(false, false, notify);
   }
 
   /** Publish an online result from a successful authenticated data request. */
@@ -476,6 +465,9 @@ export class SessionCoordinator {
       ? { id: 'auth', email: normalizedEmail, name: normalizedEmail }
       : null;
 
+    context.throwIfAborted();
+    this.dependencies.hooks.invalidateApplicationOperations();
+    context.throwIfAborted();
     await this.serializeSessionMutation(() => this.dependencies.sessionStore.establish(
       {
         email: normalizedEmail || undefined,
@@ -485,7 +477,6 @@ export class SessionCoordinator {
       { signal: context.signal },
     ));
     context.throwIfAborted();
-    this.dependencies.hooks.invalidateApplicationOperations();
     this._authState = { isAuthenticated: true, user, token: normalizedToken };
     this.setConnectivity(true, false, true);
     return user;
@@ -511,8 +502,18 @@ export class SessionCoordinator {
   private setConnectivity(isOnline: boolean, offlineLocked: boolean, notify: boolean): void {
     this._isOnline = isOnline;
     this._isOfflineLocked = offlineLocked;
-    this.dependencies.hooks.setOfflineRuntime(offlineLocked);
-    if (notify) this.dependencies.hooks.notifyStateChanged();
+    try {
+      this.dependencies.hooks.setOfflineRuntime(offlineLocked);
+    } catch {
+      // Runtime adapters observe connectivity; they do not own it.
+    }
+    if (notify) {
+      try {
+        this.dependencies.hooks.notifyStateChanged();
+      } catch {
+        // Subscribers cannot roll back an authoritative state transition.
+      }
+    }
   }
 
   private async rejectMalformedStoredSession(

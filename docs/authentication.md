@@ -83,6 +83,14 @@ session-presence marker) to `PreferencesService`, and only then publishes the
 authenticated controller state. A storage failure leaves the caller
 unauthenticated and restores the previous secure token.
 
+Controller-wide application invalidation is a required cross-account safety
+gate and completes before the secure credential commit. If it fails, no new
+session is written or published. After durable commit,
+session/auth/connectivity state is authoritative: tile-runtime adapters and
+React subscribers observe that transition but cannot roll it back or convert a
+successful login/validation into failure if they throw. This preserves one
+result across the durable store, controller snapshot, and caller.
+
 Authentication attempts use latest-attempt ownership. Starting a valid
 password or token attempt cancels any older attempt and supersedes startup
 validation immediately. Network requests may overlap so a cancellation-aware
@@ -185,8 +193,8 @@ are never logged or parsed.
 
 - Coordinator unit tests cover every branch of validation, trimming,
   fail-closed persistence, latest-attempt cancellation, serialized secure
-  writes, logout exclusion, reconnect, fixed auth-error publication, and state
-  publication.
+  writes, logout exclusion, reconnect, fixed auth-error publication,
+  pre-commit invalidation, observer-failure isolation, and state publication.
 - Controller characterization tests cover the stable façade and its integration
   with destructive purge, project sync, and application-wide invalidation.
 - Together they cover identity-free restoration, every response class, and

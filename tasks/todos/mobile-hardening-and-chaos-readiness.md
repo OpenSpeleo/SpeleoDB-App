@@ -75,6 +75,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-027 | P0 | Persisted pre-origin-policy sessions can retain unsafe instance paths forever as an offline session and leave local user data behind an unusable identity. | Closed: canonical upgrade before I/O; destructive purge for malformed or uncommittable identity metadata. |
 | MH-028 | P0 | Finite exact-value filtering cannot guarantee that transformed credentials are absent from arbitrary authentication server prose. | Closed: authentication failures publish only fixed local messages and ignore response-body text. |
 | MH-029 | P0 | Logout leaves the coordinator's authenticated snapshot published while it waits for secure-write rollback, and cancelled validation can report stale `ok`. | Closed: revoke at logout admission with best-effort notification; return `unauthorized` for logout-owned cancellation. |
+| MH-030 | P0 | Hook exceptions around durable session commit can either report failure after accepted credentials or let required old-account invalidation fail open. | Closed: require invalidation before commit; isolate only post-commit publication observers. |
 
 ## Commit checklist
 
@@ -124,6 +125,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Purge malformed persisted sessions`
 - [x] `[Security] Ignore authentication server error prose`
 - [x] `[Fix] Revoke sessions at logout admission`
+- [x] `[Fix] Isolate session publication from observer failures`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -1093,7 +1095,7 @@ and physical-device evidence.
 
 ### Revoke sessions at logout admission
 
-- Commit: recorded after this objective is committed.
+- Commit: `acf134b` (`[Fix] Revoke sessions at logout admission`).
 - Reproduction: `logout()` closed admission and aborted work but left the
   coordinator's authenticated snapshot intact while waiting for accepted login
   operations to finish rollback. A stuck native write therefore kept the old
@@ -1117,4 +1119,33 @@ and physical-device evidence.
   Release compilation succeeds. Exact staged pre-commit and CI evidence is
   recorded immediately before commit.
 - Findings closed: MH-029. The broader authentication/network audit remains
+  open.
+
+### Isolate session publication from observer failures
+
+- Commit: recorded after this objective is committed.
+- Reproduction: session establishment durably committed the token, then invoked
+  application invalidation and connectivity/subscriber hooks on the same
+  awaited command path. If a hook threw, login returned the secure-storage
+  failure message even though credentials and possibly authenticated state were
+  already committed. Successful validation could similarly fall through into
+  an offline result.
+- Correction: required controller-wide invalidation now completes before secure
+  credential commit and fails closed without a write. After commit,
+  authoritative auth/connectivity fields are independent of best-effort
+  runtime-adapter and subscriber effects, whose failures cannot alter the
+  returned login/validation result. The reusable rule is in
+  `tasks/lessons/authoritative-state-publication.md`.
+- Verification: 258/258 focused coordinator and controller-façade tests pass.
+  Regressions prove invalidation failure writes no session, while failures from
+  both post-commit publication observers leave durable login successful with
+  authenticated/online state and restored-session validation remains `ok`.
+  Node 22 CI passes 1,759/1,759 tests across 103 files with 89.64% statements,
+  82.54% branches, 93.07% functions, and 91.70% lines. Capacitor synchronization
+  produces no tracked native drift. Android lint, 9 first-party unit tests,
+  release APK assembly, and release AAB bundling pass. All 9 iOS XCTest cases
+  pass on an iPhone 17 Pro simulator running iOS 26.5, and unsigned simulator
+  Release compilation succeeds. Exact staged pre-commit and CI evidence is
+  recorded immediately before commit.
+- Findings closed: MH-030. The broader authentication/network audit remains
   open.

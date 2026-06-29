@@ -372,8 +372,50 @@ describe('SessionCoordinator', () => {
       expect((await coordinator.login(credentials)).message).toContain('previously validated session');
       await expect(coordinator.login(credentials)).resolves.toEqual({
         success: false,
-        message: 'Login succeeded, but the secure session could not be saved.',
+        message: 'Login succeeded, but the session could not be established safely.',
       });
+      expect(coordinator.isAuthenticated).toBe(false);
+    });
+
+    it('keeps a committed login successful when publication observers throw', async () => {
+      const hooks = createHooks();
+      const { coordinator, store } = createHarness({ hooks });
+      vi.mocked(hooks.setOfflineRuntime).mockImplementation(() => {
+        throw new Error('runtime adapter failed');
+      });
+      vi.mocked(hooks.notifyStateChanged).mockImplementation(() => {
+        throw new Error('subscriber failed');
+      });
+
+      await expect(coordinator.login({
+        email: 'user@example.com',
+        password: 'password',
+        instance: 'https://example.com',
+      })).resolves.toMatchObject({ success: true, token: 'token' });
+
+      expect(store.establish).toHaveBeenCalledOnce();
+      expect(coordinator.isAuthenticated).toBe(true);
+      expect(coordinator.isOnline).toBe(true);
+      expect(coordinator.isOfflineLocked).toBe(false);
+    });
+
+    it('does not commit a session when required application invalidation fails', async () => {
+      const hooks = createHooks({
+        invalidateApplicationOperations: vi.fn(() => {
+          throw new Error('invalidation failed');
+        }),
+      });
+      const { coordinator, store } = createHarness({ hooks });
+
+      await expect(coordinator.loginWithToken({
+        token: 'token',
+        instance: 'https://example.com',
+      })).resolves.toEqual({
+        success: false,
+        message: 'Login succeeded, but the session could not be established safely.',
+      });
+
+      expect(store.establish).not.toHaveBeenCalled();
       expect(coordinator.isAuthenticated).toBe(false);
     });
   });
@@ -484,7 +526,7 @@ describe('SessionCoordinator', () => {
       });
       await expect(coordinator.loginWithToken(credentials)).resolves.toEqual({
         success: false,
-        message: 'Login succeeded, but the secure session could not be saved.',
+        message: 'Login succeeded, but the session could not be established safely.',
       });
       expect(coordinator.isAuthenticated).toBe(false);
     });
@@ -936,6 +978,23 @@ describe('SessionCoordinator', () => {
       );
       expect(coordinator.isOnline).toBe(true);
       expect(hooks.notifyStateChanged).toHaveBeenCalledOnce();
+    });
+
+    it('keeps successful validation authoritative when publication adapters throw', async () => {
+      const hooks = createHooks();
+      const { coordinator } = createHarness({ session: STORED_SESSION, hooks });
+      vi.mocked(hooks.setOfflineRuntime).mockImplementation(() => {
+        throw new Error('runtime adapter failed');
+      });
+      vi.mocked(hooks.notifyStateChanged).mockImplementation(() => {
+        throw new Error('subscriber failed');
+      });
+
+      await expect(coordinator.validateSession()).resolves.toBe('ok');
+
+      expect(coordinator.isAuthenticated).toBe(true);
+      expect(coordinator.isOnline).toBe(true);
+      expect(coordinator.isOfflineLocked).toBe(false);
     });
 
     it.each([401, 403])('purges an explicitly denied session on status %i', async (status) => {

@@ -87,6 +87,11 @@ The app enters offline mode only as a result of a failed server probe, never fro
   stored-session logout path.
 - `SessionCoordinator` is the sole owner of auth-validation outcome policy and
   online/offline state transitions; `SpeleoDBController` remains the UI façade.
+- Controller-wide operation invalidation is a required pre-commit gate for a
+  new account/session; failure prevents credential storage. Runtime adapters
+  and subscribers observe later session/connectivity publication but do not own
+  its result. Their exceptions cannot turn a committed login or successful
+  validation into a reported failure/offline transition.
 - `401`/`403` from stored-session validation explicitly deny authorization and
   trigger logout plus local purge.
 - Network errors, timeouts, redirects, server errors, and inconclusive client

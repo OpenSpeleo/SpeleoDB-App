@@ -478,7 +478,7 @@ describe('SpeleoDBController', () => {
 
       expect(result).toEqual({
         success: false,
-        message: 'Login succeeded, but the secure session could not be saved.',
+        message: 'Login succeeded, but the session could not be established safely.',
       });
       expect(controller.isAuthenticated()).toBe(false);
       expect(prefs.session.establish).toHaveBeenCalledOnce();
@@ -651,7 +651,7 @@ describe('SpeleoDBController', () => {
 
       expect(result).toEqual({
         success: false,
-        message: 'Login succeeded, but the secure session could not be saved.',
+        message: 'Login succeeded, but the session could not be established safely.',
       });
       expect(controller.isAuthenticated()).toBe(false);
     });
