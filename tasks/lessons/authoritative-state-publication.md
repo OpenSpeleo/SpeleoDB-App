@@ -12,3 +12,6 @@ snapshot, and returned result must describe one coherent outcome.
 Do not misclassify safety prerequisites as observers. Cancellation/invalidation
 that prevents old-account work from crossing into a new session must complete
 before durable commit; if it fails, reject setup without writing credentials.
+Conversely, startup adapters and follow-up work launched after an authoritative
+result are observers: their exceptions cannot crash restoration or reclassify a
+successful transition.

@@ -127,7 +127,7 @@ export class SessionCoordinator {
 
   constructor(private readonly dependencies: SessionCoordinatorDependencies) {
     this.restoreSession();
-    this.dependencies.hooks.setOfflineRuntime(false);
+    this.setConnectivity(false, false, false);
   }
 
   get authState(): AuthState {
@@ -318,7 +318,11 @@ export class SessionCoordinator {
     const operation = (async () => {
       const outcome = await this.validateSessionAgainstServer();
       if (outcome.authoritative && outcome.result === 'ok') {
-        this.dependencies.hooks.startReconnectSync();
+        try {
+          this.dependencies.hooks.startReconnectSync();
+        } catch {
+          // Reconnect is already authoritative; follow-up sync is best-effort.
+        }
       }
       return outcome.result;
     })();

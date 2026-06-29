@@ -91,6 +91,9 @@ React subscribers observe that transition but cannot roll it back or convert a
 successful login/validation into failure if they throw. This preserves one
 result across the durable store, controller snapshot, and caller.
 
+The initial offline-runtime adapter is also best-effort: failure cannot crash
+controller construction or discard a securely restored session.
+
 Authentication attempts use latest-attempt ownership. Starting a valid
 password or token attempt cancels any older attempt and supersedes startup
 validation immediately. Network requests may overlap so a cancellation-aware

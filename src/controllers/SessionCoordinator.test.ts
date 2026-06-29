@@ -102,6 +102,18 @@ describe('SessionCoordinator', () => {
       expect(hooks.notifyStateChanged).not.toHaveBeenCalled();
     });
 
+    it('restores safely when the startup runtime adapter throws', () => {
+      const hooks = createHooks({
+        setOfflineRuntime: vi.fn(() => { throw new Error('runtime unavailable'); }),
+      });
+
+      const { coordinator } = createHarness({ session: STORED_SESSION, hooks });
+
+      expect(coordinator.isAuthenticated).toBe(true);
+      expect(coordinator.isOnline).toBe(false);
+      expect(coordinator.isOfflineLocked).toBe(false);
+    });
+
     it('restores a token-only session without inventing an identity', () => {
       const { coordinator } = createHarness({
         session: {
@@ -1049,6 +1061,20 @@ describe('SessionCoordinator', () => {
       await coordinator.validateSession();
 
       await expect(coordinator.attemptReconnect()).resolves.toBe('ok');
+      expect(coordinator.isOfflineLocked).toBe(false);
+      expect(hooks.startReconnectSync).toHaveBeenCalledOnce();
+    });
+
+    it('keeps reconnect success authoritative when follow-up sync launch throws', async () => {
+      const hooks = createHooks({
+        startReconnectSync: vi.fn(() => { throw new Error('sync launch failed'); }),
+      });
+      const { coordinator } = createHarness({ session: STORED_SESSION, hooks });
+      coordinator.enterOfflineMode();
+
+      await expect(coordinator.attemptReconnect()).resolves.toBe('ok');
+
+      expect(coordinator.isOnline).toBe(true);
       expect(coordinator.isOfflineLocked).toBe(false);
       expect(hooks.startReconnectSync).toHaveBeenCalledOnce();
     });

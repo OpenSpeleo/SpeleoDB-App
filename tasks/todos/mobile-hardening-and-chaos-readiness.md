@@ -76,6 +76,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-028 | P0 | Finite exact-value filtering cannot guarantee that transformed credentials are absent from arbitrary authentication server prose. | Closed: authentication failures publish only fixed local messages and ignore response-body text. |
 | MH-029 | P0 | Logout leaves the coordinator's authenticated snapshot published while it waits for secure-write rollback, and cancelled validation can report stale `ok`. | Closed: revoke at logout admission with best-effort notification; return `unauthorized` for logout-owned cancellation. |
 | MH-030 | P0 | Hook exceptions around durable session commit can either report failure after accepted credentials or let required old-account invalidation fail open. | Closed: require invalidation before commit; isolate only post-commit publication observers. |
+| MH-031 | P1 | Startup runtime-adapter failure can crash session restoration, while reconnect-sync launch failure can reject an already successful online transition. | Closed: treat startup/runtime and post-reconnect launch as best-effort observers. |
 
 ## Commit checklist
 
@@ -126,6 +127,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Security] Ignore authentication server error prose`
 - [x] `[Fix] Revoke sessions at logout admission`
 - [x] `[Fix] Isolate session publication from observer failures`
+- [x] `[Fix] Preserve session results across follow-up failures`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -1123,7 +1125,7 @@ and physical-device evidence.
 
 ### Isolate session publication from observer failures
 
-- Commit: recorded after this objective is committed.
+- Commit: `2719c58` (`[Fix] Isolate session publication from observer failures`).
 - Reproduction: session establishment durably committed the token, then invoked
   application invalidation and connectivity/subscriber hooks on the same
   awaited command path. If a hook threw, login returned the secure-storage
@@ -1148,4 +1150,29 @@ and physical-device evidence.
   Release compilation succeeds. Exact staged pre-commit and CI evidence is
   recorded immediately before commit.
 - Findings closed: MH-030. The broader authentication/network audit remains
+  open.
+
+### Preserve session results across follow-up failures
+
+- Commit: recorded after this objective is committed.
+- Reproduction: `SessionCoordinator` called the offline-runtime adapter directly
+  during construction, so an adapter exception could abort controller startup
+  after a secure session had been restored. After successful reconnect, a
+  throwing follow-up sync launcher rejected `attemptReconnect()` even though
+  validation had already published online state.
+- Correction: constructor connectivity initialization uses the same
+  observer-isolated publication boundary as runtime transitions. Successful
+  reconnect retains its authoritative `ok` result while follow-up sync launch
+  remains best-effort.
+- Verification: 74/74 focused coordinator tests pass. Regressions prove a
+  throwing startup adapter cannot prevent secure-session restoration and a
+  throwing reconnect-sync launcher cannot reject or roll back online state.
+  Node 22 CI passes 1,761/1,761 tests across 103 files with 89.64% statements,
+  82.54% branches, 93.07% functions, and 91.70% lines. Capacitor synchronization
+  produces no tracked native drift. Android lint, 9 first-party unit tests,
+  release APK assembly, and release AAB bundling pass. All 9 iOS XCTest cases
+  pass on an iPhone 17 Pro simulator running iOS 26.5, and unsigned simulator
+  Release compilation succeeds. Exact staged pre-commit and CI evidence is
+  recorded immediately before commit.
+- Findings closed: MH-031. The broader authentication/network audit remains
   open.

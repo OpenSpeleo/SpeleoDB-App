@@ -57,6 +57,10 @@ exactly one outcome:
   or `5xx`): remain offline without destructive logout.
 
 Both paths are explicit and user-initiated. The app still does **not** subscribe to passive `online`/`offline` connectivity events. `attemptReconnect()` deliberately bypasses the offline-lock short-circuit in `validateSession()` so it can actually probe the server while offline-locked.
+Reconnect validation owns the returned result. If the best-effort follow-up
+project-sync launcher throws after a successful probe, the session remains
+online and `attemptReconnect()` still resolves `ok`; sync-launch failure cannot
+reclassify connectivity.
 Concurrent manual reconnect calls are coalesced at the coordinator boundary,
 so same-tick taps or overlapping UI callers share one request and can launch at
 most one sync. A reconnect superseded by a newer authenticated transition may
