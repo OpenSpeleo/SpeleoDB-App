@@ -48,7 +48,8 @@ it still owns the wider application cleanup and sync orchestration.
 Connectivity changes are request-driven. No browser or operating-system online
 event may bypass this state machine. Superseded validation runs are aborted and
 their late completions resolve from current auth state without publishing stale
-connectivity.
+connectivity. Concurrent manual reconnect calls share one in-flight result, and
+only an authoritative validation success may invoke the reconnect-sync hook.
 
 ## Verification and performance
 

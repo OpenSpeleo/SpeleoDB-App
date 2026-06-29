@@ -15,6 +15,11 @@ import { CancellationContext } from './CancellationContext';
 
 export type SessionValidationResult = 'ok' | 'unauthorized' | 'network_error';
 
+interface SessionValidationOutcome {
+  result: SessionValidationResult;
+  authoritative: boolean;
+}
+
 export interface SessionTransport {
   authenticate(
     instance: string,
@@ -109,6 +114,7 @@ export class SessionCoordinator {
   private sessionMutationTail: Promise<void> = Promise.resolve();
   private isLoggingOut = false;
   private logoutPromise: Promise<void> | null = null;
+  private reconnectPromise: Promise<SessionValidationResult> | null = null;
 
   constructor(private readonly dependencies: SessionCoordinatorDependencies) {
     this.restoreSession();
@@ -280,14 +286,25 @@ export class SessionCoordinator {
   async validateSession(): Promise<SessionValidationResult> {
     if (this.isLoggingOut) return 'unauthorized';
     if (this._isOfflineLocked) return 'network_error';
-    return this.validateSessionAgainstServer();
+    return (await this.validateSessionAgainstServer()).result;
   }
 
-  async attemptReconnect(): Promise<SessionValidationResult> {
-    if (this.isLoggingOut) return 'unauthorized';
-    const result = await this.validateSessionAgainstServer();
-    if (result === 'ok') this.dependencies.hooks.startReconnectSync();
-    return result;
+  attemptReconnect(): Promise<SessionValidationResult> {
+    if (this.isLoggingOut) return Promise.resolve('unauthorized');
+    if (this.reconnectPromise) return this.reconnectPromise;
+
+    const operation = (async () => {
+      const outcome = await this.validateSessionAgainstServer();
+      if (outcome.authoritative && outcome.result === 'ok') {
+        this.dependencies.hooks.startReconnectSync();
+      }
+      return outcome.result;
+    })();
+    const trackedOperation = operation.finally(() => {
+      this.reconnectPromise = null;
+    });
+    this.reconnectPromise = trackedOperation;
+    return trackedOperation;
   }
 
   async logout(): Promise<void> {
@@ -331,7 +348,7 @@ export class SessionCoordinator {
     this.setConnectivity(false, true, true);
   }
 
-  private async validateSessionAgainstServer(): Promise<SessionValidationResult> {
+  private async validateSessionAgainstServer(): Promise<SessionValidationOutcome> {
     const generation = this.validationGeneration;
     const context = this.beginValidationContext();
     let session: StoredSession | null;
@@ -346,11 +363,11 @@ export class SessionCoordinator {
         // performs best-effort cleanup before reporting its storage failure.
       }
       this.finishValidation(context);
-      return 'unauthorized';
+      return { result: 'unauthorized', authoritative: true };
     }
     if (!session) {
       this.finishValidation(context);
-      return 'unauthorized';
+      return { result: 'unauthorized', authoritative: true };
     }
 
     try {
@@ -366,20 +383,20 @@ export class SessionCoordinator {
 
       if (isSuccessfulStatus(response.status)) {
         this.markOnline();
-        return 'ok';
+        return { result: 'ok', authoritative: true };
       }
       if (isAuthorizationDeniedStatus(response.status)) {
         await this.logout();
-        return 'unauthorized';
+        return { result: 'unauthorized', authoritative: true };
       }
       this.setConnectivity(false, true, true);
-      return 'network_error';
+      return { result: 'network_error', authoritative: true };
     } catch (error) {
       if (isAbortError(error) || !this.isValidationCurrent(context, generation)) {
-        return this.staleSessionResult();
+        return { result: this.staleSessionResult(), authoritative: false };
       }
       this.setConnectivity(false, true, true);
-      return 'network_error';
+      return { result: 'network_error', authoritative: true };
     } finally {
       this.finishValidation(context);
     }

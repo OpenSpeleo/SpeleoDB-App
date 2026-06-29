@@ -65,7 +65,9 @@ A dedicated section rendered **only while offline-locked** (`isOfflineLocked`), 
   - `unauthorized` (`401`/`403`): the controller has already logged out and
     purged local data; Settings navigates to `/login`. Other error statuses
     remain non-destructive `network_error` outcomes.
-- Re-entry is guarded with local `isReconnecting` state (the button shows `Reconnecting…` and is disabled during the attempt) to prevent double-submission.
+- Local `isReconnecting` state provides button feedback (`Reconnecting…`) and
+  disables the rendered control. `SessionCoordinator` is the authoritative
+  re-entry guard: concurrent callers share one probe and can start one sync.
 
 ### Account
 

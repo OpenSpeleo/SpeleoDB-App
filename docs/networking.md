@@ -25,7 +25,9 @@ Explicit, user-initiated actions may attempt to return online from offline mode:
 2. Tap **Go Online** in Settings or **Try Reconnect** on Pending Changes. Both
    call `controller.attemptReconnect()`, which delegates the explicit probe to
    `SessionCoordinator` and launches a sync through an injected lifecycle hook
-   only after validation succeeds.
+   only after authoritative validation succeeds. Concurrent calls share one
+   probe and one result; a probe superseded by login, logout, or another
+   validation cannot launch reconnect sync.
 
 If none of these actions occurs, the app remains in offline behavior even if device connectivity changes. The Settings **Resync** button calls `syncProjects()` only, is disabled while offline-locked, and never performs a reconnect.
 

@@ -65,6 +65,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-017 | P1 | Native HTTP can launch a request after cancellation wins during asynchronous User-Agent assembly. | Closed: re-check cancellation immediately before invoking CapacitorHttp. |
 | MH-018 | P1 | An unreadable session snapshot or unexpected startup-validation rejection can escape as an unhandled promise and leave ambiguous auth routing. | Closed: fail closed in the coordinator and mounted startup boundary. |
 | MH-019 | P0 | Inconclusive stored-session `4xx` responses such as `408` or `429` trigger destructive logout and wipe offline data. | Closed: purge only on explicit `401`/`403` authorization denial. |
+| MH-020 | P1 | Concurrent manual reconnects can supersede each other and let a stale `ok` result launch sync while the authoritative probe remains offline. | Closed: coalesce reconnect ownership and gate sync on authoritative validation. |
 
 ## Commit checklist
 
@@ -104,6 +105,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Prevent cancelled native request launch`
 - [x] `[Fix] Fail closed on startup validation exceptions`
 - [x] `[Fix] Preserve sessions on inconclusive validation responses`
+- [x] `[Fix] Serialize manual reconnect attempts`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -803,7 +805,7 @@ and physical-device evidence.
 
 ### Preserve sessions on inconclusive validation responses
 
-- Commit: recorded after this objective is committed.
+- Commit: `4a4fb9c` (`[Fix] Preserve sessions on inconclusive validation responses`).
 - Reproduction: stored-session validation classified every `4xx` response as
   definitive invalid credentials. Rate limiting (`429`), request timeout
   (`408`), deployment mismatch (`404`), and other inconclusive client statuses
@@ -824,4 +826,29 @@ and physical-device evidence.
   Release compilation succeeds. Exact staged pre-commit and CI evidence is
   recorded immediately before commit.
 - Findings closed: MH-019. The broader authentication/network audit remains
+  open.
+
+### Serialize manual reconnect attempts
+
+- Commit: recorded after this objective is committed.
+- Reproduction: same-tick `attemptReconnect()` calls each started validation;
+  the newer call aborted the older one. Because stale validation intentionally
+  resolves from current authenticated state, the older call could report `ok`
+  and start project sync while the authoritative request was still pending or
+  had re-locked the app offline.
+- Correction: `SessionCoordinator` now owns one shared reconnect promise and
+  classifies validation outcomes as authoritative or superseded. Only an
+  authoritative `ok` result invokes the reconnect-sync hook; stale completions
+  remain unable to publish follow-up work after login, logout, or replacement.
+- Verification: coordinator regressions prove concurrent callers share one
+  transport request/result and exactly one sync, and prove a logout-superseded
+  reconnect cannot start sync even when its caller-facing stale result is
+  `ok`. Node 22 CI passes 1,716/1,716 tests across 101 files with 89.45%
+  statements, 82.48% branches, 92.86% functions, and 91.53% lines. Capacitor
+  synchronization produces no tracked native drift. Android passes its 9
+  first-party tests plus lint, release APK, and release AAB gates. Signed iOS
+  XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned simulator
+  Release compilation succeeds. Exact staged pre-commit and CI evidence is
+  recorded immediately before commit.
+- Findings closed: MH-020. The broader authentication/network audit remains
   open.

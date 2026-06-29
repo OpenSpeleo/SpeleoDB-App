@@ -792,6 +792,43 @@ describe('SessionCoordinator', () => {
       expect(hooks.startReconnectSync).toHaveBeenCalledOnce();
     });
 
+    it('coalesces concurrent reconnect attempts and starts one sync', async () => {
+      const reconnectResponse = createDeferred<HttpResponse<unknown>>();
+      const transport = createTransport({
+        validateToken: vi.fn()
+          .mockRejectedValueOnce(new Error('offline'))
+          .mockImplementationOnce(() => reconnectResponse.promise),
+      });
+      const { coordinator, hooks } = createHarness({ session: STORED_SESSION, transport });
+      await coordinator.validateSession();
+
+      const first = coordinator.attemptReconnect();
+      const second = coordinator.attemptReconnect();
+
+      expect(second).toBe(first);
+      expect(transport.validateToken).toHaveBeenCalledTimes(2);
+      reconnectResponse.resolve({ status: 200, data: {} });
+      await expect(Promise.all([first, second])).resolves.toEqual(['ok', 'ok']);
+      expect(hooks.startReconnectSync).toHaveBeenCalledOnce();
+    });
+
+    it('does not start reconnect sync from a validation superseded by logout', async () => {
+      const reconnectResponse = createDeferred<HttpResponse<unknown>>();
+      const transport = createTransport({
+        validateToken: vi.fn(() => reconnectResponse.promise),
+      });
+      const { coordinator, hooks } = createHarness({ session: STORED_SESSION, transport });
+      coordinator.enterOfflineMode();
+
+      const reconnect = coordinator.attemptReconnect();
+      await vi.waitFor(() => expect(transport.validateToken).toHaveBeenCalledOnce());
+      await coordinator.logout();
+      reconnectResponse.resolve({ status: 200, data: {} });
+
+      await expect(reconnect).resolves.toBe('ok');
+      expect(hooks.startReconnectSync).not.toHaveBeenCalled();
+    });
+
     it('does not start sync when reconnect remains offline', async () => {
       const transport = createTransport({
         validateToken: vi.fn(async () => ({ status: 500, data: {} })),
