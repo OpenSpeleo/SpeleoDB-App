@@ -102,6 +102,7 @@ limitations, and the test strategy.
 | Averaging session hook | `src/hooks/useGpsAveraging.ts` |
 | UI | `src/components/GpsPanel.tsx`, `src/components/GpsRecordingScreen.tsx`, `src/components/GpsAveragingModal.tsx`, `src/components/GpsScreenHeader.tsx`, `src/components/AppTabBar.tsx` |
 | Dashboard GPS presentation | `src/pages/dashboard/DashboardGpsActivity.tsx`, `src/pages/dashboard/DashboardGpsTrackDialogs.tsx` |
+| Dashboard track actions | `src/pages/dashboard/useDashboardGpsTrackActions.ts` |
 | Dashboard GPS orchestration | `src/pages/Dashboard.tsx` |
 
 ## Architecture / data flow
@@ -143,6 +144,8 @@ track list, persistence, geometry, GPX preparation, and snapshots;
 `GpsPanel`/`GpsAveragingModal` are presentational; the focused Dashboard GPS
 wrappers compose recording, averaging, upload, edit, and delete presentation
 without owning controller or persistence behavior;
+`useDashboardGpsTrackActions` owns track visibility, lazy geometry, sharing,
+map zoom, and mutation-dialog action state;
 `useGpsAveraging` isolates
 the averaging session's side effects from the modal.
 

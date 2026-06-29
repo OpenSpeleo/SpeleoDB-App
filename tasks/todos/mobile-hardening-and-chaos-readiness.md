@@ -84,6 +84,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Extract dashboard map layers`
 - [x] `[Refactoring] Extract dashboard map interactions`
 - [x] `[Refactoring] Extract dashboard GPS presentation`
+- [x] `[Refactoring] Extract dashboard GPS track actions`
 - [ ] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [ ] `[Fix] Stop inactive page effects and polling`
 - [ ] `[Fix] Harden authentication and network state machines`
@@ -422,7 +423,7 @@ and physical-device evidence.
 
 ### Restrict iOS background execution to recording
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `2097d58` (`[Fix] Restrict iOS background execution to recording`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -436,3 +437,27 @@ and physical-device evidence.
   tests plus lint/APK/AAB builds, and iOS passes 9/9 signed native tests plus
   Release compilation.
 - Findings closed: MH-014.
+
+### Extract dashboard GPS track actions
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
+  compilation.
+- Result: track visibility, lazy geometry, visible-track GeoJSON, GPX sharing,
+  map zoom, and upload/edit/delete action state now live in a focused hook
+  behind narrow injected ports. Its direct suite has 100% statement, branch,
+  function, and line coverage, and Dashboard's 106 characterization tests stay
+  green. Dashboard shrinks from 1,709 to 1,449 lines; the production module is
+  428 lines and every function remains below 80 lines. Vitest passes
+  1,624/1,624 tests across 95 files with aggregate coverage of 87.86%
+  statements, 80.69% branches, 90.67% functions, and 90.32% lines. The
+  Dashboard lazy chunk is 150.44 KiB (47.90 KiB gzip), 1.40 KiB larger than the
+  prior modular boundary but still far below the starting bundle baseline.
+  Capacitor sync introduces no tracked native drift; Android passes 9/9 native
+  tests plus lint/APK/AAB builds, and iOS passes 9/9 signed native tests plus
+  Release compilation.
+- Findings closed: the GPS track-action slice of MH-007. Recording/averaging
+  action state, landmark presentation/state, chrome, and panel-state
+  unification remain scheduled as independently reviewable splits.

@@ -27,6 +27,8 @@ This folder contains product and engineering documentation for core app behavior
   marker-detail, depth-probe, timer, and cancellation ownership.
 - `dashboard-gps-presentation.md`: recording/averaging activity composition,
   GPS track dialog policy, callback boundaries, testing, and render cost.
+- `dashboard-gps-track-actions.md`: track visibility, lazy geometry, sharing,
+  map zoom, mutation-dialog state, async guards, and performance ownership.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `ci.md`: GitHub Actions stages, Vitest non-watch requirements, integration-test secrets, and native build verification.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding
