@@ -8,10 +8,17 @@ export function createAbortError(message = 'Operation aborted'): Error {
   return error
 }
 
-export function isAbortError(error: unknown): boolean {
+interface AbortErrorLike {
+  name: 'AbortError'
+  message?: unknown
+}
+
+export function isAbortError(error: unknown): error is AbortErrorLike {
   return Boolean(
-    (error instanceof DOMException && error.name === 'AbortError') ||
-      (error instanceof Error && error.name === 'AbortError'),
+    error
+      && typeof error === 'object'
+      && 'name' in error
+      && error.name === 'AbortError',
   )
 }
 
@@ -19,6 +26,13 @@ export function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return
 
   const { reason } = signal
+  if (isAbortError(reason)) {
+    const message = 'message' in reason && typeof reason.message === 'string'
+      ? reason.message
+      : undefined
+    throw createAbortError(message)
+  }
+
   if (reason instanceof Error) {
     throw reason
   }

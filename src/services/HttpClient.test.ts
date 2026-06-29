@@ -8,6 +8,20 @@ import {
   type HttpRequest,
 } from './HttpClient';
 import { clearPreferences, setPreferences } from './PreferencesService';
+import { createAbortError } from '../utils/abort';
+
+const { mockAppGetInfo, mockDeviceGetInfo } = vi.hoisted(() => ({
+  mockAppGetInfo: vi.fn(),
+  mockDeviceGetInfo: vi.fn(),
+}));
+
+vi.mock('@capacitor/app', () => ({
+  App: { getInfo: mockAppGetInfo },
+}));
+
+vi.mock('@capacitor/device', () => ({
+  Device: { getInfo: mockDeviceGetInfo },
+}));
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -15,6 +29,24 @@ function createDeferred<T>() {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function resetNativeMetadataMocks(): void {
+  mockAppGetInfo.mockReset().mockResolvedValue({
+    name: 'SpeleoDB',
+    id: 'org.speleodb.app',
+    build: '1',
+    version: '1.0.0',
+  });
+  mockDeviceGetInfo.mockReset().mockResolvedValue({
+    model: 'iPhone18,1',
+    platform: 'ios',
+    operatingSystem: 'ios',
+    osVersion: '26.5',
+    manufacturer: 'Apple',
+    isVirtual: true,
+    webViewVersion: '26.5',
+  });
 }
 
 describe('HttpClient (web transport)', () => {
@@ -25,6 +57,7 @@ describe('HttpClient (web transport)', () => {
     client = new HttpClient();
     vi.restoreAllMocks();
     clearPreferences();
+    resetNativeMetadataMocks();
   });
 
   it('sends a GET request and returns parsed JSON', async () => {
@@ -276,6 +309,60 @@ describe('HttpClient (web transport)', () => {
     expect(error).toBeInstanceOf(DOMException);
     expect((error as DOMException).name).toBe('AbortError');
   });
+
+  it('does not swallow caller cancellation while parsing a response body', async () => {
+    const abortController = new AbortController();
+    const body = createDeferred<{ late: boolean }>();
+    const jsonStarted = createDeferred<void>();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      status: 200,
+      json: () => {
+        jsonStarted.resolve();
+        return body.promise;
+      },
+    } as Response);
+
+    const request = client.request({
+      url: 'https://api.test/api/v2/projects/geojson/',
+      method: 'GET',
+      signal: abortController.signal,
+    });
+    await jsonStarted.promise;
+    abortController.abort(createAbortError('caller cancelled'));
+
+    await expect(request).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    body.resolve({ late: true });
+    await Promise.resolve();
+  });
+
+  it('rejects invalid timeout values before launching fetch', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    await expect(client.request({
+      url: 'https://api.test/api/v2/projects/geojson/',
+      method: 'GET',
+      timeoutMs: 0,
+    })).rejects.toThrow(/positive finite/);
+    await expect(client.request({
+      url: 'https://api.test/api/v2/projects/geojson/',
+      method: 'GET',
+      timeoutMs: Number.NaN,
+    })).rejects.toThrow(/positive finite/);
+    await expect(client.request({
+      url: 'https://api.test/api/v2/projects/geojson/',
+      method: 'GET',
+      timeoutMs: Number.POSITIVE_INFINITY,
+    })).rejects.toThrow(/positive finite/);
+    await expect(client.request({
+      url: 'https://api.test/api/v2/projects/geojson/',
+      method: 'GET',
+      timeoutMs: 2_147_483_648,
+    })).rejects.toThrow(/no greater than/);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe('HttpClient (native transport)', () => {
@@ -301,6 +388,7 @@ describe('HttpClient (native transport)', () => {
     vi.restoreAllMocks();
     clearPreferences();
     setPreferences({ instance: 'https://api.test' });
+    resetNativeMetadataMocks();
   });
 
   it('injects iOS User-Agent when not provided', async () => {
@@ -373,6 +461,154 @@ describe('HttpClient (native transport)', () => {
 
     await expect(request).rejects.toMatchObject({ name: 'AbortError' });
     expect(nativeRequest).not.toHaveBeenCalled();
+  });
+
+  it('applies the request deadline to native header assembly and blocks late launch', async () => {
+    vi.useFakeTimers();
+    try {
+      const userAgent = createDeferred<string | undefined>();
+      const nativeRequest = vi.fn().mockResolvedValue({
+        status: 200,
+        data: {},
+        headers: {},
+        url: 'https://api.test',
+      });
+      client = new HttpClient({
+        getNativeUserAgent: () => userAgent.promise,
+        isNativePlatform: () => true,
+        nativeHttp: { request: nativeRequest } as never,
+      });
+
+      const request = client.request({
+        url: 'https://api.test/api/v2/user/auth-token/',
+        method: 'GET',
+        timeoutMs: 100,
+      });
+      const result = request.catch((error) => error);
+      await vi.advanceTimersByTimeAsync(101);
+
+      await expect(result).resolves.toMatchObject({
+        name: 'AbortError',
+      });
+      userAgent.resolve('SpeleoDB-iOS/v1.0.0/iPhone - iOS 26.5');
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(nativeRequest).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers native metadata loading after a timed-out cached preparation', async () => {
+    vi.useFakeTimers();
+    try {
+      const firstAppInfo = createDeferred<{
+        name: string;
+        id: string;
+        build: string;
+        version: string;
+      }>();
+      vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('ios');
+      mockAppGetInfo
+        .mockImplementationOnce(() => firstAppInfo.promise)
+        .mockResolvedValue({
+          name: 'SpeleoDB',
+          id: 'org.speleodb.app',
+          build: '1',
+          version: '1.0.0',
+        });
+      mockDeviceGetInfo.mockResolvedValue({
+        model: 'iPhone18,1',
+        platform: 'ios',
+        operatingSystem: 'ios',
+        osVersion: '26.5',
+        manufacturer: 'Apple',
+        isVirtual: true,
+        webViewVersion: '26.5',
+      });
+      const nativeRequest = vi.fn().mockResolvedValue({
+        status: 200,
+        data: { ok: true },
+        headers: {},
+        url: 'https://api.test',
+      });
+      client = new HttpClient({
+        isNativePlatform: () => true,
+        nativeHttp: { request: nativeRequest } as never,
+      });
+
+      const firstRequest = client.request({
+        url: 'https://api.test/api/v2/projects/geojson/',
+        method: 'GET',
+        timeoutMs: 100,
+      });
+      const firstResult = firstRequest.catch((error) => error);
+      await vi.advanceTimersByTimeAsync(101);
+      await expect(firstResult).resolves.toMatchObject({ name: 'AbortError' });
+      expect(nativeRequest).not.toHaveBeenCalled();
+
+      await expect(client.request({
+        url: 'https://api.test/api/v2/projects/geojson/',
+        method: 'GET',
+        timeoutMs: 1_000,
+      })).resolves.toMatchObject({ status: 200, data: { ok: true } });
+      expect(nativeRequest).toHaveBeenCalledOnce();
+
+      firstAppInfo.resolve({
+        name: 'SpeleoDB',
+        id: 'org.speleodb.app',
+        build: '1',
+        version: 'stale',
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(nativeRequest).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('enforces the overall deadline when native transport never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const nativeResponse = createDeferred<{
+        status: number;
+        data: unknown;
+        headers: Record<string, string>;
+        url: string;
+      }>();
+      const nativeRequest = vi.fn(() => nativeResponse.promise);
+      client = new HttpClient({
+        getNativeUserAgent: async () => 'SpeleoDB-Android/v1.0.0/device - Android 16',
+        isNativePlatform: () => true,
+        nativeHttp: { request: nativeRequest } as never,
+      });
+
+      const request = client.request({
+        url: 'https://api.test/api/v2/projects/geojson/',
+        method: 'GET',
+        timeoutMs: 100,
+      });
+      const result = request.catch((error) => error);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(nativeRequest).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(101);
+      await expect(result).resolves.toMatchObject({ name: 'AbortError' });
+      nativeResponse.resolve({
+        status: 200,
+        data: { late: true },
+        headers: {},
+        url: 'https://api.test',
+      });
+      await Promise.resolve();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not inject app User-Agent for non-API URLs (e.g. map tiles)', async () => {

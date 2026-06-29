@@ -137,6 +137,12 @@ Implementation notes:
   after supersession/logout. Native request preparation checks cancellation
   again after asynchronous app/device header assembly, so a request cancelled
   during preparation is never launched.
+- The per-request timeout is one overall deadline spanning native metadata
+  preparation, transport, response-body parsing, and publication. Web JSON
+  parse failures are ignored only for genuinely malformed bodies; an abort
+  during parsing remains an `AbortError`. A timed-out native metadata lookup is
+  removed from the shared cache so the next request can recover instead of
+  inheriting a permanently pending promise.
 - Login error parsing in `SessionCoordinator.login` reads `detail` / `message` /
   `errors.non_field_errors` directly off `response.data` (already v2-shaped).
 - Direct token login reuses `SpeleoDBService.validateToken`; `2xx` establishes

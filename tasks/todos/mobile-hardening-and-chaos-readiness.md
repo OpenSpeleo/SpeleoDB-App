@@ -68,6 +68,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-020 | P1 | Concurrent manual reconnects can supersede each other and let a stale `ok` result launch sync while the authoritative probe remains offline. | Closed: coalesce reconnect ownership and gate sync on authoritative validation. |
 | MH-021 | P0 | A GPS/persistence cleanup failure can interrupt logout before credential/cache purge, and failed vault deletion retains a marker that can restore the old session on restart. | Closed: revoke first, attempt all cleanup, and clear session metadata independently. |
 | MH-022 | P1 | Same-turn login submissions can supersede each other, successful login re-enables before redirect, and its timer can navigate after unmount. | Closed: synchronous single-flight admission and unmount-owned publication/timer cleanup. |
+| MH-023 | P1 | Web body parsing can swallow cancellation as an empty success, while native preparation is outside the request timeout and can poison the metadata cache permanently. | Closed: one deadline signal owns preparation, transport, parsing, publication, and cache recovery. |
 
 ## Commit checklist
 
@@ -110,6 +111,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Serialize manual reconnect attempts`
 - [x] `[Fix] Complete destructive logout after cleanup failures`
 - [x] `[Fix] Prevent stale login form completions`
+- [x] `[Fix] Enforce request deadlines through response publication`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -888,7 +890,7 @@ and physical-device evidence.
 
 ### Prevent stale login form completions
 
-- Commit: recorded after this objective is committed.
+- Commit: `11a80c0` (`[Fix] Prevent stale login form completions`).
 - Reproduction: React loading state did not synchronously guard the form
   handler, so two same-turn submits invoked the controller twice and the newer
   attempt superseded the first. A successful result reset loading before its
@@ -911,4 +913,35 @@ and physical-device evidence.
   Exact staged pre-commit and CI evidence is recorded immediately before
   commit.
 - Findings closed: MH-022. The broader authentication/network audit remains
+  open.
+
+### Enforce request deadlines through response publication
+
+- Commit: recorded after this objective is committed.
+- Reproduction: after web response headers arrived, cancellation during
+  `response.json()` entered the generic parse-error catch and returned the
+  response status with `{}` instead of rejecting. Native timeout options did
+  not start until `CapacitorHttp.request()`, so a hung app/device metadata call
+  could exceed the deadline, launch late, and leave a permanently pending
+  User-Agent promise cached for every later request.
+- Correction: both transports now derive one bounded abort context from caller
+  cancellation and the overall request deadline. It governs preparation,
+  transport, body parsing, and publication; native late work rechecks the same
+  signal before launch, and timed-out metadata cache entries are discarded.
+  Abort reasons are normalized structurally across JavaScript realms. The
+  reusable rule is in `tasks/lessons/transport-deadline-ownership.md`.
+- Verification: transport regressions prove web body-parse cancellation cannot
+  publish an empty response, invalid deadlines launch no request, native
+  metadata and never-settling transport both time out, late preparation cannot
+  launch, and a subsequent request recovers from the cleared metadata cache.
+  Shared abort-utility tests prove cross-realm classification and normalized
+  cancellation reasons. The focused suites pass 36/36 tests. Node 22 CI passes
+  1,732/1,732 tests across 102 files with 89.59% statements, 82.53% branches,
+  93.03% functions, and 91.66% lines. Capacitor synchronization produces no
+  tracked native drift. Android passes its 9 first-party tests plus lint,
+  release APK, and release AAB gates. Signed iOS XCTest passes 9/9 tests on
+  iPhone 17 Pro/iOS 26.5, and unsigned simulator Release compilation succeeds.
+  Exact staged pre-commit and CI evidence is recorded immediately before
+  commit.
+- Findings closed: MH-023. The broader authentication/network audit remains
   open.

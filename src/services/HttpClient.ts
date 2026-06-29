@@ -50,7 +50,7 @@ export interface HttpRequest {
    * because it also works on native (CapacitorHttp). See `MultipartPayload`.
    */
   multipart?: MultipartPayload;
-  /** Per-request timeout; defaults to NETWORK.REQUEST_TIMEOUT_MS. */
+  /** Positive overall request deadline; defaults to NETWORK.REQUEST_TIMEOUT_MS. */
   timeoutMs?: number;
   /** Optional caller-owned cancellation. */
   signal?: AbortSignal;
@@ -110,42 +110,51 @@ async function getNativeUserAgent(): Promise<string | undefined> {
       return undefined;
     }
 
-    if (nativeUserAgentCache && nativeUserAgentCache.platform === platform) {
-      return nativeUserAgentCache.valuePromise;
+    let valuePromise = nativeUserAgentCache?.platform === platform
+      ? nativeUserAgentCache.valuePromise
+      : undefined;
+    if (!valuePromise) {
+      valuePromise = (async () => {
+        const platformLabel = platform === 'ios' ? 'iOS' : 'Android';
+        const base = `SpeleoDB-${platformLabel}`;
+
+        const [appInfoResult, deviceInfoResult] = await Promise.allSettled([
+          App.getInfo(),
+          Device.getInfo(),
+        ]);
+        const appVersion =
+          appInfoResult.status === 'fulfilled'
+            ? normalizeUaPart(appInfoResult.value.version)
+            : undefined;
+        const deviceModel =
+          deviceInfoResult.status === 'fulfilled'
+            ? normalizeUaPart(getAppleMarketingModelOrIdentifier(deviceInfoResult.value.model))
+            : undefined;
+        const osVersion =
+          deviceInfoResult.status === 'fulfilled'
+            ? normalizeUaPart(deviceInfoResult.value.osVersion)
+            : undefined;
+
+        if (!appVersion && !deviceModel && !osVersion) {
+          return base;
+        }
+
+        const versionPart = appVersion ? `v${appVersion}` : 'vunknown';
+        const devicePart = deviceModel ?? 'device-unknown';
+        const osPart = osVersion ? `${platformLabel} ${osVersion}` : platformLabel;
+        return `${base}/${versionPart}/${devicePart} - ${osPart}`;
+      })();
+      nativeUserAgentCache = { platform, valuePromise };
     }
 
-    const valuePromise = (async () => {
-      const platformLabel = platform === 'ios' ? 'iOS' : 'Android';
-      const base = `SpeleoDB-${platformLabel}`;
-
-      const [appInfoResult, deviceInfoResult] = await Promise.allSettled([
-        App.getInfo(),
-        Device.getInfo(),
-      ]);
-      const appVersion =
-        appInfoResult.status === 'fulfilled'
-          ? normalizeUaPart(appInfoResult.value.version)
-          : undefined;
-      const deviceModel =
-        deviceInfoResult.status === 'fulfilled'
-          ? normalizeUaPart(getAppleMarketingModelOrIdentifier(deviceInfoResult.value.model))
-          : undefined;
-      const osVersion =
-        deviceInfoResult.status === 'fulfilled'
-          ? normalizeUaPart(deviceInfoResult.value.osVersion)
-          : undefined;
-
-      if (!appVersion && !deviceModel && !osVersion) {
-        return base;
+    try {
+      return await valuePromise;
+    } catch {
+      if (nativeUserAgentCache?.valuePromise === valuePromise) {
+        nativeUserAgentCache = null;
       }
-
-      const versionPart = appVersion ? `v${appVersion}` : 'vunknown';
-      const devicePart = deviceModel ?? 'device-unknown';
-      const osPart = osVersion ? `${platformLabel} ${osVersion}` : platformLabel;
-      return `${base}/${versionPart}/${devicePart} - ${osPart}`;
-    })();
-    nativeUserAgentCache = { platform, valuePromise };
-    return valuePromise;
+      return undefined;
+    }
   } catch {
     // No-op: if native metadata fails we still keep transport functional.
     return undefined;
@@ -208,6 +217,35 @@ export function assertSafeRequestUrl(url: string, isProduction: boolean): void {
 
 function getWebUserAgent(): string {
   return 'SpeleoDB-Unittest';
+}
+
+interface RequestAbortContext {
+  signal: AbortSignal;
+  cleanup: () => void;
+}
+
+function createRequestAbortContext(
+  timeout: number,
+  callerSignal?: AbortSignal,
+): RequestAbortContext {
+  throwIfAborted(callerSignal);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(createAbortError(`Request timed out after ${timeout}ms`)),
+    timeout,
+  );
+  const onCallerAbort = () => {
+    controller.abort(callerSignal?.reason ?? createAbortError());
+  };
+  callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeoutId);
+      callerSignal?.removeEventListener('abort', onCallerAbort);
+    },
+  };
 }
 
 async function buildNativeHeaders(
@@ -333,6 +371,8 @@ function buildMultipartFormData(payload: MultipartPayload): FormData {
 
 // ==================== HttpClient ====================
 
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 export class HttpClient {
   constructor(private deps: HttpClientDeps = {}) {}
 
@@ -342,6 +382,11 @@ export class HttpClient {
    */
   async request<T = unknown>(req: HttpRequest): Promise<HttpResponse<T>> {
     const timeout = req.timeoutMs ?? NETWORK.REQUEST_TIMEOUT_MS;
+    if (!Number.isFinite(timeout) || timeout <= 0 || timeout > MAX_TIMER_DELAY_MS) {
+      throw new RangeError(
+        `Request timeout must be a positive finite number no greater than ${MAX_TIMER_DELAY_MS}`,
+      );
+    }
     assertSafeRequestUrl(req.url, (this.deps.isProduction ?? (() => import.meta.env.PROD))());
 
     if ((this.deps.isNativePlatform ?? isNativePlatform)()) {
@@ -353,7 +398,24 @@ export class HttpClient {
   // ---- Native (CapacitorHttp) -------------------------------------------------
 
   private async nativeRequest<T>(req: HttpRequest, timeout: number): Promise<HttpResponse<T>> {
-    throwIfAborted(req.signal);
+    const abortContext = createRequestAbortContext(timeout, req.signal);
+    try {
+      const operation = this.performNativeRequest<T>(req, timeout, abortContext.signal);
+      return await this.awaitWithAbort(operation, abortContext.signal);
+    } finally {
+      if (abortContext.signal.aborted && !this.deps.getNativeUserAgent) {
+        nativeUserAgentCache = null;
+      }
+      abortContext.cleanup();
+    }
+  }
+
+  private async performNativeRequest<T>(
+    req: HttpRequest,
+    timeout: number,
+    signal: AbortSignal,
+  ): Promise<HttpResponse<T>> {
+    throwIfAborted(signal);
 
     let data = req.data;
     let headerOverrides = req.headers;
@@ -374,34 +436,32 @@ export class HttpClient {
       headerOverrides,
       this.deps.getNativeUserAgent,
     );
-    throwIfAborted(req.signal);
+    throwIfAborted(signal);
     const nativeHttp = this.deps.nativeHttp ?? CapacitorHttp;
-    const response = await this.awaitWithAbort(
-      nativeHttp.request({
-        url: req.url,
-        method: req.method,
-        headers: nativeHeaders,
-        data,
-        connectTimeout: timeout,
-        readTimeout: timeout,
-        disableRedirects: hasSensitiveRequestData(req),
-      }),
-      req.signal,
-    );
+    const response = await nativeHttp.request({
+      url: req.url,
+      method: req.method,
+      headers: nativeHeaders,
+      data,
+      connectTimeout: timeout,
+      readTimeout: timeout,
+      disableRedirects: hasSensitiveRequestData(req),
+    });
+    throwIfAborted(signal);
 
     return { status: response.status, data: response.data as T };
   }
 
-  private async awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-    if (!signal) {
-      return promise;
-    }
-
+  private async awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
     throwIfAborted(signal);
 
     return new Promise<T>((resolve, reject) => {
       const onAbort = () => {
-        reject(createAbortError());
+        try {
+          throwIfAborted(signal);
+        } catch (error) {
+          reject(error);
+        }
       };
 
       signal.addEventListener('abort', onAbort, { once: true });
@@ -422,23 +482,12 @@ export class HttpClient {
   // ---- Web (fetch) ------------------------------------------------------------
 
   private async webRequest<T>(req: HttpRequest, timeout: number): Promise<HttpResponse<T>> {
-    throwIfAborted(req.signal);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(createAbortError(`Request timed out after ${timeout}ms`)),
-      timeout,
-    );
-    const onAbort = () => controller.abort(req.signal?.reason ?? createAbortError());
-
-    if (req.signal) {
-      req.signal.addEventListener('abort', onAbort, { once: true });
-    }
+    const abortContext = createRequestAbortContext(timeout, req.signal);
 
     try {
       const init: RequestInit = {
         method: req.method,
-        signal: controller.signal,
+        signal: abortContext.signal,
         redirect: hasSensitiveRequestData(req) ? 'manual' : 'follow',
       };
 
@@ -457,20 +506,28 @@ export class HttpClient {
         }
       }
 
-      const response = await fetch(req.url, init);
+      const response = await this.awaitWithAbort(
+        fetch(req.url, init),
+        abortContext.signal,
+      );
 
-      // Parse JSON body (swallow parse errors to return raw status).
+      // Swallow malformed JSON only. Deadline/caller abort remains
+      // authoritative through body parsing and final publication.
       let data: T;
       try {
-        data = (await response.json()) as T;
+        data = (await this.awaitWithAbort(
+          response.json(),
+          abortContext.signal,
+        )) as T;
       } catch {
+        throwIfAborted(abortContext.signal);
         data = {} as T;
       }
+      throwIfAborted(abortContext.signal);
 
       return { status: response.status, data };
     } finally {
-      clearTimeout(timeoutId);
-      req.signal?.removeEventListener('abort', onAbort);
+      abortContext.cleanup();
     }
   }
 }
