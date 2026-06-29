@@ -31,6 +31,8 @@ This folder contains product and engineering documentation for core app behavior
   map zoom, mutation-dialog state, async guards, and performance ownership.
 - `dashboard-gps-recording-actions.md`: recorder controls, live geometry,
   battery hints, averaging transitions, async guards, and landmark handoff.
+- `dashboard-landmark-actions.md`: collection preferences, visible GeoJSON,
+  locate/create/edit/delete state, toasts, async guards, and GPS handoff.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `ci.md`: GitHub Actions stages, Vitest non-watch requirements, integration-test secrets, and native build verification.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding

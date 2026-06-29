@@ -35,11 +35,6 @@ import {
   setCountryVisibilityPreferences,
   getCountryCollapsedPreferences,
   setCountryCollapsedPreference,
-  getLandmarkCollectionVisibilityPreferences,
-  setLandmarkCollectionVisibilityPreference,
-  setLandmarkCollectionVisibilityPreferences,
-  getLandmarkCollectionCollapsedPreferences,
-  setLandmarkCollectionCollapsedPreference,
 } from '../services/PreferencesService';
 import ProjectPanel from '../components/ProjectPanel';
 import LandmarkPanel from '../components/LandmarkPanel';
@@ -47,7 +42,6 @@ import GpsPanel from '../components/GpsPanel';
 import AppTabBar from '../components/AppTabBar';
 import {
   buildLandmarkCollectionGroups,
-  type LandmarkListItem,
 } from '../utils/landmarkCollections';
 import GeolocationErrorModal from '../components/GeolocationErrorModal';
 import DistanceScale from '../components/map/DistanceScale';
@@ -55,12 +49,9 @@ import DepthGauge from '../components/map/DepthGauge';
 import { PERMISSION_DENIED_SENTINEL } from '../utils/geolocationError';
 import OverlayMarkerDetailsModal from '../components/OverlayMarkerDetailsModal';
 import LandmarkFormModal from '../components/LandmarkFormModal';
-import type { LandmarkFormInitialValues, LandmarkFormMode } from '../components/LandmarkFormModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LongPressRing from '../components/LongPressRing';
-import type { LandmarkCollection } from '../types/landmark';
-import { LandmarkMutationError } from '../types/landmark';
-import { ensureLandmarkPropertyIds, type NormalizedLandmarkInput } from '../utils/landmarkMutations';
+import { ensureLandmarkPropertyIds } from '../utils/landmarkMutations';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { createProjectColorState } from '../utils/projectColors';
 import type { MapColorMode } from '../types/mapColorMode';
@@ -70,9 +61,6 @@ import {
   attachDepthToFeatureCollection,
 } from '../utils/depthColoring';
 import { useDepthProbe } from '../hooks/useDepthProbe';
-import type {
-  LandmarkDetails,
-} from '../utils/overlayMarkerDetails';
 import {
   DEFAULT_OVERLAY_ICON_AVAILABILITY,
   OVERLAY_ICON_SOURCES,
@@ -94,6 +82,7 @@ import { DashboardGpsActivity } from './dashboard/DashboardGpsActivity';
 import { DashboardGpsTrackDialogs } from './dashboard/DashboardGpsTrackDialogs';
 import { useDashboardGpsTrackActions } from './dashboard/useDashboardGpsTrackActions';
 import { useDashboardGpsRecordingActions } from './dashboard/useDashboardGpsRecordingActions';
+import { useDashboardLandmarkActions } from './dashboard/useDashboardLandmarkActions';
 
 // ==================== GeoJSON type alias ====================
 
@@ -160,20 +149,6 @@ const Dashboard: React.FC<DashboardProps> = ({
   const knownVisibilityProjectIdsRef = useRef<Set<string>>(new Set());
   const mapRef = useRef<MapRef>(null);
 
-  // ---- Landmark CRUD state --------------------------------------------------
-  // Create/edit form: non-null means open. Delete confirm target: non-null open.
-  const [landmarkForm, setLandmarkForm] = useState<
-    { mode: LandmarkFormMode; initialValues: LandmarkFormInitialValues; editId: string | null } | null
-  >(null);
-  const [landmarkCollections, setLandmarkCollections] = useState<LandmarkCollection[]>([]);
-  const [landmarkFormBusy, setLandmarkFormBusy] = useState(false);
-  const [landmarkFormError, setLandmarkFormError] = useState<string | null>(null);
-  const [landmarkDeleteTarget, setLandmarkDeleteTarget] = useState<LandmarkDetails | null>(null);
-  const [landmarkDeleteBusy, setLandmarkDeleteBusy] = useState(false);
-  const [landmarkToast, setLandmarkToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
-  const landmarkToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isMountedRef = useRef(true);
-
   const [mapViewMetrics, setMapViewMetrics] = useState<{ zoom: number; latitude: number }>(() => ({
     zoom: MAP.DEFAULT_ZOOM,
     latitude: MAP.DEFAULT_CENTER[1],
@@ -189,15 +164,6 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [countryCollapsed, setCountryCollapsed] = useState<Record<string, boolean>>(
     () => getCountryCollapsedPreferences(),
   );
-
-  // Per-landmark-collection visibility + collapse (restored from prefs once on
-  // mount). Missing keys imply visible / expanded.
-  const [landmarkCollectionVisibility, setLandmarkCollectionVisibility] = useState<
-    Record<string, boolean>
-  >(() => getLandmarkCollectionVisibilityPreferences());
-  const [landmarkCollectionCollapsed, setLandmarkCollectionCollapsed] = useState<
-    Record<string, boolean>
-  >(() => getLandmarkCollectionCollapsedPreferences());
 
   // Loaded, commit-identified project map artifacts. Consumers derive their
   // GeoJSON and bounds from the same atomic record so commits cannot mix.
@@ -453,19 +419,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     [overlayGeoJsonData],
   );
 
-  // Landmarks actually drawn on the map: only those whose collection is visible
-  // (missing key implies visible). The whole layer is additionally gated behind
-  // the global `showLandmarks` master toggle at render time.
-  const visibleLandmarksGeoJSON = useMemo(() => {
-    const featureCollection = visibleOverlayGeoJsonData.landmarks;
-    if (!featureCollection) return undefined;
-    const features = featureCollection.features.filter((feature) => {
-      const collectionId = String(feature.properties?.collection ?? '') || '__personal__';
-      return landmarkCollectionVisibility[collectionId] !== false;
-    });
-    return { ...featureCollection, features };
-  }, [visibleOverlayGeoJsonData, landmarkCollectionVisibility]);
-
   // ---- Auto-fit bounds on first data load -----------------------------------
 
   useEffect(() => {
@@ -519,6 +472,45 @@ const Dashboard: React.FC<DashboardProps> = ({
     projects: sortedProjects,
     clearProbedDepth,
     sampleDepthAtClientPoint,
+  });
+  const closeLandmarkPanel = useCallback(
+    () => onLandmarkPanelChange(false),
+    [onLandmarkPanelChange],
+  );
+
+  const {
+    collectionVisibility: landmarkCollectionVisibility,
+    collectionCollapsed: landmarkCollectionCollapsed,
+    visibleLandmarks: visibleLandmarksGeoJSON,
+    landmarkForm,
+    landmarkCollections,
+    landmarkFormBusy,
+    landmarkFormError,
+    landmarkDeleteTarget,
+    landmarkDeleteBusy,
+    landmarkToast,
+    showToast: showLandmarkToast,
+    toggleCollection: handleToggleLandmarkCollection,
+    toggleCollectionCollapsed: handleToggleLandmarkCollectionCollapsed,
+    showAll: handleLandmarkShowAll,
+    hideAll: handleLandmarkHideAll,
+    locateLandmark: handleLocateLandmark,
+    openCreateFromSelected: handleOpenCreateLandmark,
+    openCreateAtPoint: handleAveragingSave,
+    openEditFromSelected: handleOpenEditLandmark,
+    openDeleteFromSelected: handleOpenDeleteLandmark,
+    cancelLandmarkForm: handleCancelLandmarkForm,
+    submitLandmarkForm: handleSubmitLandmarkForm,
+    cancelDeleteLandmark: handleCancelDeleteLandmark,
+    confirmDeleteLandmark: handleConfirmDeleteLandmark,
+  } = useDashboardLandmarkActions({
+    controller,
+    selectedMarkerDetail: selectedOverlayMarkerDetail,
+    clearSelectedMarkerDetail,
+    groups: landmarkCollectionGroups,
+    landmarks: visibleOverlayGeoJsonData.landmarks,
+    mapRef,
+    onClosePanel: closeLandmarkPanel,
   });
 
   const handleToggleProject = useCallback((projectId: string) => {
@@ -673,80 +665,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
   }, []);
 
-  const handleToggleLandmarkCollection = useCallback(
-    (collectionId: string, visible: boolean) => {
-      setLandmarkCollectionVisibility((prev) => ({ ...prev, [collectionId]: visible }));
-      setLandmarkCollectionVisibilityPreference(collectionId, visible);
-    },
-    [],
-  );
-
-  const handleToggleLandmarkCollectionCollapsed = useCallback(
-    (collectionId: string, collapsed: boolean) => {
-      setLandmarkCollectionCollapsed((prev) => ({ ...prev, [collectionId]: collapsed }));
-      setLandmarkCollectionCollapsedPreference(collectionId, collapsed);
-    },
-    [],
-  );
-
-  const handleLandmarkShowAll = useCallback(() => {
-    const updates: Record<string, boolean> = {};
-    for (const group of landmarkCollectionGroups) updates[group.id] = true;
-    if (Object.keys(updates).length === 0) return;
-    setLandmarkCollectionVisibility((prev) => ({ ...prev, ...updates }));
-    setLandmarkCollectionVisibilityPreferences(updates);
-  }, [landmarkCollectionGroups]);
-
-  const handleLandmarkHideAll = useCallback(() => {
-    const updates: Record<string, boolean> = {};
-    for (const group of landmarkCollectionGroups) updates[group.id] = false;
-    if (Object.keys(updates).length === 0) return;
-    setLandmarkCollectionVisibility((prev) => ({ ...prev, ...updates }));
-    setLandmarkCollectionVisibilityPreferences(updates);
-  }, [landmarkCollectionGroups]);
-
-  const handleLocateLandmark = useCallback(
-    (landmark: LandmarkListItem) => {
-      // Close the panel so the map is unobstructed before animating.
-      onLandmarkPanelChange(false);
-      const map = mapRef.current;
-      if (map) {
-        (map.getMap() as MaplibreMap).flyTo({
-          center: [landmark.longitude, landmark.latitude],
-          zoom: 16,
-          duration: 1000,
-        });
-      }
-      // NOTE: intentionally do NOT open the details modal here. The landmark
-      // details modal is only reachable by physically tapping the marker on
-      // the map; a panel-row tap just flies to the landmark.
-    },
-    [onLandmarkPanelChange],
-  );
-
-  // ---- Landmark CRUD handlers -----------------------------------------------
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      if (landmarkToastTimerRef.current !== null) {
-        clearTimeout(landmarkToastTimerRef.current);
-      }
-    };
-  }, []);
-
-  const showLandmarkToast = useCallback((message: string, tone: 'success' | 'error') => {
-    if (landmarkToastTimerRef.current !== null) {
-      clearTimeout(landmarkToastTimerRef.current);
-    }
-    setLandmarkToast({ message, tone });
-    landmarkToastTimerRef.current = setTimeout(() => {
-      if (isMountedRef.current) setLandmarkToast(null);
-      landmarkToastTimerRef.current = null;
-    }, 3000);
-  }, []);
-
   const closeGpsPanel = useCallback(() => onGpsPanelChange(false), [onGpsPanelChange]);
   const {
     trackVisibility: gpsTrackVisibility,
@@ -781,126 +699,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     onClosePanel: closeGpsPanel,
     showToast: showLandmarkToast,
   });
-
-  // Load the writable collection list for the picker (best-effort, online only).
-  const loadLandmarkCollections = useCallback(() => {
-    void (async () => {
-      try {
-        const collections = await controller.getLandmarkCollections();
-        if (isMountedRef.current) setLandmarkCollections(collections);
-      } catch {
-        if (isMountedRef.current) setLandmarkCollections([]);
-      }
-    })();
-  }, [controller]);
-
-  const handleOpenCreateLandmark = useCallback(() => {
-    const detail = selectedOverlayMarkerDetail;
-    if (!detail || detail.type !== 'mapLongPress') return;
-    clearSelectedMarkerDetail();
-    setLandmarkFormError(null);
-    setLandmarkForm({
-      mode: 'create',
-      editId: null,
-      initialValues: {
-        latitude: detail.latitude,
-        longitude: detail.longitude,
-      },
-    });
-    loadLandmarkCollections();
-  }, [clearSelectedMarkerDetail, selectedOverlayMarkerDetail, loadLandmarkCollections]);
-
-  const handleOpenEditLandmark = useCallback(() => {
-    const detail = selectedOverlayMarkerDetail;
-    if (!detail || detail.type !== 'landmark') return;
-    clearSelectedMarkerDetail();
-    setLandmarkFormError(null);
-    setLandmarkForm({
-      mode: 'edit',
-      editId: detail.id,
-      initialValues: {
-        name: detail.name === 'N/A' ? '' : detail.name,
-        description: detail.description === 'N/A' ? '' : detail.description,
-        latitude: detail.latitude,
-        longitude: detail.longitude,
-        collectionId: detail.collectionId,
-        collectionName: detail.collectionName === 'N/A' ? null : detail.collectionName,
-      },
-    });
-    loadLandmarkCollections();
-  }, [clearSelectedMarkerDetail, selectedOverlayMarkerDetail, loadLandmarkCollections]);
-
-  const handleOpenDeleteLandmark = useCallback(() => {
-    const detail = selectedOverlayMarkerDetail;
-    if (!detail || detail.type !== 'landmark') return;
-    clearSelectedMarkerDetail();
-    setLandmarkDeleteTarget(detail);
-  }, [clearSelectedMarkerDetail, selectedOverlayMarkerDetail]);
-
-  const handleCancelLandmarkForm = useCallback(() => {
-    if (landmarkFormBusy) return;
-    setLandmarkForm(null);
-    setLandmarkFormError(null);
-  }, [landmarkFormBusy]);
-
-  const handleSubmitLandmarkForm = useCallback(
-    (value: NormalizedLandmarkInput) => {
-      const form = landmarkForm;
-      if (!form || landmarkFormBusy) return;
-      setLandmarkFormBusy(true);
-      setLandmarkFormError(null);
-      void (async () => {
-        try {
-          if (form.mode === 'create') {
-            await controller.createLandmark({
-              name: value.name,
-              description: value.description,
-              latitude: value.latitude,
-              longitude: value.longitude,
-              collection: value.collection,
-            });
-          } else if (form.editId) {
-            await controller.updateLandmark(form.editId, {
-              name: value.name,
-              description: value.description,
-              latitude: value.latitude,
-              longitude: value.longitude,
-              collection: value.collection,
-            });
-          }
-          if (!isMountedRef.current) return;
-          setLandmarkForm(null);
-          showLandmarkToast(
-            form.mode === 'create' ? 'Landmark created' : 'Landmark updated',
-            'success',
-          );
-        } catch (error) {
-          if (!isMountedRef.current) return;
-          const message =
-            error instanceof LandmarkMutationError
-              ? error.message
-              : 'Something went wrong. Please try again.';
-          setLandmarkFormError(message);
-        } finally {
-          if (isMountedRef.current) setLandmarkFormBusy(false);
-        }
-      })();
-    },
-    [controller, landmarkForm, landmarkFormBusy, showLandmarkToast],
-  );
-
-  const handleAveragingSave = useCallback(
-    (pointToSave: { latitude: number; longitude: number; altitude: number | null }) => {
-      setLandmarkFormError(null);
-      setLandmarkForm({
-        mode: 'create',
-        editId: null,
-        initialValues: { latitude: pointToSave.latitude, longitude: pointToSave.longitude },
-      });
-      loadLandmarkCollections();
-    },
-    [loadLandmarkCollections],
-  );
 
   const {
     currentTrackPoints,
@@ -939,39 +737,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     showToast: showLandmarkToast,
     onSaveAveragedPoint: handleAveragingSave,
   });
-
-  const handleCancelDeleteLandmark = useCallback(() => {
-    if (landmarkDeleteBusy) return;
-    setLandmarkDeleteTarget(null);
-  }, [landmarkDeleteBusy]);
-
-  const handleConfirmDeleteLandmark = useCallback(() => {
-    const target = landmarkDeleteTarget;
-    if (!target || landmarkDeleteBusy) return;
-    setLandmarkDeleteBusy(true);
-    void (async () => {
-      try {
-        await controller.deleteLandmark(target.id);
-        if (!isMountedRef.current) return;
-        setLandmarkDeleteTarget(null);
-        showLandmarkToast('Landmark deleted', 'success');
-      } catch (error) {
-        if (!isMountedRef.current) return;
-        const isGone = error instanceof LandmarkMutationError && error.kind === 'not_found';
-        setLandmarkDeleteTarget(null);
-        showLandmarkToast(
-          isGone
-            ? 'Landmark already removed'
-            : error instanceof LandmarkMutationError
-              ? error.message
-              : 'Could not delete the landmark. Please try again.',
-          isGone ? 'success' : 'error',
-        );
-      } finally {
-        if (isMountedRef.current) setLandmarkDeleteBusy(false);
-      }
-    })();
-  }, [controller, landmarkDeleteTarget, landmarkDeleteBusy, showLandmarkToast]);
 
   // ---- Render ---------------------------------------------------------------
 

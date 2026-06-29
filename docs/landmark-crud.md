@@ -1,10 +1,9 @@
 # Landmark CRUD (Online, Offline-Ready)
 
 Create, edit, and delete landmarks from the mobile map viewer, mirroring the
-SpeleoDB web map viewer's **Landmark Manager**. This document covers the
-**ONLINE** behavior. The architecture intentionally funnels every mutation
-through a single cache-write seam so the **OFFLINE** queue can be layered on
-later without touching the UI.
+SpeleoDB web map viewer's **Landmark Manager**. The online and offline paths
+share one controller-owned mutation seam; the UI does not branch on transport
+availability.
 
 This complements `docs/landmark-collections.md`, which describes the read-only
 browse/locate panel. That panel remains the browse surface; this document adds
@@ -144,7 +143,10 @@ cached collection so the optimistic view needs no extra UI wiring.
 - **Details parsing:** `LandmarkDetails` gains `canWrite`, `canDelete`,
   `collectionId`, `latitude`, `longitude` (`src/utils/overlayMarkerDetails.ts`).
 - **UI:** `LandmarkFormModal`, `ConfirmDialog`, `LongPressRing`
-  (`src/components/`), plus new actions in `OverlayMarkerDetailsModal`.
+  (`src/components/`), plus actions in `OverlayMarkerDetailsModal`.
+- **Dashboard action owner:** `useDashboardLandmarkActions` owns collection
+  preferences, form/delete/toast state, mounted completion guards, and the
+  averaged-GPS-point handoff; `Dashboard` only wires its outputs to views.
 
 ## Long-press ring UX
 
@@ -226,4 +228,5 @@ collection than the one displayed.
 - `src/components/ConfirmDialog.test.tsx`
 - `src/components/LongPressRing.test.tsx`
 - `src/components/OverlayMarkerDetailsModal.test.tsx`
+- `src/pages/dashboard/useDashboardLandmarkActions.test.ts`
 - `src/pages/Dashboard.test.tsx`
