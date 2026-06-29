@@ -11,6 +11,7 @@ import { SpeleoDBService } from '../services/SpeleoDBService';
 import { ProjectCacheService } from '../services/ProjectCacheService';
 import { SpeleoDBController, type PreferencesPort } from '../controllers/SpeleoDBController';
 import type { StoredSession } from '../services/SecureSessionStore';
+import { getInstanceBaseUrl } from '../utils/instanceUrl';
 import { canRunIntegrationTests, isGitHubActionsPasswordLoginBlocked, TEST_ENV } from './env';
 
 /** In-memory preferences (mirrors PreferencesService without touching localStorage). */
@@ -107,7 +108,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
       const saved = prefs.getPreferences();
       expect(prefs.session.getSession()?.token).toBe(result.token);
       expect(saved.email).toBeTruthy();
-      expect(saved.instance).toBe(instance);
+      expect(saved.instance).toBe(getInstanceBaseUrl(instance));
     }, TEST_ENV.timeoutMs);
 
     it('rejects wrong password', async () => {
@@ -130,7 +131,7 @@ describe.runIf(canRunIntegrationTests)('SpeleoDBController [integration]', () =>
       const saved = prefs.getPreferences();
       expect(prefs.session.getSession()?.token).toBe(oauthToken);
       expect(saved.email).toBeUndefined();
-      expect(saved.instance).toBe(instance.trim());
+      expect(saved.instance).toBe(getInstanceBaseUrl(instance));
     }, TEST_ENV.timeoutMs);
   });
 

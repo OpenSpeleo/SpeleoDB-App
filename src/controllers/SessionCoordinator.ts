@@ -11,6 +11,7 @@ import type {
   User,
 } from '../types';
 import { isAbortError } from '../utils/abort';
+import { getInstanceBaseUrl } from '../utils/instanceUrl';
 import { CancellationContext } from './CancellationContext';
 
 export type SessionValidationResult = 'ok' | 'unauthorized' | 'network_error';
@@ -58,6 +59,15 @@ const OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE =
   'Unable to reach SpeleoDB. Offline access requires a previously validated session.';
 const SUPERSEDED_AUTHENTICATION_MESSAGE = 'Authentication attempt was superseded.';
 const LOGOUT_IN_PROGRESS_MESSAGE = 'Sign out is in progress. Please try again.';
+const INVALID_INSTANCE_MESSAGE = 'Enter a valid SpeleoDB instance origin URL.';
+
+function normalizeInstance(instance: string): string | null {
+  try {
+    return getInstanceBaseUrl(instance);
+  } catch {
+    return null;
+  }
+}
 
 function isSuccessfulStatus(status: number): boolean {
   return status >= 200 && status < 300;
@@ -162,6 +172,10 @@ export class SessionCoordinator {
     if (!instance?.trim()) {
       return { success: false, message: 'SpeleoDB instance URL is required' };
     }
+    const normalizedInstance = normalizeInstance(instance);
+    if (!normalizedInstance) {
+      return { success: false, message: INVALID_INSTANCE_MESSAGE };
+    }
     if (!this.hasNetworkAccess) {
       return { success: false, message: OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE };
     }
@@ -169,7 +183,10 @@ export class SessionCoordinator {
       return { success: false, message: LOGOUT_IN_PROGRESS_MESSAGE };
     }
 
-    return this.runAuthentication((context) => this.loginWithPassword(credentials, context));
+    return this.runAuthentication((context) => this.loginWithPassword(
+      { ...credentials, instance: normalizedInstance },
+      context,
+    ));
   }
 
   private async loginWithPassword(
@@ -229,11 +246,19 @@ export class SessionCoordinator {
 
     if (!token) return { success: false, message: 'OAuth token is required' };
     if (!instance) return { success: false, message: 'SpeleoDB instance URL is required' };
+    const normalizedInstance = normalizeInstance(instance);
+    if (!normalizedInstance) {
+      return { success: false, message: INVALID_INSTANCE_MESSAGE };
+    }
     if (this.isLoggingOut) {
       return { success: false, message: LOGOUT_IN_PROGRESS_MESSAGE };
     }
 
-    return this.runAuthentication((context) => this.loginWithOAuthToken(token, instance, context));
+    return this.runAuthentication((context) => this.loginWithOAuthToken(
+      token,
+      normalizedInstance,
+      context,
+    ));
   }
 
   private async loginWithOAuthToken(

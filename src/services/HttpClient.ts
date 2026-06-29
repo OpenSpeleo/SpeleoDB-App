@@ -8,7 +8,7 @@ import { App } from '@capacitor/app';
 import { Device } from '@capacitor/device';
 import { API, NETWORK } from '../constants';
 import { getPreferences } from './PreferencesService';
-import { getInstanceBaseUrl } from '../utils/url';
+import { getInstanceBaseUrl } from '../utils/instanceUrl';
 import { getAppleMarketingModelOrIdentifier } from '../utils/appleDeviceModelMap';
 import { createAbortError, throwIfAborted } from '../utils/abort';
 

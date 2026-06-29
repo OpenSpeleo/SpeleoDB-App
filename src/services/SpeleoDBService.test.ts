@@ -93,6 +93,15 @@ describe('SpeleoDBService', () => {
       expect(http.calls[0].url).toBe(INSTANCE + API.AUTH_TOKEN_ENDPOINT);
     });
 
+    it('rejects a non-origin instance before sending credentials', async () => {
+      await expect(service.authenticate(
+        'https://www.speleodb.org/tenant?name=one',
+        'a@b.com',
+        'password',
+      )).rejects.toThrow(/origin URL/);
+      expect(http.calls).toHaveLength(0);
+    });
+
     it('forwards timeout and cancellation ownership to the transport', async () => {
       const abortController = new AbortController();
 

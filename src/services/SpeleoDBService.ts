@@ -7,7 +7,7 @@
  */
 
 import { API, GPS, HEADERS } from '../constants';
-import { getInstanceBaseUrl } from '../utils/url';
+import { getInstanceBaseUrl } from '../utils/instanceUrl';
 import type { HttpClient, HttpResponse, HttpRequest } from './HttpClient';
 import type { AuthTokenResponse } from '../types';
 import type { Project } from '../types/project';

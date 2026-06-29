@@ -101,6 +101,9 @@ The app enters offline mode only as a result of a failed server probe, never fro
 
 - Production API and download requests must use absolute HTTPS URLs. Remote
   `http://` instance input is upgraded; development HTTP is limited to loopback.
+- SpeleoDB instance input is an origin only. Paths, queries, and fragments are
+  rejected before authentication because API endpoints are fixed absolute
+  paths under `/api/v2`; accepted origins are canonicalized before use/storage.
 - URL userinfo (`https://user:pass@host`) and non-HTTP schemes are rejected.
 - Requests carrying authorization/cookies or any body disable automatic
   redirects in fetch and CapacitorHttp. This prevents credential and payload

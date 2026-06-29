@@ -527,7 +527,7 @@ describe('SpeleoDBController', () => {
         token: 'oauth-token',
       });
       expect(service.validateToken).toHaveBeenCalledWith(
-        'https://custom.speleodb.org/',
+        'https://custom.speleodb.org',
         'oauth-token',
         { signal: expect.any(AbortSignal) },
       );
@@ -538,7 +538,7 @@ describe('SpeleoDBController', () => {
         {
           email: undefined,
           token: 'oauth-token',
-          instance: 'https://custom.speleodb.org/',
+          instance: 'https://custom.speleodb.org',
         },
         { signal: expect.any(AbortSignal) },
       );

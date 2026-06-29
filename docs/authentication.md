@@ -16,7 +16,10 @@ This document defines how the app creates and restores SpeleoDB sessions.
 ## Login methods
 
 The login page exposes two keyboard-accessible tabs that share the selected
-SpeleoDB instance.
+SpeleoDB instance. An instance is an origin only (scheme, hostname, and
+optional port); paths, queries, fragments, embedded credentials, and non-HTTP
+schemes are rejected before either credential transport runs. The accepted
+origin is canonicalized before both transport and secure-session persistence.
 
 ### Email and password
 
@@ -142,6 +145,8 @@ token as an orphan to delete, never as a restorable authenticated session.
   transitions, validation cancellation, reconnect decisions, and session
   establishment. It does not depend on project, GPS, tile, or React modules.
 - `SecureSessionStore` owns migration, commit ordering, rollback, and revocation.
+- `instanceUrl.ts` owns pure instance-origin parsing and canonicalization; it
+  has no Capacitor/browser dependency.
 - `PreferencesService` owns non-secret metadata and exposes legacy token bytes
   only to the one migration adapter.
 - `SpeleoDBService.validateToken()` owns the API request and authorization

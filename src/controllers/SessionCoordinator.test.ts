@@ -179,6 +179,24 @@ describe('SessionCoordinator', () => {
       expect(transport.authenticate).not.toHaveBeenCalled();
     });
 
+    it.each([
+      'https://example.com/tenant',
+      'https://example.com/?tenant=one',
+      'https://example.com/#login',
+    ])('rejects non-origin instance input %s before password transport', async (instance) => {
+      const { coordinator, transport } = createHarness();
+
+      await expect(coordinator.login({
+        email: 'user@example.com',
+        password: 'password',
+        instance,
+      })).resolves.toEqual({
+        success: false,
+        message: 'Enter a valid SpeleoDB instance origin URL.',
+      });
+      expect(transport.authenticate).not.toHaveBeenCalled();
+    });
+
     it('rejects a new login while the current session is offline-locked', async () => {
       const { coordinator, transport } = createHarness();
       coordinator.enterOfflineMode();
@@ -208,9 +226,15 @@ describe('SessionCoordinator', () => {
       const result = await coordinator.login({
         email: 'submitted@example.com',
         password: 'password',
-        instance: '  https://example.com  ',
+        instance: '  http://example.com///  ',
       });
 
+      expect(transport.authenticate).toHaveBeenCalledWith(
+        'https://example.com',
+        'submitted@example.com',
+        'password',
+        { signal: expect.any(AbortSignal) },
+      );
       expect(store.establish).toHaveBeenCalledWith(
         {
           email: 'server@example.com',
@@ -329,14 +353,30 @@ describe('SessionCoordinator', () => {
       expect(transport.validateToken).not.toHaveBeenCalled();
     });
 
+    it.each([
+      'https://example.com/tenant',
+      'https://example.com/?tenant=one',
+      'https://example.com/#login',
+    ])('rejects non-origin instance input %s before token transport', async (instance) => {
+      const { coordinator, transport } = createHarness();
+
+      await expect(coordinator.loginWithToken({ token: 'token', instance }))
+        .resolves.toEqual({
+          success: false,
+          message: 'Enter a valid SpeleoDB instance origin URL.',
+        });
+      expect(transport.validateToken).not.toHaveBeenCalled();
+    });
+
     it('validates and stores a normalized identity-free token', async () => {
       const { coordinator, store } = createHarness();
 
       const result = await coordinator.loginWithToken({
         token: '  oauth-token  ',
-        instance: '  https://example.com  ',
+        instance: '  http://example.com///  ',
       });
 
+      expect(store.establish).toHaveBeenCalledOnce();
       expect(store.establish).toHaveBeenCalledWith(
         {
           email: undefined,

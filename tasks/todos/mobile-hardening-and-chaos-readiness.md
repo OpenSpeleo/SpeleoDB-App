@@ -69,6 +69,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-021 | P0 | A GPS/persistence cleanup failure can interrupt logout before credential/cache purge, and failed vault deletion retains a marker that can restore the old session on restart. | Closed: revoke first, attempt all cleanup, and clear session metadata independently. |
 | MH-022 | P1 | Same-turn login submissions can supersede each other, successful login re-enables before redirect, and its timer can navigate after unmount. | Closed: synchronous single-flight admission and unmount-owned publication/timer cleanup. |
 | MH-023 | P1 | Web body parsing can swallow cancellation as an empty success, while native preparation is outside the request timeout and can poison the metadata cache permanently. | Closed: one deadline signal owns preparation, transport, parsing, publication, and cache recovery. |
+| MH-024 | P1 | Instance input accepts paths/queries/fragments even though services append fixed API paths, producing malformed authenticated targets and misleading network errors. | Closed: enforce and persist a canonical origin before transport. |
 
 ## Commit checklist
 
@@ -112,6 +113,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Complete destructive logout after cleanup failures`
 - [x] `[Fix] Prevent stale login form completions`
 - [x] `[Fix] Enforce request deadlines through response publication`
+- [x] `[Fix] Reject non-origin API instance URLs`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -917,7 +919,7 @@ and physical-device evidence.
 
 ### Enforce request deadlines through response publication
 
-- Commit: recorded after this objective is committed.
+- Commit: `4ae9740` (`[Fix] Enforce request deadlines through response publication`).
 - Reproduction: after web response headers arrived, cancellation during
   `response.json()` entered the generic parse-error catch and returned the
   response status with `{}` instead of rejecting. Native timeout options did
@@ -944,4 +946,33 @@ and physical-device evidence.
   Exact staged pre-commit and CI evidence is recorded immediately before
   commit.
 - Findings closed: MH-023. The broader authentication/network audit remains
+  open.
+
+### Reject non-origin API instance URLs
+
+- Commit: recorded after this objective is committed.
+- Reproduction: `getInstanceBaseUrl()` accepted paths, queries, and fragments,
+  but API services form request URLs by appending fixed `/api/v2/...` paths.
+  Inputs such as `https://host/tenant?name=one` therefore produced a malformed
+  authenticated target, and the coordinator caught local URL errors as if the
+  server were unreachable.
+- Correction: instance parsing now accepts only an HTTP(S) origin with an
+  optional port, upgrades remote HTTP, and returns the canonical origin. Both
+  login methods validate and normalize before transport, then persist that same
+  value. The pure parser is separated from external-browser behavior so the
+  session/service/transport layers do not import a Capacitor UI plugin. The
+  reusable rule is in `tasks/lessons/origin-only-api-bases.md`.
+- Verification: URL tests cover ports, trailing slashes, paths, queries,
+  fragments, schemes, credentials, and HTTP policy. Coordinator tests prove
+  both login methods make zero transport calls for non-origin input and use the
+  canonical HTTPS origin for transport/storage. The service test proves invalid
+  input cannot send a password. The focused unit/controller/API suites pass
+  340/340 tests. Node 22 CI passes 1,743/1,743 tests across 103 files with 89.6%
+  statements, 82.55% branches, 93.03% functions, and 91.67% lines. Capacitor
+  synchronization produces no tracked native drift. Android passes its 9
+  first-party tests plus lint, release APK, and release AAB gates. Signed iOS
+  XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned simulator
+  Release compilation succeeds. Exact staged pre-commit and CI evidence is
+  recorded immediately before commit.
+- Findings closed: MH-024. The broader authentication/network audit remains
   open.
