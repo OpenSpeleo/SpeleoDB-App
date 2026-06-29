@@ -56,6 +56,7 @@ function AuthenticatedRoutes(): ReactNode {
   return (
     <>
       <div
+        aria-hidden={!isDashboard}
         style={{
           position: 'fixed',
           inset: 0,
@@ -76,44 +77,34 @@ function AuthenticatedRoutes(): ReactNode {
           />
         </Suspense>
       </div>
-      <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          visibility: isSettings ? 'visible' : 'hidden',
-          pointerEvents: isSettings ? 'auto' : 'none',
-        }}
-      >
-        <Suspense fallback={null}>
-          <Settings
-            showLandmarks={showLandmarks}
-            onShowLandmarksChange={setShowLandmarks}
-            colorMode={colorMode}
-            onColorModeChange={setColorMode}
-            measurementUnit={measurementUnit}
-            onMeasurementUnitChange={setMeasurementUnit}
-            layerOfflineSync={layerOfflineSync}
-            onLayerOfflineSyncChange={setLayerOfflineSync}
-            activeDashboardPanel={activeDashboardPanel}
-            onDashboardPanelChange={setActiveDashboardPanel}
-          />
-        </Suspense>
-      </div>
-      <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          visibility: isPending ? 'visible' : 'hidden',
-          pointerEvents: isPending ? 'auto' : 'none',
-        }}
-      >
-        <Suspense fallback={null}>
-          <PendingOps
-            activeDashboardPanel={activeDashboardPanel}
-            onDashboardPanelChange={setActiveDashboardPanel}
-          />
-        </Suspense>
-      </div>
+      {isSettings && (
+        <div className="fixed inset-0">
+          <Suspense fallback={null}>
+            <Settings
+              showLandmarks={showLandmarks}
+              onShowLandmarksChange={setShowLandmarks}
+              colorMode={colorMode}
+              onColorModeChange={setColorMode}
+              measurementUnit={measurementUnit}
+              onMeasurementUnitChange={setMeasurementUnit}
+              layerOfflineSync={layerOfflineSync}
+              onLayerOfflineSyncChange={setLayerOfflineSync}
+              activeDashboardPanel={activeDashboardPanel}
+              onDashboardPanelChange={setActiveDashboardPanel}
+            />
+          </Suspense>
+        </div>
+      )}
+      {isPending && (
+        <div className="fixed inset-0">
+          <Suspense fallback={null}>
+            <PendingOps
+              activeDashboardPanel={activeDashboardPanel}
+              onDashboardPanelChange={setActiveDashboardPanel}
+            />
+          </Suspense>
+        </div>
+      )}
       {gpsErrorToast && (
         <div
           data-testid="gps-recording-error-toast"
@@ -127,8 +118,8 @@ function AuthenticatedRoutes(): ReactNode {
 }
 
 /**
- * Keeps Dashboard + Settings + Pending mounted behind the authenticated shell
- * so map state survives tab switches, while allowing the whole shell to load lazily.
+ * Keeps only Dashboard mounted behind the authenticated shell so expensive map
+ * state survives tab switches. Non-map pages mount only for their active route.
  */
 export default function AuthenticatedAppShell(): ReactNode {
   return (

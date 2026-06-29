@@ -15,10 +15,11 @@ cross-route props with one value and one transition callback.
 
 ## Ownership and flow
 
-`AuthenticatedAppShell` owns `activeDashboardPanel` because Dashboard,
-Settings, and Pending remain mounted while authenticated routes change.
-The value and `onDashboardPanelChange` are passed to all three pages and their
-shared `AppTabBar`.
+`AuthenticatedAppShell` owns `activeDashboardPanel` because it outlives every
+authenticated route transition. Dashboard remains mounted to preserve map
+state; Settings and Pending mount only while active. The value and
+`onDashboardPanelChange` are passed to Dashboard and whichever non-map page is
+active, plus their shared `AppTabBar`.
 
 `AppTabBar` owns tab transition policy:
 
@@ -41,8 +42,8 @@ cannot cover the first tour step.
   close/open updates.
 - No consumer can construct a project-plus-landmark, project-plus-GPS, or
   landmark-plus-GPS state.
-- Hidden authenticated routes observe the same value; returning to Dashboard
-  cannot resurrect a stale second boolean.
+- The shell preserves one value while Settings or Pending unmount; returning to
+  Dashboard cannot resurrect a stale second boolean.
 - The union is ephemeral UI state. It is neither persisted nor owned by a
   domain controller.
 
@@ -50,10 +51,12 @@ cannot cover the first tour step.
 
 One state update replaces up to three coupled React updates when switching
 panels. Prop threading drops from six values to two on every authenticated
-page. No listener, timer, storage access, or network operation is added.
+page. Only Dashboard remains mounted across route changes; Settings and Pending
+release their timers, effects, and local modal state when inactive.
 
 `AuthenticatedAppShell.test.tsx` proves the authoritative cross-route sequence
-`null -> projects -> landmarks -> gps -> null`. `AppTabBar.test.tsx` covers
-route navigation, activation, replacement, same-tab close, Map close, and
-recording/pending presentation. Dashboard, Settings, Pending, and shared-state
-tests exercise the page integration contract.
+`null -> projects -> landmarks -> gps -> null`, Dashboard state preservation,
+and inactive-page unmount cleanup. `AppTabBar.test.tsx` covers route navigation,
+activation, replacement, same-tab close, Map close, and recording/pending
+presentation. Dashboard, Settings, Pending, and shared-state tests exercise the
+page integration contract.

@@ -1,6 +1,9 @@
 # Settings Page
 
-The Settings page provides account actions, synchronization controls, and map preferences. It is always mounted alongside the Dashboard (both stay in the DOM) so map state is preserved across tab switches.
+The Settings page provides account actions, synchronization controls, and map
+preferences. It mounts only while `/settings` is active. The authenticated shell
+keeps Dashboard mounted separately so map state survives tab switches without
+retaining Settings effects, dialogs, or polling on other routes.
 
 ## Navigation
 
@@ -83,7 +86,10 @@ A dedicated section rendered **only while offline-locked** (`isOfflineLocked`), 
 
 ## Polling lifecycle
 
-The 3-second polling interval for cache stats activates only when `location.pathname === '/settings'`. When the user navigates away, the effect cleans up and the interval stops. The effect re-activates on navigation back.
+The 3-second polling interval for cache stats starts when Settings mounts. The
+authenticated shell unmounts Settings on every other route, so the effect
+cleanup stops the interval. Returning to `/settings` mounts a fresh page,
+refreshes immediately, and starts one new interval.
 
 ## Offline behavior
 

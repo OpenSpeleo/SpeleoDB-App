@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
@@ -8,35 +8,64 @@ import AuthenticatedAppShell from './AuthenticatedAppShell';
 import { SpeleoDBContext } from './context/useSpeleoDB';
 import type { DashboardPanel } from './types/dashboardPanel';
 
+const pageLifecycle = vi.hoisted(() => ({
+  settingsMounted: vi.fn(),
+  settingsUnmounted: vi.fn(),
+  pendingMounted: vi.fn(),
+  pendingUnmounted: vi.fn(),
+}));
+
 vi.mock('./pages/Dashboard', () => ({
-  default: ({ activeDashboardPanel }: { activeDashboardPanel: DashboardPanel }) => (
-    <div
-      data-testid="dashboard-page"
-      data-active-panel={activeDashboardPanel ?? 'none'}
-    >
-      Dashboard
-    </div>
-  ),
+  default: function MockDashboard({
+    activeDashboardPanel,
+  }: {
+    activeDashboardPanel: DashboardPanel;
+  }) {
+    const [mapState, setMapState] = React.useState(0);
+    return (
+      <div
+        data-testid="dashboard-page"
+        data-active-panel={activeDashboardPanel ?? 'none'}
+      >
+        Dashboard
+        <button onClick={() => setMapState((current) => current + 1)}>
+          Map state {mapState}
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('./pages/Settings', () => ({
-  default: ({
+  default: function MockSettings({
     onDashboardPanelChange,
   }: {
     onDashboardPanelChange: (panel: DashboardPanel) => void;
-  }) => (
-    <div data-testid="settings-page">
-      Settings
-      <button onClick={() => onDashboardPanelChange('projects')}>Open projects</button>
-      <button onClick={() => onDashboardPanelChange('landmarks')}>Open landmarks</button>
-      <button onClick={() => onDashboardPanelChange('gps')}>Open GPS</button>
-      <button onClick={() => onDashboardPanelChange(null)}>Close panels</button>
-    </div>
-  ),
+  }) {
+    React.useEffect(() => {
+      pageLifecycle.settingsMounted();
+      return () => pageLifecycle.settingsUnmounted();
+    }, []);
+    return (
+      <div data-testid="settings-page">
+        Settings
+        <button onClick={() => onDashboardPanelChange('projects')}>Open projects</button>
+        <button onClick={() => onDashboardPanelChange('landmarks')}>Open landmarks</button>
+        <button onClick={() => onDashboardPanelChange('gps')}>Open GPS</button>
+        <button onClick={() => onDashboardPanelChange(null)}>Close panels</button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('./pages/PendingOps', () => ({
-  default: () => <div data-testid="pending-page">Pending</div>,
+  default: function MockPendingOps() {
+    React.useEffect(() => {
+      pageLifecycle.pendingMounted();
+      return () => pageLifecycle.pendingUnmounted();
+    }, []);
+    return <div data-testid="pending-page">Pending</div>;
+  },
 }));
 
 describe('AuthenticatedAppShell', () => {
@@ -89,5 +118,38 @@ describe('AuthenticatedAppShell', () => {
     expect(dashboard).toHaveAttribute('data-active-panel', 'gps');
     await user.click(screen.getByRole('button', { name: 'Close panels' }));
     expect(dashboard).toHaveAttribute('data-active-panel', 'none');
+  });
+
+  it('retains Dashboard state while unmounting inactive non-map pages', async () => {
+    const user = userEvent.setup();
+    const history = createMemoryHistory({ initialEntries: ['/dashboard'] });
+    render(
+      <Router history={history}>
+        <SpeleoDBContext.Provider value={{} as never}>
+          <AuthenticatedAppShell />
+        </SpeleoDBContext.Provider>
+      </Router>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Map state 0' }));
+    expect(screen.getByRole('button', { name: 'Map state 1' })).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-page')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pending-page')).not.toBeInTheDocument();
+
+    act(() => history.push('/settings'));
+    expect(await screen.findByTestId('settings-page')).toBeInTheDocument();
+    expect(pageLifecycle.settingsMounted).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('dashboard-page')).toHaveTextContent('Map state 1');
+
+    act(() => history.push('/pending'));
+    expect(await screen.findByTestId('pending-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-page')).not.toBeInTheDocument();
+    expect(pageLifecycle.settingsUnmounted).toHaveBeenCalledTimes(1);
+    expect(pageLifecycle.pendingMounted).toHaveBeenCalledTimes(1);
+
+    act(() => history.push('/dashboard'));
+    expect(screen.queryByTestId('pending-page')).not.toBeInTheDocument();
+    expect(pageLifecycle.pendingUnmounted).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Map state 1' })).toBeInTheDocument();
   });
 });

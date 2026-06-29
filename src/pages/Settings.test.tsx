@@ -203,6 +203,7 @@ function renderSettings(
   );
   return {
     history,
+    unmount: renderResult.unmount,
     rerender: () => {
       renderResult.rerender(
         <Router history={history}>
@@ -359,25 +360,27 @@ describe('Settings page', () => {
     });
   });
 
-  it('refreshes synchronization rows immediately on route entry to /settings', async () => {
-    mockGetManualTileCount.mockResolvedValue(42);
-    mockGetTotalCacheBytes.mockResolvedValue(1024);
+  it('polls synchronization rows while mounted and stops on unmount', () => {
+    vi.useFakeTimers();
+    mockGetManualTileCount.mockReturnValue(new Promise(() => {}));
+    mockGetTotalCacheBytes.mockReturnValue(new Promise(() => {}));
 
-    const { history } = renderSettings(true, '/dashboard');
-
-    expect(mockGetManualTileCount).not.toHaveBeenCalled();
-    expect(mockGetTotalCacheBytes).not.toHaveBeenCalled();
-
-    act(() => {
-      history.push('/settings');
-    });
-
-    await waitFor(() => {
+    try {
+      const { unmount } = renderSettings();
       expect(mockGetManualTileCount).toHaveBeenCalledTimes(1);
       expect(mockGetTotalCacheBytes).toHaveBeenCalledTimes(1);
-    });
-    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('42 / 42');
-    expect(screen.getByTestId('sync-pct')).toHaveTextContent('100%');
+
+      act(() => vi.advanceTimersByTime(3000));
+      expect(mockGetManualTileCount).toHaveBeenCalledTimes(2);
+      expect(mockGetTotalCacheBytes).toHaveBeenCalledTimes(2);
+
+      unmount();
+      act(() => vi.advanceTimersByTime(6000));
+      expect(mockGetManualTileCount).toHaveBeenCalledTimes(2);
+      expect(mockGetTotalCacheBytes).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows 0% sync progress when no jobs and no cache', () => {

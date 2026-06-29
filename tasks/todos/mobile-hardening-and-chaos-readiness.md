@@ -51,7 +51,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-003 | P0 | Tag CI can publish temporary-signed artifacts as releases. | Separate compile smoke from trusted signed release output. |
 | MH-004 | P1 | Native verification is placeholder-only on Android and absent on iOS. | Add real native test targets and device evidence. |
 | MH-005 | P1 | There is no cross-platform mobile E2E suite. | Add Appium/WebdriverIO coverage. |
-| MH-006 | P1 | Hidden Settings/Pending pages remain mounted and can retain effects such as polling. | Mount or activate effects only for the active page. |
+| MH-006 | P1 | Hidden Settings/Pending pages remain mounted and can retain effects such as polling. | Closed: keep only Dashboard mounted and unmount inactive non-map pages. |
 | MH-007 | P2 | Controller and Dashboard exceed safe review/modularity limits. | Extract behavior-owned modules behind stable contracts. |
 | MH-008 | P2 | Coverage has no threshold and branch coverage is 76.54%. | Reach and enforce justified per-file 100% runtime coverage. |
 | MH-009 | P2 | README, Make, CI, simulator, PWA, and feature documentation contain stale claims. | Reconcile every document with implementation. |
@@ -95,7 +95,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Extract dashboard landmark presentation`
 - [x] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [x] `[Testing] Stabilize deterministic coverage reporting`
-- [ ] `[Fix] Stop inactive page effects and polling`
+- [x] `[Fix] Stop inactive page effects and polling`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -656,7 +656,7 @@ and physical-device evidence.
 
 ### Stabilize deterministic coverage reporting
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `70ac87f` (`[Testing] Stabilize deterministic coverage reporting`).
 - Reproduction: repeated serial coverage on the same tree reported either
   90/105 or 93/105 covered branches in `TileCacheRepository`; shuffled seed 1
   reproduced an intermediate 92/105 result. The varying branches were the
@@ -686,3 +686,26 @@ and physical-device evidence.
   exact staged evidence are recorded before commit; no native gate applies to
   this test-only/documentation objective.
 - Findings closed: MH-015.
+
+### Stop inactive page effects and polling
+
+- Commit: recorded in the next objective after this commit is created.
+- Correction: `AuthenticatedAppShell` keeps Dashboard mounted so MapLibre and
+  map interaction state survive tab switches, but mounts Settings and Pending
+  only for their active routes. Settings no longer reads router state to suspend
+  polling; its cache-stat interval is owned by the component lifetime and is
+  always cleaned up on unmount. Non-map dialogs, reconnect state, memoized queue
+  views, and other page-local effects are released at the same boundary.
+- Verification: the shell, Settings, and Pending suites pass 65/65 focused
+  tests. Shell characterization proves Dashboard state survives both non-map
+  routes, Settings and Pending each unmount when inactive, and the shell module
+  has 100% branch and line coverage. Settings' authoritative timer test proves
+  immediate refresh, one three-second poll, and no calls after unmount. The full
+  suite passes 1,689/1,689 tests with 89.35% statements, 82.35% branches,
+  92.79% functions, and 91.43% lines. Dashboard remains 160.23 KiB (51.08 KiB
+  gzip); the authenticated shell drops from 2.47 KiB to 2.35 KiB while Settings
+  drops from 12.11 KiB to 12.05 KiB. Capacitor sync produces no tracked native
+  drift; Android passes 9/9 first-party tests plus lint, APK, and AAB builds,
+  and iOS passes 9/9 signed tests on iPhone 17 Pro/iOS 26.5 plus Release
+  compilation. Exact staged evidence is recorded before commit.
+- Findings closed: MH-006.

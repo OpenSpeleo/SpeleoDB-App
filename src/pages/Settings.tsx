@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useHistory, useLocation } from 'react-router-dom';
+import { useHistory } from 'react-router-dom';
 import {
   IonContent,
   IonFooter,
@@ -77,7 +77,6 @@ const Settings: React.FC<SettingsProps> = ({
   onDashboardPanelChange,
 }) => {
   const history = useHistory();
-  const location = useLocation();
   const {
     controller,
     projects,
@@ -109,8 +108,6 @@ const Settings: React.FC<SettingsProps> = ({
   }, [history, controller]);
 
   useEffect(() => {
-    if (location.pathname !== '/settings') return;
-
     const refresh = () => {
       getTotalCacheBytes().then(setCacheBytes).catch(() => {});
       getManualTileCount().then(setManualTileCount).catch(() => {});
@@ -119,7 +116,7 @@ const Settings: React.FC<SettingsProps> = ({
     refresh();
     const interval = setInterval(refresh, 3000);
     return () => clearInterval(interval);
-  }, [location.pathname]);
+  }, []);
 
   const handleToggleLandmarks = useCallback(
     (checked: boolean) => {
