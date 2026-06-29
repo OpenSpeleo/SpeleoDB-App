@@ -283,12 +283,12 @@ describe('SessionCoordinator', () => {
     });
 
     it.each([
-      [{ detail: 'detail error' }, 'detail error'],
-      [{ detail: ' ', message: 'message error' }, 'message error'],
-      [{ errors: { non_field_errors: ['field error'] } }, 'field error'],
-      [{ errors: { non_field_errors: [7] } }, 'Invalid email or password'],
-      [null, 'Invalid email or password'],
-    ])('returns the supported 401 error shape', async (data, message) => {
+      { detail: 'detail error' },
+      { detail: ' ', message: 'message error' },
+      { errors: { non_field_errors: ['field error'] } },
+      { errors: { non_field_errors: [7] } },
+      null,
+    ])('returns a fixed message for untrusted 401 body %#', async (data) => {
       const transport = createTransport({
         authenticate: vi.fn(async () => ({ status: 401, data })),
       });
@@ -300,16 +300,15 @@ describe('SessionCoordinator', () => {
         instance: 'https://example.com',
       });
 
-      expect(result).toEqual({ success: false, message });
+      expect(result).toEqual({ success: false, message: 'Invalid email or password' });
     });
 
-    it('redacts reflected email and password values from server errors', async () => {
+    it('never publishes reflected email or password error content', async () => {
+      const reflected = 'Rejected USER%40example.com with p%40ss+word\nTry again';
       const transport = createTransport({
         authenticate: vi.fn(async () => ({
           status: 401,
-          data: {
-            detail: 'Rejected user@example.com with p@ss word\nTry again',
-          },
+          data: { detail: reflected },
         })),
       });
       const { coordinator } = createHarness({ transport });
@@ -320,9 +319,8 @@ describe('SessionCoordinator', () => {
         instance: 'https://example.com',
       });
 
-      expect(result.message).toBe(
-        'Rejected [REDACTED] with [REDACTED] Try again',
-      );
+      expect(result.message).toBe('Invalid email or password');
+      expect(result.message).not.toContain(reflected);
       expect(result.message).not.toContain('user@example.com');
       expect(result.message).not.toContain('p@ss word');
     });
@@ -428,9 +426,9 @@ describe('SessionCoordinator', () => {
     });
 
     it.each([
-      [403, { message: 'denied' }, 'denied'],
+      [403, { message: 'denied' }, 'Invalid OAuth token'],
       [401, {}, 'Invalid OAuth token'],
-      [500, { detail: 'maintenance' }, 'maintenance'],
+      [500, { detail: 'maintenance' }, 'Unable to validate OAuth token. Please try again.'],
       [500, {}, 'Unable to validate OAuth token. Please try again.'],
     ])('classifies status %i without creating a session', async (status, data, message) => {
       const transport = createTransport({
@@ -443,18 +441,15 @@ describe('SessionCoordinator', () => {
       expect(store.establish).not.toHaveBeenCalled();
     });
 
-    it('redacts raw and encoded token reflection and bounds the displayed error', async () => {
-      const token = 'oauth token/secret';
+    it('never publishes raw or transformed token error content', async () => {
+      const token = 'oauth /? [REDACTED] token';
       const encodedToken = encodeURIComponent(token);
-      const lowercaseEscapes = encodedToken.replace(
-        /%[0-9A-F]{2}/g,
-        (escape) => escape.toLowerCase(),
-      );
+      const mixedEscapes = encodedToken.replace('%2F', '%2f');
       const transport = createTransport({
         validateToken: vi.fn(async () => ({
           status: 403,
           data: {
-            detail: `${token} ${encodedToken} ${lowercaseEscapes} ${'x'.repeat(400)}`,
+            detail: `${token} ${encodedToken} ${mixedEscapes} ${'x'.repeat(400)}`,
           },
         })),
       });
@@ -465,11 +460,10 @@ describe('SessionCoordinator', () => {
         instance: 'https://example.com',
       });
 
-      expect(result.message).not.toContain(token);
+      expect(result.message).toBe('Invalid OAuth token');
       expect(result.message).not.toContain(encodedToken);
-      expect(result.message).not.toContain(lowercaseEscapes);
-      expect(result.message).toContain('[REDACTED]');
-      expect(result.message).toHaveLength(256);
+      expect(result.message).not.toContain(mixedEscapes);
+      expect(result.message).not.toContain('[REDACTED]');
     });
 
     it('reports transport and secure-storage failures without authenticating', async () => {

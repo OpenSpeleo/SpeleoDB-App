@@ -566,7 +566,7 @@ describe('SpeleoDBController', () => {
       expect(prefs.setPreferences).not.toHaveBeenCalled();
     });
 
-    it('surfaces a 4xx token error without authenticating or persisting', async () => {
+    it('ignores 4xx token error prose without authenticating or persisting', async () => {
       service = createMockService({
         validateToken: vi.fn(async () => ({
           status: 401,
@@ -580,7 +580,7 @@ describe('SpeleoDBController', () => {
         instance: validCreds.instance,
       });
 
-      expect(result).toEqual({ success: false, message: 'This token has expired.' });
+      expect(result).toEqual({ success: false, message: 'Invalid OAuth token' });
       expect(controller.isAuthenticated()).toBe(false);
       expect(prefs.setPreferences).not.toHaveBeenCalled();
     });

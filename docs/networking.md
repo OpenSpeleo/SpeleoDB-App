@@ -148,10 +148,10 @@ Implementation notes:
   inheriting a permanently pending promise. Service wrappers, including signed
   GeoJSON downloads, forward both caller cancellation and custom deadlines to
   that transport boundary.
-- Login error parsing in `SessionCoordinator.login` reads `detail` / `message` /
-  `errors.non_field_errors` directly off `response.data` (already v2-shaped),
-  then removes exact submitted credential values and bounds the untrusted text
-  before it can be displayed.
+- Login error publication in `SessionCoordinator` ignores response-body text
+  completely and selects fixed local messages from status/transport classes.
+  Authentication payloads can therefore never reflect submitted credential
+  bytes into the UI.
 - Direct token login reuses `SpeleoDBService.validateToken`; `2xx` establishes
   an identity-free session, while every failure remains unauthenticated and
   never falls back offline.

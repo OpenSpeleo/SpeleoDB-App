@@ -71,8 +71,9 @@ regression test, verification commands, commit, and final disposition.
 | MH-023 | P1 | Web body parsing can swallow cancellation as an empty success, while native preparation is outside the request timeout and can poison the metadata cache permanently. | Closed: one deadline signal owns preparation, transport, parsing, publication, and cache recovery. |
 | MH-024 | P1 | Instance input accepts paths/queries/fragments even though services append fixed API paths, producing malformed authenticated targets and misleading network errors. | Closed: enforce and persist a canonical origin before transport. |
 | MH-025 | P2 | Signed JSON downloads accept a custom timeout but silently drop it before the transport boundary. | Closed: forward complete request ownership options. |
-| MH-026 | P0 | Untrusted authentication error bodies can reflect submitted token/password/email bytes directly into the login UI. | Closed: exact-value redaction and bounded message normalization before publication. |
-| MH-027 | P0 | Persisted pre-origin-policy sessions can retain unsafe instance paths forever as an offline session and later expose another account to stale local data. | Closed: canonical upgrade before I/O; destructive purge for malformed or uncommittable identity metadata. |
+| MH-026 | P0 | Untrusted authentication error bodies can reflect submitted token/password/email bytes directly into the login UI. | Closed initially by bounded exact redaction; superseded by the body-opaque fixed-message boundary in MH-028. |
+| MH-027 | P0 | Persisted pre-origin-policy sessions can retain unsafe instance paths forever as an offline session and leave local user data behind an unusable identity. | Closed: canonical upgrade before I/O; destructive purge for malformed or uncommittable identity metadata. |
+| MH-028 | P0 | Finite exact-value filtering cannot guarantee that transformed credentials are absent from arbitrary authentication server prose. | Closed: authentication failures publish only fixed local messages and ignore response-body text. |
 
 ## Commit checklist
 
@@ -120,6 +121,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Forward signed-download request deadlines`
 - [x] `[Security] Redact reflected credentials from auth errors`
 - [x] `[Fix] Purge malformed persisted sessions`
+- [x] `[Security] Ignore authentication server error prose`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -1032,7 +1034,7 @@ and physical-device evidence.
 
 ### Purge malformed persisted sessions
 
-- Commit: recorded after this objective is committed.
+- Commit: `b596816` (`[Fix] Purge malformed persisted sessions`).
 - Reproduction: the current login flow accepted only canonical instance
   origins, but a session written by an older version could still restore an
   instance path/query/fragment. URL construction then failed before transport,
@@ -1059,4 +1061,30 @@ and physical-device evidence.
   running iOS 26.5, and unsigned simulator Release compilation succeeds. Exact
   staged pre-commit and CI evidence is recorded immediately before commit.
 - Findings closed: MH-027. The broader authentication/network audit remains
+  open.
+
+### Ignore authentication server error prose
+
+- Commit: recorded after this objective is committed.
+- Reproduction: exact raw/encoded credential replacement still admitted
+  transformed representations such as mixed-case percent escapes, and a
+  credential matching text inside the replacement marker defeated the claimed
+  absence invariant. Arbitrary server prose cannot be made credential-free by
+  a finite replacement list.
+- Correction: password and token authentication now ignore error response
+  bodies completely and publish fixed local messages selected only from trusted
+  status/transport classes. The durable lesson now forbids finite exact-value
+  filtering as an arbitrary secret-disclosure boundary.
+- Verification: 254/254 focused coordinator and controller-façade tests pass.
+  Response-shape tests prove `detail`, `message`, and field errors cannot affect
+  password or token failure text; adversarial raw, encoded, mixed-escape,
+  marker-overlap, control, and oversized values remain absent because no
+  response prose is consumed. Node 22 CI passes 1,755/1,755 tests across 103
+  files with 89.63% statements, 82.53% branches, 93.07% functions, and 91.70%
+  lines. Capacitor synchronization produces no tracked native drift. Android
+  lint, 9 first-party unit tests, release APK assembly, and release AAB bundling
+  pass. All 9 iOS XCTest cases pass on an iPhone 17 Pro simulator running iOS
+  26.5, and unsigned simulator Release compilation succeeds. Exact staged
+  pre-commit and CI evidence is recorded immediately before commit.
+- Findings closed: MH-028. The broader authentication/network audit remains
   open.

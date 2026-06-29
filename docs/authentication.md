@@ -54,16 +54,15 @@ derive identity from the token.
 Token login requires a live server response:
 
 - `2xx`: create and persist the session.
-- `4xx`: remain on the login page and show the server message, falling back to
-  `Invalid OAuth token`.
+- `4xx`: remain on the login page and show `Invalid OAuth token`.
 - timeout, transport error, or non-`4xx` server failure: remain on the login
   page, show a validation/connectivity error, and do not enter offline mode.
 
-Server error bodies are untrusted display input. Before an authentication
-message reaches React, exact submitted token/password/email values (including
-URL-encoded forms) are replaced, control characters are neutralized, and the
-result is bounded. Unsupported or empty shapes use the documented generic
-fallbacks; credential bytes are never reflected into the UI.
+Authentication error bodies are untrusted and are never display input. The
+coordinator selects fixed messages from local status/transport classes for both
+password and token login. It does not parse `detail`, `message`, field errors,
+or any other response-body text, so raw, transformed, or encoded credential
+bytes cannot be reflected into the UI.
 
 An unvalidated token is never persisted. The token input is masked, disables
 browser autofill and autocapitalization, and preserves its value only in React
@@ -186,8 +185,8 @@ are never logged or parsed.
 
 - Coordinator unit tests cover every branch of validation, trimming,
   fail-closed persistence, latest-attempt cancellation, serialized secure
-  writes, logout exclusion, reconnect, reflected-credential redaction, and
-  state publication.
+  writes, logout exclusion, reconnect, fixed auth-error publication, and state
+  publication.
 - Controller characterization tests cover the stable façade and its integration
   with destructive purge, project sync, and application-wide invalidation.
 - Together they cover identity-free restoration, every response class, and

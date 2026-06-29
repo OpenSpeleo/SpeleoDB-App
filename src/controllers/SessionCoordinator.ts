@@ -60,8 +60,6 @@ const OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE =
 const SUPERSEDED_AUTHENTICATION_MESSAGE = 'Authentication attempt was superseded.';
 const LOGOUT_IN_PROGRESS_MESSAGE = 'Sign out is in progress. Please try again.';
 const INVALID_INSTANCE_MESSAGE = 'Enter a valid SpeleoDB instance origin URL.';
-const REDACTED_AUTH_VALUE = '[REDACTED]';
-const MAX_AUTH_ERROR_MESSAGE_LENGTH = 256;
 
 function normalizeInstance(instance: string): string | null {
   try {
@@ -101,51 +99,6 @@ function sessionsMatch(left: StoredSession, right: StoredSession): boolean {
   return left.token === right.token
     && left.instance === right.instance
     && left.email === right.email;
-}
-
-function extractAuthErrorMessage(
-  data: unknown,
-  sensitiveValues: readonly string[] = [],
-): string | undefined {
-  if (!data || typeof data !== 'object') return undefined;
-
-  const body = data as {
-    detail?: unknown;
-    message?: unknown;
-    errors?: { non_field_errors?: unknown };
-  };
-  let message: string | undefined;
-  if (typeof body.detail === 'string' && body.detail.trim()) message = body.detail;
-  else if (typeof body.message === 'string' && body.message.trim()) message = body.message;
-  if (Array.isArray(body.errors?.non_field_errors)) {
-    const firstError = body.errors.non_field_errors[0];
-    if (!message && typeof firstError === 'string' && firstError.trim()) message = firstError;
-  }
-  if (!message) return undefined;
-
-  let sanitized = '';
-  for (const character of message) {
-    const codePoint = character.codePointAt(0) ?? 0;
-    sanitized += codePoint <= 0x1f || codePoint === 0x7f ? ' ' : character;
-  }
-  sanitized = sanitized.trim();
-  const variants = new Set<string>();
-  for (const value of sensitiveValues) {
-    if (!value) continue;
-    variants.add(value);
-    const trimmed = value.trim();
-    if (trimmed) variants.add(trimmed);
-    const encoded = encodeURIComponent(value);
-    if (encoded) {
-      variants.add(encoded);
-      variants.add(encoded.replace(/%[0-9A-F]{2}/g, (escape) => escape.toLowerCase()));
-    }
-  }
-  for (const value of [...variants].sort((left, right) => right.length - left.length)) {
-    sanitized = sanitized.split(value).join(REDACTED_AUTH_VALUE);
-  }
-  if (!sanitized) return undefined;
-  return sanitized.slice(0, MAX_AUTH_ERROR_MESSAGE_LENGTH);
 }
 
 /**
@@ -273,8 +226,7 @@ export class SessionCoordinator {
         }
       }
 
-      const message = extractAuthErrorMessage(response.data, [email, password])
-        ?? (response.status === 401 ? 'Invalid email or password' : 'Login failed');
+      const message = response.status === 401 ? 'Invalid email or password' : 'Login failed';
       return { success: false, message };
     } catch (error) {
       if (isAbortError(error)) {
@@ -333,13 +285,12 @@ export class SessionCoordinator {
       if (isClientErrorStatus(response.status)) {
         return {
           success: false,
-          message: extractAuthErrorMessage(response.data, [token]) ?? 'Invalid OAuth token',
+          message: 'Invalid OAuth token',
         };
       }
       return {
         success: false,
-        message: extractAuthErrorMessage(response.data, [token])
-          ?? 'Unable to validate OAuth token. Please try again.',
+        message: 'Unable to validate OAuth token. Please try again.',
       };
     } catch (error) {
       if (isAbortError(error)) {

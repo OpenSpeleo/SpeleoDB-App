@@ -5,7 +5,12 @@ authentication server, reverse proxy, or test tenant can echo submitted
 credentials into `detail` or `message`, turning a harmless-looking UI error
 path into a secret disclosure.
 
-At the owning policy boundary, remove exact raw and encoded sensitive inputs,
-neutralize control characters, and bound the result before publication. Keep
-generic fallbacks for missing/empty shapes, and test absence of the original
-secret rather than merely checking that a redaction marker appears.
+When the UI does not require server prose, do not publish it. Select a fixed
+local message from a trusted status/error class and treat the response body as
+opaque. Exact-value filtering is not a complete secret boundary: alternate
+encodings, case variants, normalization, or a secret that overlaps the
+redaction marker can defeat it.
+
+Only retain untrusted text when product behavior genuinely requires it. In
+that case use a schema-specific allowlist and prove the complete transformation
+space; never claim arbitrary credential absence from a finite replacement list.
