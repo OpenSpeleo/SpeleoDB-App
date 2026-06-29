@@ -379,7 +379,12 @@ export class SpeleoDBService {
    * is needed because the URL itself carries the signature.
    */
   async downloadJSON<T = unknown>(url: string, options: ServiceRequestOptions = {}): Promise<HttpResponse<T>> {
-    return this.http.request<T>({ url, method: 'GET', signal: options.signal });
+    return this.http.request<T>({
+      url,
+      method: 'GET',
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+    });
   }
 
   private async getAuthorized<T>(

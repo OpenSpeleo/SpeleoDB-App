@@ -70,6 +70,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-022 | P1 | Same-turn login submissions can supersede each other, successful login re-enables before redirect, and its timer can navigate after unmount. | Closed: synchronous single-flight admission and unmount-owned publication/timer cleanup. |
 | MH-023 | P1 | Web body parsing can swallow cancellation as an empty success, while native preparation is outside the request timeout and can poison the metadata cache permanently. | Closed: one deadline signal owns preparation, transport, parsing, publication, and cache recovery. |
 | MH-024 | P1 | Instance input accepts paths/queries/fragments even though services append fixed API paths, producing malformed authenticated targets and misleading network errors. | Closed: enforce and persist a canonical origin before transport. |
+| MH-025 | P2 | Signed JSON downloads accept a custom timeout but silently drop it before the transport boundary. | Closed: forward complete request ownership options. |
 
 ## Commit checklist
 
@@ -114,6 +115,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Prevent stale login form completions`
 - [x] `[Fix] Enforce request deadlines through response publication`
 - [x] `[Fix] Reject non-origin API instance URLs`
+- [x] `[Fix] Forward signed-download request deadlines`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -950,7 +952,7 @@ and physical-device evidence.
 
 ### Reject non-origin API instance URLs
 
-- Commit: recorded after this objective is committed.
+- Commit: `1160dcf` (`[Fix] Reject non-origin API instance URLs`).
 - Reproduction: `getInstanceBaseUrl()` accepted paths, queries, and fragments,
   but API services form request URLs by appending fixed `/api/v2/...` paths.
   Inputs such as `https://host/tenant?name=one` therefore produced a malformed
@@ -975,4 +977,25 @@ and physical-device evidence.
   Release compilation succeeds. Exact staged pre-commit and CI evidence is
   recorded immediately before commit.
 - Findings closed: MH-024. The broader authentication/network audit remains
+  open.
+
+### Forward signed-download request deadlines
+
+- Commit: recorded after this objective is committed.
+- Reproduction: `SpeleoDBService.downloadJSON()` exposed the shared
+  `ServiceRequestOptions` contract but forwarded only `signal`, silently
+  replacing any caller-supplied timeout with the transport default.
+- Correction: signed JSON downloads now forward both cancellation and the
+  complete caller-owned deadline to `HttpClient`, matching every other service
+  request wrapper and the transport ownership rule.
+- Verification: the service regression invokes the production wrapper with a
+  distinct deadline and signal and proves both reach the injected HTTP request.
+  The focused suite passes 39/39 tests. Node 22 CI passes 1,744/1,744 tests
+  across 103 files with 89.6% statements, 82.55% branches, 93.03% functions,
+  and 91.67% lines. Capacitor synchronization produces no tracked native drift.
+  Android passes its 9 first-party tests plus lint, release APK, and release AAB
+  gates. Signed iOS XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and
+  unsigned simulator Release compilation succeeds. Exact staged pre-commit and
+  CI evidence is recorded immediately before commit.
+- Findings closed: MH-025. The broader authentication/network audit remains
   open.

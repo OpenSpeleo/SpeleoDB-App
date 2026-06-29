@@ -11,3 +11,7 @@ that cannot cancel underlying work must race it with the deadline, consume its
 late settlement, and re-check the same signal before any delayed launch or
 publication. Clear cached preparation promises after timeout so one hung
 plugin call cannot poison every future request.
+
+Every service wrapper that accepts request options must forward both the abort
+signal and timeout. Dropping either option silently breaks ownership even when
+the underlying transport is correct.

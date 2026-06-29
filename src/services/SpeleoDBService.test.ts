@@ -390,6 +390,20 @@ describe('SpeleoDBService', () => {
       expect(res.status).toBe(403);
       expect(res.data).toEqual(body);
     });
+
+    it('forwards cancellation and the caller-owned download deadline', async () => {
+      const abortController = new AbortController();
+
+      await service.downloadJSON('https://cloudfront.example/p1.geojson', {
+        signal: abortController.signal,
+        timeoutMs: 4_321,
+      });
+
+      expect(http.calls[0]).toMatchObject({
+        signal: abortController.signal,
+        timeoutMs: 4_321,
+      });
+    });
   });
 
   // ---- uploadGpx ------------------------------------------------------------

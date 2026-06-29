@@ -145,7 +145,9 @@ Implementation notes:
   parse failures are ignored only for genuinely malformed bodies; an abort
   during parsing remains an `AbortError`. A timed-out native metadata lookup is
   removed from the shared cache so the next request can recover instead of
-  inheriting a permanently pending promise.
+  inheriting a permanently pending promise. Service wrappers, including signed
+  GeoJSON downloads, forward both caller cancellation and custom deadlines to
+  that transport boundary.
 - Login error parsing in `SessionCoordinator.login` reads `detail` / `message` /
   `errors.non_field_errors` directly off `response.data` (already v2-shaped).
 - Direct token login reuses `SpeleoDBService.validateToken`; `2xx` establishes
