@@ -31,6 +31,7 @@ import {
 import { restartGuidedTourFromHelp } from '../onboarding/guidedTour/runtime';
 import { isMapColorMode, DEFAULT_MAP_COLOR_MODE, type MapColorMode } from '../types/mapColorMode';
 import { isMeasurementUnit, DEFAULT_MEASUREMENT_UNIT, type MeasurementUnit } from '../types/measurementUnit';
+import type { DashboardPanel, DashboardPanelChange } from '../types/dashboardPanel';
 import { formatLastSync } from '../utils/formatLastSync';
 import { useOfflineReconnect } from '../hooks/useOfflineReconnect';
 
@@ -59,12 +60,8 @@ interface SettingsProps {
   onMeasurementUnitChange: (unit: MeasurementUnit) => void;
   layerOfflineSync: Record<string, boolean>;
   onLayerOfflineSyncChange: (next: Record<string, boolean>) => void;
-  isProjectPanelOpen: boolean;
-  onProjectPanelChange: (open: boolean) => void;
-  isLandmarkPanelOpen: boolean;
-  onLandmarkPanelChange: (open: boolean) => void;
-  isGpsPanelOpen: boolean;
-  onGpsPanelChange: (open: boolean) => void;
+  activeDashboardPanel: DashboardPanel;
+  onDashboardPanelChange: DashboardPanelChange;
 }
 
 const Settings: React.FC<SettingsProps> = ({
@@ -76,12 +73,8 @@ const Settings: React.FC<SettingsProps> = ({
   onMeasurementUnitChange,
   layerOfflineSync,
   onLayerOfflineSyncChange,
-  isProjectPanelOpen,
-  onProjectPanelChange,
-  isLandmarkPanelOpen,
-  onLandmarkPanelChange,
-  isGpsPanelOpen,
-  onGpsPanelChange,
+  activeDashboardPanel,
+  onDashboardPanelChange,
 }) => {
   const history = useHistory();
   const location = useLocation();
@@ -177,10 +170,10 @@ const Settings: React.FC<SettingsProps> = ({
   );
 
   const handleShowTutorial = useCallback(() => {
-    onProjectPanelChange(false);
+    onDashboardPanelChange(null);
     history.push('/dashboard');
     void restartGuidedTourFromHelp();
-  }, [history, onProjectPanelChange]);
+  }, [history, onDashboardPanelChange]);
 
   const handleLogout = useCallback(() => {
     setShowLogoutConfirmModal(true);
@@ -557,12 +550,8 @@ const Settings: React.FC<SettingsProps> = ({
       </IonContent>
       <IonFooter className="ion-no-border">
         <AppTabBar
-          isProjectPanelOpen={isProjectPanelOpen}
-          onProjectPanelChange={onProjectPanelChange}
-          isLandmarkPanelOpen={isLandmarkPanelOpen}
-          onLandmarkPanelChange={onLandmarkPanelChange}
-          isGpsPanelOpen={isGpsPanelOpen}
-          onGpsPanelChange={onGpsPanelChange}
+          activeDashboardPanel={activeDashboardPanel}
+          onDashboardPanelChange={onDashboardPanelChange}
           isGpsRecording={gpsRecordingState !== 'idle'}
           pendingOpsCount={pendingOpsCount}
         />

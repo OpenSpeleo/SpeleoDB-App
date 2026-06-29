@@ -39,6 +39,8 @@ This folder contains product and engineering documentation for core app behavior
   locate/create/edit/delete state, toasts, async guards, and GPS handoff.
 - `dashboard-project-visibility.md`: project and country visibility intent,
   persistence, effective map gates, bulk actions, and bounded project zoom.
+- `dashboard-panel-state.md`: the single mutually exclusive Projects,
+  Landmarks, GPS, and Map panel state shared across authenticated routes.
 - `networking.md`: networking state model, reconnect triggers, and the no-passive-listener guarantee.
 - `ci.md`: GitHub Actions stages, Vitest non-watch requirements, integration-test secrets, and native build verification.
 - `implementation-guidelines.md`: high-level architecture boundaries, coding

@@ -6,6 +6,7 @@ import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import Settings from './Settings';
 import { formatLastSync } from '../utils/formatLastSync';
+import type { DashboardPanel } from '../types/dashboardPanel';
 
 // ==================== Mocks ====================
 
@@ -177,9 +178,8 @@ function renderSettings(
     const [showLandmarks, setShowLandmarks] = React.useState(initialShowLandmarks);
     const [colorMode, setColorMode] = React.useState(initialColorMode);
     const [measurementUnit, setMeasurementUnit] = React.useState(initialMeasurementUnit);
-    const [isProjectPanelOpen, setIsProjectPanelOpen] = React.useState(false);
-    const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = React.useState(false);
-    const [isGpsPanelOpen, setIsGpsPanelOpen] = React.useState(false);
+    const [activeDashboardPanel, setActiveDashboardPanel] =
+      React.useState<DashboardPanel>(null);
     const [layerOfflineSync, setLayerOfflineSync] = React.useState<Record<string, boolean>>({});
     return (
       <Settings
@@ -191,12 +191,8 @@ function renderSettings(
         onMeasurementUnitChange={setMeasurementUnit}
         layerOfflineSync={layerOfflineSync}
         onLayerOfflineSyncChange={setLayerOfflineSync}
-        isProjectPanelOpen={isProjectPanelOpen}
-        onProjectPanelChange={setIsProjectPanelOpen}
-        isLandmarkPanelOpen={isLandmarkPanelOpen}
-        onLandmarkPanelChange={setIsLandmarkPanelOpen}
-        isGpsPanelOpen={isGpsPanelOpen}
-        onGpsPanelChange={setIsGpsPanelOpen}
+        activeDashboardPanel={activeDashboardPanel}
+        onDashboardPanelChange={setActiveDashboardPanel}
       />
     );
   };

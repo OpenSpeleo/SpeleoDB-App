@@ -8,6 +8,7 @@ import Dashboard from './Dashboard';
 import { MAP } from '../constants';
 import type { Project } from '../types/project';
 import type { GpsTrackListItem } from '../types/gpsTrack';
+import type { DashboardPanel } from '../types/dashboardPanel';
 import { LandmarkMutationError } from '../types/landmark';
 import { allowConsoleWarn } from '../test/consoleGuard';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
@@ -210,18 +211,16 @@ vi.mock('maplibre-gl', () => ({
 
 vi.mock('../components/AppTabBar', () => ({
   default: ({
-    onProjectPanelChange,
-    onGpsPanelChange,
+    onDashboardPanelChange,
     onTabPress,
   }: {
-    onProjectPanelChange?: (open: boolean) => void;
-    onGpsPanelChange?: (open: boolean) => void;
+    onDashboardPanelChange?: (panel: DashboardPanel) => void;
     onTabPress?: () => void;
   }) => (
     <div data-testid="app-tab-bar">
-      <button data-testid="projects-tab" onClick={() => { onTabPress?.(); onProjectPanelChange?.(true); }}>Projects</button>
-      <button data-testid="gps-tab" onClick={() => { onTabPress?.(); onGpsPanelChange?.(true); }}>GPS</button>
-      <button data-testid="map-tab" onClick={() => { onTabPress?.(); }}>Map</button>
+      <button data-testid="projects-tab" onClick={() => { onTabPress?.(); onDashboardPanelChange?.('projects'); }}>Projects</button>
+      <button data-testid="gps-tab" onClick={() => { onTabPress?.(); onDashboardPanelChange?.('gps'); }}>GPS</button>
+      <button data-testid="map-tab" onClick={() => { onTabPress?.(); onDashboardPanelChange?.(null); }}>Map</button>
     </div>
   ),
 }));
@@ -502,19 +501,14 @@ function renderDashboard(options?: {
   const initialLayerId = options?.selectedMapLayerId ?? 'esri-satellite';
   const initialLayerOfflineSync = options?.layerOfflineSync ?? {};
   const Harness: React.FC = () => {
-    const [isProjectPanelOpen, setIsProjectPanelOpen] = React.useState(false);
-    const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = React.useState(false);
-    const [isGpsPanelOpen, setIsGpsPanelOpen] = React.useState(false);
+    const [activeDashboardPanel, setActiveDashboardPanel] =
+      React.useState<DashboardPanel>(null);
     const [showLandmarks] = React.useState(initialShowLandmarks);
     const [selectedMapLayerId, setSelectedMapLayerId] = React.useState(initialLayerId);
     return (
       <Dashboard
-        isProjectPanelOpen={isProjectPanelOpen}
-        onProjectPanelChange={setIsProjectPanelOpen}
-        isLandmarkPanelOpen={isLandmarkPanelOpen}
-        onLandmarkPanelChange={setIsLandmarkPanelOpen}
-        isGpsPanelOpen={isGpsPanelOpen}
-        onGpsPanelChange={setIsGpsPanelOpen}
+        activeDashboardPanel={activeDashboardPanel}
+        onDashboardPanelChange={setActiveDashboardPanel}
         showLandmarks={showLandmarks}
         colorMode={initialColorMode}
         measurementUnit={initialMeasurementUnit}

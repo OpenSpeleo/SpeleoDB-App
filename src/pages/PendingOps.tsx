@@ -20,16 +20,13 @@ import type {
   OfflineOpView,
 } from '../types/offlineOp';
 import type { OfflineSyncSummary } from '../offline/OfflineOpQueue';
+import type { DashboardPanel, DashboardPanelChange } from '../types/dashboardPanel';
 import { formatLastSync } from '../utils/formatLastSync';
 import { useOfflineReconnect } from '../hooks/useOfflineReconnect';
 
 interface PendingOpsProps {
-  isProjectPanelOpen: boolean;
-  onProjectPanelChange: (open: boolean) => void;
-  isLandmarkPanelOpen: boolean;
-  onLandmarkPanelChange: (open: boolean) => void;
-  isGpsPanelOpen: boolean;
-  onGpsPanelChange: (open: boolean) => void;
+  activeDashboardPanel: DashboardPanel;
+  onDashboardPanelChange: DashboardPanelChange;
 }
 
 const KIND_LABEL: Record<OfflineOpView['kind'], string> = {
@@ -50,12 +47,8 @@ function kindAccent(kind: OfflineOpView['kind']): string {
 }
 
 const PendingOps: React.FC<PendingOpsProps> = ({
-  isProjectPanelOpen,
-  onProjectPanelChange,
-  isLandmarkPanelOpen,
-  onLandmarkPanelChange,
-  isGpsPanelOpen,
-  onGpsPanelChange,
+  activeDashboardPanel,
+  onDashboardPanelChange,
 }) => {
   const history = useHistory();
   const { controller, pendingOpsCount, pendingOpsRevision, isOfflineLocked, gpsRecordingState } =
@@ -363,12 +356,8 @@ const PendingOps: React.FC<PendingOpsProps> = ({
 
       <IonFooter className="ion-no-border">
         <AppTabBar
-          isProjectPanelOpen={isProjectPanelOpen}
-          onProjectPanelChange={onProjectPanelChange}
-          isLandmarkPanelOpen={isLandmarkPanelOpen}
-          onLandmarkPanelChange={onLandmarkPanelChange}
-          isGpsPanelOpen={isGpsPanelOpen}
-          onGpsPanelChange={onGpsPanelChange}
+          activeDashboardPanel={activeDashboardPanel}
+          onDashboardPanelChange={onDashboardPanelChange}
           isGpsRecording={gpsRecordingState !== 'idle'}
           pendingOpsCount={pendingOpsCount}
         />

@@ -90,6 +90,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Extract dashboard project visibility actions`
 - [x] `[Refactoring] Extract dashboard map data lifecycle`
 - [x] `[Refactoring] Extract dashboard map shell`
+- [x] `[Refactoring] Unify dashboard panel state`
 - [ ] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [ ] `[Fix] Stop inactive page effects and polling`
 - [ ] `[Fix] Harden authentication and network state machines`
@@ -568,7 +569,7 @@ and physical-device evidence.
 
 ### Extract dashboard map shell
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `d0bc265` (`[Refactoring] Extract dashboard map shell`).
 - Verification: Node 22 inventory, lint, typecheck, focused hook/canvas and
   Dashboard characterization coverage, full one-shot Vitest with coverage and
   live API contracts, production build, both-platform Capacitor sync, Android
@@ -592,3 +593,29 @@ and physical-device evidence.
 - Findings closed: the map-shell and page-size slices of MH-007. Dashboard is
   now within the 600-line production-module budget; modal composition and
   panel-state unification remain scheduled as independently reviewable splits.
+
+### Unify dashboard panel state
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, focused authenticated-shell,
+  tab-bar, shared-state, Dashboard, Settings, and Pending tests, full one-shot
+  Vitest with coverage and live API contracts, production build,
+  both-platform Capacitor sync, Android lint/unit/release builds, signed iOS
+  XCTest, and iOS Release compilation.
+- Result: three independent panel booleans and three coupled setters are
+  replaced by one `DashboardPanel` union and one transition callback across all
+  authenticated routes. Impossible multi-panel states are no longer
+  representable, and switching panels publishes one atomic React update. The
+  authoritative hidden-route test proves the complete none-to-projects-to-
+  landmarks-to-GPS-to-none sequence; 191 focused shell/page tests pass.
+  Dashboard shrinks from 584 to 576 lines and remains within the
+  production-module budget. Vitest passes
+  1,684/1,684 tests across 100 files with aggregate coverage of 89.34%
+  statements, 82.28% branches, 92.78% functions, and 91.43% lines. The
+  Dashboard lazy chunk drops to 159.50 KiB (51.42 KiB gzip), 0.15 KiB (0.03
+  KiB gzip) below the prior modular boundary. Capacitor sync introduces no
+  tracked native drift; Android passes 9/9 first-party native tests plus lint,
+  APK, and AAB builds, and iOS passes 9/9 signed native tests on iPhone 17
+  Pro/iOS 26.5 plus Release compilation.
+- Findings closed: the panel-state slice of MH-007. Modal composition remains
+  scheduled as the final independently reviewable Dashboard split.

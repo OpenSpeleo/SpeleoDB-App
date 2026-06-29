@@ -4,6 +4,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryHistory } from 'history';
 import App from './App';
+import type { DashboardPanel } from './types/dashboardPanel';
 
 const { historyRef } = vi.hoisted(() => ({
   historyRef: { current: null as ReturnType<typeof createMemoryHistory> | null },
@@ -59,19 +60,19 @@ vi.mock('./pages/Dashboard', () => ({
     showLandmarks,
     colorMode,
     measurementUnit,
-    isProjectPanelOpen,
+    activeDashboardPanel,
   }: {
     showLandmarks: boolean;
     colorMode: 'project' | 'depth';
     measurementUnit: 'feet' | 'meters';
-    isProjectPanelOpen: boolean;
+    activeDashboardPanel: DashboardPanel;
   }) => (
     <div
       data-testid="mock-dashboard"
       data-show-landmarks={String(showLandmarks)}
       data-color-mode={colorMode}
       data-measurement-unit={measurementUnit}
-      data-panel-open={String(isProjectPanelOpen)}
+      data-active-panel={activeDashboardPanel ?? 'none'}
     />
   ),
 }));
@@ -81,12 +82,12 @@ vi.mock('./pages/Settings', () => ({
     onShowLandmarksChange,
     onColorModeChange,
     onMeasurementUnitChange,
-    onProjectPanelChange,
+    onDashboardPanelChange,
   }: {
     onShowLandmarksChange: (visible: boolean) => void;
     onColorModeChange: (mode: 'project' | 'depth') => void;
     onMeasurementUnitChange: (unit: 'feet' | 'meters') => void;
-    onProjectPanelChange: (open: boolean) => void;
+    onDashboardPanelChange: (panel: DashboardPanel) => void;
   }) => (
     <div data-testid="mock-settings">
       <button
@@ -113,7 +114,7 @@ vi.mock('./pages/Settings', () => ({
       <button
         type="button"
         data-testid="settings-open-panel"
-        onClick={() => onProjectPanelChange(true)}
+        onClick={() => onDashboardPanelChange('projects')}
       >
         Open panel
       </button>
@@ -146,7 +147,7 @@ describe('App shared state wiring', () => {
       expect(dashboard).toHaveAttribute('data-show-landmarks', 'false');
       expect(dashboard).toHaveAttribute('data-color-mode', 'depth');
       expect(dashboard).toHaveAttribute('data-measurement-unit', 'feet');
-      expect(dashboard).toHaveAttribute('data-panel-open', 'true');
+      expect(dashboard).toHaveAttribute('data-active-panel', 'projects');
     });
   });
 });

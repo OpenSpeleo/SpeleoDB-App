@@ -13,7 +13,12 @@ The project panel is a slide-in side panel on the dashboard that lets users mana
 | Tapping "Projects" tab again (when open) | Panel slides out |
 | Tapping "Map" tab (when open) | Panel slides out |
 
-State is owned by `isProjectPanelOpen` in `App.tsx` (`AppRoutes`) and shared with both `Dashboard.tsx` and `Settings.tsx`. The panel itself (`ProjectPanel.tsx`) is a stateless presentational component controlled via `isOpen` / `onClose` props. The bottom nav bar toggles the panel through the shared `onProjectPanelChange` callback prop.
+State is the `'projects'` member of the single `DashboardPanel` union owned by
+`AuthenticatedAppShell` and shared with Dashboard, Settings, and Pending. The
+panel itself (`ProjectPanel.tsx`) is a stateless presentational component
+controlled via `isOpen` / `onClose` props. The bottom nav bar transitions the
+shared value through `onDashboardPanelChange`; see
+`docs/dashboard-panel-state.md`.
 
 ### Auto-close on project selection
 
@@ -180,11 +185,11 @@ When no projects are available, the list area shows "No projects available" cent
 
 ```
 src/components/ProjectPanel.tsx   -- Presentational component (stateless)
-src/App.tsx                       -- Shared panel state owner + prop wiring (`isProjectPanelOpen`)
+src/AuthenticatedAppShell.tsx     -- Single `DashboardPanel` state owner + prop wiring
 src/pages/Dashboard.tsx           -- Connects map data and visibility outputs to consumers
 src/pages/dashboard/useDashboardMapData.ts -- Loads commit-matched cached map data
 src/pages/dashboard/useDashboardProjectVisibility.ts -- Visibility state + actions
-src/components/AppTabBar.tsx      -- Navigation trigger (Projects tab calls `onProjectPanelChange`)
+src/components/AppTabBar.tsx      -- Navigation + atomic panel transition policy
 ```
 
 `ProjectPanel` receives all data and callbacks as props. It does not hold state,

@@ -10,6 +10,7 @@ import {
   getSelectedMapLayerId,
   getShowLandmarks,
 } from './services/PreferencesService'
+import type { DashboardPanel } from './types/dashboardPanel'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Settings = lazy(() => import('./pages/Settings'))
@@ -25,9 +26,7 @@ function AuthenticatedRoutes(): ReactNode {
   const isDashboard = path === '/dashboard'
   const isSettings = path === '/settings'
   const isPending = path === '/pending'
-  const [isProjectPanelOpen, setIsProjectPanelOpen] = useState(false)
-  const [isLandmarkPanelOpen, setIsLandmarkPanelOpen] = useState(false)
-  const [isGpsPanelOpen, setIsGpsPanelOpen] = useState(false)
+  const [activeDashboardPanel, setActiveDashboardPanel] = useState<DashboardPanel>(null)
   const [showLandmarks, setShowLandmarks] = useState(() => getShowLandmarks())
   const [colorMode, setColorMode] = useState(() => getColorMode())
   const [measurementUnit, setMeasurementUnit] = useState(() => getMeasurementUnit())
@@ -54,32 +53,6 @@ function AuthenticatedRoutes(): ReactNode {
     return () => window.clearTimeout(timeout)
   }, [gpsErrorToast])
 
-  // The project, landmark, and GPS panels share the same left-edge slot, so
-  // opening one closes the others (they are mutually exclusive).
-  const handleProjectPanelChange = (open: boolean) => {
-    setIsProjectPanelOpen(open)
-    if (open) {
-      setIsLandmarkPanelOpen(false)
-      setIsGpsPanelOpen(false)
-    }
-  }
-
-  const handleLandmarkPanelChange = (open: boolean) => {
-    setIsLandmarkPanelOpen(open)
-    if (open) {
-      setIsProjectPanelOpen(false)
-      setIsGpsPanelOpen(false)
-    }
-  }
-
-  const handleGpsPanelChange = (open: boolean) => {
-    setIsGpsPanelOpen(open)
-    if (open) {
-      setIsProjectPanelOpen(false)
-      setIsLandmarkPanelOpen(false)
-    }
-  }
-
   return (
     <>
       <div
@@ -92,12 +65,8 @@ function AuthenticatedRoutes(): ReactNode {
       >
         <Suspense fallback={null}>
           <Dashboard
-            isProjectPanelOpen={isProjectPanelOpen}
-            onProjectPanelChange={handleProjectPanelChange}
-            isLandmarkPanelOpen={isLandmarkPanelOpen}
-            onLandmarkPanelChange={handleLandmarkPanelChange}
-            isGpsPanelOpen={isGpsPanelOpen}
-            onGpsPanelChange={handleGpsPanelChange}
+            activeDashboardPanel={activeDashboardPanel}
+            onDashboardPanelChange={setActiveDashboardPanel}
             showLandmarks={showLandmarks}
             colorMode={colorMode}
             measurementUnit={measurementUnit}
@@ -125,12 +94,8 @@ function AuthenticatedRoutes(): ReactNode {
             onMeasurementUnitChange={setMeasurementUnit}
             layerOfflineSync={layerOfflineSync}
             onLayerOfflineSyncChange={setLayerOfflineSync}
-            isProjectPanelOpen={isProjectPanelOpen}
-            onProjectPanelChange={handleProjectPanelChange}
-            isLandmarkPanelOpen={isLandmarkPanelOpen}
-            onLandmarkPanelChange={handleLandmarkPanelChange}
-            isGpsPanelOpen={isGpsPanelOpen}
-            onGpsPanelChange={handleGpsPanelChange}
+            activeDashboardPanel={activeDashboardPanel}
+            onDashboardPanelChange={setActiveDashboardPanel}
           />
         </Suspense>
       </div>
@@ -144,12 +109,8 @@ function AuthenticatedRoutes(): ReactNode {
       >
         <Suspense fallback={null}>
           <PendingOps
-            isProjectPanelOpen={isProjectPanelOpen}
-            onProjectPanelChange={handleProjectPanelChange}
-            isLandmarkPanelOpen={isLandmarkPanelOpen}
-            onLandmarkPanelChange={handleLandmarkPanelChange}
-            isGpsPanelOpen={isGpsPanelOpen}
-            onGpsPanelChange={handleGpsPanelChange}
+            activeDashboardPanel={activeDashboardPanel}
+            onDashboardPanelChange={setActiveDashboardPanel}
           />
         </Suspense>
       </div>

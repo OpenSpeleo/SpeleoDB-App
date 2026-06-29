@@ -72,12 +72,8 @@ function setup(options: SetupOptions = {}) {
     <MemoryRouter initialEntries={['/pending']}>
       <SpeleoDBContext.Provider value={value}>
         <PendingOps
-          isProjectPanelOpen={false}
-          onProjectPanelChange={vi.fn()}
-          isLandmarkPanelOpen={false}
-          onLandmarkPanelChange={vi.fn()}
-          isGpsPanelOpen={false}
-          onGpsPanelChange={vi.fn()}
+          activeDashboardPanel={null}
+          onDashboardPanelChange={vi.fn()}
         />
       </SpeleoDBContext.Provider>
     </MemoryRouter>,

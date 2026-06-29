@@ -71,11 +71,13 @@ A dedicated section rendered **only while offline-locked** (`isOfflineLocked`), 
 - Sync stats (`cacheBytes`, `manualTileCount`): local state, polled via `useEffect`.
 - Sync metrics (`syncTotalTiles`, `syncProcessedTiles`, `syncPct`): derived via `useMemo` from `tilePrefetchJobs` + `manualTileCount`.
 - `lastSyncedAt`: owned by `SpeleoDBController`, persisted via `PreferencesService`, exposed through `useSpeleoDB()`. UI is read-only.
-- `showLandmarks`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
-- `colorMode`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
-- `measurementUnit`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
+- `showLandmarks`: shared state owned by `AuthenticatedAppShell`, passed via props.
+- `colorMode`: shared state owned by `AuthenticatedAppShell`, passed via props.
+- `measurementUnit`: shared state owned by `AuthenticatedAppShell`, passed via props.
 - `selectedMapLayerId` / `layerOfflineSync`: shared state owned by `AuthenticatedAppShell`, passed to Dashboard + Settings; persisted via `PreferencesService`. Layer offline-sync side effects (prefetch enqueue / cleanup) are owned by `SpeleoDBController`.
-- `isProjectPanelOpen`: shared state owned by `AppRoutes` in `App.tsx`, passed via props.
+- `activeDashboardPanel`: single mutually exclusive panel state owned by
+  `AuthenticatedAppShell`, passed with `onDashboardPanelChange`; see
+  `docs/dashboard-panel-state.md`.
 - Logout modal: local state (`showLogoutConfirmModal`, `isLoggingOut`).
 - Reconnect flow: local state (`isReconnecting`, `showReconnectFailedModal`). The authoritative online/offline state (`isOfflineLocked`) is owned by `SpeleoDBController` and consumed read-only via `useSpeleoDB()`.
 

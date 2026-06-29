@@ -1,13 +1,10 @@
 import React from 'react';
 import { useLocation, useHistory } from 'react-router-dom';
+import type { DashboardPanel, DashboardPanelChange } from '../types/dashboardPanel';
 
 interface AppTabBarProps {
-  isProjectPanelOpen?: boolean;
-  onProjectPanelChange?: (open: boolean) => void;
-  isLandmarkPanelOpen?: boolean;
-  onLandmarkPanelChange?: (open: boolean) => void;
-  isGpsPanelOpen?: boolean;
-  onGpsPanelChange?: (open: boolean) => void;
+  activeDashboardPanel?: DashboardPanel;
+  onDashboardPanelChange?: DashboardPanelChange;
   /** Show a live recording dot on the GPS tab while a track is recording. */
   isGpsRecording?: boolean;
   /**
@@ -21,12 +18,8 @@ interface AppTabBarProps {
 }
 
 const AppTabBar: React.FC<AppTabBarProps> = ({
-  isProjectPanelOpen = false,
-  onProjectPanelChange,
-  isLandmarkPanelOpen = false,
-  onLandmarkPanelChange,
-  isGpsPanelOpen = false,
-  onGpsPanelChange,
+  activeDashboardPanel = null,
+  onDashboardPanelChange,
   isGpsRecording = false,
   onTabPress,
   pendingOpsCount = 0,
@@ -38,34 +31,16 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
   const onPending = location.pathname === '/pending';
   const showPendingTab = pendingOpsCount > 0 || onPending;
 
-  const isProjectsActive = onDashboard && isProjectPanelOpen;
-  const isLandmarksActive = onDashboard && isLandmarkPanelOpen;
-  const isGpsActive = onDashboard && isGpsPanelOpen;
-  const isMapActive =
-    onDashboard && !isProjectPanelOpen && !isLandmarkPanelOpen && !isGpsPanelOpen;
+  const isProjectsActive = onDashboard && activeDashboardPanel === 'projects';
+  const isLandmarksActive = onDashboard && activeDashboardPanel === 'landmarks';
+  const isGpsActive = onDashboard && activeDashboardPanel === 'gps';
+  const isMapActive = onDashboard && activeDashboardPanel === null;
 
-  const openProjectPanel = () => {
-    onProjectPanelChange?.(true);
-  };
-
-  const closeProjectPanel = () => {
-    onProjectPanelChange?.(false);
-  };
-
-  const openLandmarkPanel = () => {
-    onLandmarkPanelChange?.(true);
-  };
-
-  const closeLandmarkPanel = () => {
-    onLandmarkPanelChange?.(false);
-  };
-
-  const openGpsPanel = () => {
-    onGpsPanelChange?.(true);
-  };
-
-  const closeGpsPanel = () => {
-    onGpsPanelChange?.(false);
+  const togglePanel = (panel: Exclude<DashboardPanel, null>) => {
+    if (!onDashboard) history.push('/dashboard');
+    onDashboardPanelChange?.(
+      onDashboard && activeDashboardPanel === panel ? null : panel,
+    );
   };
 
   return (
@@ -84,14 +59,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
         data-testid="projects-tab"
         onClick={() => {
           onTabPress?.();
-          if (!onDashboard) {
-            history.push('/dashboard');
-            openProjectPanel();
-          } else if (isProjectPanelOpen) {
-            closeProjectPanel();
-          } else {
-            openProjectPanel();
-          }
+          togglePanel('projects');
         }}
         className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
           isProjectsActive
@@ -113,14 +81,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
         data-testid="landmarks-tab"
         onClick={() => {
           onTabPress?.();
-          if (!onDashboard) {
-            history.push('/dashboard');
-            openLandmarkPanel();
-          } else if (isLandmarkPanelOpen) {
-            closeLandmarkPanel();
-          } else {
-            openLandmarkPanel();
-          }
+          togglePanel('landmarks');
         }}
         className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
           isLandmarksActive
@@ -143,14 +104,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
         data-testid="gps-tab"
         onClick={() => {
           onTabPress?.();
-          if (!onDashboard) {
-            history.push('/dashboard');
-            openGpsPanel();
-          } else if (isGpsPanelOpen) {
-            closeGpsPanel();
-          } else {
-            openGpsPanel();
-          }
+          togglePanel('gps');
         }}
         className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
           isGpsActive ? 'text-purple-400' : 'text-slate-400 active:text-slate-200'
@@ -180,9 +134,7 @@ const AppTabBar: React.FC<AppTabBarProps> = ({
           if (!onDashboard) {
             history.push('/dashboard');
           }
-          if (isProjectPanelOpen) closeProjectPanel();
-          if (isLandmarkPanelOpen) closeLandmarkPanel();
-          if (isGpsPanelOpen) closeGpsPanel();
+          if (activeDashboardPanel !== null) onDashboardPanelChange?.(null);
         }}
         className={`app-tab-bar__tab flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${
           isMapActive

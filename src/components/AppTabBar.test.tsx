@@ -5,75 +5,79 @@ import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import AppTabBar from './AppTabBar';
+import type { DashboardPanel } from '../types/dashboardPanel';
 
 function renderTabBar(
   pathname: string,
-  isProjectPanelOpen = false,
-  isLandmarkPanelOpen = false,
+  activeDashboardPanel: DashboardPanel = null,
   pendingOpsCount = 0,
-  options: { isGpsPanelOpen?: boolean; isGpsRecording?: boolean } = {},
+  options: { isGpsRecording?: boolean } = {},
 ) {
   const history = createMemoryHistory({ initialEntries: [pathname] });
-  const onProjectPanelChange = vi.fn();
-  const onLandmarkPanelChange = vi.fn();
-  const onGpsPanelChange = vi.fn();
+  const onDashboardPanelChange = vi.fn();
   const onTabPress = vi.fn();
   render(
     <Router history={history}>
       <AppTabBar
-        isProjectPanelOpen={isProjectPanelOpen}
-        onProjectPanelChange={onProjectPanelChange}
-        isLandmarkPanelOpen={isLandmarkPanelOpen}
-        onLandmarkPanelChange={onLandmarkPanelChange}
-        isGpsPanelOpen={options.isGpsPanelOpen ?? false}
-        onGpsPanelChange={onGpsPanelChange}
+        activeDashboardPanel={activeDashboardPanel}
+        onDashboardPanelChange={onDashboardPanelChange}
         isGpsRecording={options.isGpsRecording ?? false}
         onTabPress={onTabPress}
         pendingOpsCount={pendingOpsCount}
       />
     </Router>,
   );
-  return { history, onProjectPanelChange, onLandmarkPanelChange, onGpsPanelChange, onTabPress };
+  return { history, onDashboardPanelChange, onTabPress };
 }
 
 describe('AppTabBar', () => {
   it('opens the project panel and navigates to dashboard from settings', async () => {
     const user = userEvent.setup();
-    const { history, onProjectPanelChange } = renderTabBar('/settings');
+    const { history, onDashboardPanelChange } = renderTabBar('/settings');
 
     await user.click(screen.getByTestId('projects-tab'));
 
     expect(history.location.pathname).toBe('/dashboard');
-    expect(onProjectPanelChange).toHaveBeenCalledWith(true);
+    expect(onDashboardPanelChange).toHaveBeenCalledWith('projects');
   });
 
   it('toggles the project panel closed on dashboard when already open', async () => {
     const user = userEvent.setup();
-    const { onProjectPanelChange } = renderTabBar('/dashboard', true);
+    const { onDashboardPanelChange } = renderTabBar('/dashboard', 'projects');
 
     await user.click(screen.getByTestId('projects-tab'));
 
-    expect(onProjectPanelChange).toHaveBeenCalledWith(false);
+    expect(onDashboardPanelChange).toHaveBeenCalledWith(null);
   });
 
   it('opens the project panel on dashboard when currently closed', async () => {
     const user = userEvent.setup();
-    const { onProjectPanelChange } = renderTabBar('/dashboard', false);
+    const { onDashboardPanelChange } = renderTabBar('/dashboard');
 
     await user.click(screen.getByTestId('projects-tab'));
 
-    expect(onProjectPanelChange).toHaveBeenCalledWith(true);
+    expect(onDashboardPanelChange).toHaveBeenCalledWith('projects');
+  });
+
+  it('replaces the active panel with one atomic transition', async () => {
+    const user = userEvent.setup();
+    const { onDashboardPanelChange } = renderTabBar('/dashboard', 'landmarks');
+
+    await user.click(screen.getByTestId('projects-tab'));
+
+    expect(onDashboardPanelChange).toHaveBeenCalledOnce();
+    expect(onDashboardPanelChange).toHaveBeenCalledWith('projects');
   });
 
   it('navigates to dashboard map and closes panel from settings map tab', async () => {
     const user = userEvent.setup();
-    const { history, onProjectPanelChange, onLandmarkPanelChange } = renderTabBar('/settings', true, true);
+    const { history, onDashboardPanelChange } = renderTabBar('/settings', 'landmarks');
 
     await user.click(screen.getByText('Map'));
 
     expect(history.location.pathname).toBe('/dashboard');
-    expect(onProjectPanelChange).toHaveBeenCalledWith(false);
-    expect(onLandmarkPanelChange).toHaveBeenCalledWith(false);
+    expect(onDashboardPanelChange).toHaveBeenCalledOnce();
+    expect(onDashboardPanelChange).toHaveBeenCalledWith(null);
   });
 
   it('renders the GPS tab between Landmarks and Map', () => {
@@ -84,39 +88,44 @@ describe('AppTabBar', () => {
 
   it('opens the GPS panel and navigates to dashboard from settings', async () => {
     const user = userEvent.setup();
-    const { history, onGpsPanelChange } = renderTabBar('/settings');
+    const { history, onDashboardPanelChange } = renderTabBar('/settings');
 
     await user.click(screen.getByTestId('gps-tab'));
 
     expect(history.location.pathname).toBe('/dashboard');
-    expect(onGpsPanelChange).toHaveBeenCalledWith(true);
+    expect(onDashboardPanelChange).toHaveBeenCalledWith('gps');
   });
 
   it('toggles the GPS panel closed on dashboard when already open', async () => {
     const user = userEvent.setup();
-    const { onGpsPanelChange } = renderTabBar('/dashboard', false, false, 0, {
-      isGpsPanelOpen: true,
-    });
+    const { onDashboardPanelChange } = renderTabBar('/dashboard', 'gps');
 
     await user.click(screen.getByTestId('gps-tab'));
 
-    expect(onGpsPanelChange).toHaveBeenCalledWith(false);
+    expect(onDashboardPanelChange).toHaveBeenCalledWith(null);
   });
 
   it('closes the GPS panel when the Map tab is tapped', async () => {
     const user = userEvent.setup();
-    const { onGpsPanelChange } = renderTabBar('/dashboard', false, false, 0, {
-      isGpsPanelOpen: true,
-    });
+    const { onDashboardPanelChange } = renderTabBar('/dashboard', 'gps');
 
     await user.click(screen.getByText('Map'));
 
-    expect(onGpsPanelChange).toHaveBeenCalledWith(false);
+    expect(onDashboardPanelChange).toHaveBeenCalledWith(null);
+  });
+
+  it('does not republish an already-active Map state', async () => {
+    const user = userEvent.setup();
+    const { onDashboardPanelChange } = renderTabBar('/dashboard');
+
+    await user.click(screen.getByText('Map'));
+
+    expect(onDashboardPanelChange).not.toHaveBeenCalled();
   });
 
   it('calls onTabPress on every tab press (to collapse GPS overlays)', async () => {
     const user = userEvent.setup();
-    const { onTabPress } = renderTabBar('/dashboard', false, false, 2);
+    const { onTabPress } = renderTabBar('/dashboard', null, 2);
     await user.click(screen.getByTestId('projects-tab'));
     await user.click(screen.getByTestId('landmarks-tab'));
     await user.click(screen.getByTestId('gps-tab'));
@@ -127,7 +136,7 @@ describe('AppTabBar', () => {
   });
 
   it('shows a recording dot on the GPS tab while recording', () => {
-    renderTabBar('/dashboard', false, false, 0, { isGpsRecording: true });
+    renderTabBar('/dashboard', null, 0, { isGpsRecording: true });
     expect(screen.getByTestId('gps-tab-recording-dot')).toBeInTheDocument();
   });
 
@@ -138,39 +147,39 @@ describe('AppTabBar', () => {
 
   it('opens the landmark panel and navigates to dashboard from settings', async () => {
     const user = userEvent.setup();
-    const { history, onLandmarkPanelChange } = renderTabBar('/settings');
+    const { history, onDashboardPanelChange } = renderTabBar('/settings');
 
     await user.click(screen.getByTestId('landmarks-tab'));
 
     expect(history.location.pathname).toBe('/dashboard');
-    expect(onLandmarkPanelChange).toHaveBeenCalledWith(true);
+    expect(onDashboardPanelChange).toHaveBeenCalledWith('landmarks');
   });
 
   it('opens the landmark panel on dashboard when currently closed', async () => {
     const user = userEvent.setup();
-    const { onLandmarkPanelChange } = renderTabBar('/dashboard', false, false);
+    const { onDashboardPanelChange } = renderTabBar('/dashboard');
 
     await user.click(screen.getByTestId('landmarks-tab'));
 
-    expect(onLandmarkPanelChange).toHaveBeenCalledWith(true);
+    expect(onDashboardPanelChange).toHaveBeenCalledWith('landmarks');
   });
 
   it('toggles the landmark panel closed on dashboard when already open', async () => {
     const user = userEvent.setup();
-    const { onLandmarkPanelChange } = renderTabBar('/dashboard', false, true);
+    const { onDashboardPanelChange } = renderTabBar('/dashboard', 'landmarks');
 
     await user.click(screen.getByTestId('landmarks-tab'));
 
-    expect(onLandmarkPanelChange).toHaveBeenCalledWith(false);
+    expect(onDashboardPanelChange).toHaveBeenCalledWith(null);
   });
 
   it('hides the Pending tab when there are no pending ops', () => {
-    renderTabBar('/dashboard', false, false, 0);
+    renderTabBar('/dashboard', null, 0);
     expect(screen.queryByTestId('pending-tab')).toBeNull();
   });
 
   it('reveals the Pending tab with a badge when there are pending ops', () => {
-    renderTabBar('/dashboard', false, false, 3);
+    renderTabBar('/dashboard', null, 3);
     const tabs = screen.getAllByRole('tab');
     expect(tabs).toHaveLength(6);
     expect(tabs[4]).toHaveAttribute('data-testid', 'pending-tab');
@@ -181,7 +190,7 @@ describe('AppTabBar', () => {
 
   it('navigates to the Pending page when the Pending tab is tapped', async () => {
     const user = userEvent.setup();
-    const { history } = renderTabBar('/dashboard', false, false, 2);
+    const { history } = renderTabBar('/dashboard', null, 2);
 
     await user.click(screen.getByTestId('pending-tab'));
 
@@ -189,7 +198,7 @@ describe('AppTabBar', () => {
   });
 
   it('keeps the Pending tab visible on /pending even when the queue is empty', () => {
-    renderTabBar('/pending', false, false, 0);
+    renderTabBar('/pending', null, 0);
     expect(screen.getByTestId('pending-tab')).toBeTruthy();
   });
 });

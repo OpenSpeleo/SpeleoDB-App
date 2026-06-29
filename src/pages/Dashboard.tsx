@@ -17,6 +17,7 @@ import type { MapRef } from 'react-map-gl/maplibre';
 import { useSpeleoDB } from '../context/useSpeleoDB';
 import { DEFAULT_MAP_LAYER_ID, MAP } from '../constants';
 import type { MapLayerId } from '../types/mapLayer';
+import type { DashboardPanel, DashboardPanelChange } from '../types/dashboardPanel';
 import { registerTileCacheProtocol } from '../services/TileCacheService';
 import ProjectPanel from '../components/ProjectPanel';
 import LandmarkPanel from '../components/LandmarkPanel';
@@ -50,12 +51,8 @@ registerTileCacheProtocol();
 // ==================== Component ====================
 
 interface DashboardProps {
-  isProjectPanelOpen: boolean;
-  onProjectPanelChange: (open: boolean) => void;
-  isLandmarkPanelOpen: boolean;
-  onLandmarkPanelChange: (open: boolean) => void;
-  isGpsPanelOpen: boolean;
-  onGpsPanelChange: (open: boolean) => void;
+  activeDashboardPanel: DashboardPanel;
+  onDashboardPanelChange: DashboardPanelChange;
   showLandmarks: boolean;
   colorMode: MapColorMode;
   measurementUnit: MeasurementUnit;
@@ -65,12 +62,8 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({
-  isProjectPanelOpen,
-  onProjectPanelChange,
-  isLandmarkPanelOpen,
-  onLandmarkPanelChange,
-  isGpsPanelOpen,
-  onGpsPanelChange,
+  activeDashboardPanel,
+  onDashboardPanelChange,
   showLandmarks,
   colorMode,
   measurementUnit,
@@ -132,8 +125,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     landmarksRevision,
   });
   const closeProjectPanel = useCallback(
-    () => onProjectPanelChange(false),
-    [onProjectPanelChange],
+    () => onDashboardPanelChange(null),
+    [onDashboardPanelChange],
   );
   const {
     panelProjects,
@@ -228,8 +221,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     sampleDepthAtClientPoint,
   });
   const closeLandmarkPanel = useCallback(
-    () => onLandmarkPanelChange(false),
-    [onLandmarkPanelChange],
+    () => onDashboardPanelChange(null),
+    [onDashboardPanelChange],
   );
 
   const {
@@ -267,7 +260,10 @@ const Dashboard: React.FC<DashboardProps> = ({
     onClosePanel: closeLandmarkPanel,
   });
 
-  const closeGpsPanel = useCallback(() => onGpsPanelChange(false), [onGpsPanelChange]);
+  const closeGpsPanel = useCallback(
+    () => onDashboardPanelChange(null),
+    [onDashboardPanelChange],
+  );
   const {
     trackVisibility: gpsTrackVisibility,
     loadingTrackIds,
@@ -400,8 +396,8 @@ const Dashboard: React.FC<DashboardProps> = ({
             onHideAll={handleHideAll}
             onToggleCountry={handleToggleCountry}
             onToggleCountryCollapsed={handleToggleCountryCollapsed}
-            onClose={() => onProjectPanelChange(false)}
-            isOpen={isProjectPanelOpen}
+            onClose={closeProjectPanel}
+            isOpen={activeDashboardPanel === 'projects'}
           />
 
           {/* ---- Landmark panel ---- */}
@@ -414,14 +410,14 @@ const Dashboard: React.FC<DashboardProps> = ({
             onLocateLandmark={handleLocateLandmark}
             onShowAll={handleLandmarkShowAll}
             onHideAll={handleLandmarkHideAll}
-            onClose={() => onLandmarkPanelChange(false)}
-            isOpen={isLandmarkPanelOpen}
+            onClose={closeLandmarkPanel}
+            isOpen={activeDashboardPanel === 'landmarks'}
           />
 
           {/* ---- GPS panel ---- */}
           <GpsPanel
-            isOpen={isGpsPanelOpen}
-            onClose={() => onGpsPanelChange(false)}
+            isOpen={activeDashboardPanel === 'gps'}
+            onClose={closeGpsPanel}
             recordingState={gpsRecordingState}
             currentPoints={currentTrackPoints}
             tracks={gpsTracks}
@@ -565,12 +561,8 @@ const Dashboard: React.FC<DashboardProps> = ({
 
           </div>
           <AppTabBar
-            isProjectPanelOpen={isProjectPanelOpen}
-            onProjectPanelChange={onProjectPanelChange}
-            isLandmarkPanelOpen={isLandmarkPanelOpen}
-            onLandmarkPanelChange={onLandmarkPanelChange}
-            isGpsPanelOpen={isGpsPanelOpen}
-            onGpsPanelChange={onGpsPanelChange}
+            activeDashboardPanel={activeDashboardPanel}
+            onDashboardPanelChange={onDashboardPanelChange}
             isGpsRecording={gpsRecordingState !== 'idle'}
             onTabPress={closeGpsOverlays}
             pendingOpsCount={pendingOpsCount}

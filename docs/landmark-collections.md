@@ -75,10 +75,10 @@ flowchart TD
   and `LandmarkListItem` (`src/utils/landmarkCollections.ts`).
 - **Panel:** `src/components/LandmarkPanel.tsx` (stateless; props in, callbacks out).
 - **Tab:** `src/components/AppTabBar.tsx` — "Landmarks" tab placed between Projects
-  and Map, with `isLandmarkPanelOpen` / `onLandmarkPanelChange` props.
+  and Map, using the `'landmarks'` member of `DashboardPanel`.
 - **Panel state ownership / mutual exclusivity:** `src/AuthenticatedAppShell.tsx`
-  (`handleProjectPanelChange` / `handleLandmarkPanelChange`), threaded through
-  `Dashboard` and `Settings`.
+  owns one union value threaded through Dashboard, Settings, and Pending; see
+  `docs/dashboard-panel-state.md`.
 - **Persistence:** `UserPreferences.landmarkCollectionVisibility` and
   `landmarkCollectionCollapsed` (localStorage via `PreferencesService`), with
   `get/set` helpers mirroring project visibility. Missing key ⇒ visible /
