@@ -19,10 +19,8 @@ import { Geolocation } from '@capacitor/geolocation';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 import { useSpeleoDB } from '../context/useSpeleoDB';
-import { DEFAULT_MAP_LAYER_ID, MAP, MAP_LAYERS, MAP_OVERLAYS } from '../constants';
-import type { MapOverlayGeoJsonRecord } from '../types/mapOverlay';
+import { DEFAULT_MAP_LAYER_ID, MAP, MAP_LAYERS } from '../constants';
 import type { MapLayerId } from '../types/mapLayer';
-import type { ProjectGeoJSONBounds } from '../types/projectGeoJSON';
 import { registerTileCacheProtocol, getCachedLayerStyle } from '../services/TileCacheService';
 import MapLayerControl from '../components/map/MapLayerControl';
 import {
@@ -32,9 +30,6 @@ import ProjectPanel from '../components/ProjectPanel';
 import LandmarkPanel from '../components/LandmarkPanel';
 import GpsPanel from '../components/GpsPanel';
 import AppTabBar from '../components/AppTabBar';
-import {
-  buildLandmarkCollectionGroups,
-} from '../utils/landmarkCollections';
 import GeolocationErrorModal from '../components/GeolocationErrorModal';
 import DistanceScale from '../components/map/DistanceScale';
 import DepthGauge from '../components/map/DepthGauge';
@@ -43,28 +38,18 @@ import OverlayMarkerDetailsModal from '../components/OverlayMarkerDetailsModal';
 import LandmarkFormModal from '../components/LandmarkFormModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LongPressRing from '../components/LongPressRing';
-import { ensureLandmarkPropertyIds } from '../utils/landmarkMutations';
-import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
-import { createProjectColorState } from '../utils/projectColors';
 import type { MapColorMode } from '../types/mapColorMode';
 import type { MeasurementUnit } from '../types/measurementUnit';
-import {
-  DEPTH_PROPERTY_KEY,
-  attachDepthToFeatureCollection,
-} from '../utils/depthColoring';
 import { useDepthProbe } from '../hooks/useDepthProbe';
 import {
   DEFAULT_OVERLAY_ICON_AVAILABILITY,
   OVERLAY_ICON_SOURCES,
   computeBounds,
-  filterOverlayByProjectVisibility,
   loadMapImage,
   lockMapOrientation,
-  normalizeOverlayGeoJSON,
   type OverlayImageMap,
   type OverlayIconAvailability,
   type OverlayIconId,
-  type ProjectBoundsRecord,
 } from './dashboard/dashboardMapUtils';
 import { ProjectMapLayers } from './dashboard/ProjectMapLayers';
 import { OverlayMapLayers } from './dashboard/OverlayMapLayers';
@@ -76,16 +61,10 @@ import { useDashboardGpsTrackActions } from './dashboard/useDashboardGpsTrackAct
 import { useDashboardGpsRecordingActions } from './dashboard/useDashboardGpsRecordingActions';
 import { useDashboardLandmarkActions } from './dashboard/useDashboardLandmarkActions';
 import { useDashboardProjectVisibility } from './dashboard/useDashboardProjectVisibility';
-
-// ==================== GeoJSON type alias ====================
-
-type GeoJsonRecord = Record<string, GeoJSON.FeatureCollection>;
-interface LoadedProjectMapData {
-  commitId: string;
-  featureCollection: GeoJSON.FeatureCollection;
-  bounds: ProjectGeoJSONBounds;
-}
-type ProjectMapDataRecord = Record<string, LoadedProjectMapData>;
+import {
+  useDashboardMapData,
+  useVisibleDashboardOverlays,
+} from './dashboard/useDashboardMapData';
 
 // ==================== Register tile caching protocol once ====================
 
@@ -146,10 +125,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     latitude: MAP.DEFAULT_CENTER[1],
   }));
 
-  // Loaded, commit-identified project map artifacts. Consumers derive their
-  // GeoJSON and bounds from the same atomic record so commits cannot mix.
-  const [projectMapData, setProjectMapData] = useState<ProjectMapDataRecord>({});
-  const [overlayGeoJsonData, setOverlayGeoJsonData] = useState<MapOverlayGeoJsonRecord>({});
   const [overlayIconAvailability, setOverlayIconAvailability] = useState<OverlayIconAvailability>(
     DEFAULT_OVERLAY_ICON_AVAILABILITY,
   );
@@ -201,28 +176,21 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // ---- Load GeoJSON from cache after sync completes -------------------------
 
-  const { sortedProjects, projectColorsById } = useMemo(
-    () => createProjectColorState(projects),
-    [projects],
-  );
-  const geoJsonProjects = useMemo(
-    () => sortedProjects.filter((p) => !p.exclude_geojson && Boolean(p.geojson_file)),
-    [sortedProjects],
-  );
-  const currentProjectMapData = useMemo<ProjectMapDataRecord>(() => {
-    const next: ProjectMapDataRecord = {};
-    for (const project of geoJsonProjects) {
-      const loaded = projectMapData[project.id];
-      if (loaded?.commitId === project.latest_commit.id) next[project.id] = loaded;
-    }
-    return next;
-  }, [geoJsonProjects, projectMapData]);
-  const geoJsonData = useMemo<GeoJsonRecord>(() => Object.fromEntries(
-    Object.entries(currentProjectMapData).map(([id, data]) => [id, data.featureCollection]),
-  ), [currentProjectMapData]);
-  const projectBounds = useMemo<ProjectBoundsRecord>(() => Object.fromEntries(
-    Object.entries(currentProjectMapData).map(([id, data]) => [id, data.bounds]),
-  ), [currentProjectMapData]);
+  const {
+    sortedProjects,
+    projectColorsById,
+    geoJsonProjects,
+    currentProjectMapData,
+    geoJsonData,
+    projectBounds,
+    overlayGeoJsonData,
+    landmarkCollectionGroups,
+  } = useDashboardMapData({
+    source: controller,
+    projects,
+    mapDataRevision,
+    landmarksRevision,
+  });
   const closeProjectPanel = useCallback(
     () => onProjectPanelChange(false),
     [onProjectPanelChange],
@@ -274,110 +242,9 @@ const Dashboard: React.FC<DashboardProps> = ({
     setOverlayIconsLoaded(true);
   }, []);
 
-  useEffect(() => {
-    // Only load after a controller-owned map-data sync reaches a terminal state.
-    if (mapDataRevision === 0) return;
-
-    let stale = false;
-
-    (async () => {
-      const newData: ProjectMapDataRecord = {};
-
-      // When geoJsonProjects is empty, the loop is a no-op and newData stays {},
-      // which clears any previously-loaded data via the atomic state swap below.
-      // Setting state inside this async callback avoids the cascading-render
-      // cost of calling setState synchronously in the effect body.
-      for (const project of geoJsonProjects) {
-        try {
-          const mapData = await controller.getProjectMapData(project.id);
-          if (stale) return;
-
-          const fc = normalizeGeoJSON(mapData?.featureCollection);
-          if (
-            fc
-            && fc.features.length > 0
-            && mapData?.commitId === project.latest_commit.id
-          ) {
-            newData[project.id] = {
-              commitId: mapData.commitId,
-              featureCollection: attachDepthToFeatureCollection(fc, DEPTH_PROPERTY_KEY),
-              bounds: mapData.bounds,
-            };
-          }
-        } catch (err) {
-          console.warn('Failed to load project GeoJSON:', err);
-        }
-      }
-
-      if (stale) return;
-
-      setProjectMapData(newData);
-    })();
-
-    return () => { stale = true; };
-  }, [mapDataRevision, controller, geoJsonProjects]);
-
-  useEffect(() => {
-    if (mapDataRevision === 0) return;
-
-    let stale = false;
-    (async () => {
-      const nextData: MapOverlayGeoJsonRecord = {};
-      for (const overlay of MAP_OVERLAYS) {
-        try {
-          const raw = await controller.getOverlayGeoJSON(overlay.id);
-          if (stale) return;
-
-          const featureCollection = normalizeGeoJSON(raw);
-          if (featureCollection && featureCollection.features.length > 0) {
-            const normalized = normalizeOverlayGeoJSON(overlay.id, featureCollection);
-            nextData[overlay.id] =
-              overlay.id === 'landmarks'
-                ? (ensureLandmarkPropertyIds(normalized) as GeoJSON.FeatureCollection)
-                : normalized;
-          }
-        } catch (error) {
-          console.warn('Failed to load a cached overlay:', error);
-        }
-      }
-
-      if (stale) return;
-      setOverlayGeoJsonData(nextData);
-    })();
-
-    return () => {
-      stale = true;
-    };
-    // `landmarksRevision` bumps after a landmark create/edit/delete writes the
-    // cached overlay; mapDataRevision changes only after a sync/resync finishes
-    // its map-data phases. Re-read on either so the map + panel always reflect
-    // the latest cached overlays.
-  }, [controller, mapDataRevision, landmarksRevision]);
-
-  const visibleOverlayGeoJsonData = useMemo(() => {
-    const nextData: MapOverlayGeoJsonRecord = {};
-    for (const overlay of MAP_OVERLAYS) {
-      const featureCollection = overlayGeoJsonData[overlay.id];
-      if (!featureCollection || featureCollection.features.length === 0) {
-        continue;
-      }
-      const filtered = filterOverlayByProjectVisibility(
-        overlay.id,
-        featureCollection,
-        effectiveActiveProjectIds,
-      );
-      if (filtered.features.length > 0) {
-        nextData[overlay.id] = filtered;
-      }
-    }
-    return nextData;
-  }, [effectiveActiveProjectIds, overlayGeoJsonData]);
-
-  // Landmark collection groups for the panel, derived entirely from the cached
-  // landmarks GeoJSON (fully offline -- no extra endpoint).
-  const landmarkCollectionGroups = useMemo(
-    () => buildLandmarkCollectionGroups(overlayGeoJsonData.landmarks ?? null),
-    [overlayGeoJsonData],
+  const visibleOverlayGeoJsonData = useVisibleDashboardOverlays(
+    overlayGeoJsonData,
+    effectiveActiveProjectIds,
   );
 
   // ---- Auto-fit bounds on first data load -----------------------------------

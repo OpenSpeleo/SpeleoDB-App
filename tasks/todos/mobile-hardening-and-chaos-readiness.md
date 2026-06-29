@@ -88,6 +88,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Extract dashboard GPS recording and averaging actions`
 - [x] `[Refactoring] Extract dashboard landmark actions`
 - [x] `[Refactoring] Extract dashboard project visibility actions`
+- [x] `[Refactoring] Extract dashboard map data lifecycle`
 - [ ] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [ ] `[Fix] Stop inactive page effects and polling`
 - [ ] `[Fix] Harden authentication and network state machines`
@@ -517,7 +518,7 @@ and physical-device evidence.
 
 ### Extract dashboard project visibility actions
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `284c83a` (`[Refactoring] Extract dashboard project visibility actions`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -536,5 +537,30 @@ and physical-device evidence.
   passes 9/9 first-party native tests plus lint/APK/AAB builds, and iOS passes
   9/9 signed native tests on iPhone 17 Pro/iOS 26.5 plus Release compilation.
 - Findings closed: the project-visibility slice of MH-007. Map-shell state,
+  chrome, and panel-state unification remain scheduled as independently
+  reviewable splits.
+
+### Extract dashboard map data lifecycle
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
+  compilation.
+- Result: revision-driven project and overlay cache reads, GeoJSON/depth
+  normalization, commit gating, atomic publication, stale completion guards,
+  landmark grouping, and project-linked overlay filtering now live in a focused
+  hook behind a two-method data-source port. Its direct 9-test suite has 100%
+  statement, branch, function, and line coverage, and Dashboard's 106
+  characterization tests stay green. Dashboard shrinks from 934 to 801 lines;
+  the production hook is 221 lines and its largest function is 58 lines.
+  Vitest passes 1,673/1,673 tests across 99 files with aggregate coverage of
+  89.15% statements, 82.04% branches, 92.35% functions, and 91.22% lines. The
+  Dashboard lazy chunk is 157.15 KiB (50.48 KiB gzip), 0.86 KiB larger than the
+  prior modular boundary but still far below the starting bundle baseline.
+  Capacitor sync introduces no tracked native drift; Android passes 9/9
+  first-party native tests plus lint, APK, and AAB builds, and iOS passes 9/9
+  signed native tests on iPhone 17 Pro/iOS 26.5 plus Release compilation.
+- Findings closed: the map-data lifecycle slice of MH-007. Map-shell state,
   chrome, and panel-state unification remain scheduled as independently
   reviewable splits.

@@ -21,6 +21,8 @@ This folder contains product and engineering documentation for core app behavior
   server mutation policy, cancellation, geometry, GPX, and snapshot ownership.
 - `dashboard-map-utilities.md`: pure map bounds, overlay filtering, icon loading,
   hit testing, and orientation invariants extracted from Dashboard rendering.
+- `dashboard-map-data.md`: revision-driven project/overlay cache reads,
+  commit-gated publication, normalization, cancellation, and derived map data.
 - `dashboard-map-layers.md`: focused project, overlay, GPS-track, recording, and
   user-location MapLibre layer composition.
 - `dashboard-map-interactions.md`: touch/pen tap, long-press, empty-spot,

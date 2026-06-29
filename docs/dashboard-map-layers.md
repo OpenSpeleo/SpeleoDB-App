@@ -15,9 +15,11 @@ expand the Dashboard state machine.
   lead, and cylinder layers, labels, icon availability, and visual fallbacks.
 - `GpsMapLayers.tsx` owns saved-track, active-recording, and user-location
   sources and layers.
-- `Dashboard.tsx` supplies already-derived data and visibility state. It owns
-  no layer paint/layout declaration. Pointer interaction orchestration is owned
-  by `useDashboardMapInteractions`; see `docs/dashboard-map-interactions.md`.
+- `useDashboardMapData` supplies normalized, commit-gated project and overlay
+  data; see `docs/dashboard-map-data.md`.
+- `Dashboard.tsx` connects already-derived data and visibility state. It owns no
+  layer paint/layout declaration. Pointer interaction orchestration is owned by
+  `useDashboardMapInteractions`; see `docs/dashboard-map-interactions.md`.
 
 The components are deliberately data-in/render-out. They do not fetch, mutate
 storage, schedule work, register listeners, or retain local state.

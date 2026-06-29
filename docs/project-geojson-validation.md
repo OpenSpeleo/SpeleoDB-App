@@ -189,11 +189,14 @@ façade atomically as
 `{ commitId, featureCollection, bounds }`. It returns null for legacy,
 quarantined, session-disabled, missing, or non-current commits. A stable
 `mapDataRevision` is published after map-data sync attempts reach a terminal
-state, including initial/offline and Settings-triggered sync paths. Dashboard
-reloads on that revision, atomically swaps its project map-data record, and
-requires each loaded `commitId` to equal the project's `latest_commit.id`. If a
-sync is superseded, the cancelled run cannot publish; its replacement publishes
-the next terminal revision.
+state, including initial/offline and Settings-triggered sync paths.
+`useDashboardMapData` reloads on that revision, atomically swaps its project
+map-data record, and requires each loaded `commitId` to equal the project's
+`latest_commit.id`. It immediately filters an old commit when the project list
+advances, before a replacement cache read resolves. If a sync or consumer read
+is superseded, stale success and failure completions cannot publish; the
+replacement publishes the next terminal revision. See
+`docs/dashboard-map-data.md`.
 
 Dashboard uses stored bounds for project zoom and combined initial fit; it does
 not walk project coordinates. Combined fit unions complete directed longitude
