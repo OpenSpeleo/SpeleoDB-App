@@ -61,6 +61,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-013 | P0 | Remote cleartext instances and automatic redirects can expose credentials or request bodies. | Require release HTTPS and disable redirects for sensitive requests. |
 | MH-014 | P1 | iOS declares background fetch and processing modes without scheduling either kind of work. | Restrict the compiled app configuration to recording-owned background location. |
 | MH-015 | P2 | Repeated one-shot coverage runs on the same tree can differ by three covered `TileCacheRepository` branches. | Closed: isolate fake IndexedDB, await complete background transactions, and own the overwrite path directly. |
+| MH-016 | P0 | Concurrent login/logout can publish stale auth state or leave a superseded token durable after an uncancellable native vault write. | Closed: latest-attempt cancellation, transactional secure-store rollback, and logout admission/wait ordering. |
 
 ## Commit checklist
 
@@ -96,6 +97,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [x] `[Testing] Stabilize deterministic coverage reporting`
 - [x] `[Fix] Stop inactive page effects and polling`
+- [x] `[Fix] Serialize authentication and logout transitions`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -689,7 +691,7 @@ and physical-device evidence.
 
 ### Stop inactive page effects and polling
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `9423807` (`[Fix] Stop inactive page effects and polling`).
 - Correction: `AuthenticatedAppShell` keeps Dashboard mounted so MapLibre and
   map interaction state survive tab switches, but mounts Settings and Pending
   only for their active routes. Settings no longer reads router state to suspend
@@ -709,3 +711,37 @@ and physical-device evidence.
   and iOS passes 9/9 signed tests on iPhone 17 Pro/iOS 26.5 plus Release
   compilation. Exact staged evidence is recorded before commit.
 - Findings closed: MH-006.
+
+### Serialize authentication and logout transitions
+
+- Commit: recorded after this objective is committed.
+- Reproduction: password and token login shared no attempt generation. An older
+  response could complete after a newer attempt and publish stale credentials;
+  logout could clear storage while an in-flight login repopulated it. Adding
+  response-level cancellation alone exposed a second failure: Keychain and
+  Keystore writes are not guaranteed to abort, so a superseded token could
+  remain durable even when its controller state was never published.
+- Root cause: transport, secure-session mutation, validation, and logout had no
+  single transition-ownership protocol. `SecureSessionStore` rolled back
+  metadata failures but did not accept cancellation through the token/metadata
+  commit boundary.
+- Correction: valid login attempts now use latest-attempt ownership and cancel
+  startup validation immediately. Password and token transports receive the
+  attempt signal and run without waiting for stale transport work. Secure
+  session mutations use a serialized lane; the real store checks cancellation
+  before and after native writes and metadata commit, restoring the previous
+  token and metadata before releasing the lane. Logout closes login/validation
+  admission before cancellation, coalesces callers, waits for every accepted
+  authentication operation, and then purges.
+- Verification: the three owning suites pass 105/105 focused tests and the
+  changed `SessionCoordinator`, `SecureSessionStore`, and `SpeleoDBService`
+  files report 100% statement, branch, function, and line coverage. The full
+  Node 22 CI gate passes 1,703/1,703 tests across 101 files with 89.44%
+  statements, 82.47% branches, 92.85% functions, and 91.51% lines, followed by
+  a production build. Capacitor sync produces no tracked native drift. Android
+  passes its 9 first-party tests plus lint, release APK, and release AAB gates.
+  Signed iOS XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned
+  simulator Release compilation succeeds. Exact staged pre-commit and CI
+  evidence is recorded immediately before commit.
+- Findings closed: MH-016. The broader authentication/network audit remains
+  open for additional finding-specific commits.

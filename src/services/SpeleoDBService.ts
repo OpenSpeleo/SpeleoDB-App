@@ -54,6 +54,7 @@ export class SpeleoDBService {
     instance: string,
     email: string,
     password: string,
+    options: ServiceRequestOptions = {},
   ): Promise<HttpResponse<AuthTokenResponse | unknown>> {
     const baseUrl = getInstanceBaseUrl(instance);
     const url = baseUrl + API.AUTH_TOKEN_ENDPOINT;
@@ -63,6 +64,8 @@ export class SpeleoDBService {
       method: 'POST',
       headers: { [HEADERS.CONTENT_TYPE]: HEADERS.APPLICATION_JSON_UTF8 },
       data: { email, password },
+      timeoutMs: options.timeoutMs,
+      signal: options.signal,
     });
   }
 

@@ -104,7 +104,10 @@ describe('SessionCoordinator', () => {
 
     it('restores a token-only session without inventing an identity', () => {
       const { coordinator } = createHarness({
-        session: { ...STORED_SESSION, email: '   ' },
+        session: {
+          instance: STORED_SESSION.instance,
+          token: STORED_SESSION.token,
+        },
       });
 
       expect(coordinator.isAuthenticated).toBe(true);
@@ -208,11 +211,14 @@ describe('SessionCoordinator', () => {
         instance: '  https://example.com  ',
       });
 
-      expect(store.establish).toHaveBeenCalledWith({
-        email: 'server@example.com',
-        instance: 'https://example.com',
-        token: 'issued-token',
-      });
+      expect(store.establish).toHaveBeenCalledWith(
+        {
+          email: 'server@example.com',
+          instance: 'https://example.com',
+          token: 'issued-token',
+        },
+        { signal: expect.any(AbortSignal) },
+      );
       expect(result).toEqual({
         success: true,
         message: 'Login successful',
@@ -331,11 +337,14 @@ describe('SessionCoordinator', () => {
         instance: '  https://example.com  ',
       });
 
-      expect(store.establish).toHaveBeenCalledWith({
-        email: undefined,
-        instance: 'https://example.com',
-        token: 'oauth-token',
-      });
+      expect(store.establish).toHaveBeenCalledWith(
+        {
+          email: undefined,
+          instance: 'https://example.com',
+          token: 'oauth-token',
+        },
+        { signal: expect.any(AbortSignal) },
+      );
       expect(result).toEqual({ success: true, message: 'Login successful', token: 'oauth-token' });
       expect(coordinator.currentUser).toBeNull();
     });
@@ -377,6 +386,297 @@ describe('SessionCoordinator', () => {
         message: 'Login succeeded, but the secure session could not be saved.',
       });
       expect(coordinator.isAuthenticated).toBe(false);
+    });
+  });
+
+  describe('authentication ownership', () => {
+    it('lets the newest attempt finish without waiting for a stale transport', async () => {
+      const staleResponse = createDeferred<HttpResponse<AuthTokenResponse>>();
+      const authenticate = vi.fn((
+        _instance: string,
+        _email: string,
+        _password: string,
+        _options?: Parameters<SessionTransport['authenticate']>[3],
+      ) => staleResponse.promise);
+      const transport = createTransport({ authenticate });
+      const { coordinator, store } = createHarness({ transport });
+
+      const staleLogin = coordinator.login({
+        email: 'old@example.com',
+        password: 'password',
+        instance: 'https://old.example',
+      });
+      await vi.waitFor(() => expect(authenticate).toHaveBeenCalledOnce());
+      const staleOptions = authenticate.mock.calls[0][3];
+
+      const currentLogin = coordinator.loginWithToken({
+        token: 'new-token',
+        instance: 'https://new.example',
+      });
+
+      await expect(currentLogin).resolves.toEqual({
+        success: true,
+        message: 'Login successful',
+        token: 'new-token',
+      });
+      expect(staleOptions?.signal?.aborted).toBe(true);
+      expect(store.establish).toHaveBeenCalledOnce();
+      expect(store.establish).toHaveBeenCalledWith(
+        {
+          email: undefined,
+          instance: 'https://new.example',
+          token: 'new-token',
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+
+      staleResponse.resolve({
+        status: 200,
+        data: { user: 'old@example.com', token: 'old-token' },
+      });
+      await expect(staleLogin).resolves.toEqual({
+        success: false,
+        message: 'Authentication attempt was superseded.',
+      });
+      expect(coordinator.authState.token).toBe('new-token');
+    });
+
+    it('prevents stale startup validation from purging a new login', async () => {
+      const staleResponse = createDeferred<HttpResponse<unknown>>();
+      let validationCalls = 0;
+      const validateToken = vi.fn((
+        _instance: string,
+        _token: string,
+        _options?: Parameters<SessionTransport['validateToken']>[2],
+      ) => {
+        validationCalls += 1;
+        return validationCalls === 1
+          ? staleResponse.promise
+          : Promise.resolve({ status: 200, data: {} });
+      });
+      const hooks = createHooks();
+      const transport = createTransport({ validateToken });
+      const { coordinator } = createHarness({
+        hooks,
+        session: STORED_SESSION,
+        transport,
+      });
+
+      const staleValidation = coordinator.validateSession();
+      await vi.waitFor(() => expect(validateToken).toHaveBeenCalledOnce());
+      const validationSignal = validateToken.mock.calls[0][2]?.signal;
+      const currentLogin = coordinator.loginWithToken({
+        token: 'new-token',
+        instance: 'https://new.example',
+      });
+
+      await expect(currentLogin).resolves.toMatchObject({
+        success: true,
+        token: 'new-token',
+      });
+      expect(validationSignal?.aborted).toBe(true);
+      staleResponse.resolve({ status: 401, data: {} });
+      await expect(staleValidation).resolves.toBe('ok');
+      expect(hooks.purgeLocalUserData).not.toHaveBeenCalled();
+      expect(coordinator.authState.token).toBe('new-token');
+    });
+
+    it('classifies a superseded token transport as cancellation', async () => {
+      const staleResponse = createDeferred<HttpResponse<unknown>>();
+      let validationCalls = 0;
+      const validateToken = vi.fn(() => {
+        validationCalls += 1;
+        return validationCalls === 1
+          ? staleResponse.promise
+          : Promise.resolve({ status: 200, data: {} });
+      });
+      const transport = createTransport({ validateToken });
+      const { coordinator } = createHarness({ transport });
+
+      const staleLogin = coordinator.loginWithToken({
+        token: 'old-token',
+        instance: 'https://old.example',
+      });
+      await vi.waitFor(() => expect(validateToken).toHaveBeenCalledOnce());
+      const currentLogin = coordinator.login({
+        email: 'new@example.com',
+        password: 'password',
+        instance: 'https://new.example',
+      });
+
+      await expect(currentLogin).resolves.toMatchObject({ success: true });
+      staleResponse.resolve({ status: 200, data: {} });
+      await expect(staleLogin).resolves.toEqual({
+        success: false,
+        message: 'Authentication attempt was superseded.',
+      });
+    });
+
+    it('rolls back a superseded token while a newer password login waits to commit', async () => {
+      const staleWrite = createDeferred<void>();
+      const store = createSessionStore();
+      vi.mocked(store.establish).mockImplementationOnce(async (_session, options) => {
+        await staleWrite.promise;
+        options?.signal?.throwIfAborted();
+      });
+      const { coordinator, transport } = createHarness({ store });
+
+      const staleLogin = coordinator.loginWithToken({
+        token: 'old-token',
+        instance: 'https://old.example',
+      });
+      await vi.waitFor(() => expect(store.establish).toHaveBeenCalledOnce());
+      const currentLogin = coordinator.login({
+        email: 'new@example.com',
+        password: 'password',
+        instance: 'https://new.example',
+      });
+
+      await vi.waitFor(() => expect(transport.authenticate).toHaveBeenCalledOnce());
+      expect(store.establish).toHaveBeenCalledOnce();
+      staleWrite.resolve();
+
+      await expect(staleLogin).resolves.toEqual({
+        success: false,
+        message: 'Authentication attempt was superseded.',
+      });
+      await expect(currentLogin).resolves.toMatchObject({ success: true });
+      expect(store.establish).toHaveBeenCalledTimes(2);
+    });
+
+    it('serializes secure writes and publishes only the newest session', async () => {
+      const staleWrite = createDeferred<void>();
+      const store = createSessionStore();
+      vi.mocked(store.establish).mockImplementationOnce(async (_session, options) => {
+        await staleWrite.promise;
+        options?.signal?.throwIfAborted();
+      });
+      const { coordinator, transport } = createHarness({ store });
+
+      const staleLogin = coordinator.login({
+        email: 'old@example.com',
+        password: 'password',
+        instance: 'https://old.example',
+      });
+      await vi.waitFor(() => expect(store.establish).toHaveBeenCalledOnce());
+      const currentLogin = coordinator.loginWithToken({
+        token: 'new-token',
+        instance: 'https://new.example',
+      });
+
+      await vi.waitFor(() => expect(transport.validateToken).toHaveBeenCalledOnce());
+      expect(store.establish).toHaveBeenCalledOnce();
+      staleWrite.resolve();
+
+      await expect(staleLogin).resolves.toEqual({
+        success: false,
+        message: 'Authentication attempt was superseded.',
+      });
+      await expect(currentLogin).resolves.toEqual({
+        success: true,
+        message: 'Login successful',
+        token: 'new-token',
+      });
+      expect(store.establish).toHaveBeenCalledTimes(2);
+      expect(coordinator.authState.token).toBe('new-token');
+    });
+
+    it('waits for an aborted secure write before destructive logout', async () => {
+      const staleWrite = createDeferred<void>();
+      const store = createSessionStore();
+      vi.mocked(store.establish).mockImplementationOnce(async (_session, options) => {
+        await staleWrite.promise;
+        options?.signal?.throwIfAborted();
+      });
+      const purge = createDeferred<void>();
+      const hooks = createHooks({ purgeLocalUserData: vi.fn(() => purge.promise) });
+      const { coordinator, transport } = createHarness({ hooks, store });
+
+      const login = coordinator.login({
+        email: 'user@example.com',
+        password: 'password',
+        instance: 'https://example.com',
+      });
+      await vi.waitFor(() => expect(store.establish).toHaveBeenCalledOnce());
+      const logout = coordinator.logout();
+
+      await expect(coordinator.loginWithToken({
+        token: 'new-token',
+        instance: 'https://new.example',
+      })).resolves.toEqual({
+        success: false,
+        message: 'Sign out is in progress. Please try again.',
+      });
+      await expect(coordinator.login({
+        email: 'new@example.com',
+        password: 'password',
+        instance: 'https://new.example',
+      })).resolves.toEqual({
+        success: false,
+        message: 'Sign out is in progress. Please try again.',
+      });
+      expect(transport.validateToken).not.toHaveBeenCalled();
+      expect(hooks.purgeLocalUserData).not.toHaveBeenCalled();
+
+      staleWrite.resolve();
+      await expect(login).resolves.toEqual({
+        success: false,
+        message: 'Authentication attempt was superseded.',
+      });
+      await vi.waitFor(() => expect(hooks.purgeLocalUserData).toHaveBeenCalledOnce());
+      purge.resolve();
+      await expect(logout).resolves.toBeUndefined();
+      expect(coordinator.isAuthenticated).toBe(false);
+    });
+
+    it('coalesces concurrent logout requests and reopens login after purge', async () => {
+      const purge = createDeferred<void>();
+      const hooks = createHooks({ purgeLocalUserData: vi.fn(() => purge.promise) });
+      const { coordinator } = createHarness({ hooks });
+
+      const first = coordinator.logout();
+      const second = coordinator.logout();
+      await vi.waitFor(() => expect(hooks.purgeLocalUserData).toHaveBeenCalledOnce());
+      purge.resolve();
+
+      await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+      await expect(coordinator.loginWithToken({
+        token: 'token',
+        instance: 'https://example.com',
+      })).resolves.toMatchObject({ success: true });
+    });
+
+    it('cancels validation and rejects new probes throughout logout', async () => {
+      const validationResponse = createDeferred<HttpResponse<unknown>>();
+      const validateToken = vi.fn((
+        _instance: string,
+        _token: string,
+        _options?: Parameters<SessionTransport['validateToken']>[2],
+      ) => validationResponse.promise);
+      const purge = createDeferred<void>();
+      const hooks = createHooks({ purgeLocalUserData: vi.fn(() => purge.promise) });
+      const transport = createTransport({ validateToken });
+      const { coordinator } = createHarness({
+        hooks,
+        session: STORED_SESSION,
+        transport,
+      });
+
+      const staleValidation = coordinator.validateSession();
+      await vi.waitFor(() => expect(validateToken).toHaveBeenCalledOnce());
+      const validationSignal = validateToken.mock.calls[0][2]?.signal;
+      const logout = coordinator.logout();
+
+      expect(validationSignal?.aborted).toBe(true);
+      await expect(coordinator.validateSession()).resolves.toBe('unauthorized');
+      await expect(coordinator.attemptReconnect()).resolves.toBe('unauthorized');
+      expect(validateToken).toHaveBeenCalledOnce();
+
+      validationResponse.resolve({ status: 200, data: {} });
+      await expect(staleValidation).resolves.toBe('ok');
+      expect(coordinator.isOnline).toBe(false);
+      purge.resolve();
+      await expect(logout).resolves.toBeUndefined();
     });
   });
 

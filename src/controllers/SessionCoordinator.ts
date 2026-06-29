@@ -20,6 +20,7 @@ export interface SessionTransport {
     instance: string,
     email: string,
     password: string,
+    options?: ServiceRequestOptions,
   ): Promise<HttpResponse<AuthTokenResponse | unknown>>;
   validateToken(
     instance: string,
@@ -50,6 +51,8 @@ const EMPTY_AUTH_STATE: AuthState = {
 
 const OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE =
   'Unable to reach SpeleoDB. Offline access requires a previously validated session.';
+const SUPERSEDED_AUTHENTICATION_MESSAGE = 'Authentication attempt was superseded.';
+const LOGOUT_IN_PROGRESS_MESSAGE = 'Sign out is in progress. Please try again.';
 
 function isSuccessfulStatus(status: number): boolean {
   return status >= 200 && status < 300;
@@ -96,6 +99,12 @@ export class SessionCoordinator {
   private validationGeneration = 0;
   private nextValidationRunId = 1;
   private activeValidationContext: CancellationContext | null = null;
+  private nextAuthenticationRunId = 1;
+  private activeAuthenticationContext: CancellationContext | null = null;
+  private readonly authenticationOperations = new Set<Promise<AuthResponse>>();
+  private sessionMutationTail: Promise<void> = Promise.resolve();
+  private isLoggingOut = false;
+  private logoutPromise: Promise<void> | null = null;
 
   constructor(private readonly dependencies: SessionCoordinatorDependencies) {
     this.restoreSession();
@@ -146,23 +155,46 @@ export class SessionCoordinator {
     if (!this.hasNetworkAccess) {
       return { success: false, message: OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE };
     }
+    if (this.isLoggingOut) {
+      return { success: false, message: LOGOUT_IN_PROGRESS_MESSAGE };
+    }
 
+    return this.runAuthentication((context) => this.loginWithPassword(credentials, context));
+  }
+
+  private async loginWithPassword(
+    credentials: LoginCredentials,
+    context: CancellationContext,
+  ): Promise<AuthResponse> {
+    const { email, password, instance } = credentials;
     try {
-      const response = await this.dependencies.transport.authenticate(instance, email, password);
+      context.throwIfAborted();
+      const response = await this.dependencies.transport.authenticate(instance, email, password, {
+        signal: context.signal,
+      });
+      context.throwIfAborted();
       if (isSuccessfulStatus(response.status) && hasAuthTokenResponse(response.data)) {
         const authToken = response.data.token.trim();
         const userEmail = typeof response.data.user === 'string' && response.data.user.trim()
           ? response.data.user
           : email;
         try {
-          const user = await this.establishAuthenticatedSession(authToken, instance, userEmail);
+          const user = await this.establishAuthenticatedSession(
+            authToken,
+            instance,
+            context,
+            userEmail,
+          );
           return {
             success: true,
             message: 'Login successful',
             user,
             token: authToken,
           };
-        } catch {
+        } catch (error) {
+          if (isAbortError(error)) {
+            return { success: false, message: SUPERSEDED_AUTHENTICATION_MESSAGE };
+          }
           return {
             success: false,
             message: 'Login succeeded, but the secure session could not be saved.',
@@ -173,7 +205,10 @@ export class SessionCoordinator {
       const message = extractAuthErrorMessage(response.data)
         ?? (response.status === 401 ? 'Invalid email or password' : 'Login failed');
       return { success: false, message };
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) {
+        return { success: false, message: SUPERSEDED_AUTHENTICATION_MESSAGE };
+      }
       return { success: false, message: OFFLINE_LOGIN_REQUIRES_SESSION_MESSAGE };
     }
   }
@@ -184,14 +219,32 @@ export class SessionCoordinator {
 
     if (!token) return { success: false, message: 'OAuth token is required' };
     if (!instance) return { success: false, message: 'SpeleoDB instance URL is required' };
+    if (this.isLoggingOut) {
+      return { success: false, message: LOGOUT_IN_PROGRESS_MESSAGE };
+    }
 
+    return this.runAuthentication((context) => this.loginWithOAuthToken(token, instance, context));
+  }
+
+  private async loginWithOAuthToken(
+    token: string,
+    instance: string,
+    context: CancellationContext,
+  ): Promise<AuthResponse> {
     try {
-      const response = await this.dependencies.transport.validateToken(instance, token);
+      context.throwIfAborted();
+      const response = await this.dependencies.transport.validateToken(instance, token, {
+        signal: context.signal,
+      });
+      context.throwIfAborted();
       if (isSuccessfulStatus(response.status)) {
         try {
-          await this.establishAuthenticatedSession(token, instance);
+          await this.establishAuthenticatedSession(token, instance, context);
           return { success: true, message: 'Login successful', token };
-        } catch {
+        } catch (error) {
+          if (isAbortError(error)) {
+            return { success: false, message: SUPERSEDED_AUTHENTICATION_MESSAGE };
+          }
           return {
             success: false,
             message: 'Login succeeded, but the secure session could not be saved.',
@@ -209,7 +262,10 @@ export class SessionCoordinator {
         message: extractAuthErrorMessage(response.data)
           ?? 'Unable to validate OAuth token. Please try again.',
       };
-    } catch {
+    } catch (error) {
+      if (isAbortError(error)) {
+        return { success: false, message: SUPERSEDED_AUTHENTICATION_MESSAGE };
+      }
       return {
         success: false,
         message: 'Unable to validate OAuth token. Check your connection and try again.',
@@ -218,18 +274,34 @@ export class SessionCoordinator {
   }
 
   async validateSession(): Promise<SessionValidationResult> {
+    if (this.isLoggingOut) return 'unauthorized';
     if (this._isOfflineLocked) return 'network_error';
     return this.validateSessionAgainstServer();
   }
 
   async attemptReconnect(): Promise<SessionValidationResult> {
+    if (this.isLoggingOut) return 'unauthorized';
     const result = await this.validateSessionAgainstServer();
     if (result === 'ok') this.dependencies.hooks.startReconnectSync();
     return result;
   }
 
   async logout(): Promise<void> {
-    await this.dependencies.hooks.purgeLocalUserData();
+    if (this.logoutPromise) return this.logoutPromise;
+
+    this.isLoggingOut = true;
+    this.invalidate();
+    this.activeAuthenticationContext?.abort('Logout superseded authentication');
+    const pendingAuthentication = [...this.authenticationOperations];
+    const operation = (async () => {
+      await Promise.allSettled(pendingAuthentication);
+      await this.dependencies.hooks.purgeLocalUserData();
+    })();
+    this.logoutPromise = operation.finally(() => {
+      this.isLoggingOut = false;
+      this.logoutPromise = null;
+    });
+    return this.logoutPromise;
   }
 
   /** Abort startup validation when login, logout, or a wider app reset wins. */
@@ -299,16 +371,19 @@ export class SessionCoordinator {
   private async establishAuthenticatedSession(
     token: string,
     instance: string,
+    context: CancellationContext,
     email: string,
   ): Promise<User>;
   private async establishAuthenticatedSession(
     token: string,
     instance: string,
+    context: CancellationContext,
     email?: undefined,
   ): Promise<null>;
   private async establishAuthenticatedSession(
     token: string,
     instance: string,
+    context: CancellationContext,
     email?: string,
   ): Promise<User | null> {
     const normalizedToken = token.trim();
@@ -317,11 +392,15 @@ export class SessionCoordinator {
       ? { id: 'auth', email: normalizedEmail, name: normalizedEmail }
       : null;
 
-    await this.dependencies.sessionStore.establish({
-      email: normalizedEmail || undefined,
-      token: normalizedToken,
-      instance: instance.trim(),
-    });
+    await this.serializeSessionMutation(() => this.dependencies.sessionStore.establish(
+      {
+        email: normalizedEmail || undefined,
+        token: normalizedToken,
+        instance: instance.trim(),
+      },
+      { signal: context.signal },
+    ));
+    context.throwIfAborted();
     this.dependencies.hooks.invalidateApplicationOperations();
     this._authState = { isAuthenticated: true, user, token: normalizedToken };
     this.setConnectivity(true, false, true);
@@ -356,6 +435,46 @@ export class SessionCoordinator {
     this.nextValidationRunId += 1;
     this.activeValidationContext = context;
     return context;
+  }
+
+  private runAuthentication(
+    authenticate: (context: CancellationContext) => Promise<AuthResponse>,
+  ): Promise<AuthResponse> {
+    const context = this.beginAuthenticationContext();
+    const result = authenticate(context);
+    const trackedResult = result.finally(() => {
+      this.finishAuthentication(context);
+      this.authenticationOperations.delete(trackedResult);
+    });
+    this.authenticationOperations.add(trackedResult);
+    return trackedResult;
+  }
+
+  private serializeSessionMutation<T>(mutate: () => Promise<T>): Promise<T> {
+    const result = this.sessionMutationTail.then(mutate);
+    this.sessionMutationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  private beginAuthenticationContext(): CancellationContext {
+    this.invalidate();
+    this.activeAuthenticationContext?.abort('Authentication superseded');
+    const context = new CancellationContext(
+      this.nextAuthenticationRunId,
+      'Session authentication',
+    );
+    this.nextAuthenticationRunId += 1;
+    this.activeAuthenticationContext = context;
+    return context;
+  }
+
+  private finishAuthentication(context: CancellationContext): void {
+    if (this.activeAuthenticationContext === context) {
+      this.activeAuthenticationContext = null;
+    }
   }
 
   private isValidationCurrent(context: CancellationContext, generation: number): boolean {

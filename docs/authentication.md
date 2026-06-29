@@ -69,6 +69,17 @@ session-presence marker) to `PreferencesService`, and only then publishes the
 authenticated controller state. A storage failure leaves the caller
 unauthenticated and restores the previous secure token.
 
+Authentication attempts use latest-attempt ownership. Starting a valid
+password or token attempt cancels any older attempt and supersedes startup
+validation immediately. Network requests may overlap so a cancellation-aware
+new attempt is not blocked by stale transport work, but secure-session writes
+use one serialized mutation lane. The cancellation signal remains authoritative
+inside `SecureSessionStore`: if cancellation arrives during a native vault
+write or after metadata commit, both token and metadata are rolled back to the
+previous coherent session before the attempt returns. A superseded attempt can
+therefore neither publish nor leave durable credentials behind when the newer
+attempt fails.
+
 Email/password login also stores the authenticated email. Token login omits the
 email so stale identity cannot leak from a previous session. Before React
 mounts, startup restores the token from iOS Keychain or Android Keystore-backed
@@ -99,6 +110,10 @@ token in browser storage. Durable session restoration is a native-app feature.
 Logout and invalid stored-session handling remain destructive operations as
 defined in `docs/logout-behavior.md`. A failed pre-login token attempt does not
 call logout or purge caches because it never created a session.
+Once logout begins, new login and validation probes are rejected until purge
+finishes. Logout cancels in-flight authentication and validation, waits for all
+authentication operations (including secure-store rollback) to settle, and
+only then enters the destructive purge boundary.
 
 ## Architecture and performance
 
@@ -114,8 +129,10 @@ call logout or purge caches because it never created a session.
 - `SpeleoDBService.validateToken()` owns the API request and authorization
   header; there is no separate token-login transport path.
 
-Token login adds one validation request and one bounded native vault write. It
-adds no polling, cache scan, or background task.
+Token login adds one validation request and one bounded native vault write. A
+new request starts without waiting for a stale network response; only the short
+secure-session mutation is serialized. Login adds no polling, cache scan, or
+background task.
 
 Bootstrap removes the obsolete `speleo_users_db` record before session restore.
 Failure to remove that residue fails session initialization closed; raw values
@@ -124,13 +141,15 @@ are never logged or parsed.
 ## Verification strategy
 
 - Coordinator unit tests cover every branch of validation, trimming,
-  fail-closed persistence, cancellation, reconnect, and state publication.
+  fail-closed persistence, latest-attempt cancellation, serialized secure
+  writes, logout exclusion, reconnect, and state publication.
 - Controller characterization tests cover the stable façade and its integration
   with destructive purge, project sync, and application-wide invalidation.
 - Together they cover identity-free restoration, every response class, and
   rejection of seeded legacy plaintext credentials during a transport failure.
 - Session-store tests cover fresh writes, account replacement, legacy migration,
-  interrupted migration, orphan cleanup, rollback, rollback failure, and logout.
+  interrupted migration, orphan cleanup, cancellation before/after metadata
+  commit, rollback, rollback failure, and logout.
 - An iOS integration test loads the production bridge controller and proves the
   JavaScript-visible `CredentialStore` plugin is registered before the WebView
   uses it; the separate Keychain tests retain ownership of persistence behavior.

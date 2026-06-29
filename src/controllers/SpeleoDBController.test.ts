@@ -378,12 +378,16 @@ describe('SpeleoDBController', () => {
         validCreds.instance,
         validCreds.email,
         validCreds.password,
+        { signal: expect.any(AbortSignal) },
       );
-      expect(prefs.session.establish).toHaveBeenCalledWith({
-        email: 'u@x.com',
-        token: 'tok',
-        instance: validCreds.instance,
-      });
+      expect(prefs.session.establish).toHaveBeenCalledWith(
+        {
+          email: 'u@x.com',
+          token: 'tok',
+          instance: validCreds.instance,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
     });
 
     it('accepts any 2xx auth response that includes a token body', async () => {
@@ -401,11 +405,14 @@ describe('SpeleoDBController', () => {
       expect(result.token).toBe('created-token');
       expect(controller.isAuthenticated()).toBe(true);
       expect(controller.currentUser?.email).toBe('created@x.com');
-      expect(prefs.session.establish).toHaveBeenCalledWith({
-        email: 'created@x.com',
-        token: 'created-token',
-        instance: validCreds.instance,
-      });
+      expect(prefs.session.establish).toHaveBeenCalledWith(
+        {
+          email: 'created@x.com',
+          token: 'created-token',
+          instance: validCreds.instance,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
     });
 
     it('rejects malformed 2xx auth responses that do not include a token', async () => {
@@ -522,15 +529,19 @@ describe('SpeleoDBController', () => {
       expect(service.validateToken).toHaveBeenCalledWith(
         'https://custom.speleodb.org/',
         'oauth-token',
+        { signal: expect.any(AbortSignal) },
       );
       expect(controller.isAuthenticated()).toBe(true);
       expect(controller.currentUser).toBeNull();
       expect(controller.isOnline).toBe(true);
-      expect(prefs.session.establish).toHaveBeenCalledWith({
-        email: undefined,
-        token: 'oauth-token',
-        instance: 'https://custom.speleodb.org/',
-      });
+      expect(prefs.session.establish).toHaveBeenCalledWith(
+        {
+          email: undefined,
+          token: 'oauth-token',
+          instance: 'https://custom.speleodb.org/',
+        },
+        { signal: expect.any(AbortSignal) },
+      );
     });
 
     it('requires a token without calling the service', async () => {
@@ -718,8 +729,7 @@ describe('SpeleoDBController', () => {
         logoutResolved = true;
       });
 
-      await flushPromises(3);
-      expect(cache.clearAll).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(cache.clearAll).toHaveBeenCalledOnce());
       expect(logoutResolved).toBe(false);
 
       if (!clearAllResolver.fn) throw new Error('clearAll resolver should be defined');

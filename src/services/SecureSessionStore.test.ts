@@ -122,6 +122,25 @@ describe('SecureSessionStore', () => {
     expect(credentials.writeToken).not.toHaveBeenCalled();
   });
 
+  it('preserves an already-migrated token when legacy metadata cleanup fails', async () => {
+    const { credentials, getSecureToken, metadataStore, store } = createHarness({
+      secureToken: 'same-token',
+      metadata: {
+        instance: 'https://speleodb.org',
+        legacyToken: 'same-token',
+      },
+    });
+    vi.mocked(metadataStore.commit).mockImplementationOnce(() => {
+      throw new Error('quota');
+    });
+
+    await expect(store.initialize()).rejects.toMatchObject({ code: 'persistence-failed' });
+
+    expect(credentials.writeToken).not.toHaveBeenCalled();
+    expect(credentials.clearToken).not.toHaveBeenCalled();
+    expect(getSecureToken()).toBe('same-token');
+  });
+
   it('rolls back a new secure token when legacy metadata cannot be scrubbed', async () => {
     const { credentials, getSecureToken, metadataStore, store } = createHarness({
       metadata: {
@@ -216,6 +235,121 @@ describe('SecureSessionStore', () => {
       instance: 'https://speleodb.org',
       token: 'token',
     });
+  });
+
+  it('restores the previous token when cancellation wins during a secure write', async () => {
+    const { credentials, getMetadata, getSecureToken, store } = createHarness({
+      secureToken: 'old-token',
+      metadata: {
+        email: 'old@example.com',
+        hasStoredSession: true,
+        instance: 'https://old.example',
+      },
+    });
+    await store.initialize();
+    const abortController = new AbortController();
+    const writeToken = vi.mocked(credentials.writeToken).getMockImplementation();
+    vi.mocked(credentials.writeToken).mockImplementationOnce(async (token) => {
+      await writeToken?.(token);
+      abortController.abort();
+    });
+
+    await expect(store.establish({
+      email: 'new@example.com',
+      instance: 'https://new.example',
+      token: 'new-token',
+    }, { signal: abortController.signal })).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(credentials.writeToken).toHaveBeenNthCalledWith(1, 'new-token');
+    expect(credentials.writeToken).toHaveBeenNthCalledWith(2, 'old-token');
+    expect(getSecureToken()).toBe('old-token');
+    expect(getMetadata()).toEqual({
+      email: 'old@example.com',
+      hasStoredSession: true,
+      instance: 'https://old.example',
+    });
+    expect(store.getSession()).toEqual({
+      email: 'old@example.com',
+      instance: 'https://old.example',
+      token: 'old-token',
+    });
+  });
+
+  it('restores previous token and metadata when cancellation wins after metadata commit', async () => {
+    const { getMetadata, getSecureToken, metadataStore, store } = createHarness({
+      secureToken: 'old-token',
+      metadata: {
+        email: 'old@example.com',
+        hasStoredSession: true,
+        instance: 'https://old.example',
+      },
+    });
+    await store.initialize();
+    const abortController = new AbortController();
+    const commit = vi.mocked(metadataStore.commit).getMockImplementation();
+    vi.mocked(metadataStore.commit).mockImplementationOnce((session) => {
+      commit?.(session);
+      abortController.abort();
+    });
+
+    await expect(store.establish({
+      email: 'new@example.com',
+      instance: 'https://new.example',
+      token: 'new-token',
+    }, { signal: abortController.signal })).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(getSecureToken()).toBe('old-token');
+    expect(getMetadata()).toEqual({
+      email: 'old@example.com',
+      hasStoredSession: true,
+      instance: 'https://old.example',
+    });
+    expect(store.getSession()).toEqual({
+      email: 'old@example.com',
+      instance: 'https://old.example',
+      token: 'old-token',
+    });
+  });
+
+  it('removes a superseded first session after its metadata was committed', async () => {
+    const { getMetadata, getSecureToken, metadataStore, store } = createHarness();
+    await store.initialize();
+    const abortController = new AbortController();
+    const commit = vi.mocked(metadataStore.commit).getMockImplementation();
+    vi.mocked(metadataStore.commit).mockImplementationOnce((session) => {
+      commit?.(session);
+      abortController.abort();
+    });
+
+    await expect(store.establish({
+      instance: 'https://new.example',
+      token: 'new-token',
+    }, { signal: abortController.signal })).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(getSecureToken()).toBeNull();
+    expect(getMetadata()).toEqual({ hasStoredSession: false });
+    expect(store.getSession()).toBeNull();
+  });
+
+  it('reports a failed cancellation rollback without accepting the new session', async () => {
+    const { credentials, metadataStore, store } = createHarness();
+    await store.initialize();
+    const abortController = new AbortController();
+    const commit = vi.mocked(metadataStore.commit).getMockImplementation();
+    vi.mocked(metadataStore.commit).mockImplementationOnce((session) => {
+      commit?.(session);
+      abortController.abort();
+    });
+    vi.mocked(credentials.clearToken).mockRejectedValueOnce(new Error('vault failure'));
+
+    await expect(store.establish({
+      instance: 'https://new.example',
+      token: 'new-token',
+    }, { signal: abortController.signal })).rejects.toMatchObject({
+      code: 'rollback-failed',
+    });
+
+    expect(store.getSession()).toBeNull();
   });
 
   it.each([

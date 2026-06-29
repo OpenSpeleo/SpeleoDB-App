@@ -35,6 +35,14 @@ Logout must not be triggered by transient network conditions:
 
 Implementation notes:
 
+- logout closes admission for new login and validation requests before it
+  dispatches cancellation, preventing abort-listener re-entry from starting a
+  new session transition,
+- in-flight login transports and startup validation are cancelled immediately;
+  logout waits for every accepted authentication operation and secure-store
+  rollback before entering destructive purge,
+- concurrent logout calls share one purge operation, and authentication is
+  admitted again only after that operation settles,
 - logout invalidates and cancels coordinator-owned startup validation and
   controller-owned sync run contexts before the destructive cache wipe starts,
 - UI auth/session state resets immediately so the app stops rendering the old session,

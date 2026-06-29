@@ -65,6 +65,14 @@ The app enters offline mode only as a result of a failed server probe, never fro
   session metadata is updated. A `4xx`, timeout, transport error, storage
   failure, or other server failure
   leaves the app on the login page without creating an offline session.
+- Password and token transports both receive coordinator-owned cancellation
+  signals. The newest accepted login supersedes older login and startup-
+  validation work; stale responses cannot publish state or begin a durable
+  session write.
+- Secure-session mutations are serialized independently of transport work. If
+  cancellation arrives while the platform vault cannot be interrupted, the
+  completed token/metadata mutation is rolled back before the next mutation or
+  logout purge proceeds.
 - Pre-login token validation failure does not purge local data. It never
   established a session, so it returns a form error rather than calling the
   stored-session logout path.
@@ -72,7 +80,10 @@ The app enters offline mode only as a result of a failed server probe, never fro
   online/offline state transitions; `SpeleoDBController` remains the UI façade.
 - `4xx` from auth validation means token/session is invalid and must trigger logout + local purge.
 - Network errors, timeouts, and non-`4xx` failures must preserve session and local cache.
-- Logout invalidates and cancels in-flight startup/sync work before cache purge, so stale validation or sync completions cannot re-lock offline mode or repopulate cache after logout.
+- Logout first closes the login/validation admission gate, then cancels
+  in-flight authentication and startup/sync work. It waits for authentication
+  and any secure-store rollback before cache purge, so stale completions cannot
+  authenticate, re-lock offline mode, or repopulate durable state after logout.
 
 ## HTTPS and redirects
 

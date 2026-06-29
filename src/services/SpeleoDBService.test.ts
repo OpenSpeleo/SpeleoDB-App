@@ -93,6 +93,18 @@ describe('SpeleoDBService', () => {
       expect(http.calls[0].url).toBe(INSTANCE + API.AUTH_TOKEN_ENDPOINT);
     });
 
+    it('forwards timeout and cancellation ownership to the transport', async () => {
+      const abortController = new AbortController();
+
+      await service.authenticate(INSTANCE, 'a@b.com', 'pass', {
+        timeoutMs: 1234,
+        signal: abortController.signal,
+      });
+
+      expect(http.calls[0].timeoutMs).toBe(1234);
+      expect(http.calls[0].signal).toBe(abortController.signal);
+    });
+
     it('returns the flat 4xx error body verbatim (no envelope unwrapping)', async () => {
       const body = { errors: { non_field_errors: ['Invalid email or password.'] } };
       http = createMockHttpClient({ status: 401, data: body });

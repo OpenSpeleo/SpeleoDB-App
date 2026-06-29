@@ -1,4 +1,5 @@
 import type { CredentialStore } from './CredentialStore';
+import { isAbortError, throwIfAborted } from '../utils/abort';
 
 export interface StoredSession {
   email?: string;
@@ -22,7 +23,7 @@ export interface SessionMetadataStore {
 export interface SessionStore {
   initialize(): Promise<StoredSession | null>;
   getSession(): StoredSession | null;
-  establish(session: StoredSession): Promise<void>;
+  establish(session: StoredSession, options?: { signal?: AbortSignal }): Promise<void>;
   clear(): Promise<void>;
 }
 
@@ -77,19 +78,35 @@ export class SecureSessionStore implements SessionStore {
     return this.current ? { ...this.current } : null;
   }
 
-  async establish(session: StoredSession): Promise<void> {
+  async establish(
+    session: StoredSession,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
     this.assertInitialized();
     const normalized = normalizeSession(session);
+    const previousSession = this.current ? { ...this.current } : null;
+    throwIfAborted(options.signal);
     const previousToken = await this.credentials.readToken();
+    throwIfAborted(options.signal);
 
     await this.credentials.writeToken(normalized.token);
+    let metadataTouched = false;
     try {
+      throwIfAborted(options.signal);
+      metadataTouched = true;
       this.metadata.commit({
         email: normalized.email,
         instance: normalized.instance,
       });
+      throwIfAborted(options.signal);
     } catch (error) {
-      await this.rollbackCredential(previousToken, error);
+      await this.rollbackEstablishedSession(
+        previousSession,
+        previousToken,
+        metadataTouched,
+        error,
+      );
+      if (isAbortError(error)) throw error;
       throw new SessionStoreError(
         'persistence-failed',
         'Unable to persist secure session metadata',
@@ -188,6 +205,38 @@ export class SecureSessionStore implements SessionStore {
       } else {
         await this.credentials.writeToken(previousToken);
       }
+    } catch (rollbackError) {
+      throw new SessionStoreError(
+        'rollback-failed',
+        'Secure session rollback failed',
+        { cause: new AggregateError([cause, rollbackError]) },
+      );
+    }
+  }
+
+  private async rollbackEstablishedSession(
+    previousSession: StoredSession | null,
+    previousToken: string | null,
+    restoreMetadata: boolean,
+    cause: unknown,
+  ): Promise<void> {
+    try {
+      if (previousToken === null) {
+        await this.credentials.clearToken();
+      } else {
+        await this.credentials.writeToken(previousToken);
+      }
+      if (restoreMetadata) {
+        if (previousSession) {
+          this.metadata.commit({
+            email: previousSession.email,
+            instance: previousSession.instance,
+          });
+        } else {
+          this.metadata.clear();
+        }
+      }
+      this.current = previousSession;
     } catch (rollbackError) {
       throw new SessionStoreError(
         'rollback-failed',
