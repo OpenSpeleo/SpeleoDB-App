@@ -14,3 +14,5 @@ redaction marker can defeat it.
 Only retain untrusted text when product behavior genuinely requires it. In
 that case use a schema-specific allowlist and prove the complete transformation
 space; never claim arbitrary credential absence from a finite replacement list.
+The same rule applies to thrown native/storage errors: when their prose is not
+needed, log a fixed operation label and omit the raw error object entirely.

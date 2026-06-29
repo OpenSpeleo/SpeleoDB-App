@@ -498,8 +498,8 @@ export class SessionCoordinator {
         user: email ? { id: 'restored', email, name: email } : null,
         token: normalizedSession.token,
       };
-    } catch (error) {
-      console.error('Failed to load auth state:', error);
+    } catch {
+      console.error('Failed to load auth state.');
     }
   }
 

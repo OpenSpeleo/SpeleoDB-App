@@ -77,6 +77,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-029 | P0 | Logout leaves the coordinator's authenticated snapshot published while it waits for secure-write rollback, and cancelled validation can report stale `ok`. | Closed: revoke at logout admission with best-effort notification; return `unauthorized` for logout-owned cancellation. |
 | MH-030 | P0 | Hook exceptions around durable session commit can either report failure after accepted credentials or let required old-account invalidation fail open. | Closed: require invalidation before commit; isolate only post-commit publication observers. |
 | MH-031 | P1 | Startup runtime-adapter failure can crash session restoration, while reconnect-sync launch failure can reject an already successful online transition. | Closed: treat startup/runtime and post-reconnect launch as best-effort observers. |
+| MH-032 | P0 | Session restoration passes arbitrary native storage error prose into diagnostics, where finite pattern redaction cannot guarantee credential absence. | Closed: emit a fixed restoration diagnostic and omit the thrown object. |
 
 ## Commit checklist
 
@@ -128,7 +129,8 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Revoke sessions at logout admission`
 - [x] `[Fix] Isolate session publication from observer failures`
 - [x] `[Fix] Preserve session results across follow-up failures`
-- [ ] `[Fix] Harden authentication and network state machines`
+- [x] `[Security] Remove raw session restoration diagnostics`
+- [x] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
 - [ ] `[Fix] Harden GPS landmark and lifecycle behavior`
@@ -1154,7 +1156,7 @@ and physical-device evidence.
 
 ### Preserve session results across follow-up failures
 
-- Commit: recorded after this objective is committed.
+- Commit: `83b5c65` (`[Fix] Preserve session results across follow-up failures`).
 - Reproduction: `SessionCoordinator` called the offline-runtime adapter directly
   during construction, so an adapter exception could abort controller startup
   after a secure session had been restored. After successful reconnect, a
@@ -1176,3 +1178,25 @@ and physical-device evidence.
   recorded immediately before commit.
 - Findings closed: MH-031. The broader authentication/network audit remains
   open.
+
+### Remove raw session restoration diagnostics
+
+- Commit: recorded after this objective is committed.
+- Reproduction: the synchronous restoration catch passed the arbitrary thrown
+  storage error to `console.error`. Even with process-wide pattern redaction,
+  an unlabeled credential embedded in native error prose could not be proven
+  absent from diagnostics.
+- Correction: restoration now emits only a fixed operation label and never
+  forwards the thrown value. The durable untrusted-error lesson now applies the
+  same body-opaque rule to credential-adjacent native/storage exceptions.
+- Verification: 74/74 focused coordinator tests pass, including every
+  restoration/validation storage-read failure with the fixed diagnostic
+  contract. Node 22 CI passes 1,761/1,761 tests across 103 files with 89.64%
+  statements, 82.54% branches, 93.07% functions, and 91.70% lines. Capacitor
+  synchronization produces no tracked native drift. Android lint, 9 first-party
+  unit tests, release APK assembly, and release AAB bundling pass. All 9 iOS
+  XCTest cases pass on an iPhone 17 Pro simulator running iOS 26.5, and unsigned
+  simulator Release compilation succeeds. Exact staged pre-commit and CI
+  evidence is recorded immediately before commit.
+- Findings closed: MH-032. The authentication/network audit objective is closed;
+  persistence/offline replay is the next active subsystem.

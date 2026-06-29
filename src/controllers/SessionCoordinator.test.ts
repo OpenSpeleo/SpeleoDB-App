@@ -152,7 +152,7 @@ describe('SessionCoordinator', () => {
 
     it('fails closed when session restoration throws', () => {
       const error = new Error('vault unavailable');
-      allowConsoleError('Failed to load auth state:', error);
+      allowConsoleError('Failed to load auth state.');
       const store = createSessionStore(null, {
         getSession: vi.fn(() => { throw error; }),
       });
@@ -946,7 +946,7 @@ describe('SessionCoordinator', () => {
 
     it('fails closed when validation cannot read the secure session', async () => {
       const error = new Error('vault state unavailable');
-      allowConsoleError('Failed to load auth state:', error);
+      allowConsoleError('Failed to load auth state.');
       const store = createSessionStore(null, {
         getSession: vi.fn(() => { throw error; }),
       });
@@ -964,7 +964,7 @@ describe('SessionCoordinator', () => {
 
     it('keeps an unreadable session unauthorized when destructive cleanup fails', async () => {
       const error = new Error('vault state unavailable');
-      allowConsoleError('Failed to load auth state:', error);
+      allowConsoleError('Failed to load auth state.');
       const store = createSessionStore(null, {
         getSession: vi.fn(() => { throw error; }),
       });

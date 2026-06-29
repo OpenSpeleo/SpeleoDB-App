@@ -132,6 +132,8 @@ If the in-process secure-session snapshot cannot be read, validation revokes
 authentication, invokes the destructive local-data purge, and returns
 `unauthorized` without making a request. Cleanup remains best-effort so a native
 deletion error cannot restore in-memory access or reject the validation result.
+Restoration failure emits only a fixed diagnostic string; the thrown native
+storage object is never passed to console/reporting boundaries.
 The startup UI also treats an unexpected validation rejection as unauthorized:
 it clears the pending banner, dismisses the splash, and routes to login instead
 of leaving an unhandled rejection or an ambiguous authenticated view.
