@@ -59,6 +59,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-011 | P0 | Offline/WebView data is eligible for platform backup and device transfer. | Disable Android backup and exclude protected iOS data directories. |
 | MH-012 | P0 | Raw errors, deep links, identifiers, coordinates, and payload-shaped data can reach console/Sentry diagnostics. | Enforce one redacted diagnostic boundary. |
 | MH-013 | P0 | Remote cleartext instances and automatic redirects can expose credentials or request bodies. | Require release HTTPS and disable redirects for sensitive requests. |
+| MH-014 | P1 | iOS declares background fetch and processing modes without scheduling either kind of work. | Restrict the compiled app configuration to recording-owned background location. |
 
 ## Commit checklist
 
@@ -71,6 +72,8 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Security] Migrate authenticated sessions to secure storage`
 - [x] `[Security] Remove plaintext offline password authentication`
 - [x] `[Security] Harden URLs backups and diagnostics`
+- [x] `[Fix] Register iOS credential storage with Capacitor 8`
+- [x] `[Fix] Restrict iOS background execution to recording`
 - [x] `[Refactoring] Extract session and startup coordination`
 - [x] `[Refactoring] Extract project synchronization coordination`
 - [x] `[Refactoring] Extract offline mutation and tile coordination`
@@ -385,7 +388,7 @@ and physical-device evidence.
 
 ### Extract dashboard GPS presentation
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `b7a8599` (`[Refactoring] Extract dashboard GPS presentation`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -403,3 +406,33 @@ and physical-device evidence.
 - Findings closed: the GPS presentation slice of MH-007. GPS action state,
   landmark presentation/state, chrome, and panel-state unification remain
   scheduled as independently reviewable splits.
+
+### Register iOS credential storage with Capacitor 8
+
+- Commit: `e0551b8` (`[Fix] Credentials Secure Storage Interacting with
+  Capacitor 8`).
+- Verification: full Node 22 web gates, signed iOS XCTest on an iPhone 17 Pro
+  simulator, and iOS Debug/Release simulator compilation.
+- Result: the first-party `CredentialStore` is registered through Capacitor
+  8's live instance-registration path and a bridge integration test proves the
+  JavaScript-visible plugin exists. Signed iOS tests pass 8/8. Physical-device
+  login remains part of the final device matrix.
+- Follow-up: review found unrelated background `fetch` and `processing` modes
+  in the same commit; MH-014 is closed by the next isolated objective.
+
+### Restrict iOS background execution to recording
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
+  compilation.
+- Result: the compiled iOS app now declares only the `location` background
+  mode, matching the sole runtime owner, and a hosted XCTest prevents hidden
+  `fetch` or `processing` declarations from returning. All web gates pass:
+  Vitest passes 1,610/1,610 tests across 94 files with aggregate coverage of
+  86.95% statements, 79.70% branches, 89.88% functions, and 89.51% lines.
+  Capacitor sync introduces no tracked native drift; Android passes 9/9 native
+  tests plus lint/APK/AAB builds, and iOS passes 9/9 signed native tests plus
+  Release compilation.
+- Findings closed: MH-014.

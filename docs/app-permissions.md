@@ -12,6 +12,11 @@ This document lists all native permissions declared by the app, why each is need
 - `UIBackgroundModes` → `location` (lets recording continue with the app
   backgrounded / screen locked)
 
+`location` is the only declared iOS background mode. The app does not schedule
+background fetch or `BGProcessingTask` work, so declaring `fetch` or
+`processing` would overstate its execution contract and must fail native
+configuration verification.
+
 **Android** (`android/app/src/main/AndroidManifest.xml`):
 - `ACCESS_COARSE_LOCATION`
 - `ACCESS_FINE_LOCATION`

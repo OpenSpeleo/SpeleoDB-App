@@ -13,4 +13,11 @@ final class AppBridgeViewControllerTests: XCTestCase {
                 is CredentialStorePlugin
         )
     }
+
+    func testBackgroundExecutionIsRestrictedToLocationRecording() {
+        XCTAssertEqual(
+            Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String],
+            ["location"]
+        )
+    }
 }

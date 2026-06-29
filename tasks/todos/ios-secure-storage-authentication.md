@@ -53,7 +53,7 @@ arguments.
 - Updated authentication and secure-storage documentation with the ownership,
   fail-closed behavior, regression seam, and negligible one-instance startup
   cost.
-- Commit containing the implementation: `8023398` (`[Fix] Credentials Secure
+- Commit containing the implementation: `e0551b8` (`[Fix] Credentials Secure
   Storage Interacting with Capacitor 8`).
 
 ### Verification
@@ -84,3 +84,10 @@ run passed and the reusable rule is captured in
   final device/network interaction remains a device smoke test.
 - Android verification is inapplicable because no Android source,
   configuration, dependency, or generated file changed.
+
+### Follow-up audit
+
+The commit also acquired unrelated `fetch` and `processing` iOS background
+modes while Xcode rewrote project metadata. SpeleoDB schedules neither mode;
+the mobile hardening ledger tracks their removal and a compiled-configuration
+regression test as a separate objective.
