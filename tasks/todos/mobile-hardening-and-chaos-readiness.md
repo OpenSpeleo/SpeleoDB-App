@@ -85,6 +85,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Extract dashboard map interactions`
 - [x] `[Refactoring] Extract dashboard GPS presentation`
 - [x] `[Refactoring] Extract dashboard GPS track actions`
+- [x] `[Refactoring] Extract dashboard GPS recording and averaging actions`
 - [ ] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [ ] `[Fix] Stop inactive page effects and polling`
 - [ ] `[Fix] Harden authentication and network state machines`
@@ -440,7 +441,7 @@ and physical-device evidence.
 
 ### Extract dashboard GPS track actions
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `1a2fd37` (`[Refactoring] Extract dashboard GPS track actions`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -461,3 +462,28 @@ and physical-device evidence.
 - Findings closed: the GPS track-action slice of MH-007. Recording/averaging
   action state, landmark presentation/state, chrome, and panel-state
   unification remain scheduled as independently reviewable splits.
+
+### Extract dashboard GPS recording and averaging actions
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
+  coverage and live API contracts, production build, both-platform Capacitor
+  sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
+  compilation.
+- Result: recorder controls, cancellation, Android battery guidance, live-track
+  geometry, averaging transitions, and landmark handoff now live in a focused
+  hook behind narrow controller, battery, toast, and landmark ports. The shared
+  mounted guard removes duplicated async-lifecycle code. Its direct 14-test
+  suite has 100% statement, branch, function, and line coverage, and Dashboard's
+  106 characterization tests stay green. Dashboard shrinks from 1,449 to 1,308
+  lines; the production hook is 307 lines and its largest function is 71 lines.
+  Vitest passes 1,638/1,638 tests across 96 files with aggregate coverage of
+  88.43% statements, 81.15% branches, 91.58% functions, and 90.81% lines. The
+  Dashboard lazy chunk is 152.33 KiB (48.72 KiB gzip), 1.89 KiB larger than the
+  prior modular boundary but still far below the starting bundle baseline.
+  Capacitor sync introduces no tracked native drift; Android passes 9/9
+  first-party native tests plus lint/APK/AAB builds, and iOS passes 9/9 signed
+  native tests plus Release compilation.
+- Findings closed: the recording/averaging action slice of MH-007. Landmark
+  presentation/state, chrome, and panel-state unification remain scheduled as
+  independently reviewable splits.

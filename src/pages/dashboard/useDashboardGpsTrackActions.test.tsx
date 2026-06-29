@@ -454,6 +454,9 @@ describe('useDashboardGpsTrackActions', () => {
     expect(result.current.savedTrackFeatureCollection.features).toHaveLength(0);
 
     act(() => result.current.openDelete({ ...TRACK, id: 'not-loaded' }));
+    act(() => result.current.cancelDelete());
+    expect(result.current.deleteTarget).toBeNull();
+    act(() => result.current.openDelete({ ...TRACK, id: 'not-loaded' }));
     act(() => result.current.confirmDelete());
     await waitFor(() => expect(controller.removeGpsTrack).toHaveBeenCalledTimes(2));
     act(() => result.current.cancelDelete());

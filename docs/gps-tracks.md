@@ -103,6 +103,7 @@ limitations, and the test strategy.
 | UI | `src/components/GpsPanel.tsx`, `src/components/GpsRecordingScreen.tsx`, `src/components/GpsAveragingModal.tsx`, `src/components/GpsScreenHeader.tsx`, `src/components/AppTabBar.tsx` |
 | Dashboard GPS presentation | `src/pages/dashboard/DashboardGpsActivity.tsx`, `src/pages/dashboard/DashboardGpsTrackDialogs.tsx` |
 | Dashboard track actions | `src/pages/dashboard/useDashboardGpsTrackActions.ts` |
+| Dashboard recording/averaging actions | `src/pages/dashboard/useDashboardGpsRecordingActions.ts` |
 | Dashboard GPS orchestration | `src/pages/Dashboard.tsx` |
 
 ## Architecture / data flow
@@ -146,6 +147,9 @@ wrappers compose recording, averaging, upload, edit, and delete presentation
 without owning controller or persistence behavior;
 `useDashboardGpsTrackActions` owns track visibility, lazy geometry, sharing,
 map zoom, and mutation-dialog action state;
+`useDashboardGpsRecordingActions` owns recorder-screen actions, live recording
+geometry, the battery-optimization hint, averaging UI transitions, and the
+landmark-create handoff;
 `useGpsAveraging` isolates
 the averaging session's side effects from the modal.
 
@@ -335,8 +339,9 @@ Saving an averaged point **reuses** the shared `LandmarkFormModal` +
 ### Session controls (stopwatch semantics)
 
 The collector behaves like a stopwatch and never runs the GPS watch in the
-background. The Dashboard tracks an `averagingPhase` of `idle | running |
-stopped`, and `useGpsAveraging` is active only while phase is `running`:
+background. `useDashboardGpsRecordingActions` tracks an `averagingPhase` of
+`idle | running | stopped`, and `useGpsAveraging` is active only while phase is
+`running`:
 
 - **Start** (from `idle` or `stopped`) -> `running`: requests permission and
   begins/resumes the high-accuracy watch. Resuming **continues** appending to

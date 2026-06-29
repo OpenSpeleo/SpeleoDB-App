@@ -44,10 +44,7 @@ import {
 import ProjectPanel from '../components/ProjectPanel';
 import LandmarkPanel from '../components/LandmarkPanel';
 import GpsPanel from '../components/GpsPanel';
-import { BatteryOptimizationGuard } from '../services/BatteryOptimizationGuard';
-import type { GpsAveragingPhase } from '../components/GpsAveragingModal';
 import AppTabBar from '../components/AppTabBar';
-import { useGpsAveraging } from '../hooks/useGpsAveraging';
 import {
   buildLandmarkCollectionGroups,
   type LandmarkListItem,
@@ -66,7 +63,6 @@ import { LandmarkMutationError } from '../types/landmark';
 import { ensureLandmarkPropertyIds, type NormalizedLandmarkInput } from '../utils/landmarkMutations';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { createProjectColorState } from '../utils/projectColors';
-import { trackPointsToFeatureCollection } from '../utils/gpsTrackGeoJson';
 import type { MapColorMode } from '../types/mapColorMode';
 import type { MeasurementUnit } from '../types/measurementUnit';
 import {
@@ -97,6 +93,7 @@ import { useDashboardMapInteractions } from './dashboard/useDashboardMapInteract
 import { DashboardGpsActivity } from './dashboard/DashboardGpsActivity';
 import { DashboardGpsTrackDialogs } from './dashboard/DashboardGpsTrackDialogs';
 import { useDashboardGpsTrackActions } from './dashboard/useDashboardGpsTrackActions';
+import { useDashboardGpsRecordingActions } from './dashboard/useDashboardGpsRecordingActions';
 
 // ==================== GeoJSON type alias ====================
 
@@ -177,38 +174,6 @@ const Dashboard: React.FC<DashboardProps> = ({
   const landmarkToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
 
-  // ---- GPS state ------------------------------------------------------------
-  // The dedicated full-screen recording screen (own page with a back button).
-  const [isRecorderOpen, setIsRecorderOpen] = useState(false);
-  const [isAveragingOpen, setIsAveragingOpen] = useState(false);
-  // Stopwatch-style session: idle (held) -> running -> stopped (paused, data
-  // retained) -> running (resume/continue). Reset is the only thing that zeroes
-  // (it bumps the nonce, which clears the hook's samples).
-  const [averagingPhase, setAveragingPhase] = useState<GpsAveragingPhase>('idle');
-  const [averagingNonce, setAveragingNonce] = useState(0);
-  const [showAveragingResetConfirm, setShowAveragingResetConfirm] = useState(false);
-  // Confirm before abandoning an in-progress recording via the Cancel button.
-  const [showRecordingCancelConfirm, setShowRecordingCancelConfirm] = useState(false);
-  // Android-only nudge to exempt the app from battery optimization so OEM power
-  // managers don't kill the recording service. Dismissal is per-session.
-  const [showBatteryHint, setShowBatteryHint] = useState(false);
-  const batteryHintDismissedRef = useRef(false);
-  const batteryGuard = useMemo(() => new BatteryOptimizationGuard(), []);
-  const averaging = useGpsAveraging(isAveragingOpen && averagingPhase === 'running', {
-    restartNonce: averagingNonce,
-  });
-
-  // The live recording buffer lives on the controller; re-read it whenever the
-  // GPS revision bumps (a new fix appended bumps it).
-  const currentTrackPoints = useMemo(
-    () => controller.currentTrackPoints,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [controller, gpsTracksRevision],
-  );
-  const currentTrackFeatureCollection = useMemo(
-    () => trackPointsToFeatureCollection(currentTrackPoints, { name: 'Current GPS recording' }),
-    [currentTrackPoints],
-  );
   const [mapViewMetrics, setMapViewMetrics] = useState<{ zoom: number; latitude: number }>(() => ({
     zoom: MAP.DEFAULT_ZOOM,
     latitude: MAP.DEFAULT_CENTER[1],
@@ -924,152 +889,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     [controller, landmarkForm, landmarkFormBusy, showLandmarkToast],
   );
 
-  // ---- GPS handlers ---------------------------------------------------------
-
-  const handleOpenRecorder = useCallback(() => {
-    setIsRecorderOpen(true);
-  }, []);
-
-  // Collapse any full-screen GPS overlay (recorder / averaging) so a bottom-tab
-  // press reveals that tab's normal view. Recording keeps running (it lives in
-  // the controller); only the on-screen view is dismissed. If averaging has data,
-  // tab collapse behaves like Stop (pause), not Reset.
-  const closeGpsOverlays = useCallback(() => {
-    setIsRecorderOpen(false);
-    setIsAveragingOpen(false);
-    setAveragingPhase((prev) => (prev === 'running' ? 'stopped' : prev));
-  }, []);
-
-  const handleStartRecording = useCallback(() => {
-    void (async () => {
-      try {
-        await controller.startTrackRecording();
-      } catch (error) {
-        if (!isMountedRef.current) return;
-        const message =
-          error instanceof Error ? error.message : 'Could not start GPS recording.';
-        showLandmarkToast(message, 'error');
-        return;
-      }
-      // Once recording is live, nudge (Android only) to disable battery
-      // optimization if it's still active and the user hasn't dismissed it.
-      if (batteryHintDismissedRef.current) return;
-      const active = await batteryGuard.isOptimizationActive();
-      if (isMountedRef.current && active) setShowBatteryHint(true);
-    })();
-  }, [controller, showLandmarkToast, batteryGuard]);
-
-  const handleFixBatteryOptimization = useCallback(() => {
-    void (async () => {
-      await batteryGuard.requestExemption();
-      // Re-check after the system dialog returns; hide once exempted.
-      const stillActive = await batteryGuard.isOptimizationActive();
-      if (!isMountedRef.current) return;
-      if (!stillActive) {
-        setShowBatteryHint(false);
-        batteryHintDismissedRef.current = true;
-      }
-    })();
-  }, [batteryGuard]);
-
-  const handleDismissBatteryHint = useCallback(() => {
-    batteryHintDismissedRef.current = true;
-    setShowBatteryHint(false);
-  }, []);
-
-  const handlePauseRecording = useCallback(() => {
-    void controller.pauseTrackRecording();
-  }, [controller]);
-
-  const handleResumeRecording = useCallback(() => {
-    void controller.resumeTrackRecording();
-  }, [controller]);
-
-  // Stop from the recording screen, then leave the screen (back to the map).
-  const handleStopRecordingFromScreen = useCallback(() => {
-    void (async () => {
-      const track = await controller.stopTrackRecording();
-      if (!isMountedRef.current) return;
-      setIsRecorderOpen(false);
-      showLandmarkToast(track ? 'Track saved' : 'No points were recorded', track ? 'success' : 'error');
-    })();
-  }, [controller, showLandmarkToast]);
-
-  // Cancel from the recording screen: if a recording is in progress (recording
-  // or paused) confirm before discarding; otherwise just close the screen.
-  const handleCancelRecording = useCallback(() => {
-    if (gpsRecordingState === 'idle') {
-      setIsRecorderOpen(false);
-      return;
-    }
-    setShowRecordingCancelConfirm(true);
-  }, [gpsRecordingState]);
-
-  const handleDismissRecordingCancel = useCallback(() => {
-    setShowRecordingCancelConfirm(false);
-  }, []);
-
-  const handleConfirmRecordingCancel = useCallback(() => {
-    setShowRecordingCancelConfirm(false);
-    void controller.discardTrackRecording();
-    setIsRecorderOpen(false);
-  }, [controller]);
-
-  const handleCollectPoint = useCallback(() => {
-    if (averagingPhase === 'stopped' && averaging.result) {
-      setIsAveragingOpen(true);
-      return;
-    }
-    // Open held (no watch); bump the nonce so any prior session's data is
-    // cleared. The user presses Start to begin collecting.
-    setAveragingPhase('idle');
-    setAveragingNonce((n) => n + 1);
-    setIsAveragingOpen(true);
-  }, [averaging.result, averagingPhase]);
-
-  const handleStartAveraging = useCallback(() => {
-    // Start (from held) or resume/continue (from stopped) -- both just run.
-    if (averaging.status === 'permission-denied' || averaging.status === 'error') {
-      setAveragingNonce((n) => n + 1);
-    }
-    setAveragingPhase('running');
-  }, [averaging.status]);
-
-  const handleStopAveraging = useCallback(() => {
-    // Pause: stop reading but keep the collected data (stopwatch Stop).
-    setAveragingPhase('stopped');
-  }, []);
-
-  // Reset is destructive, so confirm first.
-  const handleRequestAveragingReset = useCallback(() => {
-    setShowAveragingResetConfirm(true);
-  }, []);
-
-  const handleCancelAveragingReset = useCallback(() => {
-    setShowAveragingResetConfirm(false);
-  }, []);
-
-  const handleConfirmAveragingReset = useCallback(() => {
-    setShowAveragingResetConfirm(false);
-    // Clear the collected fixes. If running, keep running (continue from zero);
-    // if paused, drop back to the held/zero state.
-    setAveragingNonce((n) => n + 1);
-    setAveragingPhase((prev) => (prev === 'running' ? 'running' : 'idle'));
-  }, []);
-
-  const handleCancelAveraging = useCallback(() => {
-    setIsAveragingOpen(false);
-    setAveragingPhase('idle');
-    setAveragingNonce((n) => n + 1);
-  }, []);
-
-  // Save an averaged point as a landmark by reusing the shared create form
-  // (works online and offline via the controller's landmark seam).
   const handleAveragingSave = useCallback(
     (pointToSave: { latitude: number; longitude: number; altitude: number | null }) => {
-      setIsAveragingOpen(false);
-      setAveragingPhase('idle');
-      setAveragingNonce((n) => n + 1);
       setLandmarkFormError(null);
       setLandmarkForm({
         mode: 'create',
@@ -1080,6 +901,44 @@ const Dashboard: React.FC<DashboardProps> = ({
     },
     [loadLandmarkCollections],
   );
+
+  const {
+    currentTrackPoints,
+    currentTrackFeatureCollection,
+    isRecorderOpen,
+    showBatteryHint,
+    recordingCancelOpen: showRecordingCancelConfirm,
+    openRecorder: handleOpenRecorder,
+    closeRecorder: handleCloseRecorder,
+    startRecording: handleStartRecording,
+    pauseRecording: handlePauseRecording,
+    resumeRecording: handleResumeRecording,
+    stopRecording: handleStopRecordingFromScreen,
+    cancelRecording: handleCancelRecording,
+    dismissRecordingCancel: handleDismissRecordingCancel,
+    confirmRecordingCancel: handleConfirmRecordingCancel,
+    fixBatteryOptimization: handleFixBatteryOptimization,
+    dismissBatteryHint: handleDismissBatteryHint,
+    isAveragingOpen,
+    averagingPhase,
+    averaging,
+    averagingResetOpen: showAveragingResetConfirm,
+    collectPoint: handleCollectPoint,
+    startAveraging: handleStartAveraging,
+    stopAveraging: handleStopAveraging,
+    requestAveragingReset: handleRequestAveragingReset,
+    cancelAveragingReset: handleCancelAveragingReset,
+    confirmAveragingReset: handleConfirmAveragingReset,
+    cancelAveraging: handleCancelAveraging,
+    saveAveragedPoint,
+    closeGpsOverlays,
+  } = useDashboardGpsRecordingActions({
+    controller,
+    recordingState: gpsRecordingState,
+    tracksRevision: gpsTracksRevision,
+    showToast: showLandmarkToast,
+    onSaveAveragedPoint: handleAveragingSave,
+  });
 
   const handleCancelDeleteLandmark = useCallback(() => {
     if (landmarkDeleteBusy) return;
@@ -1300,7 +1159,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               recordingElapsedUpdatedAt: gpsRecordingElapsedUpdatedAt,
               currentPoints: currentTrackPoints,
               measurementUnit,
-              onBack: () => setIsRecorderOpen(false),
+              onBack: handleCloseRecorder,
               onStart: handleStartRecording,
               onPause: handlePauseRecording,
               onResume: handleResumeRecording,
@@ -1324,7 +1183,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               onStop: handleStopAveraging,
               onReset: handleRequestAveragingReset,
               onCancel: handleCancelAveraging,
-              onSave: handleAveragingSave,
+              onSave: saveAveragedPoint,
             }}
             averagingResetOpen={showAveragingResetConfirm}
             onConfirmAveragingReset={handleConfirmAveragingReset}

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { MapRef } from 'react-map-gl/maplibre';
 import type { SpeleoDBController } from '../../controllers/SpeleoDBController';
 import { GpxFileService } from '../../services/GpxFileService';
@@ -10,6 +10,7 @@ import {
 import type { GpsTrackListItem, RecordedPoint } from '../../types/gpsTrack';
 import { errorToLogDetails } from '../../utils/errorDiagnostics';
 import { trackPointsToLineStringFeature } from '../../utils/gpsTrackGeoJson';
+import { useMountedRef } from '../../hooks/useMountedRef';
 import { boundsFromPoints } from './dashboardMapUtils';
 
 type TrackController = Pick<
@@ -110,7 +111,7 @@ export function buildSavedTrackFeatureCollection(
   return { type: 'FeatureCollection', features };
 }
 
-type MountedRef = MutableRefObject<boolean>;
+type MountedRef = ReturnType<typeof useMountedRef>;
 type ErrorReporter = (
   track: GpsTrackListItem,
   phase: 'gpx' | 'share' | 'upload' | 'edit' | 'delete',
@@ -118,17 +119,6 @@ type ErrorReporter = (
   error: unknown,
 ) => void;
 type TrackPointsSetter = Dispatch<SetStateAction<Record<string, RecordedPoint[]>>>;
-
-function useMountedRef(): MountedRef {
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-  return mountedRef;
-}
 
 function useActionErrorReporter(
   mountedRef: MountedRef,
