@@ -19,6 +19,8 @@ unsafe because the late write can repopulate storage after logout.
 
 - Give login attempts explicit latest-attempt ownership and pass their signal
   through transport and secure-session storage.
+- Re-check cancellation after every asynchronous request-preparation boundary
+  and immediately before launching a transport that cannot be interrupted.
 - Let network work overlap, but serialize credential/metadata mutations.
 - Snapshot the previous coherent session before mutation. If cancellation wins
   during or after an uncancellable write, restore both the credential and its

@@ -9,6 +9,14 @@ import {
 } from './HttpClient';
 import { clearPreferences, setPreferences } from './PreferencesService';
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe('HttpClient (web transport)', () => {
   let client: HttpClient;
 
@@ -335,6 +343,36 @@ describe('HttpClient (native transport)', () => {
 
     const [{ headers = {} }] = nativeRequest.mock.calls[0];
     expect(headers).toEqual(expect.objectContaining({ 'User-Agent': 'Custom-UA/1.0' }));
+  });
+
+  it('does not launch a native request cancelled during async header assembly', async () => {
+    const userAgent = createDeferred<string | undefined>();
+    const loadUserAgent = vi.fn(() => userAgent.promise);
+    const nativeRequest = vi.fn().mockResolvedValue({
+      status: 200,
+      data: {},
+      headers: {},
+      url: 'https://api.test',
+    });
+    client = new HttpClient({
+      getNativeUserAgent: loadUserAgent,
+      isNativePlatform: () => true,
+      nativeHttp: { request: nativeRequest } as never,
+    });
+    const abortController = new AbortController();
+
+    const request = client.request({
+      url: 'https://api.test/api/v2/user/auth-token/',
+      method: 'POST',
+      data: { email: 'user@example.com', password: 'secret' },
+      signal: abortController.signal,
+    });
+    expect(loadUserAgent).toHaveBeenCalledOnce();
+    abortController.abort();
+    userAgent.resolve('SpeleoDB-iOS/v1.0.0/iPhone - iOS 26.5');
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    expect(nativeRequest).not.toHaveBeenCalled();
   });
 
   it('does not inject app User-Agent for non-API URLs (e.g. map tiles)', async () => {

@@ -64,6 +64,7 @@ export interface HttpResponse<T = unknown> {
 export interface HttpClientDeps {
   isNativePlatform?: () => boolean;
   isProduction?: () => boolean;
+  getNativeUserAgent?: () => Promise<string | undefined>;
   nativeHttp?: Pick<typeof CapacitorHttp, 'request'>;
 }
 
@@ -212,6 +213,7 @@ function getWebUserAgent(): string {
 async function buildNativeHeaders(
   url: string,
   headers?: Record<string, string>,
+  loadUserAgent: () => Promise<string | undefined> = getNativeUserAgent,
 ): Promise<Record<string, string> | undefined> {
   const merged = { ...(headers ?? {}) };
   const existingUserAgentKey = findHeaderKey(merged, 'User-Agent');
@@ -222,7 +224,7 @@ async function buildNativeHeaders(
     return Object.keys(merged).length > 0 ? merged : undefined;
   }
 
-  const userAgent = await getNativeUserAgent();
+  const userAgent = await loadUserAgent();
   if (!userAgent) {
     return Object.keys(merged).length > 0 ? merged : undefined;
   }
@@ -367,7 +369,12 @@ export class HttpClient {
       };
     }
 
-    const nativeHeaders = await buildNativeHeaders(req.url, headerOverrides);
+    const nativeHeaders = await buildNativeHeaders(
+      req.url,
+      headerOverrides,
+      this.deps.getNativeUserAgent,
+    );
+    throwIfAborted(req.signal);
     const nativeHttp = this.deps.nativeHttp ?? CapacitorHttp;
     const response = await this.awaitWithAbort(
       nativeHttp.request({

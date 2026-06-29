@@ -62,6 +62,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-014 | P1 | iOS declares background fetch and processing modes without scheduling either kind of work. | Restrict the compiled app configuration to recording-owned background location. |
 | MH-015 | P2 | Repeated one-shot coverage runs on the same tree can differ by three covered `TileCacheRepository` branches. | Closed: isolate fake IndexedDB, await complete background transactions, and own the overwrite path directly. |
 | MH-016 | P0 | Concurrent login/logout can publish stale auth state or leave a superseded token durable after an uncancellable native vault write. | Closed: latest-attempt cancellation, transactional secure-store rollback, and logout admission/wait ordering. |
+| MH-017 | P1 | Native HTTP can launch a request after cancellation wins during asynchronous User-Agent assembly. | Closed: re-check cancellation immediately before invoking CapacitorHttp. |
 
 ## Commit checklist
 
@@ -98,6 +99,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Testing] Stabilize deterministic coverage reporting`
 - [x] `[Fix] Stop inactive page effects and polling`
 - [x] `[Fix] Serialize authentication and logout transitions`
+- [x] `[Fix] Prevent cancelled native request launch`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -714,7 +716,7 @@ and physical-device evidence.
 
 ### Serialize authentication and logout transitions
 
-- Commit: recorded after this objective is committed.
+- Commit: `b55dcb5` (`[Fix] Serialize authentication and logout transitions`).
 - Reproduction: password and token login shared no attempt generation. An older
   response could complete after a newer attempt and publish stale credentials;
   logout could clear storage while an in-flight login repopulated it. Adding
@@ -745,3 +747,28 @@ and physical-device evidence.
   evidence is recorded immediately before commit.
 - Findings closed: MH-016. The broader authentication/network audit remains
   open for additional finding-specific commits.
+
+### Prevent cancelled native request launch
+
+- Commit: recorded after this objective is committed.
+- Reproduction: `HttpClient.nativeRequest()` checked the caller signal before
+  building app/device User-Agent metadata, then invoked `CapacitorHttp.request`
+  before `awaitWithAbort()` checked the signal again. Cancellation during that
+  asynchronous metadata lookup therefore rejected the caller but still
+  launched the native request, including an authenticated or body-bearing
+  request that logout had already superseded.
+- Correction: native request preparation now checks the signal immediately
+  after header assembly and before transport invocation. Post-launch native
+  cancellation remains best-effort, while publication stays cancellation-safe.
+- Verification: the regression defers the production User-Agent loader seam,
+  aborts there, resolves preparation, and proves an `AbortError` with zero
+  native transport calls. The full Node 22 CI gate passes 1,704/1,704 tests
+  across 101 files with 89.44% statements, 82.47% branches, 92.85% functions,
+  and 91.51% lines, followed by a production build. Capacitor sync produces no
+  tracked native drift. Android passes its 9 first-party tests plus lint,
+  release APK, and release AAB gates. Signed iOS XCTest passes 9/9 tests on
+  iPhone 17 Pro/iOS 26.5, and unsigned simulator Release compilation succeeds.
+  Exact staged pre-commit and CI evidence is recorded immediately before
+  commit.
+- Findings closed: MH-017. The broader authentication/network audit remains
+  open.

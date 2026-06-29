@@ -122,7 +122,9 @@ Implementation notes:
 - Service/cache IO accepts cancellation signals from coordinator-owned run
   contexts. Web `fetch` aborts transport immediately; native requests are
   best-effort at transport level but cannot publish stale state or cache writes
-  after supersession/logout.
+  after supersession/logout. Native request preparation checks cancellation
+  again after asynchronous app/device header assembly, so a request cancelled
+  during preparation is never launched.
 - Login error parsing in `SessionCoordinator.login` reads `detail` / `message` /
   `errors.non_field_errors` directly off `response.data` (already v2-shaped).
 - Direct token login reuses `SpeleoDBService.validateToken`; `2xx` establishes
