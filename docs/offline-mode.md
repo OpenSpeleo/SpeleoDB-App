@@ -219,6 +219,15 @@ cover worker responsiveness, device-console diagnostics, tile-network
 suppression after removal, warning non-dismissal, IndexedDB persistence across
 force-quit/offline startup, and recovery after a newer server commit.
 
+Runtime tile and style caching returns before its best-effort IndexedDB write
+finishes. Tests for that path wait for metadata and cache-stat accounting, which
+are the final durable effects of the transaction. Observing the tile payload
+alone is insufficient: it can become readable while metadata and statistics are
+still pending, allowing that work to leak into the next test and making branch
+coverage depend on test order. The shared test setup also installs a fresh fake
+IndexedDB factory for each file, preventing persisted jobs or open connections
+from crossing Vitest's serialized file boundary.
+
 ## Change checklist (offline/auth)
 
 When modifying auth/offline logic:

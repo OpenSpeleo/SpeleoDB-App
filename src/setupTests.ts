@@ -1,11 +1,23 @@
 import '@testing-library/jest-dom/vitest';
 import 'fake-indexeddb/auto';
+import { IDBFactory } from 'fake-indexeddb';
 import { afterEach } from 'vitest';
 import {
   assertConsoleGuardState,
   installConsoleGuards,
   resetConsoleGuardState,
 } from './test/consoleGuard';
+
+// Vitest reuses a worker across serialized test files. fake-indexeddb's auto
+// entry point exports a module singleton, so without a fresh factory one file's
+// databases and open connections can leak into the next file. Give every test
+// file an isolated IndexedDB catalog while preserving persistence within that
+// file's tests.
+Object.defineProperty(globalThis, 'indexedDB', {
+  value: new IDBFactory(),
+  configurable: true,
+  writable: true,
+});
 
 // @stencil/core (used by @ionic/core) probes adoptedStyleSheets at import time
 // and during component lifecycle. jsdom does not implement it, so we shim it on

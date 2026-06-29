@@ -16,7 +16,12 @@ import {
   isMissingTileError,
 } from './TileCacheService';
 import { MAP } from '../constants';
-import { __clearTileCacheRepositoryForTests, getTile } from './tileCache/TileCacheRepository';
+import {
+  __clearTileCacheRepositoryForTests,
+  getTile,
+  getTileCacheStats,
+  getTileMetadata,
+} from './tileCache/TileCacheRepository';
 
 type ProtocolHandler = (
   params: { url: string },
@@ -96,10 +101,12 @@ describe('TileCacheService runtime magic-hash (cached-https protocol)', () => {
     const result = await handler({ url: CACHED_TILE_URL });
     expect(new Uint8Array(result.data)).toEqual(new Uint8Array([9, 9, 9, 9]));
 
-    // The tile is cached in the background (non-blocking); allow the microtask
-    // queue to drain so the upsert lands.
+    // The tile is cached in the background (non-blocking). Wait for metadata
+    // and stats too: seeing the payload alone does not prove that the IndexedDB
+    // transaction has finished.
     await vi.waitFor(async () => {
-      expect(await getTile(TILE_URL)).not.toBeNull();
+      expect(await getTileMetadata(TILE_URL)).not.toBeNull();
+      expect((await getTileCacheStats()).tileCount).toBe(1);
     });
   });
 });

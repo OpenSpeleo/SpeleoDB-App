@@ -16,6 +16,7 @@ import {
   getManualTileCount,
   getTile,
   getTileCacheStats,
+  getTileMetadata,
   getTotalCacheBytes,
   prefetchJobKey,
   setPrefetchJob,
@@ -123,6 +124,38 @@ describe('TileCacheRepository', () => {
 
       const all = await getAllPrefetchJobs();
       expect(all.map((job) => job.projectId)).toEqual(['p2']);
+    });
+  });
+
+  describe('upsertTile', () => {
+    it('replaces a pinned tile without double-counting or dropping its pin', async () => {
+      const url = 'https://tiles.example.com/replaced.png';
+      await upsertTile(url, new ArrayBuffer(100), {
+        pinnedByAutoPrefetch: true,
+        now: 1,
+      });
+
+      await upsertTile(url, new ArrayBuffer(40), {
+        pinnedByAutoPrefetch: false,
+        now: 2,
+      });
+
+      expect((await getTile(url))?.byteLength).toBe(40);
+      expect(await getTileMetadata(url)).toEqual({
+        url,
+        sizeBytes: 40,
+        lastAccessedAt: 2,
+        pinnedByAutoPrefetch: true,
+        createdAt: 1,
+        updatedAt: 2,
+      });
+      expect(await getTileCacheStats()).toEqual({
+        totalBytes: 40,
+        tileCount: 1,
+        pinnedBytes: 40,
+        pinnedTileCount: 1,
+        updatedAt: 2,
+      });
     });
   });
 

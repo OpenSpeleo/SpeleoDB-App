@@ -95,6 +95,13 @@ This document defines high-level architecture boundaries and coding expectations
   invariants require the revision and controller accessor used by Dashboard.
   Mocking an obsolete helper or making a mock return the desired answer is not
   proof. See `tasks/lessons/authoritative-seam-tests.md`.
+- When production deliberately starts a background IndexedDB write, tests must
+  await the final durable record or accounting update, not an earlier object-
+  store write from the same transaction. Ending a test on an intermediate write
+  leaks work into later tests and makes coverage depend on execution order.
+  Serialized files must also receive separate fake IndexedDB factories so open
+  connections and catalogs cannot cross file boundaries. See
+  `tasks/lessons/indexeddb-background-writes.md`.
 - Separate compilation evidence from device evidence. Web/native builds cannot
   establish WebView responsiveness, native modal dismissal, device-console
   output, real network cancellation, or persistence across force-quit.

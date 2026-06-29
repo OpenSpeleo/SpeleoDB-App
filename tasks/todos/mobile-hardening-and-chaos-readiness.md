@@ -60,7 +60,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-012 | P0 | Raw errors, deep links, identifiers, coordinates, and payload-shaped data can reach console/Sentry diagnostics. | Enforce one redacted diagnostic boundary. |
 | MH-013 | P0 | Remote cleartext instances and automatic redirects can expose credentials or request bodies. | Require release HTTPS and disable redirects for sensitive requests. |
 | MH-014 | P1 | iOS declares background fetch and processing modes without scheduling either kind of work. | Restrict the compiled app configuration to recording-owned background location. |
-| MH-015 | P2 | Repeated one-shot coverage runs on the same tree can differ by three covered `TileCacheRepository` branches. | Isolate run-history/test-order state and make coverage evidence repeatable before enforcing thresholds. |
+| MH-015 | P2 | Repeated one-shot coverage runs on the same tree can differ by three covered `TileCacheRepository` branches. | Closed: isolate fake IndexedDB, await complete background transactions, and own the overwrite path directly. |
 
 ## Commit checklist
 
@@ -94,6 +94,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Unify dashboard panel state`
 - [x] `[Refactoring] Extract dashboard landmark presentation`
 - [x] `[Refactoring] Decompose dashboard rendering and interaction state`
+- [x] `[Testing] Stabilize deterministic coverage reporting`
 - [ ] `[Fix] Stop inactive page effects and polling`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
@@ -624,7 +625,7 @@ and physical-device evidence.
 
 ### Extract dashboard landmark presentation
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `623934e` (`[Refactoring] Extract dashboard landmark presentation`).
 - Verification: Node 22 inventory, lint, typecheck, focused presentation and
   Dashboard characterization coverage, full one-shot Vitest with coverage and
   live API contracts, production build, both-platform Capacitor sync, Android
@@ -652,3 +653,36 @@ and physical-device evidence.
   data, visibility, interactions, layers, map shell, GPS presentation,
   landmark presentation, and mutually exclusive panel state now have focused
   owners.
+
+### Stabilize deterministic coverage reporting
+
+- Commit: recorded in the next objective after this commit is created.
+- Reproduction: repeated serial coverage on the same tree reported either
+  90/105 or 93/105 covered branches in `TileCacheRepository`; shuffled seed 1
+  reproduced an intermediate 92/105 result. The varying branches were the
+  existing-tile paths in `upsertTile`, reached only when an earlier test's
+  background write continued into a later test.
+- Root cause: the existing-pinned-tile replacement path had no direct owning
+  test and was reached only incidentally when background tile work happened to
+  overwrite a cached value before coverage collection. Runtime tile/style tests
+  also returned after the payload became readable even though metadata and
+  cache-stat writes in the same transaction were still pending. Finally,
+  fake IndexedDB's auto-installed module singleton did not provide an explicit
+  per-file database boundary for serialized workers.
+- Correction: service tests now wait for the metadata record and stats update,
+  the offline cache-hit test waits for the asynchronous access-time write, and
+  each test file receives a fresh fake IndexedDB factory while retaining normal
+  persistence within the file. A direct repository regression test now proves
+  that replacing an already-pinned tile updates bytes without double-counting
+  the tile or dropping its pin. These are the final durable effects and
+  isolation boundary owned by the production transaction tests, and the
+  previously incidental overwrite branches are now exercised intentionally.
+- Verification: the repository regression passes 9/9 tests. The focused
+  tile-cache/controller suites pass 215/215 tests under shuffled seeds 1 and
+  42; both report exactly 93/105 covered `TileCacheRepository` branches despite
+  different test orders. Two consecutive complete one-shot runs pass
+  1,688/1,688 tests and report the identical 4,620/5,611 aggregate branches
+  (82.33%), including the same 93/105 repository branches. Static/build and
+  exact staged evidence are recorded before commit; no native gate applies to
+  this test-only/documentation objective.
+- Findings closed: MH-015.

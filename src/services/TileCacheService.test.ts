@@ -22,12 +22,22 @@ import { MAP } from '../constants';
 import {
   __clearTileCacheRepositoryForTests,
   getTile,
+  getTileCacheStats,
   getTileMetadata,
   upsertTile,
 } from './tileCache/TileCacheRepository';
 
+const STYLE_CACHE_KEY = '__style_json__';
+
 async function resetTileDatabase(): Promise<void> {
   await __clearTileCacheRepositoryForTests();
+}
+
+async function expectBackgroundWriteToFinish(url: string): Promise<void> {
+  await vi.waitFor(async () => {
+    expect(await getTileMetadata(url)).not.toBeNull();
+    expect((await getTileCacheStats()).tileCount).toBe(1);
+  });
 }
 
 // ==================== Tests ====================
@@ -87,6 +97,7 @@ describe('TileCacheService', () => {
       expect(sources.openmaptiles.tiles[0]).toBe(
         'cached-https://example.com/tiles/{z}/{x}/{y}.pbf',
       );
+      await expectBackgroundWriteToFinish(STYLE_CACHE_KEY);
     });
 
     it('preserves non-https URLs unchanged', async () => {
@@ -110,6 +121,7 @@ describe('TileCacheService', () => {
       expect(result.glyphs).toBe(
         'http://local.dev/fonts/{fontstack}/{range}.pbf',
       );
+      await expectBackgroundWriteToFinish(STYLE_CACHE_KEY);
     });
 
     it('throws when offline and no cache available', async () => {
@@ -131,9 +143,9 @@ describe('TileCacheService', () => {
         layers: [],
       };
       await upsertTile(
-        '__style_json__',
+        STYLE_CACHE_KEY,
         new TextEncoder().encode(JSON.stringify(cachedStyle)).buffer,
-        { pinnedByAutoPrefetch: false },
+        { pinnedByAutoPrefetch: false, now: 1 },
       );
       setTileCacheOfflineMode(true);
       const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
@@ -143,6 +155,9 @@ describe('TileCacheService', () => {
 
       expect(result.sprite).toBe('cached-https://example.com/sprites/basic');
       expect(globalThis.fetch).not.toHaveBeenCalled();
+      await vi.waitFor(async () => {
+        expect((await getTileMetadata(STYLE_CACHE_KEY))?.lastAccessedAt).toBeGreaterThan(1);
+      });
       onlineSpy.mockRestore();
     });
   });
