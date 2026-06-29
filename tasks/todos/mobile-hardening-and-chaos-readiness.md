@@ -63,6 +63,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-015 | P2 | Repeated one-shot coverage runs on the same tree can differ by three covered `TileCacheRepository` branches. | Closed: isolate fake IndexedDB, await complete background transactions, and own the overwrite path directly. |
 | MH-016 | P0 | Concurrent login/logout can publish stale auth state or leave a superseded token durable after an uncancellable native vault write. | Closed: latest-attempt cancellation, transactional secure-store rollback, and logout admission/wait ordering. |
 | MH-017 | P1 | Native HTTP can launch a request after cancellation wins during asynchronous User-Agent assembly. | Closed: re-check cancellation immediately before invoking CapacitorHttp. |
+| MH-018 | P1 | An unreadable session snapshot or unexpected startup-validation rejection can escape as an unhandled promise and leave ambiguous auth routing. | Closed: fail closed in the coordinator and mounted startup boundary. |
 
 ## Commit checklist
 
@@ -100,6 +101,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Stop inactive page effects and polling`
 - [x] `[Fix] Serialize authentication and logout transitions`
 - [x] `[Fix] Prevent cancelled native request launch`
+- [x] `[Fix] Fail closed on startup validation exceptions`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -750,7 +752,7 @@ and physical-device evidence.
 
 ### Prevent cancelled native request launch
 
-- Commit: recorded after this objective is committed.
+- Commit: `3cc6049` (`[Fix] Prevent cancelled native request launch`).
 - Reproduction: `HttpClient.nativeRequest()` checked the caller signal before
   building app/device User-Agent metadata, then invoked `CapacitorHttp.request`
   before `awaitWithAbort()` checked the signal again. Cancellation during that
@@ -771,4 +773,28 @@ and physical-device evidence.
   Exact staged pre-commit and CI evidence is recorded immediately before
   commit.
 - Findings closed: MH-017. The broader authentication/network audit remains
+  open.
+
+### Fail closed on startup validation exceptions
+
+- Commit: recorded after this objective is committed.
+- Reproduction: `validateSessionAgainstServer()` read the synchronous secure
+  session outside its guarded request block. A storage exception therefore
+  rejected the validation contract. The mounted startup chain had `then` and
+  `finally` handlers but no rejection handler, producing an unhandled promise
+  and no authoritative login redirect.
+- Correction: unreadable session state now revokes authentication, clears the
+  offline lock, invokes destructive local-data cleanup, and returns
+  `unauthorized` without transport even if cleanup reports a storage failure.
+  The startup UI catches any unexpected validation rejection, routes to login,
+  and retains its unconditional banner/timer/splash cleanup.
+- Verification: coordinator and mounted-provider regressions own the storage
+  and UI seams respectively. Node 22 CI passes 1,707/1,707 tests across 101
+  files with 89.44% statements, 82.46% branches, 92.85% functions, and 91.52%
+  lines. Capacitor synchronization produces no tracked native drift. Android
+  passes its 9 first-party tests plus lint, release APK, and release AAB gates.
+  Signed iOS XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned
+  simulator Release compilation succeeds. Exact staged pre-commit and CI
+  evidence is recorded immediately before commit.
+- Findings closed: MH-018. The broader authentication/network audit remains
   open.

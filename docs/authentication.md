@@ -88,6 +88,14 @@ restores `user: null`; a stored email reconstructs the lightweight user
 identity. Startup then validates the secure token using the rules in
 `docs/networking.md`.
 
+If the in-process secure-session snapshot cannot be read, validation revokes
+authentication, invokes the destructive local-data purge, and returns
+`unauthorized` without making a request. Cleanup remains best-effort so a native
+deletion error cannot restore in-memory access or reject the validation result.
+The startup UI also treats an unexpected validation rejection as unauthorized:
+it clears the pending banner, dismisses the splash, and routes to login instead
+of leaving an unhandled rejection or an ambiguous authenticated view.
+
 On iOS, `AppBridgeViewController` registers the first-party credential plugin
 as a concrete bridge instance. This registration path must coexist with
 Capacitor's automatic discovery for packaged plugins; type registration is not

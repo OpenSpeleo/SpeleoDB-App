@@ -1,7 +1,7 @@
 import { NETWORK } from '../constants';
 import type { HttpResponse } from '../services/HttpClient';
 import type { ServiceRequestOptions } from '../services/SpeleoDBService';
-import type { SessionStore } from '../services/SecureSessionStore';
+import type { SessionStore, StoredSession } from '../services/SecureSessionStore';
 import type {
   AuthResponse,
   AuthState,
@@ -330,7 +330,20 @@ export class SessionCoordinator {
   private async validateSessionAgainstServer(): Promise<SessionValidationResult> {
     const generation = this.validationGeneration;
     const context = this.beginValidationContext();
-    const session = this.dependencies.sessionStore.getSession();
+    let session: StoredSession | null;
+    try {
+      session = this.dependencies.sessionStore.getSession();
+    } catch {
+      this.reset(true);
+      try {
+        await this.logout();
+      } catch {
+        // Authentication is already revoked in memory. The controller purge
+        // performs best-effort cleanup before reporting its storage failure.
+      }
+      this.finishValidation(context);
+      return 'unauthorized';
+    }
     if (!session) {
       this.finishValidation(context);
       return 'unauthorized';

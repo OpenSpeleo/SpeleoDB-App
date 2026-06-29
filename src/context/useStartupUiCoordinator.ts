@@ -273,6 +273,10 @@ export function useStartupUiCoordinator({
           history.replace('/login')
         }
       })
+      .catch(() => {
+        if (!mountedRef.current) return
+        history.replace('/login')
+      })
       .finally(() => {
         if (startupBannerTimerRef.current !== null) {
           window.clearTimeout(startupBannerTimerRef.current)

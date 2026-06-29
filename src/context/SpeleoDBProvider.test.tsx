@@ -476,6 +476,25 @@ describe('SpeleoDBProvider', () => {
       }
     });
 
+    it('fails closed and dismisses the splash when startup validation rejects', async () => {
+      mockValidateSession.mockRejectedValue(new Error('unexpected validation failure'));
+      const history = createMemoryHistory({ initialEntries: ['/dashboard'] });
+
+      render(
+        <Router history={history}>
+          <SpeleoDBProvider>
+            <div>child</div>
+          </SpeleoDBProvider>
+        </Router>,
+      );
+
+      await waitFor(() => {
+        expect(history.location.pathname).toBe('/login');
+      });
+      expect(screen.queryByTestId('connecting-banner')).not.toBeInTheDocument();
+      expect(mockSplashHide).toHaveBeenCalledOnce();
+    });
+
     it('hides the splash exactly once when validation resolves quickly (.finally path)', async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       try {

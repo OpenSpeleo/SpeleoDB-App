@@ -688,6 +688,40 @@ describe('SessionCoordinator', () => {
       expect(transport.validateToken).not.toHaveBeenCalled();
     });
 
+    it('fails closed when validation cannot read the secure session', async () => {
+      const error = new Error('vault state unavailable');
+      allowConsoleError('Failed to load auth state:', error);
+      const store = createSessionStore(null, {
+        getSession: vi.fn(() => { throw error; }),
+      });
+      const { coordinator, hooks, transport } = createHarness({ store });
+
+      await expect(coordinator.validateSession()).resolves.toBe('unauthorized');
+
+      expect(coordinator.isAuthenticated).toBe(false);
+      expect(coordinator.isOnline).toBe(false);
+      expect(coordinator.isOfflineLocked).toBe(false);
+      expect(transport.validateToken).not.toHaveBeenCalled();
+      expect(hooks.notifyStateChanged).toHaveBeenCalledOnce();
+      expect(hooks.purgeLocalUserData).toHaveBeenCalledOnce();
+    });
+
+    it('keeps an unreadable session unauthorized when destructive cleanup fails', async () => {
+      const error = new Error('vault state unavailable');
+      allowConsoleError('Failed to load auth state:', error);
+      const store = createSessionStore(null, {
+        getSession: vi.fn(() => { throw error; }),
+      });
+      const hooks = createHooks({
+        purgeLocalUserData: vi.fn(async () => { throw new Error('clear failed'); }),
+      });
+      const { coordinator } = createHarness({ hooks, store });
+
+      await expect(coordinator.validateSession()).resolves.toBe('unauthorized');
+      expect(coordinator.isAuthenticated).toBe(false);
+      expect(coordinator.isOfflineLocked).toBe(false);
+    });
+
     it('publishes online state after successful startup validation', async () => {
       const { coordinator, hooks, transport } = createHarness({ session: STORED_SESSION });
 

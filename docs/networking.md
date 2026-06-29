@@ -38,6 +38,10 @@ The app enters offline mode only as a result of a failed server probe, never fro
 
 - `SpeleoDBStartupGate` must mount at the app root via `SpeleoDBProvider`, not inside lazy authenticated routes. Cold start loads `/` or `/login` before the dashboard shell exists; if startup UI only lived in `AuthenticatedAppShell`, `SplashScreen.hide()` and the stored-session redirect to `/dashboard` would never run. The gate keeps splash dismissal and validation in the main graph; heavier Ionic modals load lazily from `SpeleoDBStartupModals`.
 - Startup validation uses `NETWORK.STARTUP_AUTH_TIMEOUT_MS` (10s) so spotty networks get a fair attempt before falling back to offline.
+- An unreadable in-process secure-session snapshot fails closed as
+  `unauthorized` without transport and invokes destructive local-data cleanup.
+  The startup UI also catches unexpected validation rejections, routes to
+  login, and always completes splash/banner cleanup.
 - When validation is still pending after a 1s gate, the startup UI coordinator (`src/context/useStartupUiCoordinator.ts`) renders a small `Connecting to SpeleoDB…` banner (`data-testid="connecting-banner"`). This is purely visual feedback; it does not change networking state, retry, or trigger any side effects.
 - The banner is removed when validation resolves. On a fast network it never appears.
 - **The native splash must hide the moment the banner appears.** Capacitor's splash is configured `launchAutoHide: false` with an opaque background, so it sits above React until `SplashScreen.hide()` runs. If the splash is left up until validation resolves, the banner is rendered behind it and the user sees nothing for the full timeout — defeating the purpose of the feature. The startup UI coordinator therefore calls `hideSplashScreenSafely('connecting banner shown')` from inside the 1s gate's setTimeout callback, in addition to the existing call in the validation `.finally()`. Both calls are idempotent at the plugin level.
