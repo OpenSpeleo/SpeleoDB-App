@@ -103,6 +103,21 @@ restores `user: null`; a stored email reconstructs the lightweight user
 identity. Startup then validates the secure token using the rules in
 `docs/networking.md`.
 
+Persisted session fields are treated as untrusted upgrade input. Startup trims
+the token and identity metadata, re-applies the current origin-only/HTTPS
+instance policy, and atomically commits any recoverable canonical form before
+network validation. A path, query, fragment, embedded credential, unsupported
+scheme, blank token, or failed canonical metadata commit cannot become an
+offline session: authentication is revoked and the destructive local-user-data
+purge runs without issuing a request. A later transport failure after a
+successful canonical upgrade keeps the session and follows normal offline
+continuity rules.
+
+`SecureSessionStore` serializes every establishment and clear operation. If
+logout wins while canonical migration is inside a native vault write, the
+aborted migration completes its rollback before credential deletion runs; a
+late rollback can never restore a token after destructive cleanup.
+
 If the in-process secure-session snapshot cannot be read, validation revokes
 authentication, invokes the destructive local-data purge, and returns
 `unauthorized` without making a request. Cleanup remains best-effort so a native
@@ -179,7 +194,9 @@ are never logged or parsed.
   rejection of seeded legacy plaintext credentials during a transport failure.
 - Session-store tests cover fresh writes, account replacement, legacy migration,
   interrupted migration, orphan cleanup, cancellation before/after metadata
-  commit, rollback, rollback failure, and logout.
+  commit, canonical instance enforcement, rollback, rollback failure,
+  establish/clear ordering, and logout. Coordinator tests own persisted-session
+  upgrade ordering and destructive rejection of malformed identity metadata.
 - An iOS integration test loads the production bridge controller and proves the
   JavaScript-visible `CredentialStore` plugin is registered before the WebView
   uses it; the separate Keychain tests retain ownership of persistence behavior.

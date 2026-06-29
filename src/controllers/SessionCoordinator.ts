@@ -89,6 +89,20 @@ function hasAuthTokenResponse(data: unknown): data is AuthTokenResponse {
   return typeof token === 'string' && token.trim().length > 0;
 }
 
+function normalizeStoredSession(session: StoredSession): StoredSession | null {
+  const token = session.token.trim();
+  const instance = normalizeInstance(session.instance);
+  if (!token || !instance) return null;
+  const email = session.email?.trim();
+  return { token, instance, ...(email ? { email } : {}) };
+}
+
+function sessionsMatch(left: StoredSession, right: StoredSession): boolean {
+  return left.token === right.token
+    && left.instance === right.instance
+    && left.email === right.email;
+}
+
 function extractAuthErrorMessage(
   data: unknown,
   sensitiveValues: readonly string[] = [],
@@ -425,10 +439,24 @@ export class SessionCoordinator {
       return { result: 'unauthorized', authoritative: true };
     }
 
+    const normalizedSession = normalizeStoredSession(session);
+    if (!normalizedSession) {
+      return this.rejectMalformedStoredSession(context);
+    }
+    let sessionMigrationPending = !sessionsMatch(session, normalizedSession);
+
     try {
+      if (sessionMigrationPending) {
+        await this.serializeSessionMutation(() => this.dependencies.sessionStore.establish(
+          normalizedSession,
+          { signal: context.signal },
+        ));
+        context.throwIfAborted();
+        sessionMigrationPending = false;
+      }
       const response = await this.dependencies.transport.validateToken(
-        session.instance,
-        session.token,
+        normalizedSession.instance,
+        normalizedSession.token,
         {
           timeoutMs: NETWORK.STARTUP_AUTH_TIMEOUT_MS,
           signal: context.signal,
@@ -449,6 +477,9 @@ export class SessionCoordinator {
     } catch (error) {
       if (isAbortError(error) || !this.isValidationCurrent(context, generation)) {
         return { result: this.staleSessionResult(), authoritative: false };
+      }
+      if (sessionMigrationPending) {
+        return this.rejectMalformedStoredSession(context);
       }
       this.setConnectivity(false, true, true);
       return { result: 'network_error', authoritative: true };
@@ -500,11 +531,13 @@ export class SessionCoordinator {
     try {
       const session = this.dependencies.sessionStore.getSession();
       if (!session) return;
-      const email = session.email?.trim() ?? '';
+      const normalizedSession = normalizeStoredSession(session);
+      if (!normalizedSession) return;
+      const email = normalizedSession.email ?? '';
       this._authState = {
         isAuthenticated: true,
         user: email ? { id: 'restored', email, name: email } : null,
-        token: session.token,
+        token: normalizedSession.token,
       };
     } catch (error) {
       console.error('Failed to load auth state:', error);
@@ -516,6 +549,20 @@ export class SessionCoordinator {
     this._isOfflineLocked = offlineLocked;
     this.dependencies.hooks.setOfflineRuntime(offlineLocked);
     if (notify) this.dependencies.hooks.notifyStateChanged();
+  }
+
+  private async rejectMalformedStoredSession(
+    context: CancellationContext,
+  ): Promise<SessionValidationOutcome> {
+    this.reset(true);
+    try {
+      await this.logout();
+    } catch {
+      // Authentication is already revoked. Destructive cleanup exhausts every
+      // independent wipe step before surfacing a failure.
+    }
+    this.finishValidation(context);
+    return { result: 'unauthorized', authoritative: true };
   }
 
   private beginValidationContext(): CancellationContext {

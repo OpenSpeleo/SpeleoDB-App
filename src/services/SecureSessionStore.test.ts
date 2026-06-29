@@ -8,6 +8,16 @@ import {
   type SessionMetadataStore,
 } from './SecureSessionStore';
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 function createHarness(options: {
   metadata?: Partial<SessionMetadata>;
   secureToken?: string | null;
@@ -237,6 +247,22 @@ describe('SecureSessionStore', () => {
     });
   });
 
+  it('canonicalizes a recoverable instance before committing a new session', async () => {
+    const { getMetadata, store } = createHarness();
+    await store.initialize();
+
+    await store.establish({
+      instance: ' EXAMPLE.com/// ',
+      token: 'token',
+    });
+
+    expect(getMetadata()).toEqual({
+      hasStoredSession: true,
+      instance: 'https://example.com',
+    });
+    expect(store.getSession()?.instance).toBe('https://example.com');
+  });
+
   it('restores the previous token when cancellation wins during a secure write', async () => {
     const { credentials, getMetadata, getSecureToken, store } = createHarness({
       secureToken: 'old-token',
@@ -352,9 +378,49 @@ describe('SecureSessionStore', () => {
     expect(store.getSession()).toBeNull();
   });
 
+  it('waits for an aborted establishment rollback before clearing the session', async () => {
+    const { credentials, getMetadata, getSecureToken, metadataStore, store } = createHarness({
+      secureToken: 'old-token',
+      metadata: {
+        hasStoredSession: true,
+        instance: 'https://old.example',
+      },
+    });
+    await store.initialize();
+    const writeRelease = createDeferred<void>();
+    const writeToken = vi.mocked(credentials.writeToken).getMockImplementation();
+    vi.mocked(credentials.writeToken).mockImplementationOnce(async (token) => {
+      await writeToken?.(token);
+      await writeRelease.promise;
+    });
+    const abortController = new AbortController();
+
+    const establish = store.establish({
+      instance: 'https://new.example',
+      token: 'new-token',
+    }, { signal: abortController.signal });
+    await vi.waitFor(() => expect(credentials.writeToken).toHaveBeenCalledWith('new-token'));
+    abortController.abort();
+    const clear = store.clear();
+
+    expect(credentials.clearToken).not.toHaveBeenCalled();
+    expect(metadataStore.clear).not.toHaveBeenCalled();
+    writeRelease.resolve();
+    await expect(establish).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(clear).resolves.toBeUndefined();
+
+    expect(credentials.writeToken).toHaveBeenNthCalledWith(2, 'old-token');
+    expect(credentials.clearToken).toHaveBeenCalledOnce();
+    expect(getSecureToken()).toBeNull();
+    expect(getMetadata()).toEqual({ hasStoredSession: false });
+    expect(store.getSession()).toBeNull();
+  });
+
   it.each([
     { instance: '', token: 'token' },
     { instance: 'https://speleodb.org', token: ' ' },
+    { instance: 'https://speleodb.org/tenant', token: 'token' },
+    { instance: 'https://user:secret@speleodb.org', token: 'token' },
   ])('rejects invalid new session %j before touching storage', async (session) => {
     const { credentials, metadataStore, store } = createHarness();
     await store.initialize();

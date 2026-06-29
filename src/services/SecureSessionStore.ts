@@ -1,5 +1,6 @@
 import type { CredentialStore } from './CredentialStore';
 import { isAbortError, throwIfAborted } from '../utils/abort';
+import { getInstanceBaseUrl } from '../utils/instanceUrl';
 
 export interface StoredSession {
   email?: string;
@@ -51,11 +52,28 @@ function normalizeSession(session: StoredSession): StoredSession {
   return { token, instance, ...(email ? { email } : {}) };
 }
 
+function normalizeNewSession(session: StoredSession): StoredSession {
+  const normalized = normalizeSession(session);
+  try {
+    return {
+      ...normalized,
+      instance: getInstanceBaseUrl(normalized.instance),
+    };
+  } catch (error) {
+    throw new SessionStoreError(
+      'persistence-failed',
+      'A valid SpeleoDB instance origin is required for a stored session',
+      { cause: error },
+    );
+  }
+}
+
 /** Coordinates secure token writes with non-secret local session metadata. */
 export class SecureSessionStore implements SessionStore {
   private current: StoredSession | null = null;
   private initialized = false;
   private initialization: Promise<StoredSession | null> | null = null;
+  private mutationTail: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly credentials: CredentialStore,
@@ -83,7 +101,19 @@ export class SecureSessionStore implements SessionStore {
     options: { signal?: AbortSignal } = {},
   ): Promise<void> {
     this.assertInitialized();
-    const normalized = normalizeSession(session);
+    const normalized = normalizeNewSession(session);
+    await this.serializeMutation(() => this.establishOnce(normalized, options));
+  }
+
+  async clear(): Promise<void> {
+    this.assertInitialized();
+    await this.serializeMutation(() => this.clearOnce());
+  }
+
+  private async establishOnce(
+    normalized: StoredSession,
+    options: { signal?: AbortSignal },
+  ): Promise<void> {
     const previousSession = this.current ? { ...this.current } : null;
     throwIfAborted(options.signal);
     const previousToken = await this.credentials.readToken();
@@ -116,8 +146,7 @@ export class SecureSessionStore implements SessionStore {
     this.current = normalized;
   }
 
-  async clear(): Promise<void> {
-    this.assertInitialized();
+  private async clearOnce(): Promise<void> {
     this.current = null;
     const failures: unknown[] = [];
     try {
@@ -141,6 +170,15 @@ export class SecureSessionStore implements SessionStore {
         },
       );
     }
+  }
+
+  private serializeMutation<T>(mutate: () => Promise<T>): Promise<T> {
+    const result = this.mutationTail.then(mutate);
+    this.mutationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private async initializeOnce(): Promise<StoredSession | null> {

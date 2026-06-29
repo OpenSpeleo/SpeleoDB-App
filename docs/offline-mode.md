@@ -67,6 +67,8 @@ its original caller, but it is non-authoritative and cannot start sync.
 | Condition | Startup result | Logout | Cache purge | UX |
 | --- | --- | --- | --- | --- |
 | Session metadata or secure token is missing/inconsistent | No validation; bootstrap fails closed | Local session metadata is cleared | No | Continue unauthenticated; user must log in again |
+| Restored token exists but its instance is malformed or cannot be canonically re-persisted | `unauthorized`; no request is sent | Yes | Yes | Continue unauthenticated; user must log in again |
+| Recoverable stored instance is canonically re-persisted, then transport fails | `network_error` | No | No | Offline modal shown; session uses the canonical origin |
 | HTTP 2xx | `ok` | No | No | Continue online |
 | HTTP 401/403 | `unauthorized` | Yes | Yes | Redirect to home/login |
 | Any other non-2xx status | `network_error` | No | No | Offline modal shown (acknowledge once with `Go Offline`) |

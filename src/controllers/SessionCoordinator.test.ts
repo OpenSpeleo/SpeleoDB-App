@@ -114,6 +114,20 @@ describe('SessionCoordinator', () => {
       expect(coordinator.currentUser).toBeNull();
     });
 
+    it('does not publish a malformed persisted session as authenticated', () => {
+      const { coordinator } = createHarness({
+        session: {
+          email: 'restored@example.com',
+          instance: 'https://www.speleodb.org/tenant',
+          token: 'stored-token',
+        },
+      });
+
+      expect(coordinator.isAuthenticated).toBe(false);
+      expect(coordinator.currentUser).toBeNull();
+      expect(coordinator.authState.token).toBeNull();
+    });
+
     it('starts unauthenticated when no session exists', () => {
       const { coordinator } = createHarness();
 
@@ -779,6 +793,87 @@ describe('SessionCoordinator', () => {
 
       await expect(coordinator.validateSession()).resolves.toBe('unauthorized');
       expect(transport.validateToken).not.toHaveBeenCalled();
+    });
+
+    it('purges a malformed persisted session without attempting transport', async () => {
+      const hooks = createHooks();
+      const { coordinator, transport } = createHarness({
+        hooks,
+        session: {
+          email: 'restored@example.com',
+          instance: 'https://www.speleodb.org/tenant?account=old',
+          token: 'stored-token',
+        },
+      });
+
+      await expect(coordinator.validateSession()).resolves.toBe('unauthorized');
+
+      expect(transport.validateToken).not.toHaveBeenCalled();
+      expect(hooks.purgeLocalUserData).toHaveBeenCalledOnce();
+      expect(coordinator.isAuthenticated).toBe(false);
+      expect(coordinator.isOfflineLocked).toBe(false);
+    });
+
+    it('persists a canonical upgrade before validating a recoverable session', async () => {
+      const store = createSessionStore({
+        email: ' restored@example.com ',
+        instance: 'EXAMPLE.com///',
+        token: ' stored-token ',
+      });
+      const { coordinator, transport } = createHarness({ store });
+
+      await expect(coordinator.validateSession()).resolves.toBe('ok');
+
+      expect(store.establish).toHaveBeenCalledWith(
+        {
+          email: 'restored@example.com',
+          instance: 'https://example.com',
+          token: 'stored-token',
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      expect(vi.mocked(store.establish).mock.invocationCallOrder[0])
+        .toBeLessThan(vi.mocked(transport.validateToken).mock.invocationCallOrder[0]);
+      expect(transport.validateToken).toHaveBeenCalledWith(
+        'https://example.com',
+        'stored-token',
+        expect.objectContaining({ timeoutMs: 10_000 }),
+      );
+    });
+
+    it('purges when a required stored-session canonicalization cannot be committed', async () => {
+      const store = createSessionStore({
+        instance: 'EXAMPLE.com///',
+        token: 'stored-token',
+      }, {
+        establish: vi.fn(async () => { throw new Error('metadata unavailable'); }),
+      });
+      const hooks = createHooks();
+      const { coordinator, transport } = createHarness({ hooks, store });
+
+      await expect(coordinator.validateSession()).resolves.toBe('unauthorized');
+
+      expect(transport.validateToken).not.toHaveBeenCalled();
+      expect(hooks.purgeLocalUserData).toHaveBeenCalledOnce();
+      expect(coordinator.isAuthenticated).toBe(false);
+    });
+
+    it('keeps a canonicalized session offline when later transport fails', async () => {
+      const store = createSessionStore({
+        instance: 'EXAMPLE.com///',
+        token: 'stored-token',
+      });
+      const transport = createTransport({
+        validateToken: vi.fn(async () => { throw new Error('offline'); }),
+      });
+      const hooks = createHooks();
+      const { coordinator } = createHarness({ hooks, store, transport });
+
+      await expect(coordinator.validateSession()).resolves.toBe('network_error');
+
+      expect(hooks.purgeLocalUserData).not.toHaveBeenCalled();
+      expect(coordinator.isAuthenticated).toBe(true);
+      expect(coordinator.isOfflineLocked).toBe(true);
     });
 
     it('fails closed when validation cannot read the secure session', async () => {
