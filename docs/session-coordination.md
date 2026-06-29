@@ -17,7 +17,8 @@ coupled to the controller's project, map, tile, offline-mutation, or GPS state.
 - startup validation timeout and cancellation,
 - online/offline-lock transitions,
 - explicit reconnect decisions, and
-- the decision to request destructive logout after validation returns 4xx.
+- the decision to request destructive logout after validation returns an
+  explicit `401`/`403` authorization denial.
 
 The coordinator depends only on narrow ports:
 
@@ -35,10 +36,11 @@ it still owns the wider application cleanup and sync orchestration.
 | Trigger | Validation result | Session | Connectivity | Follow-up |
 | --- | --- | --- | --- | --- |
 | Stored-session startup | 2xx | preserved | online/unlocked | startup continues |
-| Stored-session startup | 4xx | purged | reset/unlocked | login required |
-| Stored-session startup | timeout, transport, non-4xx failure | preserved | offline/locked | cached use continues |
+| Stored-session startup | 401/403 | purged | reset/unlocked | login required |
+| Stored-session startup | timeout, transport, or non-2xx response other than 401/403 | preserved | offline/locked | cached use continues |
 | Explicit reconnect | 2xx | preserved | online/unlocked | one project sync starts |
-| Explicit reconnect | timeout, transport, non-4xx failure | preserved | offline/locked | no sync, no purge |
+| Explicit reconnect | 401/403 | purged | reset/unlocked | login required |
+| Explicit reconnect | timeout, transport, or non-2xx response other than 401/403 | preserved | offline/locked | no sync, no purge |
 | Login | validated + secure write succeeds | replaced | online/unlocked | UI notified |
 | Login | validation or secure write fails | unchanged | unchanged | error returned |
 | Logout | n/a | revoked | reset/unlocked | all user data purged |

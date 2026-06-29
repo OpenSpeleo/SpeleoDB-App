@@ -624,7 +624,7 @@ export class SpeleoDBController {
   /**
    * Validates the stored token with the server.
    * - 2xx   -> 'ok'
-   * - 4xx   -> 'unauthorized' (and local logout/cache purge)
+   * - 401/403 -> 'unauthorized' (and local logout/cache purge)
    * - other -> 'network_error' (keeps current session, enters offline mode)
    */
   async validateSession(): Promise<'ok' | 'unauthorized' | 'network_error'> {
@@ -639,7 +639,7 @@ export class SpeleoDBController {
    * - `ok`            -> session is valid: offline lock is cleared (online
    *                      restored) and a project sync is launched.
    * - `network_error` -> still unreachable: stays offline-locked, no logout.
-   * - `unauthorized`  -> 4xx: session invalid, logout + cache purge already ran.
+   * - `unauthorized`  -> 401/403: session invalid, logout + cache purge already ran.
    *
    * This is the second allowed reconnect trigger alongside app relaunch. It is
    * user-driven, not a passive connectivity listener. See docs/networking.md.

@@ -64,6 +64,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-016 | P0 | Concurrent login/logout can publish stale auth state or leave a superseded token durable after an uncancellable native vault write. | Closed: latest-attempt cancellation, transactional secure-store rollback, and logout admission/wait ordering. |
 | MH-017 | P1 | Native HTTP can launch a request after cancellation wins during asynchronous User-Agent assembly. | Closed: re-check cancellation immediately before invoking CapacitorHttp. |
 | MH-018 | P1 | An unreadable session snapshot or unexpected startup-validation rejection can escape as an unhandled promise and leave ambiguous auth routing. | Closed: fail closed in the coordinator and mounted startup boundary. |
+| MH-019 | P0 | Inconclusive stored-session `4xx` responses such as `408` or `429` trigger destructive logout and wipe offline data. | Closed: purge only on explicit `401`/`403` authorization denial. |
 
 ## Commit checklist
 
@@ -102,6 +103,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Serialize authentication and logout transitions`
 - [x] `[Fix] Prevent cancelled native request launch`
 - [x] `[Fix] Fail closed on startup validation exceptions`
+- [x] `[Fix] Preserve sessions on inconclusive validation responses`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -777,7 +779,7 @@ and physical-device evidence.
 
 ### Fail closed on startup validation exceptions
 
-- Commit: recorded after this objective is committed.
+- Commit: `e9e003a` (`[Fix] Fail closed on startup validation exceptions`).
 - Reproduction: `validateSessionAgainstServer()` read the synchronous secure
   session outside its guarded request block. A storage exception therefore
   rejected the validation contract. The mounted startup chain had `then` and
@@ -797,4 +799,29 @@ and physical-device evidence.
   simulator Release compilation succeeds. Exact staged pre-commit and CI
   evidence is recorded immediately before commit.
 - Findings closed: MH-018. The broader authentication/network audit remains
+  open.
+
+### Preserve sessions on inconclusive validation responses
+
+- Commit: recorded after this objective is committed.
+- Reproduction: stored-session validation classified every `4xx` response as
+  definitive invalid credentials. Rate limiting (`429`), request timeout
+  (`408`), deployment mismatch (`404`), and other inconclusive client statuses
+  therefore entered destructive logout and wiped secure session plus offline
+  data without proof of authorization denial.
+- Correction: only explicit `401`/`403` authorization denial enters the
+  unauthorized purge path. Every other non-success response preserves the
+  session and cache under offline lock; pre-login token validation remains
+  non-destructive for every failure.
+- Verification: the coordinator status matrix proves both denied statuses
+  purge and representative inconclusive statuses (`400`, `404`, `408`, `409`,
+  `425`, `429`) preserve authentication, enter offline lock, and never invoke
+  purge. Node 22 CI passes 1,714/1,714 tests across 101 files with 89.44%
+  statements, 82.47% branches, 92.85% functions, and 91.52% lines. Capacitor
+  synchronization produces no tracked native drift. Android passes its 9
+  first-party tests plus lint, release APK, and release AAB gates. Signed iOS
+  XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned simulator
+  Release compilation succeeds. Exact staged pre-commit and CI evidence is
+  recorded immediately before commit.
+- Findings closed: MH-019. The broader authentication/network audit remains
   open.

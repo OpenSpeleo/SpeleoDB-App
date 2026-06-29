@@ -62,7 +62,9 @@ A dedicated section rendered **only while offline-locked** (`isOfflineLocked`), 
 - **Go Online** button (`data-testid="go-online-button"`): calls `controller.attemptReconnect()`, the second allowed reconnect trigger alongside app relaunch. It is user-driven, not a passive connectivity listener.
   - `ok`: the controller clears the offline lock (online restored) and launches a sync; the section unmounts automatically because `isOfflineLocked` becomes false.
   - `network_error`: still unreachable. A local **Couldn't reconnect** modal (`data-testid="reconnect-failed-modal"`) is shown, the app stays offline, and the button remains. Nothing else changes.
-  - `unauthorized` (`4xx`): the controller has already logged out and purged local data; Settings navigates to `/login`.
+  - `unauthorized` (`401`/`403`): the controller has already logged out and
+    purged local data; Settings navigates to `/login`. Other error statuses
+    remain non-destructive `network_error` outcomes.
 - Re-entry is guarded with local `isReconnecting` state (the button shows `Reconnecting…` and is disabled during the attempt) to prevent double-submission.
 
 ### Account

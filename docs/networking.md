@@ -7,7 +7,9 @@ This document defines how network state is handled in the app and what is intent
 - Networking must be deterministic and user-driven.
 - The app must not auto-switch state just because the device toggles Wi-Fi/cellular (no passive listeners).
 - State transitions are request-driven: they only happen as a result of an explicit, user-initiated network operation (startup validation, a Resync, or the Go Online reconnect) actually failing or succeeding against the server.
-- Offline users must keep local session and cached data unless auth is definitively invalid (`4xx`).
+- Offline users must keep local session and cached data unless auth is
+  definitively denied (`401`/`403`). Other client responses are inconclusive
+  and must not trigger destructive logout.
 
 ## No passive listeners
 
@@ -31,8 +33,9 @@ If none of these actions occurs, the app remains in offline behavior even if dev
 
 The app enters offline mode only as a result of a failed server probe, never from a passive connectivity event:
 
-1. Startup token validation returns a timeout / transport error / non-`4xx` status.
-2. A user-initiated **Resync** whose project-list refresh hits a timeout / transport error / `5xx`. The controller calls `enterOfflineMode()` (idempotent), shows the normal offline modal, and reveals the Go Online button. A `4xx` does not flip offline and does not log out (only startup validation acts on `4xx`).
+1. Startup token validation returns a timeout, transport error, or any status
+   other than `2xx`, `401`, or `403`.
+2. A user-initiated **Resync** whose project-list refresh hits a timeout / transport error / `5xx`. The controller calls `enterOfflineMode()` (idempotent), shows the normal offline modal, and reveals the Go Online button. A `4xx` data response does not flip offline and does not log out; only stored-session validation may act destructively, and only on `401`/`403`.
 
 ## Startup connectivity feedback
 
@@ -82,8 +85,11 @@ The app enters offline mode only as a result of a failed server probe, never fro
   stored-session logout path.
 - `SessionCoordinator` is the sole owner of auth-validation outcome policy and
   online/offline state transitions; `SpeleoDBController` remains the UI façade.
-- `4xx` from auth validation means token/session is invalid and must trigger logout + local purge.
-- Network errors, timeouts, and non-`4xx` failures must preserve session and local cache.
+- `401`/`403` from stored-session validation explicitly deny authorization and
+  trigger logout plus local purge.
+- Network errors, timeouts, redirects, server errors, and inconclusive client
+  responses such as `400`, `404`, `408`, `409`, `425`, or `429` preserve the
+  session and local cache by entering offline lock.
 - Logout first closes the login/validation admission gate, then cancels
   in-flight authentication and startup/sync work. It waits for authentication
   and any secure-store rollback before cache purge, so stale completions cannot
@@ -120,8 +126,8 @@ Implementation notes:
   project GeoJSON, overlay, GPS refresh, and tile-prefetch phases. It treats
   only `2xx + Project[]` as project-list success. `2xx + []` replaces stale
   cache; malformed `2xx` and failed refreshes preserve cache and skip unsafe
-  downstream side effects. A 4xx data fetch never logs out; only session
-  validation owns that decision.
+  downstream side effects. A `4xx` data fetch never logs out; only stored-
+  session validation owns that decision, and only `401`/`403` prove denial.
 - Background GeoJSON cache writes validate the downloaded body before persisting it. Non-`2xx` or malformed GeoJSON payloads are skipped so stale cache is preserved instead of being overwritten with garbage.
 - Service/cache IO accepts cancellation signals from coordinator-owned run
   contexts. Web `fetch` aborts transport immediately; native requests are

@@ -62,6 +62,10 @@ function isClientErrorStatus(status: number): boolean {
   return status >= 400 && status < 500;
 }
 
+function isAuthorizationDeniedStatus(status: number): boolean {
+  return status === 401 || status === 403;
+}
+
 function hasAuthTokenResponse(data: unknown): data is AuthTokenResponse {
   if (!data || typeof data !== 'object') return false;
   const token = (data as { token?: unknown }).token;
@@ -364,7 +368,7 @@ export class SessionCoordinator {
         this.markOnline();
         return 'ok';
       }
-      if (isClientErrorStatus(response.status)) {
+      if (isAuthorizationDeniedStatus(response.status)) {
         await this.logout();
         return 'unauthorized';
       }

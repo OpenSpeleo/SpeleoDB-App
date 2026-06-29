@@ -36,8 +36,10 @@ This document defines high-level architecture boundaries and coding expectations
 - Do not add passive `window` `online`/`offline` listeners for reconnect orchestration.
 - Explicit reconnect paths are limited to app relaunch startup validation,
   Settings **Go Online**, and Pending Changes **Try Reconnect**.
-- Timeout/transport/non-`4xx` auth failures must preserve session and local cache.
-- Only auth-invalid `4xx` outcomes should trigger logout and local data purge.
+- Timeout, transport, redirect, `5xx`, and inconclusive `4xx` auth-validation
+  failures must preserve the stored session and local cache.
+- Only explicit stored-session authorization denial (`401`/`403`) should
+  trigger logout and local data purge.
 - When offline lock is active, normal data/map flows should avoid outbound network calls.
 
 ## Service layer expectations

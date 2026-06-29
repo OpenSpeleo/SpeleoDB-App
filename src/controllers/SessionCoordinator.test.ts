@@ -736,16 +736,32 @@ describe('SessionCoordinator', () => {
       expect(hooks.notifyStateChanged).toHaveBeenCalledOnce();
     });
 
-    it('purges only client-error validation outcomes', async () => {
+    it.each([401, 403])('purges an explicitly denied session on status %i', async (status) => {
       const hooks = createHooks();
       const transport = createTransport({
-        validateToken: vi.fn(async () => ({ status: 401, data: {} })),
+        validateToken: vi.fn(async () => ({ status, data: {} })),
       });
       const { coordinator } = createHarness({ session: STORED_SESSION, hooks, transport });
 
       await expect(coordinator.validateSession()).resolves.toBe('unauthorized');
       expect(hooks.purgeLocalUserData).toHaveBeenCalledOnce();
     });
+
+    it.each([400, 404, 408, 409, 425, 429])(
+      'preserves the session on inconclusive client status %i',
+      async (status) => {
+        const hooks = createHooks();
+        const transport = createTransport({
+          validateToken: vi.fn(async () => ({ status, data: {} })),
+        });
+        const { coordinator } = createHarness({ session: STORED_SESSION, hooks, transport });
+
+        await expect(coordinator.validateSession()).resolves.toBe('network_error');
+        expect(coordinator.isAuthenticated).toBe(true);
+        expect(coordinator.isOfflineLocked).toBe(true);
+        expect(hooks.purgeLocalUserData).not.toHaveBeenCalled();
+      },
+    );
 
     it.each([
       ['server response', createTransport({ validateToken: vi.fn(async () => ({ status: 503, data: {} })) })],

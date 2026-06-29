@@ -11,15 +11,17 @@ Offline mode and logout must stay clearly separated:
 
 ## Logout trigger policy
 
-Logout in startup/session validation is expected only for authentication-invalid outcomes:
+Logout in startup/session validation is expected only for explicit
+authentication-denial outcomes:
 
-- HTTP 4xx from token validation (`unauthorized` path).
+- HTTP `401` or `403` from stored-token validation (`unauthorized` path).
 
 Logout must not be triggered by transient network conditions:
 
 - timeout,
 - transport/network exceptions,
-- HTTP 5xx and other non-4xx server errors,
+- HTTP `400`, `404`, `408`, `409`, `425`, `429`, `5xx`, redirects, and other
+  responses that do not explicitly deny authorization,
 - browser offline event.
 
 ## What gets cleared on logout
@@ -57,7 +59,7 @@ Implementation notes:
 - Entering offline mode does not clear local data.
 - `Go Offline` acknowledges offline state and keeps cached content available.
 - Reconnect attempts are separate from logout and must not wipe data unless the
-  server returns 4xx. In-process reconnect is explicit and user-initiated via
+  server returns `401`/`403`. In-process reconnect is explicit and user-initiated via
   Settings or Pending Changes; passive connectivity events never reconnect.
 
 ## Source map

@@ -997,7 +997,7 @@ describe('SpeleoDBController', () => {
       expect(ctrl.isOnline).toBe(true);
     });
 
-    it('returns "unauthorized" when server responds 4xx', async () => {
+    it('returns "unauthorized" when the server explicitly denies authorization', async () => {
       service = createMockService({
         validateToken: vi.fn(async () => ({ status: 401, data: {} }) as HttpResponse<unknown>),
       });
@@ -1171,7 +1171,7 @@ describe('SpeleoDBController', () => {
       expect(service.getProjectsGeoJSON).not.toHaveBeenCalled();
     });
 
-    it('returns "unauthorized" and logs out on 4xx', async () => {
+    it('returns "unauthorized" and logs out on explicit authorization denial', async () => {
       const validateToken = vi.fn()
         .mockRejectedValueOnce(new Error('timeout'))
         .mockResolvedValueOnce({ status: 401, data: {} } as HttpResponse<unknown>);

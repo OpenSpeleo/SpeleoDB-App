@@ -6,7 +6,8 @@ This document defines the offline cache feature, user-facing offline modal behav
 
 - Allow users with a previously valid local session to continue working when network connectivity is poor or unavailable.
 - Never store passwords or use password entry to create a new offline session.
-- Log out users and clear local data only when auth is definitively invalid (HTTP 4xx from token validation).
+- Log out users and clear local data only when stored-token validation
+  explicitly denies authorization (HTTP `401`/`403`).
 - Keep offline UX non-blocking: user can acknowledge offline mode and keep using cached data.
 
 ## Startup auth timeout
@@ -51,7 +52,9 @@ exactly one outcome:
 
 - reconnect success (`2xx`): clear offline lock and resume online behavior. The Settings **Go Online** / Pending **Try Reconnect** path additionally launches a project sync; the button hides once `isOfflineLocked` is false.
 - still offline (`5xx` / timeout / transport): remain offline without forced logout and without repeated blocking prompts. The Settings **Go Online** / Pending **Try Reconnect** path shows a local "Couldn't reconnect" modal and changes nothing.
-- unauthorized (`4xx`): follow logout/cache purge behavior.
+- unauthorized (`401`/`403`): follow logout/cache purge behavior.
+- inconclusive response (`400`, `404`, `408`, `409`, `425`, `429`, redirects,
+  or `5xx`): remain offline without destructive logout.
 
 Both paths are explicit and user-initiated. The app still does **not** subscribe to passive `online`/`offline` connectivity events. `attemptReconnect()` deliberately bypasses the offline-lock short-circuit in `validateSession()` so it can actually probe the server while offline-locked.
 
@@ -61,8 +64,8 @@ Both paths are explicit and user-initiated. The app still does **not** subscribe
 | --- | --- | --- | --- | --- |
 | Session metadata or secure token is missing/inconsistent | No validation; bootstrap fails closed | Local session metadata is cleared | No | Continue unauthenticated; user must log in again |
 | HTTP 2xx | `ok` | No | No | Continue online |
-| HTTP 4xx | `unauthorized` | Yes | Yes | Redirect to home/login |
-| HTTP 5xx or non-4xx error status | `network_error` | No | No | Offline modal shown (acknowledge once with `Go Offline`) |
+| HTTP 401/403 | `unauthorized` | Yes | Yes | Redirect to home/login |
+| Any other non-2xx status | `network_error` | No | No | Offline modal shown (acknowledge once with `Go Offline`) |
 | Timeout / transport exception | `network_error` | No | No | Offline modal shown (acknowledge once with `Go Offline`) |
 
 ## Network behavior while offline
@@ -95,13 +98,16 @@ Both paths are explicit and user-initiated. The app still does **not** subscribe
 The app can flip from online to offline at runtime, request-driven (never via a passive listener):
 
 - A **Resync** runs only while online. If its project-list refresh cannot reach the server -- a timeout, transport error, or `5xx` (any non-`4xx`, non-`2xx` status) -- the controller calls `enterOfflineMode()`: `isOnline` becomes false, the offline lock is set, the normal offline modal is shown, and the Settings **Go Online** button is revealed. Cached data is preserved and no logout occurs.
-- A `4xx` during a data fetch never flips offline and never logs out (only `validateSession()` acts on `4xx`); see the v2 contract in `docs/networking.md`.
+- A `4xx` during a data fetch never flips offline and never logs out. Stored-
+  session `validateSession()` is the only status-driven destructive boundary,
+  and only `401`/`403` prove authorization denial; see `docs/networking.md`.
 - `enterOfflineMode()` is idempotent (a no-op when already offline-locked) so repeated failures do not thrash UI state. Aborted (superseded/logged-out) refreshes do not flip offline.
 
 ## Logout and data purge
 
 Logout and wipe policy is documented in `docs/logout-behavior.md`.
-In offline mode flows, local data must only be purged on authentication-invalid (`4xx`) outcomes.
+In offline mode flows, local data must only be purged on explicit
+authentication denial (`401`/`403`).
 
 ## Source code map
 
@@ -233,7 +239,7 @@ from crossing Vitest's serialized file boundary.
 When modifying auth/offline logic:
 
 1. Verify timeout and network failures do not call `logout()`.
-2. Verify only 4xx auth failures trigger cache purge.
+2. Verify only `401`/`403` stored-session validation failures trigger cache purge.
 3. Verify modal can be acknowledged with `Go Offline` and is not repeatedly re-shown in same offline period.
 4. Verify the only reconnect paths while offline are app relaunch and the Settings `Go Online` button (`attemptReconnect()`); no passive `online`/`offline` listeners.
 5. Verify a failed Resync (timeout / transport / 5xx) flips the app offline, while a `4xx` does not.
