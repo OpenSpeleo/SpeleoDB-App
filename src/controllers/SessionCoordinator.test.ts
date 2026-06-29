@@ -701,6 +701,10 @@ describe('SessionCoordinator', () => {
       await vi.waitFor(() => expect(store.establish).toHaveBeenCalledOnce());
       const logout = coordinator.logout();
 
+      expect(coordinator.isAuthenticated).toBe(false);
+      expect(coordinator.isOnline).toBe(false);
+      expect(coordinator.isOfflineLocked).toBe(false);
+
       await expect(coordinator.loginWithToken({
         token: 'new-token',
         instance: 'https://new.example',
@@ -747,6 +751,22 @@ describe('SessionCoordinator', () => {
       })).resolves.toMatchObject({ success: true });
     });
 
+    it('continues destructive logout when revocation adapters throw', async () => {
+      const hooks = createHooks();
+      const { coordinator } = createHarness({ session: STORED_SESSION, hooks });
+      vi.mocked(hooks.notifyStateChanged).mockImplementation(() => {
+        throw new Error('subscriber failed');
+      });
+      vi.mocked(hooks.setOfflineRuntime).mockImplementation(() => {
+        throw new Error('runtime failed');
+      });
+
+      await expect(coordinator.logout()).resolves.toBeUndefined();
+
+      expect(coordinator.isAuthenticated).toBe(false);
+      expect(hooks.purgeLocalUserData).toHaveBeenCalledOnce();
+    });
+
     it('cancels validation and rejects new probes throughout logout', async () => {
       const validationResponse = createDeferred<HttpResponse<unknown>>();
       const validateToken = vi.fn((
@@ -774,7 +794,7 @@ describe('SessionCoordinator', () => {
       expect(validateToken).toHaveBeenCalledOnce();
 
       validationResponse.resolve({ status: 200, data: {} });
-      await expect(staleValidation).resolves.toBe('ok');
+      await expect(staleValidation).resolves.toBe('unauthorized');
       expect(coordinator.isOnline).toBe(false);
       purge.resolve();
       await expect(logout).resolves.toBeUndefined();
@@ -1007,7 +1027,7 @@ describe('SessionCoordinator', () => {
       await coordinator.logout();
       reconnectResponse.resolve({ status: 200, data: {} });
 
-      await expect(reconnect).resolves.toBe('ok');
+      await expect(reconnect).resolves.toBe('unauthorized');
       expect(hooks.startReconnectSync).not.toHaveBeenCalled();
     });
 

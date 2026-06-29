@@ -74,6 +74,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-026 | P0 | Untrusted authentication error bodies can reflect submitted token/password/email bytes directly into the login UI. | Closed initially by bounded exact redaction; superseded by the body-opaque fixed-message boundary in MH-028. |
 | MH-027 | P0 | Persisted pre-origin-policy sessions can retain unsafe instance paths forever as an offline session and leave local user data behind an unusable identity. | Closed: canonical upgrade before I/O; destructive purge for malformed or uncommittable identity metadata. |
 | MH-028 | P0 | Finite exact-value filtering cannot guarantee that transformed credentials are absent from arbitrary authentication server prose. | Closed: authentication failures publish only fixed local messages and ignore response-body text. |
+| MH-029 | P0 | Logout leaves the coordinator's authenticated snapshot published while it waits for secure-write rollback, and cancelled validation can report stale `ok`. | Closed: revoke at logout admission with best-effort notification; return `unauthorized` for logout-owned cancellation. |
 
 ## Commit checklist
 
@@ -122,6 +123,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Security] Redact reflected credentials from auth errors`
 - [x] `[Fix] Purge malformed persisted sessions`
 - [x] `[Security] Ignore authentication server error prose`
+- [x] `[Fix] Revoke sessions at logout admission`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -1065,7 +1067,7 @@ and physical-device evidence.
 
 ### Ignore authentication server error prose
 
-- Commit: recorded after this objective is committed.
+- Commit: `a20cc4e` (`[Security] Ignore authentication server error prose`).
 - Reproduction: exact raw/encoded credential replacement still admitted
   transformed representations such as mixed-case percent escapes, and a
   credential matching text inside the replacement marker defeated the claimed
@@ -1087,4 +1089,32 @@ and physical-device evidence.
   26.5, and unsigned simulator Release compilation succeeds. Exact staged
   pre-commit and CI evidence is recorded immediately before commit.
 - Findings closed: MH-028. The broader authentication/network audit remains
+  open.
+
+### Revoke sessions at logout admission
+
+- Commit: recorded after this objective is committed.
+- Reproduction: `logout()` closed admission and aborted work but left the
+  coordinator's authenticated snapshot intact while waiting for accepted login
+  operations to finish rollback. A stuck native write therefore kept the old
+  session published, and validation/reconnect cancelled by logout could resolve
+  `ok` from that stale snapshot.
+- Correction: logout now resets auth and connectivity synchronously at
+  admission, before awaiting rollback or purge. Runtime-offline adapters and
+  subscribers are best-effort during destructive reset, so their exceptions
+  cannot preserve access or interrupt cleanup. Logout-owned stale validation
+  always resolves `unauthorized`; newer successful login ownership still
+  reports its current authenticated state.
+- Verification: 69/69 focused coordinator tests pass. Regressions prove
+  immediate revocation while a secure write remains pending, unauthorized
+  startup/reconnect completion after logout, no reconnect sync launch, and
+  continued destructive purge when both notification hooks throw. Node 22 CI
+  passes 1,756/1,756 tests across 103 files with 89.64% statements, 82.55%
+  branches, 93.07% functions, and 91.70% lines. Capacitor synchronization
+  produces no tracked native drift. Android lint, 9 first-party unit tests,
+  release APK assembly, and release AAB bundling pass. All 9 iOS XCTest cases
+  pass on an iPhone 17 Pro simulator running iOS 26.5, and unsigned simulator
+  Release compilation succeeds. Exact staged pre-commit and CI evidence is
+  recorded immediately before commit.
+- Findings closed: MH-029. The broader authentication/network audit remains
   open.

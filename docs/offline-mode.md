@@ -59,8 +59,11 @@ exactly one outcome:
 Both paths are explicit and user-initiated. The app still does **not** subscribe to passive `online`/`offline` connectivity events. `attemptReconnect()` deliberately bypasses the offline-lock short-circuit in `validateSession()` so it can actually probe the server while offline-locked.
 Concurrent manual reconnect calls are coalesced at the coordinator boundary,
 so same-tick taps or overlapping UI callers share one request and can launch at
-most one sync. Superseded reconnect validation may report current auth state to
-its original caller, but it is non-authoritative and cannot start sync.
+most one sync. A reconnect superseded by a newer authenticated transition may
+report that current auth state to its original caller, but it is
+non-authoritative and cannot start sync. Logout is stricter: it revokes the
+session immediately, so a cancelled reconnect resolves `unauthorized` and can
+never report stale success.
 
 ## Startup auth outcome matrix
 

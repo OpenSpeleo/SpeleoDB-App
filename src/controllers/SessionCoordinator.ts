@@ -333,6 +333,7 @@ export class SessionCoordinator {
     this.isLoggingOut = true;
     this.invalidate();
     this.activeAuthenticationContext?.abort('Logout superseded authentication');
+    this.reset(true);
     const pendingAuthentication = [...this.authenticationOperations];
     const operation = (async () => {
       await Promise.allSettled(pendingAuthentication);
@@ -354,7 +355,20 @@ export class SessionCoordinator {
   /** Reset session state during the controller's all-data purge. */
   reset(notify = false): void {
     this._authState = EMPTY_AUTH_STATE;
-    this.setConnectivity(false, false, notify);
+    this._isOnline = false;
+    this._isOfflineLocked = false;
+    try {
+      this.dependencies.hooks.setOfflineRuntime(false);
+    } catch {
+      // Revocation remains authoritative when a runtime adapter is unavailable.
+    }
+    if (notify) {
+      try {
+        this.dependencies.hooks.notifyStateChanged();
+      } catch {
+        // Subscribers cannot interrupt destructive session revocation.
+      }
+    }
   }
 
   /** Publish an online result from a successful authenticated data request. */
@@ -375,7 +389,6 @@ export class SessionCoordinator {
     try {
       session = this.dependencies.sessionStore.getSession();
     } catch {
-      this.reset(true);
       try {
         await this.logout();
       } catch {
@@ -505,7 +518,6 @@ export class SessionCoordinator {
   private async rejectMalformedStoredSession(
     context: CancellationContext,
   ): Promise<SessionValidationOutcome> {
-    this.reset(true);
     try {
       await this.logout();
     } catch {
@@ -573,6 +585,7 @@ export class SessionCoordinator {
   }
 
   private staleSessionResult(): Exclude<SessionValidationResult, 'network_error'> {
+    if (this.isLoggingOut) return 'unauthorized';
     return this._authState.isAuthenticated ? 'ok' : 'unauthorized';
   }
 }

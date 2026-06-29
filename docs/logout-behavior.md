@@ -40,6 +40,10 @@ Implementation notes:
 - logout closes admission for new login and validation requests before it
   dispatches cancellation, preventing abort-listener re-entry from starting a
   new session transition,
+- the session coordinator revokes its published auth/online/offline snapshot at
+  logout admission, before waiting for any in-flight native vault rollback;
+  runtime adapters and subscribers are best-effort and cannot interrupt that
+  revocation or the subsequent purge,
 - published auth, project, GPS-track, and pending-operation state is revoked
   before awaiting native watcher or tile-worker teardown,
 - in-flight login transports and startup validation are cancelled immediately;
@@ -49,7 +53,9 @@ Implementation notes:
   admitted again only after that operation settles,
 - logout invalidates and cancels coordinator-owned startup validation and
   controller-owned sync run contexts before the destructive cache wipe starts,
-- UI auth/session state resets immediately so the app stops rendering the old session,
+- UI auth/session state resets immediately so the app stops rendering the old
+  session; cancelled validation/reconnect callers resolve `unauthorized` when
+  logout owns the transition and can never report a stale online success,
 - native credential deletion and session-marker deletion are both attempted;
   marker deletion still runs when vault deletion fails, so a retained orphan
   token cannot be restored on restart. Any failure still revokes in-process

@@ -92,10 +92,11 @@ The app enters offline mode only as a result of a failed server probe, never fro
 - Network errors, timeouts, redirects, server errors, and inconclusive client
   responses such as `400`, `404`, `408`, `409`, `425`, or `429` preserve the
   session and local cache by entering offline lock.
-- Logout first closes the login/validation admission gate, then cancels
-  in-flight authentication and startup/sync work. It waits for authentication
-  and any secure-store rollback before cache purge, so stale completions cannot
-  authenticate, re-lock offline mode, or repopulate durable state after logout.
+- Logout first closes the login/validation admission gate, cancels in-flight
+  authentication/startup work, and revokes the published session snapshot. It
+  then waits for authentication and any secure-store rollback before cache
+  purge, so stale completions cannot authenticate, report online success,
+  re-lock offline mode, or repopulate durable state after logout.
 
 ## HTTPS and redirects
 
