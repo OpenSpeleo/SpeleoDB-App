@@ -263,7 +263,12 @@ Zoom levels and marker sizes are sourced from `MAP_OVERLAYS` in `src/constants.t
 
 ## Project visibility interaction
 
-- The dashboard derives `effectiveActiveProjectIds` once per render via a `useMemo` over `sortedProjects`, the per-project preference set (`activeProjectIds`), and the per-country gate (`countryVisibility`). A project is in this set iff its individual toggle is ON **and** its country gate is ON. See `docs/project-panel.md` for the full two-level visibility model.
+- `useDashboardProjectVisibility` derives `effectiveActiveProjectIds` once per
+  render from the current projects, loaded GeoJSON, per-project intent, and the
+  per-country gate. A project is in this set iff current map data exists, its
+  individual toggle is ON, and its country gate is ON. See
+  `docs/dashboard-project-visibility.md` and `docs/project-panel.md` for the full
+  two-level visibility model.
 - Every map-side consumer reads from `effectiveActiveProjectIds`:
   - project `<Source>`/`<Layer>` mount/unmount,
   - project-linked overlay filtering,

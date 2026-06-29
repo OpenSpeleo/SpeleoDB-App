@@ -27,14 +27,6 @@ import { registerTileCacheProtocol, getCachedLayerStyle } from '../services/Tile
 import MapLayerControl from '../components/map/MapLayerControl';
 import {
   setSelectedMapLayerId as persistSelectedMapLayerId,
-  getProjectVisibilityPreferences,
-  setProjectVisibilityPreference,
-  setProjectVisibilityPreferences,
-  getCountryVisibilityPreferences,
-  setCountryVisibilityPreference,
-  setCountryVisibilityPreferences,
-  getCountryCollapsedPreferences,
-  setCountryCollapsedPreference,
 } from '../services/PreferencesService';
 import ProjectPanel from '../components/ProjectPanel';
 import LandmarkPanel from '../components/LandmarkPanel';
@@ -83,6 +75,7 @@ import { DashboardGpsTrackDialogs } from './dashboard/DashboardGpsTrackDialogs';
 import { useDashboardGpsTrackActions } from './dashboard/useDashboardGpsTrackActions';
 import { useDashboardGpsRecordingActions } from './dashboard/useDashboardGpsRecordingActions';
 import { useDashboardLandmarkActions } from './dashboard/useDashboardLandmarkActions';
+import { useDashboardProjectVisibility } from './dashboard/useDashboardProjectVisibility';
 
 // ==================== GeoJSON type alias ====================
 
@@ -146,24 +139,12 @@ const Dashboard: React.FC<DashboardProps> = ({
   } = useSpeleoDB();
   const didSyncRef = useRef(false);
   const didFitRef = useRef(false);
-  const knownVisibilityProjectIdsRef = useRef<Set<string>>(new Set());
   const mapRef = useRef<MapRef>(null);
 
   const [mapViewMetrics, setMapViewMetrics] = useState<{ zoom: number; latitude: number }>(() => ({
     zoom: MAP.DEFAULT_ZOOM,
     latitude: MAP.DEFAULT_CENTER[1],
   }));
-
-  // Active projects (which layers are visible)
-  const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
-
-  // Country gate (overlays the per-project preference; restored from prefs once on mount).
-  const [countryVisibility, setCountryVisibility] = useState<Record<string, boolean>>(
-    () => getCountryVisibilityPreferences(),
-  );
-  const [countryCollapsed, setCountryCollapsed] = useState<Record<string, boolean>>(
-    () => getCountryCollapsedPreferences(),
-  );
 
   // Loaded, commit-identified project map artifacts. Consumers derive their
   // GeoJSON and bounds from the same atomic record so commits cannot mix.
@@ -228,23 +209,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     () => sortedProjects.filter((p) => !p.exclude_geojson && Boolean(p.geojson_file)),
     [sortedProjects],
   );
-  useEffect(() => {
-    const currentIds = new Set(geoJsonProjects.map((project) => project.id));
-    const preferences = getProjectVisibilityPreferences();
-    setActiveProjectIds((previous) => {
-      const next = new Set([...previous].filter((id) => currentIds.has(id)));
-      for (const project of geoJsonProjects) {
-        if (
-          !knownVisibilityProjectIdsRef.current.has(project.id)
-          && preferences[project.id] !== false
-        ) {
-          next.add(project.id);
-        }
-      }
-      return next;
-    });
-    knownVisibilityProjectIdsRef.current = currentIds;
-  }, [geoJsonProjects]);
   const currentProjectMapData = useMemo<ProjectMapDataRecord>(() => {
     const next: ProjectMapDataRecord = {};
     for (const project of geoJsonProjects) {
@@ -259,33 +223,30 @@ const Dashboard: React.FC<DashboardProps> = ({
   const projectBounds = useMemo<ProjectBoundsRecord>(() => Object.fromEntries(
     Object.entries(currentProjectMapData).map(([id, data]) => [id, data.bounds]),
   ), [currentProjectMapData]);
-  const panelProjects = useMemo(
-    () => sortedProjects.filter((p) => Boolean(geoJsonData[p.id])),
-    [sortedProjects, geoJsonData],
+  const closeProjectPanel = useCallback(
+    () => onProjectPanelChange(false),
+    [onProjectPanelChange],
   );
-  const panelActiveProjectIds = useMemo(
-    () =>
-      new Set(
-        [...activeProjectIds].filter((projectId) => Boolean(geoJsonData[projectId])),
-      ),
-    [activeProjectIds, geoJsonData],
-  );
-  // Effective visibility = individual toggle ON AND country gate ON.
-  // Every map-side consumer (layer mount, overlay filter, depth probe,
-  // fit-bounds, projectPoint/Geometry layer ids) reads from this set.
-  // Only the panel itself keeps the raw `activeProjectIds` so its toggle
-  // reflects user intent independent of country gates.
-  const effectiveActiveProjectIds = useMemo(() => {
-    const next = new Set<string>();
-    for (const project of sortedProjects) {
-      if (!activeProjectIds.has(project.id)) continue;
-      if (!geoJsonData[project.id]) continue;
-      const country = project.country || 'Unknown';
-      if (countryVisibility[country] === false) continue;
-      next.add(project.id);
-    }
-    return next;
-  }, [sortedProjects, activeProjectIds, countryVisibility, geoJsonData]);
+  const {
+    panelProjects,
+    panelActiveProjectIds,
+    effectiveActiveProjectIds,
+    countryVisibility,
+    countryCollapsed,
+    toggleProject: handleToggleProject,
+    showAll: handleShowAll,
+    hideAll: handleHideAll,
+    toggleCountry: handleToggleCountry,
+    toggleCountryCollapsed: handleToggleCountryCollapsed,
+    zoomToProject: handleZoomToProject,
+  } = useDashboardProjectVisibility({
+    projects: sortedProjects,
+    eligibleProjects: geoJsonProjects,
+    geoJsonData,
+    projectBounds,
+    mapRef,
+    onClosePanel: closeProjectPanel,
+  });
   // Project panel progress reflects the satellite layer only (extra layers have
   // their own per-layer progress in Settings).
   const tilePrefetchByProject = useMemo(
@@ -512,106 +473,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     mapRef,
     onClosePanel: closeLandmarkPanel,
   });
-
-  const handleToggleProject = useCallback((projectId: string) => {
-    Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
-    setActiveProjectIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(projectId)) {
-        next.delete(projectId);
-      } else {
-        next.add(projectId);
-      }
-      setProjectVisibilityPreference(projectId, next.has(projectId));
-      return next;
-    });
-  }, []);
-
-  const handleShowAll = useCallback(() => {
-    // Activate only projects that currently have loaded GeoJSON.
-    const nextIds = panelProjects.map((p) => p.id);
-    setProjectVisibilityPreferences(
-      Object.fromEntries(nextIds.map((projectId) => [projectId, true] as const)),
-    );
-    setActiveProjectIds(new Set(nextIds));
-
-    // Show all is symmetric with the AND gate: it must also re-enable any
-    // country gate that was previously OFF, otherwise the user can hit
-    // "Show all" and still see nothing.
-    const countries = Array.from(
-      new Set(panelProjects.map((p) => p.country || 'Unknown')),
-    );
-    if (countries.length > 0) {
-      const countryUpdate = Object.fromEntries(
-        countries.map((c) => [c, true] as const),
-      );
-      setCountryVisibilityPreferences(countryUpdate);
-      setCountryVisibility((prev) => ({ ...prev, ...countryUpdate }));
-    }
-  }, [panelProjects]);
-
-  const handleHideAll = useCallback(() => {
-    const nextIds = panelProjects.map((p) => p.id);
-    setProjectVisibilityPreferences(
-      Object.fromEntries(nextIds.map((projectId) => [projectId, false] as const)),
-    );
-    setActiveProjectIds(new Set());
-    // Country gates are intentionally left untouched — the AND naturally
-    // hides everything once individual toggles are OFF, and we want the
-    // user's per-country choices to survive a temporary "Hide all".
-  }, [panelProjects]);
-
-  const handleToggleCountry = useCallback((country: string, visible: boolean) => {
-    Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
-    setCountryVisibility((prev) => ({ ...prev, [country]: visible }));
-    setCountryVisibilityPreference(country, visible);
-  }, []);
-
-  const handleToggleCountryCollapsed = useCallback(
-    (country: string, collapsed: boolean) => {
-      // No haptic: collapse is a UI affordance, not a visibility change.
-      setCountryCollapsed((prev) => ({ ...prev, [country]: collapsed }));
-      setCountryCollapsedPreference(country, collapsed);
-    },
-    [],
-  );
-
-  const handleZoomToProject = useCallback((projectId: string) => {
-    // Step 0a: Ensure the project layer is visible on the map.
-    setActiveProjectIds((prev) => {
-      if (prev.has(projectId)) return prev;
-      const next = new Set(prev);
-      next.add(projectId);
-      return next;
-    });
-    setProjectVisibilityPreference(projectId, true);
-
-    // Step 0b: If the target project's country gate is OFF, force it ON —
-    // otherwise the AND keeps the project hidden and the zoom flies to an
-    // empty viewport.
-    const project = sortedProjects.find((p) => p.id === projectId);
-    if (project) {
-      const country = project.country || 'Unknown';
-      if (countryVisibility[country] === false) {
-        setCountryVisibility((prev) => ({ ...prev, [country]: true }));
-        setCountryVisibilityPreference(country, true);
-      }
-    }
-
-    // Step 1: Close the panel so the map is unobstructed before animating.
-    onProjectPanelChange(false);
-
-    // Step 2: Zoom using the persisted bounds validated during project sync.
-    setTimeout(() => {
-      const map = mapRef.current;
-      if (!map) return;
-
-      const bounds = computeBounds(projectBounds, new Set([projectId]));
-      if (bounds) {
-        map.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 800 });
-      }
-    }, 0);
-  }, [onProjectPanelChange, sortedProjects, countryVisibility, projectBounds]);
 
   const handleMapLoad = useCallback(() => {
     lockMapOrientation(mapRef.current);

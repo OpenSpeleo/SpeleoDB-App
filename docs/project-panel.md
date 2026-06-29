@@ -144,7 +144,8 @@ A project is **effectively visible** on the map iff all three conditions hold:
 
 Defaults: a country is visible unless `countryVisibility[country] === false`; a country is expanded unless `countryCollapsed[country] === true`.
 
-The AND is computed exactly once in `Dashboard.tsx` via the `effectiveActiveProjectIds` memo. Every map-side consumer reads from that set:
+The AND is computed exactly once by `useDashboardProjectVisibility` via the
+`effectiveActiveProjectIds` memo. Every map-side consumer reads from that set:
 
 - Project `<Source>`/`<Layer>` mount/unmount.
 - Project-linked overlay filtering (`filterOverlayByProjectVisibility`).
@@ -180,25 +181,28 @@ When no projects are available, the list area shows "No projects available" cent
 ```
 src/components/ProjectPanel.tsx   -- Presentational component (stateless)
 src/App.tsx                       -- Shared panel state owner + prop wiring (`isProjectPanelOpen`)
-src/pages/Dashboard.tsx           -- Map + project visibility handlers passed to panel
+src/pages/Dashboard.tsx           -- Loads map data and connects visibility outputs to consumers
+src/pages/dashboard/useDashboardProjectVisibility.ts -- Visibility state + actions
 src/components/AppTabBar.tsx      -- Navigation trigger (Projects tab calls `onProjectPanelChange`)
 ```
 
-`ProjectPanel` receives all data and callbacks as props. It does not hold state, perform network calls, or interact with the map directly. All business logic lives in `Dashboard.tsx` handlers:
+`ProjectPanel` receives all data and callbacks as props. It does not hold state,
+perform network calls, or interact with the map directly. Visibility business
+logic lives in the focused hook and is exposed through these actions:
 
-- `handleZoomToProject` -- activate + force-on country gate + auto-close + fitBounds
-- `handleToggleProject` -- toggle individual layer visibility
-- `handleShowAll` / `handleHideAll` -- bulk visibility changes (Show all also re-enables country gates)
-- `handleToggleCountry` -- flip the country gate; cascades through `effectiveActiveProjectIds`
-- `handleToggleCountryCollapsed` -- UI-only collapse persistence
+- `zoomToProject` -- activate + force-on country gate + auto-close + fitBounds
+- `toggleProject` -- toggle individual layer visibility
+- `showAll` / `hideAll` -- bulk visibility changes (Show all also re-enables country gates)
+- `toggleCountry` -- flip the country gate; cascades through `effectiveActiveProjectIds`
+- `toggleCountryCollapsed` -- UI-only collapse persistence
 
-`Dashboard.tsx` also owns the local country-state maps (`countryVisibility`,
-`countryCollapsed`), the raw per-project visibility-intent set, and the
-`effectiveActiveProjectIds` memo. The effective set intersects individual
-intent, country gates, and current commit-matched map data. Every project map
-consumer uses that same boundary: panel rows/progress, map sources, combined
-fit, row zoom, depth mode/probing, and project-linked overlays. Country UX state
-never reaches the controller.
+Those actions, local country-state maps (`countryVisibility`,
+`countryCollapsed`), raw per-project visibility intent, and the effective set
+are owned by `useDashboardProjectVisibility`. `Dashboard.tsx` supplies current
+commit-matched map data and routes the hook outputs to panel rows/progress, map
+sources, combined fit, row zoom, depth mode/probing, and project-linked
+overlays. Country UX state never reaches the controller. See
+`docs/dashboard-project-visibility.md` for the ownership and test contract.
 
 ## Persistence
 
@@ -211,13 +215,19 @@ All preferences live in a single `localStorage` blob managed by `PreferencesServ
 - Per-country collapse state (missing key implies expanded):
   - `getCountryCollapsedPreferences()` / `setCountryCollapsedPreference(country, bool)`.
 
-`Dashboard.tsx` reads all three at mount time via lazy state initializers (`useState(() => getXxxPreferences())`) so storage is touched once per render lifecycle.
+`useDashboardProjectVisibility` reads country state through lazy mount-time
+initializers. It reads project visibility when the eligible-project set changes
+so new or removed projects are reconciled without storage reads on ordinary
+rerenders.
 
 `clearPreferences()` wipes the entire blob, so logout cleans up all three maps for free.
 
 ## Testing
 
 - `ProjectPanel.test.tsx` -- unit tests for the presentational component (rendering, callback wiring, open/close CSS classes).
+- `useDashboardProjectVisibility.test.ts` -- direct 100% statement, branch,
+  function, and line coverage of restoration, derivation, persistence, bulk
+  actions, country gates, haptics, and scheduled zoom failure modes.
 - `Dashboard.test.tsx` -- integration tests for panel behavior within the dashboard:
   - Panel opens when Projects tab is clicked.
   - Show All / Hide All persist preferences.
