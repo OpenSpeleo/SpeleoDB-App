@@ -25,8 +25,10 @@ The hook depends on only the required controller methods, selected marker
 detail, collection groups, landmarks GeoJSON, map/panel callbacks, and
 injectable preference writers. Durable overlay state, optimistic queue folding,
 conflicts, and server transport remain controller/coordinator responsibilities.
-Dashboard wires hook outputs into `LandmarkPanel`, `OverlayMarkerDetailsModal`,
-`LandmarkFormModal`, `ConfirmDialog`, `GpsMapLayers`, and the GPS action hooks.
+Dashboard wires hook outputs into `LandmarkPanel`, the focused
+`DashboardLandmarkDialogs`/`DashboardLandmarkFeedback` presentation boundary,
+`GpsMapLayers`, and the GPS action hooks. See
+`docs/dashboard-landmark-presentation.md`.
 
 ## Testing and verification
 
@@ -37,7 +39,8 @@ submission guards and failures, deletion guards and typed outcomes, and late
 mutation completions. The production hook has 100% statement, branch, function,
 and line coverage. Dashboard's characterization suite continues to verify the
 rendered long-press, marker, form, confirmation, panel, toast, and GPS handoff
-flows.
+flows. The presentation module has its own 100% statement, branch, function,
+and line coverage.
 
 ## Performance implications
 

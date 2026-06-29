@@ -149,7 +149,8 @@ Project point layer IDs are detected with `isProjectPointLayerId()` using the pa
 
 ### Modal fields by marker type
 
-Dashboard opens a single reusable read-only modal (`OverlayMarkerDetailsModal`) from map tap/click hits:
+`DashboardLandmarkDialogs` opens a single reusable read-only modal
+(`OverlayMarkerDetailsModal`) from map tap/click hits:
 
 - **Exploration lead** (title: "Exploration Lead"):
   - Description (fallback: `No description available.`)

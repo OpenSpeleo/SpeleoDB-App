@@ -60,6 +60,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-012 | P0 | Raw errors, deep links, identifiers, coordinates, and payload-shaped data can reach console/Sentry diagnostics. | Enforce one redacted diagnostic boundary. |
 | MH-013 | P0 | Remote cleartext instances and automatic redirects can expose credentials or request bodies. | Require release HTTPS and disable redirects for sensitive requests. |
 | MH-014 | P1 | iOS declares background fetch and processing modes without scheduling either kind of work. | Restrict the compiled app configuration to recording-owned background location. |
+| MH-015 | P2 | Repeated one-shot coverage runs on the same tree can differ by three covered `TileCacheRepository` branches. | Isolate run-history/test-order state and make coverage evidence repeatable before enforcing thresholds. |
 
 ## Commit checklist
 
@@ -91,7 +92,8 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Refactoring] Extract dashboard map data lifecycle`
 - [x] `[Refactoring] Extract dashboard map shell`
 - [x] `[Refactoring] Unify dashboard panel state`
-- [ ] `[Refactoring] Decompose dashboard rendering and interaction state`
+- [x] `[Refactoring] Extract dashboard landmark presentation`
+- [x] `[Refactoring] Decompose dashboard rendering and interaction state`
 - [ ] `[Fix] Stop inactive page effects and polling`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
@@ -596,7 +598,7 @@ and physical-device evidence.
 
 ### Unify dashboard panel state
 
-- Commit: recorded in the next objective after this commit is created.
+- Commit: `7605d4a` (`[Refactoring] Unify dashboard panel state`).
 - Verification: Node 22 inventory, lint, typecheck, focused authenticated-shell,
   tab-bar, shared-state, Dashboard, Settings, and Pending tests, full one-shot
   Vitest with coverage and live API contracts, production build,
@@ -619,3 +621,34 @@ and physical-device evidence.
   Pro/iOS 26.5 plus Release compilation.
 - Findings closed: the panel-state slice of MH-007. Modal composition remains
   scheduled as the final independently reviewable Dashboard split.
+
+### Extract dashboard landmark presentation
+
+- Commit: recorded in the next objective after this commit is created.
+- Verification: Node 22 inventory, lint, typecheck, focused presentation and
+  Dashboard characterization coverage, full one-shot Vitest with coverage and
+  live API contracts, production build, both-platform Capacitor sync, Android
+  lint/unit/release builds, signed iOS XCTest, and iOS Release compilation.
+- Result: marker details, landmark form, destructive confirmation, toast, and
+  long-press ring composition now live in two side-effect-free presentation
+  components while `useDashboardLandmarkActions` retains state and mutation
+  ownership. Splitting dialogs from transient feedback preserves the existing
+  GPS-dialog stacking order. The direct 3-test suite and Dashboard's 106
+  characterization tests pass; the presentation module has 100% statement,
+  branch, function, and line coverage. Dashboard shrinks from 576 to 535 lines,
+  the presentation module is 144 lines, and every new function remains below
+  80 lines. Vitest passes 1,687/1,687 tests across 101 files with aggregate
+  coverage of 89.35% statements, at least 82.28% branches, 92.79% functions,
+  and 91.44% lines. Repeated exact-tree runs report 82.28-82.33% branches;
+  MH-015 tracks that evidence variance before thresholds are enabled. The
+  Dashboard lazy chunk is 160.23 KiB (51.08 KiB gzip): 0.73 KiB
+  larger uncompressed but 0.34 KiB smaller compressed than the prior modular
+  boundary, and still far below the starting bundle baseline. Capacitor sync
+  introduces no tracked native drift; Android passes 9/9 first-party native
+  tests plus lint, APK, and AAB builds, and iOS passes 9/9 signed native tests
+  on iPhone 17 Pro/iOS 26.5 plus Release compilation.
+- Findings closed: the final Dashboard presentation slice of MH-007 and the
+  planned Dashboard rendering/interaction decomposition. Domain actions, map
+  data, visibility, interactions, layers, map shell, GPS presentation,
+  landmark presentation, and mutually exclusive panel state now have focused
+  owners.

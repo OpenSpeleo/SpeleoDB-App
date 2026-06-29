@@ -15,7 +15,7 @@ import {
 import type { MapRef } from 'react-map-gl/maplibre';
 
 import { useSpeleoDB } from '../context/useSpeleoDB';
-import { DEFAULT_MAP_LAYER_ID, MAP } from '../constants';
+import { DEFAULT_MAP_LAYER_ID } from '../constants';
 import type { MapLayerId } from '../types/mapLayer';
 import type { DashboardPanel, DashboardPanelChange } from '../types/dashboardPanel';
 import { registerTileCacheProtocol } from '../services/TileCacheService';
@@ -23,10 +23,6 @@ import ProjectPanel from '../components/ProjectPanel';
 import LandmarkPanel from '../components/LandmarkPanel';
 import GpsPanel from '../components/GpsPanel';
 import AppTabBar from '../components/AppTabBar';
-import OverlayMarkerDetailsModal from '../components/OverlayMarkerDetailsModal';
-import LandmarkFormModal from '../components/LandmarkFormModal';
-import ConfirmDialog from '../components/ConfirmDialog';
-import LongPressRing from '../components/LongPressRing';
 import type { MapColorMode } from '../types/mapColorMode';
 import type { MeasurementUnit } from '../types/measurementUnit';
 import { useDepthProbe } from '../hooks/useDepthProbe';
@@ -43,6 +39,10 @@ import {
   useVisibleDashboardOverlays,
 } from './dashboard/useDashboardMapData';
 import { DashboardMapCanvas } from './dashboard/DashboardMapCanvas';
+import {
+  DashboardLandmarkDialogs,
+  DashboardLandmarkFeedback,
+} from './dashboard/DashboardLandmarkPresentation';
 
 // ==================== Register tile caching protocol once ====================
 
@@ -473,50 +473,28 @@ const Dashboard: React.FC<DashboardProps> = ({
             onCancelAveragingReset={handleCancelAveragingReset}
           />
 
-          <OverlayMarkerDetailsModal
-            detail={selectedOverlayMarkerDetail}
-            onClose={clearSelectedMarkerDetail}
-            onCreateLandmark={handleOpenCreateLandmark}
-            onEditLandmark={handleOpenEditLandmark}
-            onDeleteLandmark={handleOpenDeleteLandmark}
-          />
-
-          {landmarkForm && (
-            <LandmarkFormModal
-              isOpen
-              mode={landmarkForm.mode}
-              initialValues={landmarkForm.initialValues}
-              collections={landmarkCollections}
-              busy={landmarkFormBusy}
-              submitError={landmarkFormError}
-              onSubmit={handleSubmitLandmarkForm}
-              onCancel={handleCancelLandmarkForm}
-            />
-          )}
-
-          <ConfirmDialog
-            isOpen={landmarkDeleteTarget !== null}
-            title="Delete Landmark"
-            message={
-              <>
-                Are you sure you want to delete{' '}
-                <span className="font-semibold text-slate-100">
-                  {landmarkDeleteTarget && landmarkDeleteTarget.name !== 'N/A'
-                    ? landmarkDeleteTarget.name
-                    : 'this landmark'}
-                </span>
-                ?
-              </>
-            }
-            warning="This action cannot be undone."
-            confirmLabel="Delete"
-            cancelLabel="Cancel"
-            danger
-            busy={landmarkDeleteBusy}
-            busyLabel={'Deleting\u2026'}
-            onConfirm={handleConfirmDeleteLandmark}
-            onCancel={handleCancelDeleteLandmark}
-            testId="delete-landmark-confirm"
+          <DashboardLandmarkDialogs
+            detail={{
+              value: selectedOverlayMarkerDetail,
+              onClose: clearSelectedMarkerDetail,
+              onCreate: handleOpenCreateLandmark,
+              onEdit: handleOpenEditLandmark,
+              onDelete: handleOpenDeleteLandmark,
+            }}
+            form={{
+              value: landmarkForm,
+              collections: landmarkCollections,
+              busy: landmarkFormBusy,
+              error: landmarkFormError,
+              onSubmit: handleSubmitLandmarkForm,
+              onCancel: handleCancelLandmarkForm,
+            }}
+            deletion={{
+              target: landmarkDeleteTarget,
+              busy: landmarkDeleteBusy,
+              onConfirm: handleConfirmDeleteLandmark,
+              onCancel: handleCancelDeleteLandmark,
+            }}
           />
 
           <DashboardGpsTrackDialogs
@@ -538,26 +516,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             onCancelEdit={handleCancelEditTrack}
           />
 
-          {landmarkToast && (
-            <div
-              data-testid="landmark-toast"
-              className={`fixed left-1/2 -translate-x-1/2 bottom-24 z-[10000] px-4 py-2 rounded-lg text-sm text-white shadow-lg ${
-                landmarkToast.tone === 'success' ? 'bg-emerald-600' : 'bg-red-600'
-              }`}
-            >
-              {landmarkToast.message}
-            </div>
-          )}
-
-          {longPressRing && (
-            <LongPressRing
-              x={longPressRing.x}
-              y={longPressRing.y}
-              durationMs={MAP.LONG_PRESS_DURATION_MS - MAP.LONG_PRESS_RING_REVEAL_DELAY_MS}
-              sizePx={MAP.LONG_PRESS_RING_SIZE_PX}
-              strokePx={MAP.LONG_PRESS_RING_STROKE_PX}
-            />
-          )}
+          <DashboardLandmarkFeedback toast={landmarkToast} longPressRing={longPressRing} />
 
           </div>
           <AppTabBar

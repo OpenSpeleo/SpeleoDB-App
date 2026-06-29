@@ -37,6 +37,8 @@ This folder contains product and engineering documentation for core app behavior
   battery hints, averaging transitions, async guards, and landmark handoff.
 - `dashboard-landmark-actions.md`: collection preferences, visible GeoJSON,
   locate/create/edit/delete state, toasts, async guards, and GPS handoff.
+- `dashboard-landmark-presentation.md`: detail/form/delete dialog composition,
+  toast styling, long-press feedback, and callback boundaries.
 - `dashboard-project-visibility.md`: project and country visibility intent,
   persistence, effective map gates, bulk actions, and bounded project zoom.
 - `dashboard-panel-state.md`: the single mutually exclusive Projects,

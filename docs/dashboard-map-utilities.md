@@ -18,7 +18,7 @@ The utility module owns:
 - project and GPS-track bounds, including antimeridian-aware project bounds;
 - touch thresholds, long-press blocking layer IDs, and north-up orientation.
 
-Dashboard still owns domain orchestration and modal composition.
+Dashboard still owns domain orchestration and typed presentation wiring.
 `DashboardMapCanvas` and its focused child components own MapLibre composition,
 and `useDashboardMapInteractions` owns pointer state, timers, and marker
 selection;

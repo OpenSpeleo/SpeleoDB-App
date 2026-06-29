@@ -144,6 +144,9 @@ cached collection so the optimistic view needs no extra UI wiring.
   `collectionId`, `latitude`, `longitude` (`src/utils/overlayMarkerDetails.ts`).
 - **UI:** `LandmarkFormModal`, `ConfirmDialog`, `LongPressRing`
   (`src/components/`), plus actions in `OverlayMarkerDetailsModal`.
+- **Dashboard presentation:** `DashboardLandmarkDialogs` and
+  `DashboardLandmarkFeedback` own detail/form/delete/toast/ring composition
+  without owning mutation state.
 - **Dashboard action owner:** `useDashboardLandmarkActions` owns collection
   preferences, form/delete/toast state, mounted completion guards, and the
   averaged-GPS-point handoff; `Dashboard` only wires its outputs to views.
