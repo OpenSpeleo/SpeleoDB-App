@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
@@ -50,6 +50,19 @@ function getOAuthTokenInput() {
   return within(
     screen.getByRole('tabpanel', { name: /oauth token/i }),
   ).getByLabelText(/^oauth token$/i);
+}
+
+function submitPasswordForm(): HTMLFormElement {
+  fireEvent.change(screen.getByLabelText(/^email$/i), {
+    target: { value: 'user@example.com' },
+  });
+  fireEvent.change(screen.getByLabelText(/^password$/i), {
+    target: { value: 'password' },
+  });
+  const form = screen.getByRole('button', { name: /sign in/i }).closest('form');
+  if (!form) throw new Error('Login submit button must belong to a form');
+  fireEvent.submit(form);
+  return form;
 }
 
 describe('Login page', () => {
@@ -170,6 +183,92 @@ describe('Login page', () => {
       () => { expect(history.location.pathname).toBe('/dashboard'); },
       { timeout: 2000 }
     );
+  });
+
+  it('admits only one submission and stays locked through a successful redirect', async () => {
+    let resolveLogin!: (value: { success: boolean; message: string }) => void;
+    mockLogin.mockImplementation(() => new Promise((resolve) => {
+      resolveLogin = resolve;
+    }));
+    renderLogin();
+    const form = submitPasswordForm();
+    fireEvent.submit(form);
+    expect(mockLogin).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      resolveLogin({ success: true, message: 'Login successful' });
+    });
+
+    expect(screen.getByText(/login successful/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /signing in/i })).toBeDisabled();
+    fireEvent.submit(form);
+    expect(mockLogin).toHaveBeenCalledOnce();
+  });
+
+  it('cancels the delayed successful-login redirect when unmounted', async () => {
+    vi.useFakeTimers();
+    try {
+      mockLogin.mockResolvedValue({ success: true, message: 'Login successful' });
+      const history = createMemoryHistory();
+      const { unmount } = render(
+        <Router history={history}>
+          <Login />
+        </Router>,
+      );
+      submitPasswordForm();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByText(/login successful/i)).toBeInTheDocument();
+
+      unmount();
+      act(() => { vi.advanceTimersByTime(1000); });
+
+      expect(history.location.pathname).toBe('/');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores a successful controller completion after unmount', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveLogin!: (value: { success: boolean; message: string }) => void;
+      mockLogin.mockImplementation(() => new Promise((resolve) => {
+        resolveLogin = resolve;
+      }));
+      const history = createMemoryHistory();
+      const { unmount } = render(
+        <Router history={history}>
+          <Login />
+        </Router>,
+      );
+      submitPasswordForm();
+
+      unmount();
+      await act(async () => {
+        resolveLogin({ success: true, message: 'Login successful' });
+      });
+      act(() => { vi.runAllTimers(); });
+
+      expect(history.location.pathname).toBe('/');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows unexpected controller failures and reopens form admission', async () => {
+    mockLogin.mockRejectedValue(new Error('unexpected failure'));
+    renderLogin();
+    await userEvent.type(screen.getByLabelText(/^email$/i), 'user@example.com');
+    await userEvent.type(screen.getByLabelText(/^password$/i), 'password');
+    await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    expect(await screen.findByText(/an unexpected error occurred/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^sign in/i })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: /^sign in/i }));
+    expect(mockLogin).toHaveBeenCalledTimes(2);
   });
 
   it('on failed login shows error and does not redirect', async () => {

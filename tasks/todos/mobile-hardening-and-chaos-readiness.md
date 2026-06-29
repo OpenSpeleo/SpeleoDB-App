@@ -67,6 +67,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-019 | P0 | Inconclusive stored-session `4xx` responses such as `408` or `429` trigger destructive logout and wipe offline data. | Closed: purge only on explicit `401`/`403` authorization denial. |
 | MH-020 | P1 | Concurrent manual reconnects can supersede each other and let a stale `ok` result launch sync while the authoritative probe remains offline. | Closed: coalesce reconnect ownership and gate sync on authoritative validation. |
 | MH-021 | P0 | A GPS/persistence cleanup failure can interrupt logout before credential/cache purge, and failed vault deletion retains a marker that can restore the old session on restart. | Closed: revoke first, attempt all cleanup, and clear session metadata independently. |
+| MH-022 | P1 | Same-turn login submissions can supersede each other, successful login re-enables before redirect, and its timer can navigate after unmount. | Closed: synchronous single-flight admission and unmount-owned publication/timer cleanup. |
 
 ## Commit checklist
 
@@ -108,6 +109,7 @@ regression test, verification commands, commit, and final disposition.
 - [x] `[Fix] Preserve sessions on inconclusive validation responses`
 - [x] `[Fix] Serialize manual reconnect attempts`
 - [x] `[Fix] Complete destructive logout after cleanup failures`
+- [x] `[Fix] Prevent stale login form completions`
 - [ ] `[Fix] Harden authentication and network state machines`
 - [ ] `[Fix] Harden persistence and offline replay`
 - [ ] `[Fix] Harden project map and tile processing`
@@ -857,7 +859,7 @@ and physical-device evidence.
 
 ### Complete destructive logout after cleanup failures
 
-- Commit: recorded after this objective is committed.
+- Commit: `bcfcae1` (`[Fix] Complete destructive logout after cleanup failures`).
 - Reproduction: controller logout awaited GPS teardown before revoking auth or
   clearing credentials, and a rejected pending GPS persistence wait skipped
   cache/tile cleanup. Separately, `SecureSessionStore.clear()` retained the
@@ -875,11 +877,38 @@ and physical-device evidence.
   vault deletion still removes metadata and cannot restore on a fresh store,
   including aggregate vault-plus-metadata failure. Node 22 CI passes
   1,720/1,720 tests across 101 files with 89.44% statements, 82.51% branches,
-  92.83% functions, and 91.5%
-  lines. Capacitor synchronization produces no tracked native drift. Android
-  passes its 9 first-party tests plus lint, release APK, and release AAB gates.
+  92.83% functions, and 91.5% lines. Capacitor synchronization produces no
+  tracked native drift. Android passes its 9 first-party tests plus lint,
+  release APK, and release AAB gates.
   Signed iOS XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned
   simulator Release compilation succeeds. Exact staged pre-commit and CI
   evidence is recorded immediately before commit.
 - Findings closed: MH-021. The broader authentication/network audit remains
+  open.
+
+### Prevent stale login form completions
+
+- Commit: recorded after this objective is committed.
+- Reproduction: React loading state did not synchronously guard the form
+  handler, so two same-turn submits invoked the controller twice and the newer
+  attempt superseded the first. A successful result reset loading before its
+  one-second redirect, admitting another attempt, while the untracked timer
+  could still push `/dashboard` after the page unmounted.
+- Correction: the login page now closes a ref-backed admission gate before its
+  first state update, holds that gate through successful navigation, publishes
+  results only while mounted, and cancels its owned redirect timer on unmount.
+  The reusable UI ownership rule is in
+  `tasks/lessons/react-async-action-ownership.md`.
+- Verification: component regressions issue duplicate form submissions at the
+  production handler seam, prove exactly one controller call, prove the form
+  remains disabled after success, and prove unmount cancels delayed
+  navigation. The focused component suite passes 25/25 tests. Node 22 CI passes
+  1,724/1,724 tests across 101 files with 89.47% statements, 82.52% branches,
+  92.83% functions, and 91.53% lines. Capacitor synchronization produces no
+  tracked native drift. Android passes its 9 first-party tests plus lint,
+  release APK, and release AAB gates. Signed iOS XCTest passes 9/9 tests on
+  iPhone 17 Pro/iOS 26.5, and unsigned simulator Release compilation succeeds.
+  Exact staged pre-commit and CI evidence is recorded immediately before
+  commit.
+- Findings closed: MH-022. The broader authentication/network audit remains
   open.

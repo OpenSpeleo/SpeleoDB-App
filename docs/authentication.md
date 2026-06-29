@@ -60,6 +60,12 @@ An unvalidated token is never persisted. The token input is masked, disables
 browser autofill and autocapitalization, and preserves its value only in React
 form state while the login screen remains mounted.
 
+The form admits one submission synchronously, before React's loading-state
+render. It remains disabled through the successful-login redirect delay, so a
+second submit cannot supersede an accepted session while success feedback is
+visible. Async results are ignored after unmount, and the owned redirect timer
+is cancelled when the login page leaves the tree.
+
 ## Session persistence and restoration
 
 Successful online login from either method uses one coordinator session-setup
@@ -166,7 +172,7 @@ are never logged or parsed.
   JavaScript-visible `CredentialStore` plugin is registered before the WebView
   uses it; the separate Keychain tests retain ownership of persistence behavior.
 - Login component tests cover tab semantics and keyboard navigation, masked
-  token entry, shared instance submission, feedback, redirects, and solid
-  button variants.
+  token entry, shared instance submission, single-flight admission, unmount-
+  safe redirect ownership, feedback, redirects, and solid button variants.
 - The opt-in controller integration suite validates a configured real OAuth
   token through the full controller/service/HTTP stack.

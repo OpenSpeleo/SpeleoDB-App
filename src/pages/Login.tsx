@@ -1,6 +1,7 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { useSpeleoDB } from '../context/useSpeleoDB';
+import { useMountedRef } from '../hooks/useMountedRef';
 import { PREFERENCES } from '../constants';
 import { getPreferences } from '../services/PreferencesService';
 import { getInstanceBaseUrl, INSTANCE_PATHS, openExternalUrl } from '../utils/url';
@@ -12,8 +13,11 @@ type LoginMethod = 'password' | 'token';
 const Login: React.FC = () => {
   const history = useHistory();
   const { controller } = useSpeleoDB();
+  const mountedRef = useMountedRef();
   const passwordTabRef = useRef<HTMLButtonElement>(null);
   const tokenTabRef = useRef<HTMLButtonElement>(null);
+  const submissionInFlightRef = useRef(false);
+  const redirectTimerRef = useRef<number | null>(null);
   const [loginMethod, setLoginMethod] = useState<LoginMethod>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,29 +29,48 @@ const Login: React.FC = () => {
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
+  useEffect(() => () => {
+    if (redirectTimerRef.current !== null) {
+      window.clearTimeout(redirectTimerRef.current);
+      redirectTimerRef.current = null;
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submissionInFlightRef.current) return;
+    submissionInFlightRef.current = true;
     setError('');
     setSuccess('');
     setIsLoading(true);
+    let keepAdmissionClosed = false;
 
     try {
       const result = loginMethod === 'password'
         ? await controller.login({ email, password, instance })
         : await controller.loginWithToken({ token, instance });
-      
+
+      if (!mountedRef.current) return;
       if (result.success) {
+        keepAdmissionClosed = true;
         setSuccess(result.message);
-        setTimeout(() => {
+        redirectTimerRef.current = window.setTimeout(() => {
+          redirectTimerRef.current = null;
+          if (!mountedRef.current) return;
           history.push('/dashboard');
         }, 1000);
       } else {
         setError(result.message);
       }
     } catch {
-      setError('An unexpected error occurred. Please try again.');
+      if (mountedRef.current) {
+        setError('An unexpected error occurred. Please try again.');
+      }
     } finally {
-      setIsLoading(false);
+      if (!keepAdmissionClosed) {
+        submissionInFlightRef.current = false;
+        if (mountedRef.current) setIsLoading(false);
+      }
     }
   };
 
