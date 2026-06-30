@@ -29,6 +29,10 @@ storage, schedule work, register listeners, or retain local state.
 
 ## Invariants
 
+- Every MapLibre `Layer` is a direct child of its owning `Source`. The
+  `react-map-gl` `Source` component clones immediate children to inject the
+  source ID; an intervening component that does not forward `source` silently
+  creates an unbound layer declaration.
 - Project geometry remains below marker layers through the stable ordering
   anchor, including after visibility changes.
 - Project layers mount only when both effective visibility and current GeoJSON
@@ -41,8 +45,11 @@ storage, schedule work, register listeners, or retain local state.
 
 ## Verification and performance
 
-`DashboardMapLayers.test.tsx` plus the Dashboard characterization suite execute
-every statement, branch, and function in the three production layer modules.
+`DashboardMapLayers.test.tsx` models `react-map-gl` source injection with
+`Children.map`/`cloneElement` and proves that every project geometry layer,
+subsurface icon, and GPS line receives its owning source ID. It also covers
+visibility/data omission and icon availability. The Dashboard characterization
+suite verifies the surrounding data and map-readiness orchestration.
 The split changes React component ownership only: it adds no MapLibre source,
 network request, timer, listener, or data scan. All production modules remain
 below the 600-line budget and all layer functions remain at or below 80 lines.

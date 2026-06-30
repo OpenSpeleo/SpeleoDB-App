@@ -5,7 +5,6 @@ import type {
   MapOverlayGeoJsonRecord,
   MapOverlayId,
   MapOverlaySizes,
-  MarkerSizeExpression,
 } from '../../types/mapOverlay';
 import type {
   OverlayIconAvailability,
@@ -163,38 +162,6 @@ const SUBSURFACE_ICON_LAYERS: ReadonlyArray<{
   },
 ];
 
-interface SubsurfaceIconLayersProps {
-  loaded: boolean;
-  availability: OverlayIconAvailability;
-  iconSize?: MarkerSizeExpression;
-}
-
-function SubsurfaceIconLayers({
-  loaded,
-  availability,
-  iconSize,
-}: SubsurfaceIconLayersProps) {
-  if (!loaded) return null;
-  return SUBSURFACE_ICON_LAYERS.map(({ layerId, stationType, iconId }) => (
-    availability[iconId] ? (
-      <Layer
-        key={layerId}
-        id={layerId}
-        type="symbol"
-        filter={['==', ['get', 'type'], stationType]}
-        minzoom={markerMinZoom('subsurfaceStations')}
-        layout={{
-          'icon-image': iconId,
-          'icon-size': iconSize,
-          'icon-allow-overlap': true,
-          'icon-ignore-placement': true,
-        }}
-        paint={{ 'icon-opacity': 1 }}
-      />
-    ) : null
-  ));
-}
-
 interface SubsurfaceStationMapLayersProps {
   data?: GeoJSON.FeatureCollection;
   iconsLoaded: boolean;
@@ -228,11 +195,24 @@ function SubsurfaceStationMapLayers({
           'circle-opacity': 1,
         }}
       />
-      <SubsurfaceIconLayers
-        loaded={iconsLoaded}
-        availability={iconAvailability}
-        iconSize={sizes.markerIconSize}
-      />
+      {iconsLoaded && SUBSURFACE_ICON_LAYERS.map(({ layerId, stationType, iconId }) => (
+        iconAvailability[iconId] ? (
+          <Layer
+            key={layerId}
+            id={layerId}
+            type="symbol"
+            filter={['==', ['get', 'type'], stationType]}
+            minzoom={markerMinZoom('subsurfaceStations')}
+            layout={{
+              'icon-image': iconId,
+              'icon-size': sizes.markerIconSize,
+              'icon-allow-overlap': true,
+              'icon-ignore-placement': true,
+            }}
+            paint={{ 'icon-opacity': 1 }}
+          />
+        ) : null
+      ))}
       <Layer
         id="subsurface-stations-labels"
         type="symbol"

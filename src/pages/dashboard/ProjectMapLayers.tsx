@@ -1,4 +1,3 @@
-import { Fragment } from 'react';
 import { Layer, Source } from 'react-map-gl/maplibre';
 import { PROJECT_LAYERS } from '../../constants';
 import type { MapColorMode } from '../../types/mapColorMode';
@@ -11,78 +10,6 @@ import {
 import { getProjectColor } from '../../utils/projectColors';
 
 export type ProjectGeoJsonRecord = Record<string, GeoJSON.FeatureCollection>;
-
-interface ProjectLayerProps {
-  sourceId: string;
-  color: ReturnType<typeof createDepthColorExpression>;
-}
-
-function ProjectFillLayer({ sourceId, color }: ProjectLayerProps) {
-  return (
-    <Layer
-      id={`${sourceId}-fill`}
-      type="fill"
-      beforeId="project-layer-order-anchor"
-      filter={[
-        'match',
-        ['geometry-type'],
-        ['Polygon', 'MultiPolygon'],
-        true,
-        false,
-      ]}
-      paint={{ 'fill-color': color, 'fill-opacity': 0.25 }}
-    />
-  );
-}
-
-function ProjectLineLayer({ sourceId, color }: ProjectLayerProps) {
-  return (
-    <Layer
-      id={`${sourceId}-line`}
-      type="line"
-      beforeId="project-layer-order-anchor"
-      minzoom={PROJECT_LAYERS.lineMinZoom}
-      filter={[
-        'match',
-        ['geometry-type'],
-        ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'],
-        true,
-        false,
-      ]}
-      paint={{ 'line-color': color, 'line-width': 2.5 }}
-    />
-  );
-}
-
-function ProjectPointLayer({ sourceId }: Pick<ProjectLayerProps, 'sourceId'>) {
-  return (
-    <Layer
-      id={`${sourceId}-point`}
-      type="symbol"
-      beforeId="project-layer-order-anchor"
-      filter={[
-        'match',
-        ['geometry-type'],
-        ['Point', 'MultiPoint'],
-        true,
-        false,
-      ]}
-      minzoom={PROJECT_LAYERS.entrySymbolMinZoom}
-      layout={{
-        'text-field': '★',
-        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-        'text-size': PROJECT_LAYERS.entrySymbolTextSize,
-        'text-allow-overlap': true,
-        'text-ignore-placement': true,
-      }}
-      paint={{
-        'text-color': '#F5E027',
-        'text-halo-color': '#000000',
-        'text-halo-width': 1.5,
-      }}
-    />
-  );
-}
 
 interface ProjectMapSourceProps {
   project: Project;
@@ -107,9 +34,58 @@ function ProjectMapSource({
 
   return (
     <Source id={sourceId} type="geojson" data={data}>
-      <ProjectFillLayer sourceId={sourceId} color={lineAndFillColor} />
-      <ProjectLineLayer sourceId={sourceId} color={lineAndFillColor} />
-      <ProjectPointLayer sourceId={sourceId} />
+      <Layer
+        id={`${sourceId}-fill`}
+        type="fill"
+        beforeId="project-layer-order-anchor"
+        filter={[
+          'match',
+          ['geometry-type'],
+          ['Polygon', 'MultiPolygon'],
+          true,
+          false,
+        ]}
+        paint={{ 'fill-color': lineAndFillColor, 'fill-opacity': 0.25 }}
+      />
+      <Layer
+        id={`${sourceId}-line`}
+        type="line"
+        beforeId="project-layer-order-anchor"
+        minzoom={PROJECT_LAYERS.lineMinZoom}
+        filter={[
+          'match',
+          ['geometry-type'],
+          ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'],
+          true,
+          false,
+        ]}
+        paint={{ 'line-color': lineAndFillColor, 'line-width': 2.5 }}
+      />
+      <Layer
+        id={`${sourceId}-point`}
+        type="symbol"
+        beforeId="project-layer-order-anchor"
+        filter={[
+          'match',
+          ['geometry-type'],
+          ['Point', 'MultiPoint'],
+          true,
+          false,
+        ]}
+        minzoom={PROJECT_LAYERS.entrySymbolMinZoom}
+        layout={{
+          'text-field': '★',
+          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+          'text-size': PROJECT_LAYERS.entrySymbolTextSize,
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+        }}
+        paint={{
+          'text-color': '#F5E027',
+          'text-halo-color': '#000000',
+          'text-halo-width': 1.5,
+        }}
+      />
     </Source>
   );
 }
@@ -153,15 +129,14 @@ export function ProjectMapLayers({
         const data = geoJsonData[project.id];
         if (!activeProjectIds.has(project.id) || !data) return null;
         return (
-          <Fragment key={project.id}>
-            <ProjectMapSource
-              project={project}
-              data={data}
-              colorMode={colorMode}
-              depthDomain={depthDomain}
-              projectColorsById={projectColorsById}
-            />
-          </Fragment>
+          <ProjectMapSource
+            key={project.id}
+            project={project}
+            data={data}
+            colorMode={colorMode}
+            depthDomain={depthDomain}
+            projectColorsById={projectColorsById}
+          />
         );
       })}
     </>

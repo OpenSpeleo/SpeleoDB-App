@@ -158,6 +158,11 @@ is a bug. Self-check: `app-btn[^"]*bg-` must return zero matches in
 `src/**/*.tsx`. See `.cursor/rules/ui-buttons.mdc` and
 `tasks/lessons/button-backgrounds.md`.
 
+**MapLibre sources (hard rule):** every `react-map-gl` `<Layer>` MUST be a
+direct child of its owning `<Source>`. A wrapper must explicitly forward the
+injected `source` prop and be covered by a source-injection contract test. See
+`docs/coding-rules.md` and `tasks/lessons/maplibre-source-children.md`.
+
 ## Working rules
 
 1. Read relevant docs before proposing or implementing changes.

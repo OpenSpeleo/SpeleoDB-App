@@ -79,6 +79,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-031 | P1 | Startup runtime-adapter failure can crash session restoration, while reconnect-sync launch failure can reject an already successful online transition. | Closed: treat startup/runtime and post-reconnect launch as best-effort observers. |
 | MH-032 | P0 | Session restoration passes arbitrary native storage error prose into diagnostics, where finite pattern redaction cannot guarantee credential absence. | Closed: emit a fixed restoration diagnostic and omit the thrown object. |
 | MH-033 | P1 | Dashboard suppresses validated GeoJSON until a full sync publishes a non-zero revision and can miss initial bounds when data precedes MapLibre readiness, leaving a permanently blank project map after an interrupted startup sync. | Closed: read through the controller validation seam immediately and retry initial fit at map readiness. |
+| MH-034 | P1 | The map-layer extraction placed project and subsurface icon layers behind components that discarded `react-map-gl` source injection, leaving MapLibre layers unbound while GPS tracks still rendered. | Closed: restore direct `Layer` children and enforce the production child-injection contract in tests and coding rules. |
 
 ## Commit checklist
 
@@ -1219,8 +1220,10 @@ and physical-device evidence.
   so whichever dependency becomes ready last completes the fit exactly once.
 - Verification: the focused Dashboard/map-data suites pass 116/116 tests. The
   regression holds `mapDataRevision` at zero, delays the map style until after
-  validated cache publication, and proves that the project layer mounts and
-  its bounds fit when MapLibre becomes ready. Node 22 CI passes 1,762/1,762
+  validated cache publication, and proves that project layer declarations are
+  published and bounds fit when MapLibre becomes ready. It does not exercise
+  `react-map-gl` source injection; MH-034 owns that separate integration
+  contract. Node 22 CI passes 1,762/1,762
   tests across 103 files with 89.64% statements, 82.54% branches, 93.07%
   functions, and 91.71% lines. The production Dashboard chunk is 160.25 KiB
   (51.13 KiB gzip), below the program baseline. Capacitor synchronization
@@ -1230,3 +1233,28 @@ and physical-device evidence.
   simulator Release compilation succeeds.
 - Findings closed: MH-033. Persistence/offline replay remains the next planned
   subsystem after this finding-specific correction.
+
+### Restore MapLibre source propagation
+
+- Commit: recorded after this objective is committed (`[Fix] Restore MapLibre
+  source propagation`).
+- Reproduction: the source-contract test models `react-map-gl` with
+  `Children.map` and `cloneElement`. Before the correction, all three project
+  geometry layers and an available subsurface icon rendered without the source
+  ID injected by their owning `Source`; the GPS recording line remained bound.
+- Correction: project fill/line/point declarations and configured subsurface
+  icon declarations are direct `Source` children again. Layer IDs, filters,
+  paint/layout, zoom thresholds, ordering anchor, and extracted module
+  ownership are unchanged. Repository instructions now make this third-party
+  child-injection contract a hard rule.
+- Verification: focused red phase was 2 failures and 4 passes; focused green
+  phase is 6/6, and the combined Dashboard suites pass 113/113. Node 22 CI
+  passes 1,765/1,765 tests across 103 files with 89.64% statements, 82.54%
+  branches, 93.06% functions, and 91.70% lines. The production Dashboard chunk
+  is 159.90 KiB (51.05 KiB gzip). Capacitor synchronization produces no tracked
+  native drift. Android lint, 9 first-party unit tests, release APK assembly,
+  and release AAB bundling pass. All 9 signed iOS XCTest cases pass on an iPhone
+  17 Pro simulator running iOS 26.5, and unsigned simulator Release compilation
+  succeeds. No physical device is connected, so real-device confirmation
+  remains pending rather than implied by compilation.
+- Findings closed: MH-034. The separate validation-deadline correction follows.

@@ -32,3 +32,14 @@ in `tasks/lessons/button-backgrounds.md`.
   outside the theme. See `tasks/lessons/tailwind-v4-colors.md`.
 - App chrome that must beat Tailwind preflight (button shape, radius) lives
   UNLAYERED in `src/index.css` (e.g. `.app-btn`).
+
+## MapLibre source ownership
+
+- Every `react-map-gl` `<Layer>` MUST be a direct child of its owning `<Source>`.
+- A wrapper between `Source` and `Layer` is allowed only when it explicitly
+  forwards the injected `source` prop and has a contract test that models
+  `Source` using `Children.map` and `cloneElement`.
+- A test mock that merely renders `Source.children` is not evidence that a
+  layer is bound to a MapLibre source.
+
+See `tasks/lessons/maplibre-source-children.md`.
