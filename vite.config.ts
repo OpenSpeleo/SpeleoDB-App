@@ -180,6 +180,9 @@ export default defineConfig(({ mode }) => {
       environment: 'jsdom',
       setupFiles: './src/setupTests.ts',
       env,
+      onConsoleLog(log) {
+        if (log.startsWith('[project-geojson:bbox]')) return false
+      },
       // Scope the runner to the mobile app's own tests. The nested `SpeleoDB/`
       // Django web reference is read-only and ships its own test runner; its
       // error-path `console.error` calls trip this repo's consoleGuard when
