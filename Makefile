@@ -189,3 +189,7 @@ ios-log: ## Stream logs from the booted simulator
 
 dependencies: ## Report dependency drift without modifying manifests or the lockfile
 	npm outdated
+
+update:
+	npx --yes npm-check-updates -u --peer
+	npm install

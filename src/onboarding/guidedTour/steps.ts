@@ -126,7 +126,6 @@ export function buildTourSteps(
       popover: {
         title: 'Tour complete',
         description: 'You are ready to explore. Tap Finish to continue.',
-        side: 'over',
         align: 'center',
         showButtons: ['next'],
         nextBtnText: 'Finish',
