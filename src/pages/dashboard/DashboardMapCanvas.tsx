@@ -1,4 +1,4 @@
-import type { PointerEventHandler, RefObject } from 'react';
+import { useCallback, type PointerEventHandler, type RefObject } from 'react';
 import Map from 'react-map-gl/maplibre';
 import type { MapLayerMouseEvent, MapRef } from 'react-map-gl/maplibre';
 import { MAP, MAP_LAYERS } from '../../constants';
@@ -38,6 +38,7 @@ interface DashboardMapCanvasProps {
   colorMode: MapColorMode;
   measurementUnit: MeasurementUnit;
   probedDepth: number | null;
+  onMapReady?: () => void;
   dependencies?: DashboardMapShellDependencies;
 }
 
@@ -176,6 +177,7 @@ export function DashboardMapCanvas({
   colorMode,
   measurementUnit,
   probedDepth,
+  onMapReady,
   dependencies,
 }: DashboardMapCanvasProps) {
   const shell = useDashboardMapShell({
@@ -184,6 +186,11 @@ export function DashboardMapCanvas({
     onSelectedMapLayerIdChange,
     dependencies,
   });
+  const handleShellMapLoad = shell.handleMapLoad;
+  const handleMapLoad = useCallback(() => {
+    handleShellMapLoad();
+    onMapReady?.();
+  }, [handleShellMapLoad, onMapReady]);
   return (
     <>
       <div
@@ -203,7 +210,7 @@ export function DashboardMapCanvas({
           iconsLoaded={shell.overlayIconsLoaded}
           iconAvailability={shell.overlayIconAvailability}
           gestures={gestures}
-          onLoad={shell.handleMapLoad}
+          onLoad={handleMapLoad}
           onMove={shell.handleMapMove}
         />
         <div className="absolute bottom-2 left-2 z-10">

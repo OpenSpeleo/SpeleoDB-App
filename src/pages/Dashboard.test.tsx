@@ -139,6 +139,10 @@ const {
   };
 });
 
+const { mockGetCachedLayerStyle } = vi.hoisted(() => ({
+  mockGetCachedLayerStyle: vi.fn(),
+}));
+
 vi.mock('@ionic/react', () => ({
   IonPage: ({ children }: { children?: React.ReactNode }) => (
     <div data-testid="ion-page">{children}</div>
@@ -334,11 +338,7 @@ vi.mock('../services/TileCacheService', () => ({
     sources: {},
     layers: [],
   }),
-  getCachedLayerStyle: vi.fn().mockResolvedValue({
-    version: 8,
-    sources: {},
-    layers: [],
-  }),
+  getCachedLayerStyle: mockGetCachedLayerStyle,
 }));
 
 const {
@@ -530,6 +530,14 @@ function renderDashboard(options?: {
       </Router>,
     ),
   });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 function simulatePointerTap(
@@ -733,6 +741,11 @@ function mixedProjectFeatureCollection(): GeoJSON.FeatureCollection {
 describe('Dashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetCachedLayerStyle.mockResolvedValue({
+      version: 8,
+      sources: {},
+      layers: [],
+    });
     mockMapDataRevision = 1;
     mockGetProjectMapData.mockImplementation(async (projectId: string) => {
       const featureCollection = normalizeGeoJSON(await mockGetProjectGeoJSON(projectId));
@@ -783,6 +796,29 @@ describe('Dashboard', () => {
     await waitFor(() => {
       expect(screen.getByTestId('map')).toBeInTheDocument();
     });
+  });
+
+  it('publishes and fits validated GeoJSON when cache data precedes map readiness', async () => {
+    const style = deferred<Record<string, unknown>>();
+    mockGetCachedLayerStyle.mockReturnValueOnce(style.promise);
+    mockMapDataRevision = 0;
+    mockProjects = [makeProject({ id: 'cached', name: 'Cached Cave' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection(3, 47));
+
+    renderDashboard();
+
+    await waitFor(() => expect(mockGetProjectMapData).toHaveBeenCalledWith('cached'));
+    expect(screen.queryByTestId('map')).not.toBeInTheDocument();
+    expect(mockMapFitBounds).not.toHaveBeenCalled();
+
+    await act(async () => {
+      style.resolve({ version: 8, sources: {}, layers: [] });
+      await style.promise;
+    });
+
+    await waitFor(() => expect(screen.getByTestId('map')).toBeInTheDocument());
+    await waitFor(() => expect(mockMapFitBounds).toHaveBeenCalledOnce());
+    expect(document.querySelector('[data-layer-id="project-cached-line"]')).not.toBeNull();
   });
 
   it('redirects to /login when not authenticated', () => {

@@ -78,6 +78,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-030 | P0 | Hook exceptions around durable session commit can either report failure after accepted credentials or let required old-account invalidation fail open. | Closed: require invalidation before commit; isolate only post-commit publication observers. |
 | MH-031 | P1 | Startup runtime-adapter failure can crash session restoration, while reconnect-sync launch failure can reject an already successful online transition. | Closed: treat startup/runtime and post-reconnect launch as best-effort observers. |
 | MH-032 | P0 | Session restoration passes arbitrary native storage error prose into diagnostics, where finite pattern redaction cannot guarantee credential absence. | Closed: emit a fixed restoration diagnostic and omit the thrown object. |
+| MH-033 | P1 | Dashboard suppresses validated GeoJSON until a full sync publishes a non-zero revision and can miss initial bounds when data precedes MapLibre readiness, leaving a permanently blank project map after an interrupted startup sync. | Closed: read through the controller validation seam immediately and retry initial fit at map readiness. |
 
 ## Commit checklist
 
@@ -1200,3 +1201,32 @@ and physical-device evidence.
   evidence is recorded immediately before commit.
 - Findings closed: MH-032. The authentication/network audit objective is closed;
   persistence/offline replay is the next active subsystem.
+
+### Restore GeoJSON map publication
+
+- Commit: recorded after this objective is committed.
+- Reproduction: `useDashboardMapData` returned before reading any cache while
+  `mapDataRevision` was zero, even though `getProjectMapData()` already rejects
+  legacy, stale, quarantined, and commit-mismatched records. If project data
+  arrived before the asynchronous map style mounted MapLibre, the one-shot
+  initial-fit effect also observed a null map ref and never retried. An
+  interrupted startup sync therefore left valid cached project layers hidden
+  and, independently, a map-ready race could leave off-center data outside the
+  viewport.
+- Correction: validated project and overlay cache reads now start immediately
+  and still refresh on controller revisions. The initial-fit operation is an
+  idempotent callback shared by data publication and MapLibre's load boundary,
+  so whichever dependency becomes ready last completes the fit exactly once.
+- Verification: the focused Dashboard/map-data suites pass 116/116 tests. The
+  regression holds `mapDataRevision` at zero, delays the map style until after
+  validated cache publication, and proves that the project layer mounts and
+  its bounds fit when MapLibre becomes ready. Node 22 CI passes 1,762/1,762
+  tests across 103 files with 89.64% statements, 82.54% branches, 93.07%
+  functions, and 91.71% lines. The production Dashboard chunk is 160.25 KiB
+  (51.13 KiB gzip), below the program baseline. Capacitor synchronization
+  produces no tracked native drift. Android app lint, 9 first-party unit tests,
+  release APK assembly, and release AAB bundling pass. All 9 signed iOS XCTest
+  cases pass on an iPhone 17 Pro simulator running iOS 26.5, and unsigned
+  simulator Release compilation succeeds.
+- Findings closed: MH-033. Persistence/offline replay remains the next planned
+  subsystem after this finding-specific correction.

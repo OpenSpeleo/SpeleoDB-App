@@ -99,10 +99,16 @@ afterEach(() => {
 });
 
 describe('useDashboardMapData', () => {
-  it('does not read caches before the first completed map-data revision', () => {
-    const source = createSource();
+  it('publishes validated cache records before the first completed sync revision', async () => {
+    const visible = createProject('b', 'Bravo');
+    const source = createSource({
+      getProjectMapData: async (id) => id === visible.id ? mapData(visible) : null,
+      getOverlayGeoJSON: async (id) => id === 'landmarks'
+        ? collection(pointFeature('cached-landmark'))
+        : null,
+    });
     const projects = [
-      createProject('b', 'Bravo'),
+      visible,
       createProject('a', 'Alpha', { exclude_geojson: true }),
       createProject('c', 'Charlie', { geojson_file: null }),
     ];
@@ -115,13 +121,13 @@ describe('useDashboardMapData', () => {
 
     expect(result.current.sortedProjects.map((project) => project.id)).toEqual(['a', 'b', 'c']);
     expect(result.current.geoJsonProjects.map((project) => project.id)).toEqual(['b']);
-    expect(result.current.currentProjectMapData).toEqual({});
-    expect(result.current.geoJsonData).toEqual({});
-    expect(result.current.projectBounds).toEqual({});
-    expect(result.current.overlayGeoJsonData).toEqual({});
-    expect(result.current.landmarkCollectionGroups).toEqual([]);
-    expect(source.getProjectMapData).not.toHaveBeenCalled();
-    expect(source.getOverlayGeoJSON).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current.geoJsonData.b).toBeDefined());
+    await waitFor(() => expect(result.current.overlayGeoJsonData.landmarks).toBeDefined());
+    expect(result.current.currentProjectMapData.b.commitId).toBe('commit-b');
+    expect(result.current.projectBounds).toEqual({ b: BOUNDS });
+    expect(result.current.landmarkCollectionGroups).toHaveLength(1);
+    expect(source.getProjectMapData).toHaveBeenCalledOnce();
+    expect(source.getOverlayGeoJSON).toHaveBeenCalledTimes(5);
   });
 
   it('publishes only non-empty commit-matched projects and normalized overlays', async () => {

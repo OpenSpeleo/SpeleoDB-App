@@ -112,7 +112,6 @@ function useProjectMapData(
 ) {
   const [projectMapData, setProjectMapData] = useState<ProjectMapDataRecord>({});
   useEffect(() => {
-    if (mapDataRevision === 0) return undefined;
     let stale = false;
     void loadProjectMapData(source, projects, () => stale, warn).then((next) => {
       if (!stale && next) setProjectMapData(next);
@@ -130,7 +129,6 @@ function useOverlayMapData(
 ) {
   const [overlayGeoJsonData, setOverlayGeoJsonData] = useState<MapOverlayGeoJsonRecord>({});
   useEffect(() => {
-    if (mapDataRevision === 0) return undefined;
     let stale = false;
     void loadOverlayMapData(source, () => stale, warn).then((next) => {
       if (!stale && next) setOverlayGeoJsonData(next);

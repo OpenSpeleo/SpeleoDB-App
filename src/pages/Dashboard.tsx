@@ -168,7 +168,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // ---- Auto-fit bounds on first data load -----------------------------------
 
-  useEffect(() => {
+  const fitInitialProjectBounds = useCallback(() => {
     if (didFitRef.current) return;
     if (effectiveActiveProjectIds.size === 0 || Object.keys(geoJsonData).length === 0) return;
 
@@ -178,6 +178,10 @@ const Dashboard: React.FC<DashboardProps> = ({
       mapRef.current.fitBounds(bounds, { padding: 50, maxZoom: 14, duration: 800 });
     }
   }, [effectiveActiveProjectIds, geoJsonData, projectBounds]);
+
+  useEffect(() => {
+    fitInitialProjectBounds();
+  }, [fitInitialProjectBounds]);
 
   // ---- Handlers -------------------------------------------------------------
 
@@ -379,6 +383,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             colorMode={colorMode}
             measurementUnit={measurementUnit}
             probedDepth={probedDepth}
+            onMapReady={fitInitialProjectBounds}
           />
 
           {/* ---- Project panel ---- */}

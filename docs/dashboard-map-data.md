@@ -3,8 +3,8 @@
 ## Intent
 
 `useDashboardMapData` is the Dashboard-owned consumer boundary for cached,
-controller-validated project and overlay map data. It converts terminal sync
-revisions into one commit-consistent view for the page without mixing cache
+controller-validated project and overlay map data. It converts cache state and
+sync revisions into one commit-consistent view for the page without mixing cache
 reads, normalization, cancellation, and rendering in `Dashboard.tsx`.
 
 ## Ownership
@@ -13,7 +13,7 @@ The hook owns:
 
 - deterministic project ordering and color lookup;
 - eligibility filtering for projects that declare usable GeoJSON;
-- revision-driven project and overlay cache reads;
+- immediate validated-cache reads plus revision-driven refreshes;
 - normalization of cached GeoJSON and landmark property identifiers;
 - attachment of the precomputed depth property used by map layers;
 - atomic project/overlay publication after a complete read pass;
@@ -34,7 +34,9 @@ Global landmarks and surface stations remain independent of project toggles.
 
 ## Publication invariants
 
-- Cache reads do not begin until `mapDataRevision` is non-zero.
+- Cache reads begin as soon as the Dashboard has a controller and project
+  metadata. A zero `mapDataRevision` cannot hide an already validated,
+  commit-matched record when startup or a later sync phase is interrupted.
 - A project is published only when normalized GeoJSON is non-empty and its
   loaded `commitId` equals the current `latest_commit.id`.
 - GeoJSON and bounds are projected from one atomic map-data record; consumers
@@ -60,7 +62,7 @@ prevalidated bounds and never rescan coordinates.
 
 ## Verification
 
-`useDashboardMapData.test.ts` directly covers the zero-revision gate, project
+`useDashboardMapData.test.ts` directly covers zero-revision cache publication, project
 eligibility, valid/empty/malformed/stale commits, depth attachment, every
 overlay shape, failure containment, default diagnostics, revision clearing,
 commit replacement, and all late-success/late-failure cancellation pairings.
