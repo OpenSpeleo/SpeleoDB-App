@@ -142,7 +142,7 @@ describe('SpeleoDBStartupModals storage consent', () => {
   });
 
   it.each([
-    ['bbox_timeout', /0\.5-second safety limit/],
+    ['bbox_timeout', /previous validation timed out.*retried when online/i],
     ['invalid_geojson', /not a valid GeoJSON FeatureCollection/],
     ['no_coordinates', /does not contain usable geographic coordinates/],
     ['bbox_error', /could not be measured safely/],

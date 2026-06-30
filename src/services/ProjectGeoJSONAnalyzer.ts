@@ -2,10 +2,10 @@ import workerUrl from '../workers/projectGeoJSONBounds.worker.ts?worker&url';
 import { PROJECT_GEOJSON_VALIDATION } from '../constants';
 import type {
   ProjectGeoJSONAnalysis,
+  ProjectGeoJSONAnalysisFailureReason,
   ProjectGeoJSONBounds,
+  ProjectGeoJSONContentFailureReason,
   ProjectGeoJSONFailureDiagnostics,
-  ProjectGeoJSONFailureReason,
-  ProjectGeoJSONFileFailureReason,
 } from '../types/projectGeoJSON';
 import { createAbortError } from '../utils/abort';
 import {
@@ -15,7 +15,7 @@ import {
 } from '../utils/projectGeoJSONBounds';
 
 type WorkerFileFailureReason = Extract<
-  ProjectGeoJSONFileFailureReason,
+  ProjectGeoJSONContentFailureReason,
   'invalid_geojson' | 'no_coordinates' | 'bbox_error'
 >;
 
@@ -60,7 +60,7 @@ export class ProjectGeoJSONAnalysisError extends Error {
   public readonly diagnostics: ProjectGeoJSONFailureDiagnostics;
 
   constructor(
-    public readonly reason: ProjectGeoJSONFailureReason,
+    public readonly reason: ProjectGeoJSONAnalysisFailureReason,
     message: string,
     _fileScoped = reason !== 'validation_unavailable',
     diagnostics: ProjectGeoJSONFailureDiagnostics = EMPTY_FAILURE_DIAGNOSTICS,
@@ -170,6 +170,18 @@ function diagnostics(
   };
 }
 
+function validationTimeoutError(
+  measurement: ProjectGeoJSONMeasurement | null,
+  durationMs: number | null,
+): ProjectGeoJSONAnalysisError {
+  return new ProjectGeoJSONAnalysisError(
+    'validation_unavailable',
+    `Project GeoJSON validation did not complete within ${PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS} ms.`,
+    false,
+    diagnostics(measurement, durationMs),
+  );
+}
+
 export class ProjectGeoJSONAnalyzer implements ProjectGeoJSONAnalyzerPort {
   private readonly dependencies: AnalyzerDependencies;
   private readonly useTestFallback: boolean;
@@ -245,12 +257,7 @@ export class ProjectGeoJSONAnalyzer implements ProjectGeoJSONAnalyzerPort {
       );
       const timedOut = (measurement: ProjectGeoJSONMeasurement | null = null) => {
         const durationMs = elapsed();
-        return new ProjectGeoJSONAnalysisError(
-          'bbox_timeout',
-          `Project GeoJSON bbox analysis exceeded ${PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS} ms.`,
-          true,
-          diagnostics(measurement, durationMs),
-        );
+        return validationTimeoutError(measurement, durationMs);
       };
       const rejectIfDeadlineReached = (
         measurement: ProjectGeoJSONMeasurement | null = null,
@@ -279,7 +286,7 @@ export class ProjectGeoJSONAnalyzer implements ProjectGeoJSONAnalyzerPort {
           return;
         }
         // Browsers may wake a timer fractionally early. Keep the wall-clock
-        // deadline authoritative rather than rejecting before 500 ms.
+        // deadline authoritative rather than rejecting before the configured limit.
         timer = this.dependencies.setTimer(
           handleDeadlineTimer,
           PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS - durationMs,
@@ -381,26 +388,16 @@ export class ProjectGeoJSONAnalyzer implements ProjectGeoJSONAnalyzerPort {
         ));
       }
       if (durationMs >= PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS) {
-        return Promise.reject(new ProjectGeoJSONAnalysisError(
-          'bbox_timeout',
-          `Project GeoJSON bbox analysis exceeded ${PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS} ms.`,
-          true,
-          diagnostics(measurement, Math.max(0, durationMs)),
-        ));
+        return Promise.reject(validationTimeoutError(measurement, Math.max(0, durationMs)));
       }
       return Promise.resolve({ ...measurement, durationMs: Math.max(0, durationMs) });
     } catch (error) {
       const durationMs = this.dependencies.now() - startedAt;
       const safeDuration = Number.isFinite(durationMs) ? Math.max(0, durationMs) : null;
       if (safeDuration !== null && safeDuration >= PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS) {
-        return Promise.reject(new ProjectGeoJSONAnalysisError(
-          'bbox_timeout',
-          `Project GeoJSON bbox analysis exceeded ${PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS} ms.`,
-          true,
-          diagnostics(
-            error instanceof ProjectGeoJSONComputationError ? error.measurement : measurement,
-            safeDuration,
-          ),
+        return Promise.reject(validationTimeoutError(
+          error instanceof ProjectGeoJSONComputationError ? error.measurement : measurement,
+          safeDuration,
         ));
       }
       if (error instanceof ProjectGeoJSONComputationError) {

@@ -30,7 +30,7 @@ export function SpeleoDBStartupModals({
       return `Bounding box ${warning.widthKm.toFixed(1)} km × ${warning.heightKm.toFixed(1)} km exceeds the 100 km × 100 km limit.`
     }
     if (warning.reason === 'bbox_timeout') {
-      return 'Bounding-box computation exceeded the 0.5-second safety limit.'
+      return 'A previous validation timed out. The project will be retried when online.'
     }
     if (warning.reason === 'validation_unavailable') {
       return 'The GeoJSON could not be safely validated and is disabled for this session.'

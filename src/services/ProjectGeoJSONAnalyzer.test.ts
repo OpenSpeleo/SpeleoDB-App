@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PROJECT_GEOJSON_VALIDATION } from '../constants';
 import {
   ProjectGeoJSONAnalysisError,
   ProjectGeoJSONAnalyzer,
@@ -64,17 +65,17 @@ describe('ProjectGeoJSONAnalyzer worker lifecycle', () => {
     const promise = analyzer.analyze(point);
     const lateHandler = worker.onmessage;
     const assertion = expect(promise).rejects.toMatchObject({
-      reason: 'bbox_timeout',
-      fileScoped: true,
+      reason: 'validation_unavailable',
+      fileScoped: false,
       diagnostics: {
         bounds: null,
         widthKm: null,
         heightKm: null,
-        durationMs: 500,
+        durationMs: PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS,
       },
     });
 
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS);
     await assertion;
     expect(worker.terminate).toHaveBeenCalledOnce();
     expect(worker.onmessage).toBeNull();
@@ -88,14 +89,15 @@ describe('ProjectGeoJSONAnalyzer worker lifecycle', () => {
     const analyzer = new ProjectGeoJSONAnalyzer({
       now: () => now,
       createWorker: () => {
-        now = 500;
+        now = PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS;
         return worker;
       },
     });
 
     await expect(analyzer.analyze(point)).rejects.toMatchObject({
-      reason: 'bbox_timeout',
-      diagnostics: { durationMs: 500 },
+      reason: 'validation_unavailable',
+      fileScoped: false,
+      diagnostics: { durationMs: PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS },
     });
     expect(worker.postMessage).not.toHaveBeenCalled();
     expect(worker.terminate).toHaveBeenCalledOnce();
@@ -104,22 +106,28 @@ describe('ProjectGeoJSONAnalyzer worker lifecycle', () => {
   it('checks elapsed time again after synchronous structured cloning', async () => {
     let now = 0;
     const worker = new FakeWorker();
-    worker.postMessage.mockImplementation(() => { now = 501; });
+    worker.postMessage.mockImplementation(() => {
+      now = PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS + 1;
+    });
     const analyzer = new ProjectGeoJSONAnalyzer({
       now: () => now,
       createWorker: () => worker,
     });
 
     await expect(analyzer.analyze(point)).rejects.toMatchObject({
-      reason: 'bbox_timeout',
-      diagnostics: { durationMs: 501 },
+      reason: 'validation_unavailable',
+      fileScoped: false,
+      diagnostics: { durationMs: PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS + 1 },
     });
     expect(worker.postMessage).toHaveBeenCalledOnce();
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
   it('accepts a result before the deadline and rejects one at the deadline', async () => {
-    for (const [finishedAt, expected] of [[499, 'success'], [500, 'bbox_timeout']] as const) {
+    for (const [finishedAt, expected] of [
+      [PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS - 1, 'success'],
+      [PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS, 'validation_unavailable'],
+    ] as const) {
       let now = 0;
       const worker = new FakeWorker();
       const analyzer = new ProjectGeoJSONAnalyzer({
@@ -130,7 +138,9 @@ describe('ProjectGeoJSONAnalyzer worker lifecycle', () => {
       now = finishedAt;
       worker.onmessage?.({ data: { id: 1, ok: true, measurement } } as MessageEvent);
       if (expected === 'success') {
-        await expect(promise).resolves.toMatchObject({ durationMs: 499 });
+        await expect(promise).resolves.toMatchObject({
+          durationMs: PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS - 1,
+        });
       } else {
         await expect(promise).rejects.toMatchObject({ reason: expected });
       }

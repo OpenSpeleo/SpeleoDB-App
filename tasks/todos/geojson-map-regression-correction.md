@@ -13,11 +13,12 @@ retain only the validated deadline and legacy-timeout recovery policy.
 - [x] Restore direct `Layer` children for project and subsurface sources.
 - [x] Audit every application `Source` for indirect children.
 - [x] Document the MapLibre source-child contract and durable lesson.
-- [ ] Commit the independently green rendering correction.
-- [ ] Reintroduce transient validation deadlines without lazy/inline workers.
-- [ ] Prove historical 500 ms timeout recovery and content-failure quarantine.
-- [ ] Commit the independently green deadline correction.
-- [ ] Verify rewritten ancestry and leave the worktree clean without pushing.
+- [x] Commit the independently green rendering correction (`857d601`).
+- [x] Reintroduce transient validation deadlines without lazy/inline workers.
+- [x] Prove historical 500 ms timeout recovery and content-failure quarantine.
+- [x] Commit-ready independently green deadline correction
+  (`[Fix] Treat GeoJSON validation deadlines as transient`; hash recorded at handoff).
+- [x] Verify rewritten ancestry and leave the worktree clean without pushing.
 
 ## Required gates per commit
 
@@ -32,6 +33,8 @@ retain only the validated deadline and legacy-timeout recovery policy.
 
 ### MapLibre source propagation
 
+- Commit: `857d60158e47fff84561dd9e06aabca33e2b3a79`
+  (`[Fix] Restore MapLibre source propagation`).
 - Red/green: the contract-accurate source mock produced 2 failures and 4 passes
   before the correction, then 6/6 passes afterward. The combined Dashboard
   suites pass 113/113.
@@ -42,3 +45,30 @@ retain only the validated deadline and legacy-timeout recovery policy.
   17 Pro/iOS 26.5 and the unsigned simulator Release build succeeds.
 - Limitation: no connected physical device contains the user's real project
   payload, so device confirmation remains pending.
+
+### Transient validation deadlines
+
+- Red/green: the policy tests produced 7 expected failures with 247 passing
+  tests before the correction, covering deadline classification, the durable
+  cache boundary, same-commit historical recovery, and warning copy. The same
+  four focused files then pass 254/254 tests. Existing oversized and malformed
+  content tests stayed green and remain durably quarantined.
+- Correction: the existing statically imported analyzer and Vite `?worker&url`
+  artifact remain unchanged. The off-thread deadline is 10 seconds and reports
+  session-only `validation_unavailable`; analysis and cache types exclude new
+  timeout quarantine writes, and the cache runtime rejects them. Historical
+  schema-v2 `bbox_timeout` records at the old 500 ms boundary remain parseable
+  and retry the exact commit online. Successful validation atomically replaces
+  the old marker with active map data.
+- Full web gate: the inventory covers all 515 tracked files; Node 22 CI passes
+  1,767/1,767 tests across 103 files with 89.65% statements, 82.63% branches,
+  93.07% functions, and 91.72% lines. The production build retains the normal
+  8.28 KiB `projectGeoJSONBounds.worker` asset; no lazy analyzer, inline-worker
+  packaging, or generated-code bundle guard was introduced.
+- Native gate: Capacitor synchronization produced no tracked native drift.
+  Android lint, first-party unit tests, release APK assembly, and release AAB
+  bundling pass. Signed iOS XCTest passes 9/9 cases on iPhone 17 Pro/iOS 26.5,
+  and the unsigned generic-simulator Release build succeeds.
+- Limitation: no physical device with the user's real project payload was
+  available, so on-device rendering confirmation remains explicitly pending.
+  The configured contract tenant does not substitute for that payload.

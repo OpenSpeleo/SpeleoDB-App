@@ -36,7 +36,7 @@ The source of truth is `PROJECT_GEOJSON_VALIDATION` in `src/constants.ts`:
 - unpadded width must be at most 100 km;
 - unpadded height must be at most 100 km;
 - the corresponding Web-Mercator x/y footprint must be at most 100.12 km;
-- analysis must return before the 500 ms deadline;
+- analysis must return before the 10-second resource deadline;
 - every longitude/latitude must be finite and inside the legal GeoJSON range;
 - the FeatureCollection must contain at least one usable coordinate.
 
@@ -80,9 +80,9 @@ all GeoJSON geometry types and nested GeometryCollections. Null geometries are
 ignored. Malformed nesting, an unsupported geometry, or any bad position fails
 the file rather than silently dropping the coordinate.
 
-A file-scoped timeout or computation error is quarantined. Worker responses are
-runtime-validated; malformed or foreign responses, worker asset failures, and
-platform/bootstrap failures are infrastructure failures classified as
+A computation error caused by the file is quarantined. Worker responses are
+runtime-validated; deadlines, malformed or foreign responses, worker asset
+failures, and platform/bootstrap failures are infrastructure failures classified as
 `validation_unavailable`. Infrastructure failures hide the file and cancel its
 prefetch work for the current process, but are never written through the durable
 quarantine API or permanently attributed to the file commit.
@@ -119,8 +119,11 @@ commit.
 
 For the same active commit, sync logs and reuses stored bounds without
 recomputing. For the same quarantined commit, sync performs no download or
-analysis. A newer `latest_commit.id` is a new file version and is validated
-normally; a valid replacement atomically reactivates the project map layer.
+analysis, except for historical `bbox_timeout` records written by clients using
+the old 500 ms policy. Those records are retained until an online retry of the
+same commit validates and atomically replaces them. A newer `latest_commit.id`
+is a new file version and is validated normally; a valid replacement atomically
+reactivates the project map layer.
 
 If IndexedDB cannot persist quarantine, the controller retains a session-only
 typed per-commit disposition. Read failures and validation-infrastructure
@@ -135,7 +138,9 @@ storage.
 | Current record | Observed commit | Action | Result |
 | --- | --- | --- | --- |
 | Active | Same | Log stored analysis; no download or analysis | Active |
-| Quarantined | Same | Remove prefetch target; no download or analysis | Quarantined |
+| Quarantined content failure | Same | Remove prefetch target; no download or analysis | Quarantined |
+| Historical timeout quarantine | Same, online | Download and validate again | Active, content-quarantined, or session-disabled |
+| Historical timeout quarantine | Same, offline | Retain warning; do not download | Quarantined |
 | Legacy with matching commit | Same | Analyze cached bytes, online or offline | Active or quarantined |
 | Unversioned legacy | Offline | Hide; do not assign bytes to current commit | Session-disabled |
 | Unversioned legacy | Online | Download canonical current commit; do not audit ambiguous bytes | Active or quarantined |
@@ -148,7 +153,8 @@ storage.
 | Failure | File scoped | Durable quarantine | Warning | Retry |
 | --- | --- | --- | --- | --- |
 | Width or height over 100 km | Yes | Yes | Measured dimensions | New commit only |
-| 500 ms timeout | Yes | Yes | Available duration/measurement | New commit only |
+| 10-second validation deadline | No | No | Available duration/measurement | Later process |
+| Historical persisted timeout | No longer trusted | Existing record retained until retry | Available duration/measurement | Same commit when online |
 | Invalid geometry/position | Yes | Yes | Safe-computation summary | New commit only |
 | No usable coordinates | Yes | Yes | Safe-computation summary | New commit only |
 | Analyzer computation throw | Yes | Yes | Safe-computation summary | New commit only |
@@ -266,7 +272,7 @@ removes it.
 - Quarantined payload bytes are discarded from the project cache.
 - The sync download worker pool remains capped at three, which also bounds
   concurrent validation workers.
-- Worker structured-clone startup is included in the 500 ms deadline.
+- Worker startup and structured cloning are included in the 10-second deadline.
 - IndexedDB writes and conditional updates are abort-aware; cancellation aborts
   the active transaction where possible and always wins at the service boundary.
 - Directed-interval merging operates on the small set of project bounds rather
@@ -309,10 +315,12 @@ Before release, verify on both an Android device and an iOS device:
    initial fit, row zoom, and project-linked overlays.
 4. Network diagnostics show no satellite or optional-layer tile requests owned
    by the faulty project.
-5. An intentionally hung worker times out near 0.5 seconds without freezing
+5. An intentionally hung worker times out near 10 seconds without freezing
    map interaction.
 6. Force-quit and relaunch, including offline launch: the same quarantined
    commit is not downloaded or analyzed and an unacknowledged warning returns.
 7. Acknowledge, force-quit, and relaunch: the same warning does not return.
 8. Publish a newer compact commit and resync: the project returns to panel/map
    and becomes eligible for tile prefetch without restarting the app.
+9. Seed a historical 500 ms timeout marker and reconnect: the same commit is
+   downloaded, validated, and atomically restored when its content is valid.

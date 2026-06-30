@@ -9,9 +9,9 @@ import type {
   ProjectGeoJSONAcknowledgementResult,
   ProjectGeoJSONAnalysis,
   ProjectGeoJSONCacheRecord,
+  ProjectGeoJSONContentFailureReason,
   ProjectGeoJSONFailureDiagnostics,
   ProjectGeoJSONFailureReason,
-  ProjectGeoJSONFileFailureReason,
   ProjectGeoJSONMapData,
   ProjectGeoJSONWarning,
 } from '../types/projectGeoJSON';
@@ -219,7 +219,7 @@ export class ProjectGeoJSONCoordinator {
     }
 
     if (record.commitId === project.latest_commit.id) {
-      const cached = await this.processCurrentRecord(context, project, record);
+      const cached = await this.processCurrentRecord(context, project, record, allowDownloads);
       if (cached) return cached;
     }
 
@@ -266,12 +266,23 @@ export class ProjectGeoJSONCoordinator {
     context: CancellationContext,
     project: Project,
     record: ProjectGeoJSONCacheRecord,
+    allowDownloads: boolean,
   ): Promise<ProjectOutcome | null> {
     if (record.state === 'active') {
       this.log(project, record.analysis, 'cache', 'active');
       return { ...NO_OUTCOME, skipped: 1 };
     }
     if (record.state === 'quarantined') {
+      if (
+        record.reason === 'bbox_timeout'
+        && allowDownloads
+        && this.dependencies.hasNetworkAccess()
+      ) {
+        // Historical schema-v2 builds treated a 500 ms deadline as file
+        // corruption. Preserve the old marker until successful validation
+        // atomically replaces it, but retry the same commit while online.
+        return null;
+      }
       this.log(project, record.diagnostics, 'cache', 'quarantined', record.reason);
       await this.removePrefetchTarget(project.id, context);
       if (!record.warningAcknowledged) {
@@ -388,7 +399,7 @@ export class ProjectGeoJSONCoordinator {
     diagnostics: ProjectGeoJSONFailureDiagnostics,
   ): Promise<void> {
     const key = this.key(project.id, project.latest_commit.id);
-    const fileScoped = this.isFileFailure(reason);
+    const fileScoped = this.isContentFailure(reason);
     let persisted = false;
     if (fileScoped) {
       persisted = await this.dependencies.cache.setQuarantinedProjectGeoJSON(
@@ -555,9 +566,9 @@ export class ProjectGeoJSONCoordinator {
     };
   }
 
-  private isFileFailure(
+  private isContentFailure(
     reason: ProjectGeoJSONFailureReason,
-  ): reason is ProjectGeoJSONFileFailureReason {
-    return reason !== 'validation_unavailable';
+  ): reason is ProjectGeoJSONContentFailureReason {
+    return reason !== 'validation_unavailable' && reason !== 'bbox_timeout';
   }
 }

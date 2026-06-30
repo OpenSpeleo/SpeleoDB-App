@@ -14,6 +14,7 @@ import { PROJECT_GEOJSON_VALIDATION } from '../constants';
 import type {
   ProjectGeoJSONAnalysis,
   ProjectGeoJSONCacheRecord,
+  ProjectGeoJSONContentFailureReason,
   ProjectGeoJSONFailureDiagnostics,
   ProjectGeoJSONFileFailureReason,
 } from '../types/projectGeoJSON';
@@ -48,6 +49,9 @@ const GEOJSON_ANALYSIS_META_KEY = 'projectGeoJSONAnalysis';
 const GEOJSON_FAILURE_DIAGNOSTICS_META_KEY = 'projectGeoJSONFailureDiagnostics';
 const GEOJSON_FAILURE_REASON_META_KEY = 'projectGeoJSONFailureReason';
 const GEOJSON_WARNING_ACKNOWLEDGED_META_KEY = 'projectGeoJSONWarningAcknowledged';
+// Schema-v2 builds before the deadline policy correction persisted timeout
+// quarantines at this threshold. Keep them readable so they can be retried.
+const LEGACY_BBOX_TIMEOUT_MS = 500;
 
 function isNonNegativeFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -118,6 +122,15 @@ function isFileFailureReason(value: string | undefined): value is ProjectGeoJSON
     || value === 'bbox_error';
 }
 
+function isContentFailureReason(
+  value: string | undefined,
+): value is ProjectGeoJSONContentFailureReason {
+  return value === 'bbox_too_large'
+    || value === 'invalid_geojson'
+    || value === 'no_coordinates'
+    || value === 'bbox_error';
+}
+
 function isNullableMetric(value: unknown): value is number | null {
   return value === null || isNonNegativeFiniteNumber(value);
 }
@@ -147,7 +160,7 @@ function isFailureDiagnosticsForReason(
   }
   if (reason === 'bbox_timeout') {
     return diagnostics.durationMs !== null
-      && diagnostics.durationMs >= PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS;
+      && diagnostics.durationMs >= LEGACY_BBOX_TIMEOUT_MS;
   }
   return true;
 }
@@ -366,18 +379,18 @@ export class ProjectCacheService {
     }
   }
 
-  /** Replace unsafe GeoJSON bytes with a durable, per-commit quarantine marker. */
+  /** Replace proven-unsafe GeoJSON bytes with a durable, per-commit quarantine marker. */
   async setQuarantinedProjectGeoJSON(
     projectId: string,
     commitId: string,
-    reason: ProjectGeoJSONFileFailureReason,
+    reason: ProjectGeoJSONContentFailureReason,
     diagnostics: ProjectGeoJSONFailureDiagnostics,
     options: CacheOperationOptions = {},
   ): Promise<boolean> {
     throwIfAborted(options.signal);
     if (
       !isCommitId(commitId)
-      || !isFileFailureReason(reason)
+      || !isContentFailureReason(reason)
       || !isFailureDiagnostics(diagnostics)
       || !isFailureDiagnosticsForReason(reason, diagnostics)
     ) {

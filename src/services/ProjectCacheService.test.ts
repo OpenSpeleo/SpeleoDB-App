@@ -336,18 +336,21 @@ describe('ProjectCacheService overlay cache', () => {
     expect(await cache.acknowledgeProjectGeoJSONQuarantine('invalid-quarantine', 'c1')).toBe(false);
   });
 
-  it('refuses to durably quarantine an infrastructure failure reason', async () => {
-    expect(await cache.setQuarantinedProjectGeoJSON(
-      'infrastructure-failure',
-      'c1',
-      // Exercise the runtime boundary in addition to the compile-time file-reason type.
-      'validation_unavailable' as 'bbox_error',
-      { bounds: null, widthKm: null, heightKm: null, durationMs: 10 },
-    )).toBe(false);
-    expect(await cache.getProjectGeoJSONRecord('infrastructure-failure')).toEqual({
-      state: 'missing', commitId: null, data: null,
-    });
-  });
+  it.each(['validation_unavailable', 'bbox_timeout'] as const)(
+    'refuses to create a durable quarantine for %s',
+    async (reason) => {
+      expect(await cache.setQuarantinedProjectGeoJSON(
+        'non-content-failure',
+        'c1',
+        // Exercise the runtime boundary in addition to the content-only parameter type.
+        reason as 'bbox_error',
+        { bounds: null, widthKm: null, heightKm: null, durationMs: 10_000 },
+      )).toBe(false);
+      expect(await cache.getProjectGeoJSONRecord('non-content-failure')).toEqual({
+        state: 'missing', commitId: null, data: null,
+      });
+    },
+  );
 
   it('propagates a project-record storage read failure', async () => {
     const storageError = new Error('IndexedDB read failed');
@@ -364,13 +367,13 @@ describe('ProjectCacheService overlay cache', () => {
       bounds: null,
       widthKm: null,
       heightKm: null,
-      durationMs: PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS,
+      durationMs: 10,
     };
-    await cache.setQuarantinedProjectGeoJSON('ack-race', 'c1', 'bbox_timeout', diagnostics);
+    await cache.setQuarantinedProjectGeoJSON('ack-race', 'c1', 'bbox_error', diagnostics);
 
     const oldAcknowledgement = cache.acknowledgeProjectGeoJSONQuarantine('ack-race', 'c1');
     const newerCommit = cache.setQuarantinedProjectGeoJSON(
-      'ack-race', 'c2', 'bbox_timeout', diagnostics,
+      'ack-race', 'c2', 'bbox_error', diagnostics,
     );
     expect(await Promise.all([oldAcknowledgement, newerCommit])).toEqual([true, true]);
     expect(await cache.getProjectGeoJSONRecord('ack-race')).toMatchObject({
@@ -380,7 +383,7 @@ describe('ProjectCacheService overlay cache', () => {
     });
 
     const replacementFirst = cache.setQuarantinedProjectGeoJSON(
-      'ack-race', 'c3', 'bbox_timeout', diagnostics,
+      'ack-race', 'c3', 'bbox_error', diagnostics,
     );
     const staleAcknowledgement = cache.acknowledgeProjectGeoJSONQuarantine('ack-race', 'c2');
     await replacementFirst;
@@ -561,6 +564,65 @@ describe('ProjectCacheService overlay cache', () => {
     expect(fixedDownload).toHaveBeenCalledOnce();
     expect(recoveredController.projectGeoJSONWarnings).toEqual([]);
     expect(await recoveredController.getProjectMapData('persistent-project')).toMatchObject({
+      featureCollection: compact,
+      bounds: expect.any(Object),
+    });
+  });
+
+  it('revalidates a historical 500 ms timeout marker for the same commit when online', async () => {
+    const store = new CacheStore();
+    await store.set('geojson', 'persistent-project', {
+      data: null,
+      cachedAt: Date.now(),
+      meta: {
+        commitId: 'legacy-timeout',
+        projectGeoJSONState: 'quarantined',
+        projectGeoJSONValidationVersion:
+          String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION),
+        projectGeoJSONFailureReason: 'bbox_timeout',
+        projectGeoJSONFailureDiagnostics: JSON.stringify({
+          bounds: null,
+          widthKm: null,
+          heightKm: null,
+          durationMs: 500,
+        }),
+        projectGeoJSONWarningAcknowledged: 'false',
+      },
+    });
+
+    expect(await cache.getProjectGeoJSONRecord('persistent-project')).toMatchObject({
+      state: 'quarantined',
+      commitId: 'legacy-timeout',
+      reason: 'bbox_timeout',
+    });
+
+    const compact: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: [[2, 45], [2.01, 45.01]] },
+      }],
+    };
+    const download = vi.fn(async () => ({ status: 200, data: compact }));
+    const controller = new SpeleoDBController(
+      persistenceService(persistenceProject('legacy-timeout'), download),
+      persistencePreferences(),
+      cache,
+      persistenceTilePrefetch(),
+    );
+
+    await controller.syncProjects();
+
+    expect(download).toHaveBeenCalledOnce();
+    expect(controller.projectGeoJSONWarnings).toEqual([]);
+    expect(await cache.getProjectGeoJSONRecord('persistent-project')).toMatchObject({
+      state: 'active',
+      commitId: 'legacy-timeout',
+      data: compact,
+    });
+    expect(await controller.getProjectMapData('persistent-project')).toMatchObject({
+      commitId: 'legacy-timeout',
       featureCollection: compact,
       bounds: expect.any(Object),
     });

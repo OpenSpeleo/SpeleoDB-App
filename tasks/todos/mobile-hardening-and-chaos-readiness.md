@@ -80,6 +80,7 @@ regression test, verification commands, commit, and final disposition.
 | MH-032 | P0 | Session restoration passes arbitrary native storage error prose into diagnostics, where finite pattern redaction cannot guarantee credential absence. | Closed: emit a fixed restoration diagnostic and omit the thrown object. |
 | MH-033 | P1 | Dashboard suppresses validated GeoJSON until a full sync publishes a non-zero revision and can miss initial bounds when data precedes MapLibre readiness, leaving a permanently blank project map after an interrupted startup sync. | Closed: read through the controller validation seam immediately and retry initial fit at map readiness. |
 | MH-034 | P1 | The map-layer extraction placed project and subsurface icon layers behind components that discarded `react-map-gl` source injection, leaving MapLibre layers unbound while GPS tracks still rendered. | Closed: restore direct `Layer` children and enforce the production child-injection contract in tests and coding rules. |
+| MH-035 | P1 | A 500 ms validation deadline permanently quarantines valid project files on slower devices, and raising the limit alone would make historical timeout markers unreadable rather than recoverable. | Closed: use a realistic 10-second off-thread deadline, classify expiry as transient, reject new timeout quarantines, and retry historical timeout markers online. |
 
 ## Commit checklist
 
@@ -1236,8 +1237,8 @@ and physical-device evidence.
 
 ### Restore MapLibre source propagation
 
-- Commit: recorded after this objective is committed (`[Fix] Restore MapLibre
-  source propagation`).
+- Commit: `857d60158e47fff84561dd9e06aabca33e2b3a79`
+  (`[Fix] Restore MapLibre source propagation`).
 - Reproduction: the source-contract test models `react-map-gl` with
   `Children.map` and `cloneElement`. Before the correction, all three project
   geometry layers and an available subsurface icon rendered without the source
@@ -1258,3 +1259,34 @@ and physical-device evidence.
   succeeds. No physical device is connected, so real-device confirmation
   remains pending rather than implied by compilation.
 - Findings closed: MH-034. The separate validation-deadline correction follows.
+
+### Treat GeoJSON validation deadlines as transient
+
+- Commit: recorded at handoff after the independently green objective is
+  committed (`[Fix] Treat GeoJSON validation deadlines as transient`).
+- Reproduction: the old 500 ms worker deadline produced a durable
+  `bbox_timeout`, permanently attributing device speed, worker startup, and
+  structured-clone latency to the file commit. Simply increasing the current
+  limit would make those schema-v2 records fail metadata parsing and lose the
+  information needed for intentional same-commit recovery.
+- Correction: the normal statically imported analyzer and separately bundled
+  Vite worker remain. The off-thread deadline is 10 seconds and maps to
+  session-only `validation_unavailable`. Analysis and durable-cache types now
+  exclude timeout writes, the cache runtime rejects them, and historical 500 ms
+  timeout markers remain readable solely for an online same-commit retry.
+  Successful validation atomically replaces the marker with active map data;
+  genuine oversized or malformed content retains durable quarantine behavior.
+- Verification: focused red was 7 expected failures with 247 passes; focused
+  green is 254/254. The inventory covers all 515 tracked files. Node 22 CI
+  passes 1,767/1,767 tests across 103 files with 89.65% statements, 82.63%
+  branches, 93.07% functions, and 91.72% lines. The build retains the normal
+  8.28 KiB `projectGeoJSONBounds.worker` artifact. Capacitor sync has no tracked
+  native drift; Android lint, first-party unit tests, release APK, and release
+  AAB pass; signed iOS XCTest passes 9/9 on iPhone 17 Pro/iOS 26.5; and the
+  unsigned generic-simulator Release build succeeds.
+- Limitation: no physical device containing the user's real project payload is
+  available, so that runtime confirmation remains pending and is not inferred
+  from compilation or simulator evidence.
+- Findings closed: MH-035. This corrects the valid deadline subset of removed
+  commit `2bc11ad` without restoring its lazy analyzer, inline worker, split
+  error module, or brittle generated-code bundle guard.

@@ -201,7 +201,7 @@ function createMockCache(): ProjectCacheService {
     setQuarantinedProjectGeoJSON: vi.fn(async (
       id: string,
       commitId: string,
-      reason: import('../types/projectGeoJSON').ProjectGeoJSONFileFailureReason,
+      reason: import('../types/projectGeoJSON').ProjectGeoJSONContentFailureReason,
       diagnostics: import('../types/projectGeoJSON').ProjectGeoJSONFailureDiagnostics,
     ) => {
       projectGeoJSON.set(id, {
@@ -1726,14 +1726,18 @@ describe('SpeleoDBController', () => {
       });
     });
 
-    it('quarantines a worker timeout, exposes a warning, and persists acknowledgement', async () => {
+    it('keeps a worker deadline transient and never persists it as file corruption', async () => {
       allowConsoleWarn(
         '[project-geojson:bbox]',
-        expect.objectContaining({ projectId: 'p1', reason: 'bbox_timeout' }),
+        expect.objectContaining({ projectId: 'p1', reason: 'validation_unavailable' }),
       );
       const timeoutAnalyzer = {
         analyze: vi.fn(async () => {
-          throw new ProjectGeoJSONAnalysisError('bbox_timeout', 'too slow', true);
+          throw new ProjectGeoJSONAnalysisError(
+            'validation_unavailable',
+            'validation deadline exceeded',
+            false,
+          );
         }),
       };
       const timeoutCache = createMockCache();
@@ -1751,13 +1755,14 @@ describe('SpeleoDBController', () => {
       );
 
       await timeoutController.syncProjects();
-      expect(timeoutController.projectGeoJSONWarnings[0]).toMatchObject({ reason: 'bbox_timeout' });
+      expect(timeoutController.projectGeoJSONWarnings[0]).toMatchObject({
+        reason: 'validation_unavailable',
+        persistent: false,
+      });
+      expect(timeoutCache.setQuarantinedProjectGeoJSON).not.toHaveBeenCalled();
       await timeoutController.acknowledgeProjectGeoJSONWarnings();
       expect(timeoutController.projectGeoJSONWarnings).toEqual([]);
-      expect(timeoutCache.acknowledgeProjectGeoJSONQuarantine).toHaveBeenCalledWith(
-        'p1',
-        'commit-1',
-      );
+      expect(timeoutCache.acknowledgeProjectGeoJSONQuarantine).not.toHaveBeenCalled();
     });
 
     it('keeps the warning open when acknowledgement persistence fails', async () => {

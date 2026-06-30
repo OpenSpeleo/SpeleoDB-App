@@ -13,18 +13,28 @@ export interface ProjectGeoJSONAnalysis {
   durationMs: number;
 }
 
-export type ProjectGeoJSONFileFailureReason =
+export type ProjectGeoJSONContentFailureReason =
   | 'bbox_too_large'
-  | 'bbox_timeout'
   | 'invalid_geojson'
   | 'no_coordinates'
   | 'bbox_error';
 
+/** Schema-v2 compatibility only. New validation deadlines are infrastructure failures. */
+export type ProjectGeoJSONLegacyFailureReason = 'bbox_timeout';
+
+export type ProjectGeoJSONFileFailureReason =
+  | ProjectGeoJSONContentFailureReason
+  | ProjectGeoJSONLegacyFailureReason;
+
 export type ProjectGeoJSONInfrastructureFailureReason = 'validation_unavailable';
 
-export type ProjectGeoJSONFailureReason =
-  | ProjectGeoJSONFileFailureReason
+export type ProjectGeoJSONAnalysisFailureReason =
+  | ProjectGeoJSONContentFailureReason
   | ProjectGeoJSONInfrastructureFailureReason;
+
+export type ProjectGeoJSONFailureReason =
+  | ProjectGeoJSONAnalysisFailureReason
+  | ProjectGeoJSONLegacyFailureReason;
 
 /**
  * Best information available for a failed analysis. File failures that occur

@@ -257,8 +257,8 @@ export const DEFAULT_MAP_LAYER_ID = 'esri-satellite';
 
 /**
  * Safety boundary for project survey GeoJSON. Bounds are measured before map
- * or tile padding. A file is quarantined when either dimension exceeds its
- * limit or analysis does not finish before the worker deadline.
+ * or tile padding. Only content proven unsafe is quarantined; worker/bootstrap
+ * deadlines are transient validation failures and are retried later.
  */
 export const PROJECT_GEOJSON_VALIDATION = {
   MAX_WIDTH_KM: 100,
@@ -271,7 +271,9 @@ export const PROJECT_GEOJSON_VALIDATION = {
   // equatorial bbox while still rejecting projection-amplified polar spans.
   MAX_MERCATOR_X_SPAN_KM: 100.12,
   MAX_MERCATOR_Y_SPAN_KM: 100.12,
-  TIMEOUT_MS: 500,
+  // Keep the computation off the main thread, but allow realistic mobile
+  // hardware and large valid surveys enough time to complete validation.
+  TIMEOUT_MS: 10_000,
   CACHE_SCHEMA_VERSION: 2,
 } as const;
 

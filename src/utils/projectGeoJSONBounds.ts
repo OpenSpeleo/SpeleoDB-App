@@ -2,7 +2,7 @@ import { PROJECT_GEOJSON_VALIDATION } from '../constants';
 import type {
   ProjectGeoJSONAnalysis,
   ProjectGeoJSONBounds,
-  ProjectGeoJSONFileFailureReason,
+  ProjectGeoJSONContentFailureReason,
 } from '../types/projectGeoJSON';
 import {
   shortestLongitudeInterval,
@@ -21,7 +21,7 @@ function snapValidationLimitRoundoff(value: number, limit: number): number {
 export class ProjectGeoJSONComputationError extends Error {
   constructor(
     public readonly reason: Extract<
-      ProjectGeoJSONFileFailureReason,
+      ProjectGeoJSONContentFailureReason,
       'invalid_geojson' | 'no_coordinates' | 'bbox_error'
     >,
     message: string,
