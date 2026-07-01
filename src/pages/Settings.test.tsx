@@ -7,6 +7,7 @@ import { createMemoryHistory } from 'history';
 import Settings from './Settings';
 import { formatLastSync } from '../utils/formatLastSync';
 import type { DashboardPanel } from '../types/dashboardPanel';
+import type { OfflineMapSyncSnapshot } from '../types/offlineMapSync';
 
 // ==================== Mocks ====================
 
@@ -17,9 +18,11 @@ const mockAttemptReconnect = vi.fn();
 const mockRequestStorageConsentPrompt = vi.fn();
 const mockRevokeTileCacheOverLimit = vi.fn();
 const mockSetLayerOfflineSync = vi.fn().mockResolvedValue(undefined);
+const mockRefreshOfflineMaps = vi.fn().mockResolvedValue(undefined);
 
 const {
   mockTilePrefetchJobs,
+  mockOfflineMapSync,
   mockProjects,
   mockSyncStatus,
   mockLastSyncedAt,
@@ -28,6 +31,28 @@ const {
   mockIsOfflineLocked,
 } = vi.hoisted(() => ({
   mockTilePrefetchJobs: { current: [] as unknown[] },
+  mockOfflineMapSync: { current: {
+    sessionId: null,
+    phase: 'idle',
+    coordinateCount: null,
+    enabledLayerCount: 0,
+    totalTiles: 0,
+    completedTiles: 0,
+    failedTiles: 0,
+    cachedFreshTiles: 0,
+    auditedTiles: 0,
+    queuedTiles: 0,
+    downloadedTiles: 0,
+    activeDownloads: 0,
+    bytesDownloaded: 0,
+    tilesPerSecond: 0,
+    etaSeconds: null,
+    cacheBytes: 0,
+    blockedByStorage: false,
+    coverageTotalTiles: 0,
+    coverageCompletedTiles: 0,
+    layers: [],
+  } as OfflineMapSyncSnapshot },
   mockProjects: { current: [] as unknown[] },
   mockSyncStatus: { current: 'idle' as 'idle' | 'syncing' | 'done' | 'error' },
   mockLastSyncedAt: { current: null as number | null },
@@ -37,6 +62,7 @@ const {
 }));
 
 vi.mock('../context/useSpeleoDB', () => ({
+  useOfflineMapSync: () => mockOfflineMapSync.current,
   useSpeleoDB: () => ({
     controller: {
       logout: mockLogout,
@@ -46,22 +72,21 @@ vi.mock('../context/useSpeleoDB', () => ({
       requestStorageConsentPrompt: mockRequestStorageConsentPrompt,
       revokeTileCacheOverLimit: mockRevokeTileCacheOverLimit,
       setLayerOfflineSync: mockSetLayerOfflineSync,
+      refreshOfflineMaps: mockRefreshOfflineMaps,
+      isOfflineMapRefreshActive: false,
     },
     projects: mockProjects.current,
     syncStatus: mockSyncStatus.current,
     lastSyncedAt: mockLastSyncedAt.current,
-    tilePrefetchJobs: mockTilePrefetchJobs.current,
     isTileCacheOverLimit: mockIsTileCacheOverLimit.current,
     isTileCacheOverLimitApproved: mockIsTileCacheOverLimitApproved.current,
     isOfflineLocked: mockIsOfflineLocked.current,
   }),
 }));
 
-const mockGetManualTileCount = vi.fn();
-const mockGetTotalCacheBytes = vi.fn();
+const mockGetTileCacheStats = vi.fn();
 vi.mock('../services/tileCache/TileCacheRepository', () => ({
-  getManualTileCount: () => mockGetManualTileCount(),
-  getTotalCacheBytes: () => mockGetTotalCacheBytes(),
+  getTileCacheStats: () => mockGetTileCacheStats(),
 }));
 
 vi.mock('../components/AppTabBar', () => ({
@@ -214,6 +239,15 @@ function renderSettings(
   };
 }
 
+function setOfflineMapSnapshot(
+  overrides: Partial<OfflineMapSyncSnapshot>,
+): void {
+  mockOfflineMapSync.current = {
+    ...mockOfflineMapSync.current,
+    ...overrides,
+  };
+}
+
 // ==================== Tests ====================
 
 describe('Settings page', () => {
@@ -222,9 +256,32 @@ describe('Settings page', () => {
     mockIsAuthenticated.mockReturnValue(true);
     mockSyncProjects.mockReset().mockResolvedValue(undefined);
     mockAttemptReconnect.mockReset().mockResolvedValue('ok');
-    mockGetManualTileCount.mockReset().mockResolvedValue(0);
-    mockGetTotalCacheBytes.mockReset().mockResolvedValue(0);
+    mockGetTileCacheStats.mockReset().mockResolvedValue({
+      totalBytes: 0, tileCount: 0, pinnedBytes: 0, pinnedTileCount: 0, updatedAt: 0,
+    });
     mockTilePrefetchJobs.current = [];
+    mockOfflineMapSync.current = {
+      sessionId: null,
+      phase: 'idle',
+      coordinateCount: null,
+      enabledLayerCount: 0,
+      totalTiles: 0,
+      completedTiles: 0,
+      failedTiles: 0,
+      cachedFreshTiles: 0,
+      auditedTiles: 0,
+      queuedTiles: 0,
+      downloadedTiles: 0,
+      activeDownloads: 0,
+      bytesDownloaded: 0,
+      tilesPerSecond: 0,
+      etaSeconds: null,
+      cacheBytes: 0,
+      blockedByStorage: false,
+      coverageTotalTiles: 0,
+      coverageCompletedTiles: 0,
+      layers: [],
+    };
     mockProjects.current = [];
     mockSyncStatus.current = 'idle';
     mockLastSyncedAt.current = null;
@@ -236,12 +293,39 @@ describe('Settings page', () => {
     mockPersistColorMode.mockReset();
     mockPersistMeasurementUnit.mockReset();
     mockSetLayerOfflineSync.mockReset().mockResolvedValue(undefined);
+    mockRefreshOfflineMaps.mockReset().mockResolvedValue(undefined);
     mockIsOfflineLocked.current = false;
   });
 
   it('renders settings header', () => {
     renderSettings();
     expect(screen.getByText('Settings')).toBeInTheDocument();
+  });
+
+  it('confirms before forcing a rolling offline-map refresh', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(screen.getByTestId('refresh-offline-maps-button'));
+    expect(mockRefreshOfflineMaps).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId('confirm-refresh-offline-maps'));
+
+    await waitFor(() => expect(mockRefreshOfflineMaps).toHaveBeenCalledOnce());
+  });
+
+  it('disables forced map refresh while offline', () => {
+    mockIsOfflineLocked.current = true;
+    renderSettings();
+    expect(screen.getByTestId('refresh-offline-maps-button')).toBeDisabled();
+  });
+
+  it('renders map refresh as a full-width solid action', () => {
+    renderSettings();
+    expect(screen.getByTestId('refresh-offline-maps-button')).toHaveClass(
+      'app-btn',
+      'app-btn--info',
+      'w-full',
+    );
   });
 
   it('shows synced projects count (only those with geojson)', () => {
@@ -260,124 +344,252 @@ describe('Settings page', () => {
   });
 
   it('renders correct MB used from tile cache', async () => {
-    mockGetTotalCacheBytes.mockResolvedValue(13_000_000);
+    setOfflineMapSnapshot({ cacheBytes: 13_000_000 });
     renderSettings();
-    await waitFor(() => {
-      expect(screen.getByTestId('cache-size')).toHaveTextContent('12.4 MB');
+    expect(screen.getByTestId('cache-size')).toHaveTextContent('12.4 MB');
+  });
+
+  it('renders live engine percentage and tile counts', () => {
+    setOfflineMapSnapshot({
+      phase: 'downloading',
+      coordinateCount: 2000,
+      enabledLayerCount: 1,
+      totalTiles: 2000,
+      completedTiles: 1400,
+      failedTiles: 100,
+      layers: [{
+        layerId: 'esri-satellite', totalTiles: 2000, completedTiles: 1400,
+        failedTiles: 100, cachedFreshTiles: 0, auditedTiles: 1500, queuedTiles: 500,
+        downloadedTiles: 1400,
+        bytesDownloaded: 500_000, usableTiles: 0,
+      }],
     });
-  });
-
-  it('renders sync percentage and tiles from prefetch jobs', () => {
-    mockTilePrefetchJobs.current = [
-      {
-        projectId: 'p1', commitId: 'c1', status: 'downloading',
-        zoomMin: 10, zoomMax: 14, padMeters: 500,
-        totalTiles: 2000, completedTiles: 1400, failedTiles: 100,
-        bytesDownloaded: 500_000, estimatedBytes: 1_000_000, updatedAt: Date.now(),
-      },
-    ];
     renderSettings();
 
-    expect(screen.getByTestId('sync-pct')).toHaveTextContent('75%');
-    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,500 / 2,000');
+    expect(screen.getByTestId('sync-pct')).toHaveTextContent('70%');
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,400 / 2,000');
   });
 
-  it('includes the combined landmarks prefetch job in sync metrics', () => {
-    mockTilePrefetchJobs.current = [
-      {
-        projectId: 'p1', commitId: 'c1', status: 'downloading',
-        zoomMin: 0, zoomMax: 18, padMeters: 50,
-        totalTiles: 2000, completedTiles: 1400, failedTiles: 100,
-        bytesDownloaded: 500_000, estimatedBytes: 1_000_000, updatedAt: Date.now(),
-      },
-      {
-        projectId: 'landmarks', commitId: 'sig-1', status: 'downloading',
-        zoomMin: 0, zoomMax: 18, padMeters: 50,
-        totalTiles: 1000, completedTiles: 800, failedTiles: 0,
-        bytesDownloaded: 250_000, estimatedBytes: 500_000, updatedAt: Date.now(),
-      },
-    ];
-    renderSettings();
-
-    // Project processed 1500 + landmark processed 800 = 2300 of 3000 total.
-    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('2,300 / 3,000');
-    expect(screen.getByTestId('sync-pct')).toHaveTextContent('76%');
-  });
-
-  it('includes manually downloaded tiles in synchronization metrics', async () => {
-    mockGetManualTileCount.mockResolvedValue(100);
-    mockTilePrefetchJobs.current = [
-      {
-        projectId: 'p1', commitId: 'c1', status: 'downloading',
-        zoomMin: 10, zoomMax: 14, padMeters: 500,
-        totalTiles: 2000, completedTiles: 1400, failedTiles: 100,
-        bytesDownloaded: 500_000, estimatedBytes: 1_000_000, updatedAt: Date.now(),
-      },
-    ];
-
-    renderSettings();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,600 / 2,100');
+  it.each([
+    [25, '4.0 tiles/s · 25s left'],
+    [90, '4.0 tiles/s · 1m left'],
+    [3600, '4.0 tiles/s · 1h left'],
+    [3660, '4.0 tiles/s · 1h 1m left'],
+  ])('formats %s seconds of download time without zero or excess units', (etaSeconds, expected) => {
+    setOfflineMapSnapshot({
+      phase: 'downloading',
+      tilesPerSecond: 4,
+      etaSeconds,
     });
-    expect(screen.getByTestId('sync-pct')).toHaveTextContent('76%');
+    renderSettings();
+
+    expect(screen.getByTestId('offline-map-speed')).toHaveTextContent(expected);
+  });
+
+  it('reports aggregate coverage without counting failures as complete', () => {
+    setOfflineMapSnapshot({
+      phase: 'downloading', coordinateCount: 3000, enabledLayerCount: 1,
+      totalTiles: 3000, completedTiles: 2200, failedTiles: 100,
+      layers: [{
+        layerId: 'esri-satellite', totalTiles: 3000, completedTiles: 2200,
+        failedTiles: 100, cachedFreshTiles: 800, auditedTiles: 3000, queuedTiles: 700,
+        downloadedTiles: 1400,
+        bytesDownloaded: 750_000, usableTiles: 0,
+      }],
+    });
+    renderSettings();
+
+    // Failed tiles are not offline coverage: 1400 + 800 = 2200 of 3000.
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('2,200 / 3,000');
+    expect(screen.getByTestId('sync-pct')).toHaveTextContent('73%');
+    expect(screen.getByTestId('failed-tiles')).toHaveTextContent('100');
+    expect(screen.getByTestId('layer-sync-status-esri-satellite'))
+      .toHaveTextContent('100 failed');
+  });
+
+  it('shows preparation instead of false zero coverage during initial migration', () => {
+    setOfflineMapSnapshot({
+      phase: 'planning', coordinateCount: null, totalTiles: 0,
+      completedTiles: 0, coverageTotalTiles: 0, coverageCompletedTiles: 0,
+    });
+    renderSettings();
+
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('Preparing…');
+    expect(screen.getByTestId('sync-tiles')).not.toHaveTextContent('0 / 0');
+  });
+
+  it('excludes unowned browsing tiles from offline coverage metrics', async () => {
+    setOfflineMapSnapshot({
+      phase: 'downloading', coordinateCount: 2000, enabledLayerCount: 1,
+      totalTiles: 2000, completedTiles: 1400, failedTiles: 100,
+      layers: [{
+        layerId: 'esri-satellite', totalTiles: 2000, completedTiles: 1400,
+        failedTiles: 100, cachedFreshTiles: 0, auditedTiles: 1500, queuedTiles: 500,
+        downloadedTiles: 1400,
+        bytesDownloaded: 500_000, usableTiles: 0,
+      }],
+    });
+
+    renderSettings();
+
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,400 / 2,000');
+    expect(screen.getByTestId('sync-pct')).toHaveTextContent('70%');
   });
 
   it('keeps sync total stable while prefetch progresses on settings page', async () => {
-    mockGetTotalCacheBytes
-      .mockResolvedValueOnce(0)
-      .mockResolvedValueOnce(1);
-    mockGetManualTileCount
-      .mockResolvedValueOnce(100)
-      .mockResolvedValueOnce(100);
-    mockTilePrefetchJobs.current = [
-      {
-        projectId: 'p1', commitId: 'c1', status: 'downloading',
-        zoomMin: 10, zoomMax: 14, padMeters: 500,
-        totalTiles: 2000, completedTiles: 1400, failedTiles: 100,
-        bytesDownloaded: 500_000, estimatedBytes: 1_000_000, updatedAt: Date.now(),
-      },
-    ];
+    setOfflineMapSnapshot({
+      phase: 'downloading', coordinateCount: 2000, enabledLayerCount: 1,
+      totalTiles: 2000, completedTiles: 1400, failedTiles: 100,
+      layers: [{
+        layerId: 'esri-satellite', totalTiles: 2000, completedTiles: 1400,
+        failedTiles: 100, cachedFreshTiles: 0, auditedTiles: 1500, queuedTiles: 500,
+        downloadedTiles: 1400,
+        bytesDownloaded: 500_000, usableTiles: 0,
+      }],
+    });
 
     const { rerender } = renderSettings();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,600 / 2,100');
-    });
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,400 / 2,000');
 
-    mockTilePrefetchJobs.current = [
-      {
-        projectId: 'p1', commitId: 'c1', status: 'downloading',
-        zoomMin: 10, zoomMax: 14, padMeters: 500,
-        totalTiles: 2000, completedTiles: 1500, failedTiles: 100,
-        bytesDownloaded: 500_000, estimatedBytes: 1_000_000, updatedAt: Date.now(),
-      },
-    ];
+    setOfflineMapSnapshot({
+      completedTiles: 1500,
+      layers: [{
+        layerId: 'esri-satellite', totalTiles: 2000, completedTiles: 1500,
+        failedTiles: 100, cachedFreshTiles: 0, auditedTiles: 1600, queuedTiles: 400,
+        downloadedTiles: 1500,
+        bytesDownloaded: 500_000, usableTiles: 0,
+      }],
+    });
     rerender();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,700 / 2,100');
-    });
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,500 / 2,000');
   });
 
-  it('polls synchronization rows while mounted and stops on unmount', () => {
+  it('derives aggregate completion from normalized layer counters', async () => {
+    setOfflineMapSnapshot({
+      phase: 'completed', coordinateCount: 12_212, enabledLayerCount: 2,
+      totalTiles: 24_424, completedTiles: 24_424,
+      layers: [
+        {
+          layerId: 'esri-satellite', totalTiles: 12_207, completedTiles: 12_210,
+          failedTiles: 0, cachedFreshTiles: 12_207, auditedTiles: 12_207,
+          queuedTiles: 0, downloadedTiles: 0,
+          bytesDownloaded: 0, usableTiles: 12_210,
+        },
+        {
+          layerId: 'esri-world-hillshade-dark', totalTiles: 12_217,
+          completedTiles: 12_214, failedTiles: 0, cachedFreshTiles: 12_214,
+          auditedTiles: 12_214, queuedTiles: 0,
+          downloadedTiles: 0, bytesDownloaded: 0, usableTiles: 12_214,
+        },
+      ],
+    });
+    renderSettings();
+    await userEvent.click(screen.getByTestId('layer-toggle-esri-world-hillshade-dark'));
+
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('24,421 / 24,424');
+    expect(screen.getByTestId('sync-pct')).toHaveTextContent('99%');
+    expect(screen.getByTestId('layer-sync-status-esri-world-hillshade-dark'))
+      .toHaveTextContent('12,214 / 12,217');
+  });
+
+  it('uses Tiles synced without rendering a separate retained-coverage row', () => {
+    setOfflineMapSnapshot({
+      sessionId: 'refresh-1', phase: 'downloading', coordinateCount: 100,
+      enabledLayerCount: 1, totalTiles: 100, completedTiles: 25,
+      coverageTotalTiles: 100, coverageCompletedTiles: 100,
+      layers: [{
+        layerId: 'esri-satellite', totalTiles: 100, completedTiles: 25,
+        failedTiles: 0, cachedFreshTiles: 0, auditedTiles: 100, queuedTiles: 75,
+        downloadedTiles: 25,
+        bytesDownloaded: 1_000, usableTiles: 100,
+      }],
+    });
+    renderSettings();
+
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('25 / 100');
+    expect(screen.queryByTestId('offline-coverage')).not.toBeInTheDocument();
+    expect(screen.queryByText('Available offline during refresh')).not.toBeInTheDocument();
+  });
+
+  it('uses tiles-per-layer times enabled layers while a new layer is planned', async () => {
+    const user = userEvent.setup();
+    setOfflineMapSnapshot({
+      phase: 'completed', coordinateCount: 1000, enabledLayerCount: 1,
+      totalTiles: 1000, completedTiles: 1000,
+      coverageTotalTiles: 1000, coverageCompletedTiles: 1000,
+      layers: [{
+        layerId: 'esri-satellite', totalTiles: 1000, completedTiles: 1000,
+        failedTiles: 0, cachedFreshTiles: 1000, auditedTiles: 1000, queuedTiles: 0,
+        downloadedTiles: 0,
+        bytesDownloaded: 0, usableTiles: 1000,
+      }],
+    });
+    const { rerender } = renderSettings();
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,000 / 1,000');
+
+    await user.click(screen.getByTestId('layer-toggle-esri-world-hillshade'));
+    setOfflineMapSnapshot({
+      phase: 'downloading', enabledLayerCount: 2, totalTiles: 2000,
+      completedTiles: 1025,
+      layers: [
+        mockOfflineMapSync.current.layers[0],
+        {
+          layerId: 'esri-world-hillshade', totalTiles: 1000, completedTiles: 25,
+          failedTiles: 0, cachedFreshTiles: 0, auditedTiles: 1000, queuedTiles: 975,
+          downloadedTiles: 25,
+          bytesDownloaded: 0, usableTiles: 0,
+        },
+      ],
+    });
+    rerender();
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,025 / 2,000');
+
+    setOfflineMapSnapshot({
+      completedTiles: 1050,
+      layers: [
+        mockOfflineMapSync.current.layers[0],
+        { ...mockOfflineMapSync.current.layers[1]!, completedTiles: 50 },
+      ],
+    });
+    rerender();
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,050 / 2,000');
+  });
+
+  it('freezes usable coverage while the reference layer is replanned', () => {
+    setOfflineMapSnapshot({
+      phase: 'completed', coordinateCount: 1000, enabledLayerCount: 1,
+      totalTiles: 1000, completedTiles: 1000,
+      coverageTotalTiles: 1000, coverageCompletedTiles: 1000,
+      layers: [{
+        layerId: 'esri-satellite', totalTiles: 1000, completedTiles: 1000,
+        failedTiles: 0, cachedFreshTiles: 1000, auditedTiles: 1000, queuedTiles: 0,
+        downloadedTiles: 0,
+        bytesDownloaded: 0, usableTiles: 1000,
+      }],
+    });
+    const { rerender } = renderSettings();
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,000 / 1,000');
+
+    mockSyncStatus.current = 'syncing';
+    setOfflineMapSnapshot({
+      phase: 'planning', coordinateCount: null, totalTiles: 0, completedTiles: 0,
+    });
+    rerender();
+    expect(screen.getByTestId('sync-tiles')).toHaveTextContent('1,000 / 1,000');
+  });
+
+  it('does not poll IndexedDB while mounted', () => {
     vi.useFakeTimers();
-    mockGetManualTileCount.mockReturnValue(new Promise(() => {}));
-    mockGetTotalCacheBytes.mockReturnValue(new Promise(() => {}));
 
     try {
       const { unmount } = renderSettings();
-      expect(mockGetManualTileCount).toHaveBeenCalledTimes(1);
-      expect(mockGetTotalCacheBytes).toHaveBeenCalledTimes(1);
-
-      act(() => vi.advanceTimersByTime(3000));
-      expect(mockGetManualTileCount).toHaveBeenCalledTimes(2);
-      expect(mockGetTotalCacheBytes).toHaveBeenCalledTimes(2);
+      expect(mockGetTileCacheStats).not.toHaveBeenCalled();
 
       unmount();
       act(() => vi.advanceTimersByTime(6000));
-      expect(mockGetManualTileCount).toHaveBeenCalledTimes(2);
-      expect(mockGetTotalCacheBytes).toHaveBeenCalledTimes(2);
+      expect(mockGetTileCacheStats).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -536,10 +748,11 @@ describe('Settings page', () => {
     });
   });
 
-  it('still refreshes cache stats when syncProjects rejects', async () => {
+  it('does not start cache polling when syncProjects rejects', async () => {
     mockSyncProjects.mockRejectedValueOnce(new Error('sync failed'));
-    mockGetTotalCacheBytes.mockResolvedValue(5000);
-    mockGetManualTileCount.mockResolvedValue(10);
+    mockGetTileCacheStats.mockResolvedValue({
+      totalBytes: 5000, tileCount: 10, pinnedBytes: 0, pinnedTileCount: 0, updatedAt: 0,
+    });
     const user = userEvent.setup();
     renderSettings();
 
@@ -549,10 +762,7 @@ describe('Settings page', () => {
       expect(mockSyncProjects).toHaveBeenCalledOnce();
     });
 
-    await waitFor(() => {
-      expect(mockGetTotalCacheBytes).toHaveBeenCalled();
-      expect(mockGetManualTileCount).toHaveBeenCalled();
-    });
+    expect(mockGetTileCacheStats).not.toHaveBeenCalled();
   });
 
   describe('Last sync row', () => {
@@ -791,21 +1001,17 @@ describe('Settings page', () => {
       expect(screen.getByTestId('layer-toggle-esri-satellite')).toBeDisabled();
     });
 
-    it('shows per-layer sync percentage from prefetch jobs grouped by layer', () => {
-      mockTilePrefetchJobs.current = [
-        {
-          layerId: 'esri-satellite', projectId: 'p1', commitId: 'c1', status: 'downloading',
-          zoomMin: 0, zoomMax: 18, padMeters: 50,
-          totalTiles: 100, completedTiles: 50, failedTiles: 0,
-          bytesDownloaded: 0, estimatedBytes: 0, updatedAt: 1,
-        },
-        {
-          layerId: 'esri-world-hillshade', projectId: 'p1', commitId: 'c1', status: 'done',
-          zoomMin: 0, zoomMax: 16, padMeters: 50,
-          totalTiles: 10, completedTiles: 10, failedTiles: 0,
-          bytesDownloaded: 0, estimatedBytes: 0, updatedAt: 1,
-        },
-      ];
+    it('shows per-layer sync percentage from the live engine snapshot', () => {
+      setOfflineMapSnapshot({
+        phase: 'downloading', coordinateCount: 100, enabledLayerCount: 1,
+        totalTiles: 100, completedTiles: 50,
+        layers: [{
+          layerId: 'esri-satellite', totalTiles: 100, completedTiles: 50,
+          failedTiles: 0, cachedFreshTiles: 0, auditedTiles: 100, queuedTiles: 50,
+          downloadedTiles: 50,
+          bytesDownloaded: 0, usableTiles: 0,
+        }],
+      });
       renderSettings();
 
       expect(screen.getByTestId('layer-sync-status-esri-satellite')).toHaveTextContent('50%');

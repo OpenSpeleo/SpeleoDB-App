@@ -1,9 +1,9 @@
-import { createContext, useContext } from 'react';
+import { createContext, useCallback, useContext, useSyncExternalStore } from 'react';
 import type { SpeleoDBController } from '../controllers/SpeleoDBController';
 import type { SyncStatus } from '../controllers/SpeleoDBController';
 import type { AuthState } from '../types';
 import type { Project } from '../types/project';
-import type { TilePrefetchJobState } from '../types/tilePrefetch';
+import type { OfflineMapSyncSnapshot } from '../types/offlineMapSync';
 import type { ProjectGeoJSONWarning } from '../types/projectGeoJSON';
 import type { GpsRecordingState, GpsTrackListItem } from '../types/gpsTrack';
 
@@ -18,7 +18,6 @@ export interface SpeleoDBContextValue {
   projectGeoJSONWarnings: ProjectGeoJSONWarning[];
   /** Bumped after a map-data synchronization attempt reaches a terminal state. */
   mapDataRevision: number;
-  tilePrefetchJobs: TilePrefetchJobState[];
   /** Bumped after any landmark create/edit/delete writes the cached overlay. */
   landmarksRevision: number;
   /** Number of pending offline mutations (drives the Pending tab + badge). */
@@ -55,4 +54,21 @@ export function useSpeleoDB(): SpeleoDBContextValue {
     throw new Error('useSpeleoDB must be used within SpeleoDBProvider');
   }
   return ctx;
+}
+
+/**
+ * High-frequency offline-map progress intentionally bypasses the app-wide
+ * context value so a tile commit rerenders only consumers that display it.
+ */
+export function useOfflineMapSync(): OfflineMapSyncSnapshot {
+  const { controller } = useSpeleoDB();
+  const subscribe = useCallback(
+    (listener: () => void) => controller.subscribeOfflineMapSync(listener),
+    [controller],
+  );
+  const getSnapshot = useCallback(
+    () => controller.offlineMapSyncSnapshot,
+    [controller],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot);
 }

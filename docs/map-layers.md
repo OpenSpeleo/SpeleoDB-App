@@ -41,9 +41,10 @@ All layers use `maxZoom: 18` for **offline parity**. The ESRI World Hillshade ca
 >    placeholder is cached/drawn as if it were real terrain. This must be
 >    verified on device before shipping (see the device test plan).
 
-Each definition carries `tileUrlTemplate` (`{z}/{x}/{y}` XYZ), `tileSize`,
-`maxZoom`, `attribution`, `forcedOffline`, and `isDefault`. Exactly one layer is
-`forcedOffline` (satellite). `DEFAULT_MAP_LAYER_ID` is the satellite id.
+Each definition carries `tileUrlTemplate` (`{z}/{x}/{y}` XYZ),
+`noDataSha256Hashes`, `tileSize`, `maxZoom`, `attribution`, `forcedOffline`, and
+`isDefault`. Exactly one layer is `forcedOffline` (satellite).
+`DEFAULT_MAP_LAYER_ID` is the satellite id.
 
 Accessors and style assembly live in `src/services/MapLayersService.ts`
 (`getAllMapLayers`, `getMapLayerById`, `resolveMapLayer`, `buildLayerStyle`,
@@ -98,70 +99,78 @@ a per-layer sync percentage:
 - Toggling enters through `SpeleoDBController.setLayerOfflineSync` and is owned
   by `TileCoordinator.setLayerOfflineSync(layerId, enabled)`:
   - persists the opt-in (`layerOfflineSync` in `PreferencesService`),
-  - when enabling while online, immediately schedules that layer's prefetch
-    using persisted validated project bounds plus landmark boxes,
-  - when disabling, removes the layer's prefetch jobs
-    (`TilePrefetchService.removeLayer`) and evicts its cached tiles by URL
-    prefix (`TileCacheService.evictLayerTiles`) to reclaim space. `removeLayer`
-    also prunes the in-memory cache-presence hints for that layer's tiles, so a
-    later re-enable in the same session re-downloads them instead of treating
-    them as still cached.
-- Per-layer percentage is computed from prefetch jobs grouped by `layerId`.
-  Runtime-cached ("manual") tiles are excluded from per-layer math since they
-  cannot be reliably attributed to one layer.
+  - when enabling while online, reuses the persisted canonical coordinate plan
+    and schedules only the new layer URL namespace,
+  - falls back to complete fail-closed planning only when no valid active plan
+    exists,
+  - when disabling, cancels the multi-layer run, releases the layer's
+    active/pending generations, evicts its URL prefix, refreshes statistics,
+    and resumes remaining layers from the active plan. Release failure prevents
+    eviction and rolls the toggle back.
+- Per-layer percentage comes directly from `OfflineMapSyncSnapshot.layers`.
+  Runtime browsing tiles are excluded because they have no generation
+  membership.
 
 State is shared from `AuthenticatedAppShell` (`selectedMapLayerId`,
 `layerOfflineSync`) to both Dashboard and Settings so the two tabs stay
 consistent while mounted.
 
-## Prefetch: namespacing, priority, progress
+## Canonical plan, priority, and progress
 
-- `TilePrefetchJobState` carries a `layerId`. The IndexedDB job key is
-  `prefetchJobKey(layerId, targetId)` = `${layerId}::${targetId}` (target =
-  project id or `landmarks`), so the same target has independent jobs per layer.
-- **Tiles are keyed by full URL**, which already uniquely encodes layer + z/x/y
-  (each layer has a distinct host/path). No tile re-keying is needed.
-- **Priority**: `TileCoordinator.scheduleSyncPhase` enqueues satellite
-  landmark + project jobs first, then each enabled extra layer. The prefetch
-  queue is FIFO, so satellite tiles always download before extra-layer tiles.
-- Extra layers reuse the same validated project bounds and landmark points read
-  once per sync; only the tile URL template differs. `buildLayerPrefetchRequest`
-  clamps the request max zoom to the layer's configured `maxZoom` (all layers are
-  z18, so prefetch depth is identical across layers).
+- Projects, landmarks, stations, and GPS paths are unioned into one immutable,
+  layer-independent `{z,x,y}` plan. Tiles remain keyed by full provider URL.
+- The worker streams at most 2,048 raw coordinates at a time and waits for
+  storage acknowledgement. A temporary v8 compound-key store deduplicates and
+  counts the unique rows before the stable `N*M` total is published.
+- **Priority**: coordinates expand satellite first, then enabled extra layers.
+  A six-worker queue downloads ready URLs while 16-coordinate auditing
+  continues. Outstanding coordinates are backpressured at 64.
+- Extra layers reuse the exact same coordinates; only the URL template differs.
+  All current layers use zoom 0-18, making `N*M` an enforced invariant.
 - The planner accepts validated `ProjectGeoJSONBounds`, never raw project
   GeoJSON. It preserves the directed longitude arc across the antimeridian,
   deduplicates overlapping/root ranges, applies meter padding, preserves
   zero-width bounds, and clamps latitude to finite Web Mercator before deriving
   tile rows. Validation rejects projection-amplified polar bounds before this
   consumer can create a world-scale tile set.
-- The tile-prefetch **phase result** (and the project panel progress) reflect
-  **satellite only**. Extra-layer scheduling is best-effort and does not affect
-  the sync phase contract. The project panel filters jobs to
-  `layerId === 'esri-satellite'`.
-- A project GeoJSON quarantine removes that target's jobs across all layers and
-  prunes queued/in-flight ownership without evicting shared cached tiles.
-  Per-target generations and serialized job persistence make removal
-  linearizable: stale cache checks, enqueue/status writes, and retry waits cannot
-  recreate the removed target. Shared active downloads continue for remaining
-  owners; solely-owned active work aborts. A job-deletion failure is logged and
-  does not reopen the target in the current runtime.
+- Geometry changes produce a new plan revision. The prior layer generations
+  remain usable until the replacement succeeds; failed/cancelled work releases
+  only pending ownership.
+- The revision is an asynchronous length-delimited SHA-256. Unavailable hashing
+  or any incomplete required project/overlay/current-SHA GPS input aborts the
+  replacement and preserves all active generations.
+- Live per-tile progress is published through a dedicated external store at the
+  next animation frame. It never waits for one-second durable checkpoints or
+  triggers controller-wide application updates.
 
 ## Magic-hash missing-tile detection
 
-`MAP.MISSING_TILE_SHA256_HASHES` (`src/constants.ts`) lists SHA-256
-fingerprints of provider "no data" placeholder tiles (copied from the website's
-`DEFAULTS.MAP.MISSING_TILE_SHA256_HASHES`). In `TileCacheService`:
+`MapLayerDefinition.noDataSha256Hashes` owns provider-specific SHA-256
+fingerprints. The website's known fingerprint is configured only on
+`esri-satellite`; both hillshade lists are intentionally empty pending
+independent provider evidence. In `TileCacheService`:
 
-- After a raster tile downloads (runtime `fetchWithCache` and prefetch
-  `fetchAndCacheTile`), `isMissingDataTile(url, data)` hashes the bytes and
+- After a raster tile downloads, `isMissingDataTile(url, data)` resolves its
+  layer, hashes the bytes only when that layer has configured fingerprints, and
   checks membership.
-- Runtime: a match throws `MissingTileError`, which is not cached and does not
-  fall back to cache, so maplibre renders nothing (treated as a 404).
-- Prefetch: a match returns 0 bytes (counted as processed, never stored, no
-  retry).
-- Cheap guards: skipped when the hash list is empty, when the URL is not a
-  configured raster tile (`isLayerTileUrl`), or when `crypto.subtle` is
-  unavailable. Cache hits are never re-hashed.
+- Runtime: a match stores only a zero-byte metadata tombstone and throws
+  `MissingTileError`, so MapLibre renders nothing. The provider payload is
+  never retained. A fresh tombstone resolves offline without a network call.
+- Prefetch: the tombstone and pending layer-generation membership commit in one
+  transaction. The coordinate counts as completed synchronization work because
+  the HTTP response was valid and its no-data identity was verified.
+- HTTP errors remain failures. In particular, a 404 does not create a
+  tombstone and does not count as completed.
+- Tombstones use the same 180-day fetch freshness as raster payloads. A stale
+  tombstone still renders as missing immediately while it refreshes, and a
+  forced refresh bypasses its freshness.
+- Cheap guards skip hashing when the layer list is empty or the URL is not a
+  configured raster tile. Cache hits are never re-hashed. If a configured hash
+  cannot be computed because `crypto.subtle` is absent/fails, validation fails
+  closed and nothing is cached.
+- One 10-second deadline covers headers, accepted image content type, non-empty
+  body, hashing, and cancellation. HTTP/validation failures never enter the
+  tombstone path.
 
 ## Storage cap + override
 
@@ -172,10 +181,10 @@ layers compete for the same pinned budget and honor the user's override.
 
 ## Migration
 
-- IndexedDB `speleo_tiles` bumped `v3 -> v4`. The migration namespaces existing
-  bare-keyed prefetch jobs to `esri-satellite::<targetId>` and sets their
-  `layerId`. Tiles are untouched (URL-keyed), so previously downloaded satellite
-  tiles remain valid with zero loss.
+- IndexedDB `speleo_tiles` is v8. Payloads, v7 manifests, generations, and
+  memberships are preserved; v8 additively introduces temporary compound-key
+  coordinate staging. The incremental, payload-preserving v6 migration is described in
+  `docs/tile-cache-architecture.md`.
 
 ## Source code
 
@@ -188,17 +197,24 @@ layers compete for the same pinned budget and honor the user's override.
 - Settings section: `src/pages/Settings.tsx`
 - Shared state: `src/AuthenticatedAppShell.tsx`
 - Preferences: `src/services/PreferencesService.ts`
-- Prefetch jobs: `src/types/tilePrefetch.ts`, `src/services/TilePrefetchService.ts`, `src/services/tileCache/TileCacheRepository.ts`
+- Offline-map plan/engine/store: `src/services/OfflineMapPlanner.ts`,
+  `src/services/OfflineMapSyncEngine.ts`, `src/services/OfflineMapSyncStore.ts`
 - Scheduling + per-layer toggle: `src/controllers/TileCoordinator.ts`
 
 ## Tests
 
 - `src/services/MapLayersService.test.ts`: layer config invariants, `buildLayerStyle`, `isLayerTileUrl`.
-- `src/services/TileCacheService.test.ts`: magic-hash runtime 404 + prefetch skip, hash-miss passthrough, empty-list bypass, `getCachedLayerStyle` rewrite.
-- `src/services/tileCache/TileCacheRepository.test.ts`: composite key + `v3 -> v4` migration, delete-by-layer, evict-by-prefix.
-- `src/services/TilePrefetchService.test.ts`: per-layer keying, `removeLayer`,
-  target-removal races, shared/sole active ownership, retry cancellation, and
-  durable-deletion failure.
+- `src/services/TileCacheService.test.ts`: magic-hash tombstones, HTTP-error
+  separation, hash-miss passthrough, empty-list bypass, and
+  `getCachedLayerStyle` rewrite.
+- `src/services/tileCache/TileCacheRepository.test.ts`: payload-preserving
+  migration, v8 staging/recovery/GC, layer generations, transaction aborts,
+  atomic concurrent eviction, and statistics.
+- `src/services/OfflineMapSyncEngine.test.ts`: six-worker scheduling, manifest
+  fast path, per-tile progress, and retry head-of-line avoidance.
+- `src/services/OfflineMapSyncEngine.repository.test.ts`: real fake-IndexedDB
+  draining through payload and membership transactions.
+- `src/services/OfflineMapPlanner.test.ts`: canonical source union and chunks.
 - `src/services/tilePrefetchPlanner.test.ts`: meter padding, zoom ranges,
   dateline/root deduplication, zero-width bounds, and latitude clamping.
 - `src/services/PreferencesService.test.ts`: `selectedMapLayerId` + `layerOfflineSync` normalization, forced-layer semantics.
@@ -222,14 +238,15 @@ devices before shipping:
   landmarks, user-location dot) reattach with no flicker/leak, and that the
   `cached-https` protocol + magic-hash check still apply after the switch
   (react-map-gl re-adds the declarative sources on `setStyle`).
-- **`crypto.subtle`** must exist in the iOS/Android WebView for the magic-hash
-  check; if absent the check is skipped (tiles cached as-is, no crash).
+- **`crypto.subtle`** must exist in the iOS/Android WebView for satellite
+  validation; absence is an explicit terminal validation failure, never a
+  silent cache bypass.
 - **Settings row centering** uses shadow-DOM `::part(native)`; verify rows are
   vertically centered (not top-heavy) on both platforms for single- and
   multi-line rows.
-- **Removal under load**: while a project is actively prefetching more than one
-  layer, quarantine/advance its commit and verify no new requests or job rows
-  reappear for that target, while a URL shared by another target continues.
+- **Removal under load**: disable an optional layer during a multi-layer run;
+  verify release completes before prefix eviction, remaining layers resume from
+  the active plan, and an injected release failure preserves payloads/toggle.
 
 ## Change checklist
 

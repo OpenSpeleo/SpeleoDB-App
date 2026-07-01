@@ -26,7 +26,7 @@ import {
   ProjectGeoJSONAnalyzer,
   type ProjectGeoJSONAnalyzerPort,
 } from '../services/ProjectGeoJSONAnalyzer';
-import type { TilePrefetchServiceLike } from '../services/TilePrefetchService';
+import type { OfflineMapSyncEngineLike } from '../services/OfflineMapSyncEngine';
 import type {
   AuthResponse,
   AuthState,
@@ -41,9 +41,7 @@ import type {
   ProjectGeoJSONWarning,
 } from '../types/projectGeoJSON';
 import type { MapOverlayId } from '../types/mapOverlay';
-import type {
-  TilePrefetchJobState,
-} from '../types/tilePrefetch';
+import type { OfflineMapSyncSnapshot } from '../types/offlineMapSync';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import {
   mapLandmarkCollections,
@@ -175,7 +173,7 @@ export class SpeleoDBController {
     private service: SpeleoDBService,
     private prefs: PreferencesPort,
     private cache: ProjectCacheService,
-    tilePrefetch?: TilePrefetchServiceLike,
+    offlineMapSync?: OfflineMapSyncEngineLike,
     private offlineOpStore: OfflineOpStore = new OfflineOpStore(),
     gpsTrackStore: GpsTrackStore = new GpsTrackStore(),
     private geolocationWatcher: LocationWatcher = createRecordingLocationWatcher(),
@@ -241,7 +239,10 @@ export class SpeleoDBController {
       removePersisted: (id) => this.gpsTrackCoordinator.removePersisted(id),
       waitForPersistence: () => this.gpsTrackCoordinator.waitForPersistence(),
       invalidatePersistence: () => this.gpsTrackCoordinator.invalidatePersistence(),
-      addCompletedTrack: (track) => this.gpsTrackCoordinator.addCompletedTrack(track),
+      addCompletedTrack: (track) => {
+        this.gpsTrackCoordinator.addCompletedTrack(track);
+        void this.tileCoordinator.scheduleLocalGpsTrack(track);
+      },
       notifyStateChanged: () => this.gpsTrackCoordinator.recordingStateChanged(),
     });
     this.projectOverlaySyncCoordinator = new ProjectOverlaySyncCoordinator({
@@ -252,15 +253,15 @@ export class SpeleoDBController {
     });
     this.tileCoordinator = new TileCoordinator({
       cache: this.cache,
-      projectGeoJSON: this.projectGeoJSONCoordinator,
       preferences: {
         get: () => this.prefs.getPreferences(),
         set: (value) => this.prefs.setPreferences(value),
       },
       hasNetworkAccess: () => this.hasNetworkAccess(),
       getProjects: () => this.projectSyncCoordinator.projects,
+      getGpsPrefetchSources: (signal) => this.gpsTrackCoordinator.getPrefetchSources(signal),
       notifyStateChanged: () => this.notify(),
-    }, tilePrefetch);
+    }, offlineMapSync);
     this.projectSyncCoordinator = new ProjectSyncCoordinator({
       cache: this.cache,
       transport: this.service,
@@ -408,8 +409,20 @@ export class SpeleoDBController {
     return this.projectSyncCoordinator.mapDataRevision;
   }
 
-  get tilePrefetchJobs(): TilePrefetchJobState[] {
-    return this.tileCoordinator.prefetchJobs;
+  get offlineMapSyncSnapshot(): OfflineMapSyncSnapshot {
+    return this.tileCoordinator.snapshot;
+  }
+
+  subscribeOfflineMapSync(listener: () => void): () => void {
+    return this.tileCoordinator.subscribe(listener);
+  }
+
+  async refreshOfflineMaps(): Promise<void> {
+    await this.tileCoordinator.refreshOfflineMaps();
+  }
+
+  get isOfflineMapRefreshActive(): boolean {
+    return this.tileCoordinator.isRefreshActive;
   }
 
   /**
@@ -577,7 +590,7 @@ export class SpeleoDBController {
     this.sessionCoordinator.enterOfflineMode();
   }
 
-  async preloadTilePrefetch(): Promise<void> {
+  async preloadOfflineMaps(): Promise<void> {
     await this.tileCoordinator.preload();
   }
 

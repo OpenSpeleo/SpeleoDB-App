@@ -60,9 +60,10 @@ This document defines high-level architecture boundaries and coding expectations
 - Cache writes participating in sync accept `AbortSignal`. Conditional changes
   such as warning acknowledgement belong in one read/write transaction, with
   commit identity checked inside that transaction.
-- Tile-prefetch target removal is a concurrency boundary, not a best-effort
-  array filter. Preserve per-target generations, serialized job persistence,
-  shared URL ownership, abortable retry waits, and bounds-only planning.
+- Offline-map replacement is a generation boundary, not a mutable job list.
+  Preserve the active layer generation until the pending canonical plan
+  succeeds; keep retry waits outside workers and live progress outside durable
+  checkpoint persistence.
 - Circular longitude logic is centralized. Consumers merge complete directed
   intervals and clamp display/tile latitude to Web Mercator; do not independently
   min/max interval endpoints.
@@ -81,7 +82,7 @@ This document defines high-level architecture boundaries and coding expectations
 - Do not swallow errors that determine auth/offline correctness.
 - Cancellation is not an error fallback. Once a coordinator-owned run is
   aborted, stale IO completions must not publish state, cache writes, or
-  prefetch jobs.
+  offline-map plans or generation state.
 - Recheck cancellation after persistence and cleanup awaits, immediately before
   logging, counters, warnings, revisions, or other observable publication.
 

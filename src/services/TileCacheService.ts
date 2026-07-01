@@ -7,29 +7,29 @@
  * Strategy:
  *   1. Register a custom `cached-https` protocol with maplibre-gl.
  *   2. Rewrite the map style so all tile/sprite/glyph URLs use this protocol.
- *   3. On every request the protocol handler tries the network first,
- *      caches the response in IndexedDB, and falls back to cache on failure.
+ *   3. Serve fresh cache entries without touching the network.
+ *   4. Serve stale entries immediately and refresh them in the background.
+ *   5. Fetch a missing entry with a deadline and atomically cache it.
  */
 
 import maplibregl from 'maplibre-gl';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker.js?url';
 import { MAP } from '../constants';
-import type { TilePrefetchJobState } from '../types/tilePrefetch';
-import { buildLayerStyle, isLayerTileUrl } from './MapLayersService';
-import { TileCacheMaintenanceService } from './tileCache/TileCacheMaintenanceService';
+import type { TileMetadataRecord } from '../types/tileCache';
 import {
+  buildLayerStyle,
+  getMapLayerByTileUrl,
+  isLayerTileUrl,
+} from './MapLayersService';
+import {
+  claimCachedTilesForOfflineGeneration,
   clearCachedTiles as clearCachedTilesFromStore,
-  clearPrefetchJobs as clearPrefetchJobsFromStore,
-  deletePrefetchJobsByLayer as deletePrefetchJobsByLayerFromStore,
-  deletePrefetchJobsByTarget as deletePrefetchJobsByTargetFromStore,
   deleteTilesByUrlPrefixes as deleteTilesByUrlPrefixesFromStore,
-  getAllPrefetchJobs as getAllPrefetchJobsFromStore,
-  getPrefetchJob as getPrefetchJobFromStore,
   getTile,
-  hasTile,
-  setPrefetchJob as setPrefetchJobInStore,
+  getTileEntry,
   touchTileAccess,
-  upsertTile,
+  writeNoDataTile,
+  writeTileWithCapacity,
 } from './tileCache/TileCacheRepository';
 
 // ==================== Constants ====================
@@ -39,37 +39,65 @@ let tileCacheOfflineMode = false;
 // When true, pinned prefetch writes may exceed the 500 MB cap. Driven solely by
 // explicit, persisted user consent (see SpeleoDBController + PreferencesService).
 let tileCacheOverLimitApproved = false;
-const tileCacheMaintenance = new TileCacheMaintenanceService({
-  isOnline: () => !tileCacheOfflineMode,
-  allowOverLimit: () => tileCacheOverLimitApproved,
-});
+const refreshesInFlight = new Map<string, Promise<void>>();
+const backgroundRefreshControllers = new Map<string, AbortController>();
+let backgroundRefreshTail: Promise<void> = Promise.resolve();
+let cacheEpoch = 0;
+let cacheLifecycleController = new AbortController();
 
 // Use explicit worker URL instead of inline/blob worker bootstrap.
 // This avoids worker bootstrap runtime issues on some iOS devices.
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
-function isAbortError(error: unknown): boolean {
-  return Boolean(
-    typeof error === 'object' &&
-    error &&
-    'name' in error &&
-    (error as { name?: string }).name === 'AbortError',
-  );
+function throwIfSignalAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException('The operation was aborted', 'AbortError');
+}
+
+export class TileHttpError extends Error {
+  readonly status: number;
+
+  constructor(url: string, status: number) {
+    super(`HTTP ${status} while fetching ${url}`);
+    this.name = 'TileHttpError';
+    this.status = status;
+  }
+}
+
+export function isTerminalTileFetchError(error: unknown): boolean {
+  if (isMissingTileError(error) || error instanceof InvalidTilePayloadError) return true;
+  return error instanceof TileHttpError
+    && error.status >= 400
+    && error.status < 500
+    && error.status !== 408
+    && error.status !== 429;
 }
 
 /**
  * Raised when a downloaded raster tile matches a known "missing data" SHA-256
- * fingerprint. The tile is treated as a 404: it is never cached and the runtime
- * request fails so maplibre renders nothing instead of the placeholder image.
+ * fingerprint. Offline-map synchronization persists a no-data tombstone; a
+ * runtime request fails so maplibre renders nothing instead of the placeholder.
  */
 export class MissingTileError extends Error {
-  constructor(url: string) {
+  readonly responseBytes: number;
+
+  constructor(url: string, responseBytes = 0) {
     super(`Tile matched known missing-data hash: ${url}`);
     this.name = 'MissingTileError';
+    this.responseBytes = responseBytes;
   }
 }
 
-export function isMissingTileError(error: unknown): boolean {
+export class InvalidTilePayloadError extends Error {
+  constructor(url: string, reason: string) {
+    super(`Invalid tile payload for ${url}: ${reason}`);
+    this.name = 'InvalidTilePayloadError';
+  }
+}
+
+export function isMissingTileError(error: unknown): error is MissingTileError {
   return Boolean(
     error &&
     typeof error === 'object' &&
@@ -90,20 +118,51 @@ function hexFromArrayBuffer(buffer: ArrayBuffer): string {
 /**
  * True when `data` is a known provider "no data" placeholder tile, detected by
  * SHA-256 fingerprint. Cheap-guarded: skips entirely when no hashes are
- * configured, when the URL is not a configured raster tile, or when
- * `crypto.subtle` is unavailable.
+ * configured or when the URL is not a configured raster tile. A configured
+ * fingerprint fails closed when SHA-256 is unavailable.
  */
 async function isMissingDataTile(url: string, data: ArrayBuffer): Promise<boolean> {
-  if (MAP.MISSING_TILE_SHA256_HASHES.length === 0) return false;
-  if (!isLayerTileUrl(url)) return false;
+  const layer = getMapLayerByTileUrl(url);
+  const hashes = layer?.noDataSha256Hashes ?? [];
+  if (hashes.length === 0) return false;
   const subtle = globalThis.crypto?.subtle;
-  if (!subtle) return false;
+  if (!subtle) {
+    throw new InvalidTilePayloadError(url, 'SHA-256 unavailable');
+  }
   try {
     const digest = await subtle.digest('SHA-256', data);
-    return MAP.MISSING_TILE_SHA256_HASHES.includes(hexFromArrayBuffer(digest));
-  } catch {
-    return false;
+    return hashes.includes(hexFromArrayBuffer(digest));
+  } catch (error) {
+    if (error instanceof InvalidTilePayloadError) throw error;
+    throw new InvalidTilePayloadError(url, 'SHA-256 validation failed');
   }
+}
+
+function createOperationSignal(external?: AbortSignal): {
+  signal: AbortSignal;
+  dispose(): void;
+} {
+  const controller = new AbortController();
+  const signals = [external, cacheLifecycleController.signal].filter(
+    (signal): signal is AbortSignal => Boolean(signal),
+  );
+  const abort = (signal: AbortSignal) => {
+    controller.abort(signal.reason instanceof Error
+      ? signal.reason
+      : new DOMException('The operation was aborted', 'AbortError'));
+  };
+  const listeners = signals.map((signal) => {
+    const listener = () => abort(signal);
+    if (signal.aborted) abort(signal);
+    else signal.addEventListener('abort', listener, { once: true });
+    return { signal, listener };
+  });
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      for (const item of listeners) item.signal.removeEventListener('abort', item.listener);
+    },
+  };
 }
 
 function hasUsableNetwork(): boolean {
@@ -112,6 +171,9 @@ function hasUsableNetwork(): boolean {
 
 export function setTileCacheOfflineMode(isOffline: boolean): void {
   tileCacheOfflineMode = isOffline;
+  if (isOffline) {
+    for (const controller of backgroundRefreshControllers.values()) controller.abort();
+  }
 }
 
 /**
@@ -126,32 +188,26 @@ export function isTileCacheOverLimitApproved(): boolean {
   return tileCacheOverLimitApproved;
 }
 
-// ==================== Public prefetch helpers ====================
-
-/**
- * Returns true when the tile already exists in IndexedDB.
- */
-export async function hasCachedTile(url: string): Promise<boolean> {
-  return hasTile(url);
-}
-
 async function upsertTileStrict(
   url: string,
   data: ArrayBuffer,
-  pinnedByAutoPrefetch: boolean,
+  signal?: AbortSignal,
 ): Promise<void> {
-  await tileCacheMaintenance.ensureCapacityBeforeWrite(url, data.byteLength);
-  await upsertTile(url, data, { pinnedByAutoPrefetch });
+  await writeTileWithCapacity(url, data, {
+    isOnline: hasUsableNetwork(),
+    maxCacheBytes: MAP.TILE_CACHE_MAX_BYTES,
+    allowPinnedOverflow: tileCacheOverLimitApproved,
+    signal,
+  });
 }
 
 async function upsertTileBestEffort(
   url: string,
   data: ArrayBuffer,
-  pinnedByAutoPrefetch: boolean,
+  signal?: AbortSignal,
 ): Promise<void> {
   try {
-    await tileCacheMaintenance.ensureCapacityBeforeWrite(url, data.byteLength);
-    await upsertTile(url, data, { pinnedByAutoPrefetch });
+    await upsertTileStrict(url, data, signal);
   } catch {
     // Runtime map caching is best-effort.
   }
@@ -161,59 +217,81 @@ async function upsertTileBestEffort(
  * Force-download a tile and persist it. Throws when network or storage fails.
  * Returns the number of downloaded bytes.
  */
-export async function fetchAndCacheTile(
+/** Test-only seam for the strict runtime download path. */
+export async function __fetchAndCacheTileForTests(
   url: string,
   signal?: AbortSignal,
-  pinnedByAutoPrefetch = false,
 ): Promise<number> {
   if (!hasUsableNetwork()) {
     throw new Error(`Offline and no cached map for ${url}`);
   }
-  const response = await fetch(url, { signal });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const data = await response.arrayBuffer();
-  // Known missing-data tile: count as processed but never store it. Returning 0
-  // bytes lets the prefetch queue mark the tile done without retrying.
-  if (await isMissingDataTile(url, data)) {
-    return 0;
+  const operation = createOperationSignal(signal);
+  try {
+    const outcome = await downloadValidatedTile(url, operation.signal);
+    if (outcome.kind === 'no-data') {
+      await writeNoDataTile(url, { signal: operation.signal });
+      throw new MissingTileError(url, outcome.responseBytes);
+    }
+    await upsertTileStrict(url, outcome.data, operation.signal);
+    return outcome.data.byteLength;
+  } finally {
+    operation.dispose();
   }
-  await upsertTileStrict(url, data, pinnedByAutoPrefetch);
-  return data.byteLength;
 }
 
-export async function fetchAndCachePinnedTile(
+export async function fetchAndCacheOfflineMapTile(
   url: string,
-  signal?: AbortSignal,
-): Promise<number> {
-  const bytes = await fetchAndCacheTile(url, signal, true);
-  return bytes;
-}
-
-export async function getPrefetchJob(
+  generationId: string,
   layerId: string,
-  targetId: string,
-): Promise<TilePrefetchJobState | null> {
-  return getPrefetchJobFromStore(layerId, targetId);
+  signal?: AbortSignal,
+  previousSizeBytes = 0,
+): Promise<{ downloadedBytes: number; cacheDeltaBytes: number }> {
+  if (!hasUsableNetwork()) {
+    throw new Error(`Offline and no cached map for ${url}`);
+  }
+  const operation = createOperationSignal(signal);
+  try {
+    const outcome = await downloadValidatedTile(url, operation.signal);
+    if (outcome.kind === 'no-data') {
+      const result = await writeNoDataTile(url, {
+        signal: operation.signal,
+        offlineMembership: { generationId, layerId },
+      });
+      return {
+        downloadedBytes: outcome.responseBytes,
+        cacheDeltaBytes: result.cacheDeltaBytes,
+      };
+    }
+    const eviction = await writeTileWithCapacity(url, outcome.data, {
+      isOnline: hasUsableNetwork(),
+      maxCacheBytes: MAP.TILE_CACHE_MAX_BYTES,
+      allowPinnedOverflow: tileCacheOverLimitApproved,
+      signal: operation.signal,
+      offlineMembership: { generationId, layerId },
+    });
+    throwIfSignalAborted(operation.signal);
+    return {
+      downloadedBytes: outcome.data.byteLength,
+      cacheDeltaBytes: outcome.data.byteLength - previousSizeBytes - eviction.freedBytes,
+    };
+  } finally {
+    operation.dispose();
+  }
 }
 
-export async function getAllPrefetchJobs(): Promise<TilePrefetchJobState[]> {
-  return getAllPrefetchJobsFromStore();
-}
-
-export async function setPrefetchJob(job: TilePrefetchJobState): Promise<void> {
-  await setPrefetchJobInStore(job);
-}
-
-export async function clearPrefetchJobs(): Promise<void> {
-  await clearPrefetchJobsFromStore();
-}
-
-export async function deletePrefetchJobsByLayer(layerId: string): Promise<void> {
-  await deletePrefetchJobsByLayerFromStore(layerId);
-}
-
-export async function deletePrefetchJobsByTarget(targetId: string): Promise<void> {
-  await deletePrefetchJobsByTargetFromStore(targetId);
+export async function claimCachedTilesForOfflineMap(
+  urls: readonly string[],
+  generationId: string,
+  layerId: string,
+  signal?: AbortSignal,
+): Promise<Array<TileMetadataRecord | null>> {
+  return claimCachedTilesForOfflineGeneration(
+    urls,
+    generationId,
+    layerId,
+    Date.now(),
+    signal,
+  );
 }
 
 /**
@@ -225,56 +303,165 @@ export async function evictLayerTiles(prefixes: string[]): Promise<void> {
 }
 
 export async function clearCachedTiles(): Promise<void> {
+  cacheEpoch += 1;
+  cacheLifecycleController.abort(new DOMException('Tile cache cleared', 'AbortError'));
+  cacheLifecycleController = new AbortController();
+  for (const controller of backgroundRefreshControllers.values()) controller.abort();
+  backgroundRefreshControllers.clear();
+  refreshesInFlight.clear();
+  backgroundRefreshTail = Promise.resolve();
   await clearCachedTilesFromStore();
 }
 
-export async function runTileCacheStartupMaintenance(): Promise<void> {
+// ==================== Cache-first fetch with stale-while-revalidate ====================
+
+type TileDownloadOutcome =
+  | { kind: 'raster'; data: ArrayBuffer }
+  | { kind: 'no-data'; responseBytes: number };
+
+async function downloadValidatedTile(
+  url: string,
+  signal?: AbortSignal,
+): Promise<TileDownloadOutcome> {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let rejectCancellation: ((error: unknown) => void) | undefined;
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new DOMException('Tile fetch timed out', 'TimeoutError');
+      controller.abort(error);
+      reject(error);
+    }, MAP.TILE_FETCH_TIMEOUT_MS);
+  });
+  const onAbort = () => {
+    const error = signal?.reason instanceof Error
+      ? signal.reason
+      : new DOMException('The operation was aborted', 'AbortError');
+    controller.abort(error);
+    rejectCancellation?.(error);
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
   try {
-    await tileCacheMaintenance.runStartupMaintenance();
-  } catch {
-    // Startup maintenance should not block app initialization.
+    throwIfSignalAborted(signal);
+    const operation = (async (): Promise<TileDownloadOutcome> => {
+      const response = await fetch(url, { signal: controller.signal });
+      throwIfSignalAborted(signal);
+      if (!response.ok) throw new TileHttpError(url, response.status);
+      if (isLayerTileUrl(url)) {
+        const contentType = response.headers?.get?.('content-type')?.toLowerCase() ?? '';
+        if (
+          !contentType.startsWith('image/')
+          && !contentType.startsWith('application/octet-stream')
+        ) {
+          throw new InvalidTilePayloadError(
+            url,
+            contentType ? `unexpected content type ${contentType}` : 'missing content type',
+          );
+        }
+      }
+      const data = await response.arrayBuffer();
+      throwIfSignalAborted(signal);
+      if (data.byteLength === 0) throw new InvalidTilePayloadError(url, 'empty response');
+      if (await isMissingDataTile(url, data)) {
+        throwIfSignalAborted(signal);
+        return { kind: 'no-data', responseBytes: data.byteLength };
+      }
+      throwIfSignalAborted(signal);
+      return { kind: 'raster', data };
+    })();
+    return await Promise.race([
+      operation,
+      timeout,
+      cancellation,
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    signal?.removeEventListener('abort', onAbort);
   }
 }
 
-// ==================== Network-first fetch with cache ====================
+function maybeTouchTile(metadata: TileMetadataRecord | null, url: string, now: number): void {
+  if (
+    metadata
+    && metadata.prefetchOwnerCount === 0
+    && now - metadata.lastAccessedAt >= MAP.TILE_LRU_TOUCH_INTERVAL_MS
+  ) {
+    void touchTileAccess(url, now, MAP.TILE_LRU_TOUCH_INTERVAL_MS);
+  }
+}
+
+
+function enqueueBackgroundRefresh(url: string): void {
+  if (refreshesInFlight.has(url) || !hasUsableNetwork()) return;
+  const epoch = cacheEpoch;
+  const controller = new AbortController();
+  backgroundRefreshControllers.set(url, controller);
+  const refresh = backgroundRefreshTail
+    .catch(() => undefined)
+    .then(async () => {
+      if (!hasUsableNetwork() || epoch !== cacheEpoch) return;
+      const operation = createOperationSignal(controller.signal);
+      try {
+        const outcome = await downloadValidatedTile(url, operation.signal);
+        if (epoch !== cacheEpoch) throw new DOMException('Tile cache cleared', 'AbortError');
+        if (outcome.kind === 'no-data') {
+          await writeNoDataTile(url, { signal: operation.signal });
+        } else {
+          await upsertTileBestEffort(url, outcome.data, operation.signal);
+        }
+      } finally {
+        operation.dispose();
+      }
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      if (refreshesInFlight.get(url) === refresh) refreshesInFlight.delete(url);
+      if (backgroundRefreshControllers.get(url) === controller) {
+        backgroundRefreshControllers.delete(url);
+      }
+    });
+  refreshesInFlight.set(url, refresh);
+  backgroundRefreshTail = refresh;
+}
 
 async function fetchWithCache(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
-  if (!hasUsableNetwork()) {
-    const cached = await getTile(url);
-    if (cached) {
-      void touchTileAccess(url);
-      return cached;
-    }
-    throw new Error(`Offline and no cached map for ${url}`);
-  }
-
-  // Try network first
-  try {
-    const response = await fetch(url, { signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.arrayBuffer();
-
-    // Known missing-data tile: do not cache and do not fall back to cache.
-    // Propagate so maplibre renders nothing (treated as 404) for this tile.
-    if (await isMissingDataTile(url, data)) {
+  throwIfSignalAborted(signal);
+  const now = Date.now();
+  const cached = await getTileEntry(url);
+  throwIfSignalAborted(signal);
+  if (cached) {
+    maybeTouchTile(cached.metadata, url, now);
+    const fetchedAt = cached.metadata?.fetchedAt ?? 0;
+    if (cached.metadata?.isNoData) {
+      if (fetchedAt <= 0 || now - fetchedAt >= MAP.TILE_CACHE_MAX_AGE_MS) {
+        enqueueBackgroundRefresh(url);
+      }
       throw new MissingTileError(url);
     }
-
-    // Cache in background (don't await -- non-blocking)
-    void upsertTileBestEffort(url, data, false);
-
-    return data;
-  } catch (error) {
-    if (isAbortError(error)) throw error;
-    if (isMissingTileError(error)) throw error;
-
-    // Network failed -- try cache
-    const cached = await getTile(url);
-    if (cached) {
-      void touchTileAccess(url);
-      return cached;
+    if (fetchedAt > 0 && now - fetchedAt < MAP.TILE_CACHE_MAX_AGE_MS) {
+      return cached.data!;
     }
-    throw new Error(`Offline and no cached map for ${url}`);
+    enqueueBackgroundRefresh(url);
+    return cached.data!;
+  }
+  if (!hasUsableNetwork()) throw new Error(`Offline and no cached map for ${url}`);
+
+  const operation = createOperationSignal(signal);
+  try {
+    const outcome = await downloadValidatedTile(url, operation.signal);
+    throwIfSignalAborted(operation.signal);
+    if (outcome.kind === 'no-data') {
+      await writeNoDataTile(url, { signal: operation.signal });
+      throw new MissingTileError(url, outcome.responseBytes);
+    }
+    await upsertTileBestEffort(url, outcome.data, operation.signal);
+    throwIfSignalAborted(operation.signal);
+    return outcome.data;
+  } finally {
+    operation.dispose();
   }
 }
 
@@ -324,7 +511,6 @@ export async function getCachedStyle(
     void upsertTileBestEffort(
       STYLE_CACHE_KEY,
       encoder.encode(JSON.stringify(styleJson)).buffer,
-      false,
     );
   } catch {
     // Try to load from cache

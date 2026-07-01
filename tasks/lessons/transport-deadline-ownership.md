@@ -15,3 +15,9 @@ plugin call cannot poison every future request.
 Every service wrapper that accepts request options must forward both the abort
 signal and timeout. Dropping either option silently breaks ownership even when
 the underlying transport is correct.
+
+For binary raster validation, the same deadline must cover response headers,
+body settlement, content-type/non-empty checks, and any configured digest.
+Race each phase as one operation and consume late settlement; a header-only
+timeout leaves pending bodies or hashing able to outlive their publication
+authority.

@@ -28,3 +28,11 @@ For fire-and-forget IndexedDB behavior:
   lifetime within the file when persistence is part of the behavior under test;
 - run the owning persistence suites under more than one deterministic shuffled
   seed when investigating order-sensitive evidence.
+
+Cancellation must attach to the `IDBTransaction` itself, not only to checks
+before and after an awaited helper. Abort the live transaction from the signal
+and re-check cancellation/generation immediately before final metadata and
+statistics writes. For stale-while-revalidate, also capture a cache/session
+epoch: abort outstanding refreshes on clear/logout and reject a late transport
+settlement even if the transport ignored abort. Exercise payload and tombstone
+commits with a real fake-IndexedDB transaction abort, not a pre-aborted mock.

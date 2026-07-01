@@ -33,7 +33,7 @@ Logout must not be triggered by transient network conditions:
 - `localStorage` and `sessionStorage`,
 - cached projects and GeoJSON (including dashboard overlay GeoJSON),
 - cached map tiles,
-- persisted tile prefetch jobs.
+- persisted offline-map plans, generations, memberships, and cached tiles.
 
 Implementation notes:
 
@@ -60,7 +60,7 @@ Implementation notes:
   marker deletion still runs when vault deletion fails, so a retained orphan
   token cannot be restored on restart. Any failure still revokes in-process
   access and is reported after the remaining cleanup steps finish,
-- cache purge waits for already-started tracked sync work to settle before `clearAll()` / tile cleanup runs, so stale writes cannot repopulate local data after logout completes,
+- cache purge waits for already-started tracked sync work to settle before `clearAll()` / tile cleanup runs. Tile clear also advances a cache epoch and aborts every low-priority stale refresh, so ignored/late transport settlement cannot repopulate local data after logout completes,
 - GPS/tile teardown, pending GPS persistence, cache deletion, storage clearing,
   and tile-runtime restart are independent cleanup steps. A failure in one may
   not skip the others; logout rejects with a generic retryable error only after

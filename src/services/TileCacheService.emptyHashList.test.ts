@@ -14,10 +14,14 @@ vi.mock('../constants', async (importOriginal) => {
   return {
     ...actual,
     MAP: { ...actual.MAP, MISSING_TILE_SHA256_HASHES: [] as readonly string[] },
+    MAP_LAYERS: actual.MAP_LAYERS.map((layer) => ({
+      ...layer,
+      noDataSha256Hashes: [],
+    })),
   };
 });
 
-import { fetchAndCachePinnedTile, setTileCacheOfflineMode } from './TileCacheService';
+import { __fetchAndCacheTileForTests, setTileCacheOfflineMode } from './TileCacheService';
 import { __clearTileCacheRepositoryForTests, getTile } from './tileCache/TileCacheRepository';
 
 const TILE_URL =
@@ -53,10 +57,11 @@ describe('TileCacheService magic-hash with an empty hash list', () => {
     });
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
+      headers: new Headers({ 'content-type': 'image/png' }),
       arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3, 4, 5]).buffer),
     });
 
-    const bytes = await fetchAndCachePinnedTile(TILE_URL);
+    const bytes = await __fetchAndCacheTileForTests(TILE_URL);
 
     expect(bytes).toBe(5);
     expect(digest).not.toHaveBeenCalled();

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildTileUrlsForProjectBounds,
   buildTileUrlsForPoints,
+  buildTileUrlsForPaths,
   computeTilePrefetchSignature,
   extractPointCoordinates,
 } from './tilePrefetchPlanner';
@@ -252,5 +253,33 @@ describe('computeTilePrefetchSignature', () => {
     expect(computeTilePrefetchSignature([])).toBe(computeTilePrefetchSignature([]));
     expect(computeTilePrefetchSignature([])).toMatch(/^sig-0-/);
     expect(computeTilePrefetchSignature([[1, 2]])).toMatch(/^sig-1-/);
+  });
+});
+
+describe('buildTileUrlsForPaths', () => {
+  it('follows a long diagonal instead of filling its bounding box', () => {
+    const options = request({ minZoom: 8, maxZoom: 8, padMeters: 0 });
+    const pathUrls = buildTileUrlsForPaths([[[0, 0], [20, 20]]], options);
+    const bboxUrls = buildTileUrlsForProjectBounds({
+      west: 0,
+      east: 20,
+      south: 0,
+      north: 20,
+      crossesDateline: false,
+    }, options);
+
+    expect(pathUrls.length).toBeGreaterThan(1);
+    expect(pathUrls.length).toBeLessThan(bboxUrls.length / 2);
+  });
+
+  it('takes the short wrapped route across the dateline', () => {
+    const urls = buildTileUrlsForPaths(
+      [[[179.9, 0], [-179.9, 0]]],
+      request({ minZoom: 8, maxZoom: 8, padMeters: 0 }),
+    );
+    const xValues = urls.map((url) => Number(url.split('/')[1]));
+
+    expect(xValues.every((x) => x <= 1 || x >= 254)).toBe(true);
+    expect(urls.length).toBeLessThanOrEqual(4);
   });
 });

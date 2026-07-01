@@ -5,7 +5,6 @@ import { SplashScreen } from '@capacitor/splash-screen'
 
 import logoPng from '../assets/media/logo.png'
 import { getPreferences } from '../services/PreferencesService'
-import { runTileCacheStartupMaintenanceRuntime } from '../services/TileCacheRuntime'
 import { useStartupUiCoordinator } from './useStartupUiCoordinator'
 import { useSpeleoDB } from './useSpeleoDB'
 
@@ -38,8 +37,7 @@ export function SpeleoDBStartupUi(): ReactNode {
 
   useEffect(() => {
     if (!authState.isAuthenticated) return
-    void controller.preloadTilePrefetch()
-    void runTileCacheStartupMaintenanceRuntime()
+    void controller.preloadOfflineMaps()
   }, [authState.isAuthenticated, controller])
 
   return (

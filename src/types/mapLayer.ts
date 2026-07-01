@@ -8,7 +8,7 @@
  * Each layer is a single XYZ raster source. The layer `id` is the stable key
  * used for:
  *  - persisting the selected layer + per-layer offline toggle in preferences,
- *  - namespacing tile-prefetch jobs (`${layerId}::${targetId}`),
+ *  - namespacing offline-map generations,
  *  - building the maplibre style at runtime.
  */
 
@@ -21,12 +21,14 @@ export const MAP_LAYER_IDS = [
 export type MapLayerId = (typeof MAP_LAYER_IDS)[number];
 
 export interface MapLayerDefinition {
-  /** Stable unique key (also the prefetch-job + preference namespace). */
+  /** Stable unique key (also the offline-generation + preference namespace). */
   id: MapLayerId;
   /** Human-readable label shown in the layer switcher and Settings. */
   label: string;
   /** XYZ raster tile URL template with `{z}`/`{x}`/`{y}` placeholders. */
   tileUrlTemplate: string;
+  /** Provider-specific SHA-256 fingerprints for authoritative no-data rasters. */
+  noDataSha256Hashes: readonly string[];
   /** Raster tile size in pixels (ESRI = 256). */
   tileSize: number;
   /** Native maximum zoom served by the provider for this layer. */

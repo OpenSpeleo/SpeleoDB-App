@@ -79,6 +79,14 @@ export function getLayerTileUrlPrefixes(): string[] {
   return [...LAYER_TILE_URL_PREFIXES];
 }
 
+/** Resolve the configured raster layer for a raw or cached-https tile URL. */
+export function getMapLayerByTileUrl(url: string): MapLayerDefinition | null {
+  const normalized = url.replace(/^cached-https:\/\//, 'https://');
+  return MAP_LAYERS.find((layer) => (
+    normalized.startsWith(layer.tileUrlTemplate.split('{z}')[0])
+  )) ?? null;
+}
+
 /**
  * True when `url` points at one of the configured raster tile sources. Accepts
  * both raw `https://` and the rewritten `cached-https://` form.
@@ -114,6 +122,9 @@ export function buildLayerStyle(layerId: string): Record<string, unknown> {
         source: layer.id,
         minzoom: 0,
         maxzoom: DISPLAY_LAYER_MAX_ZOOM,
+        paint: {
+          'raster-fade-duration': 0,
+        },
       },
     ],
   };

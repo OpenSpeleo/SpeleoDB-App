@@ -503,6 +503,17 @@ export class ProjectCacheService {
     }
   }
 
+  /** Strict read for rolling offline-map replacement; storage errors must abort replacement. */
+  async getOverlayGeoJSONForOfflineMap(
+    overlayId: MapOverlayId,
+    options: CacheOperationOptions = {},
+  ): Promise<unknown | null> {
+    throwIfAborted(options.signal);
+    const entry = await this.store.get('geojson', this.getOverlayCacheKey(overlayId));
+    throwIfAborted(options.signal);
+    return entry?.data ?? null;
+  }
+
   /** Write an overlay GeoJSON payload. */
   async setOverlayGeoJSON(
     overlayId: MapOverlayId,
@@ -589,7 +600,15 @@ export class ProjectCacheService {
     try {
       const entry = await this.store.get('geojson', this.getGpsTrackGeoJSONKey(trackId));
       throwIfAborted(options.signal)
-      return entry?.data ?? null;
+      const stored = entry?.data as unknown;
+      if (
+        stored
+        && typeof stored === 'object'
+        && 'geojson' in stored
+      ) {
+        return (stored as { geojson: unknown }).geojson;
+      }
+      return stored ?? null;
     } catch (error) {
       if (isAbortError(error) || options.signal?.aborted) {
         throwIfAborted(options.signal)
@@ -603,12 +622,13 @@ export class ProjectCacheService {
   async setGpsTrackGeoJSON(
     trackId: string,
     data: unknown,
+    sha256 = '',
     options: CacheOperationOptions = {},
   ): Promise<boolean> {
     throwIfAborted(options.signal)
     try {
       await this.store.set('geojson', this.getGpsTrackGeoJSONKey(trackId), {
-        data,
+        data: { geojson: data, sha256 },
         cachedAt: Date.now(),
       }, options);
       throwIfAborted(options.signal)
@@ -619,6 +639,36 @@ export class ProjectCacheService {
       }
       console.error('ProjectCacheService.setGpsTrackGeoJSON failed:', error);
       return false
+    }
+  }
+
+  /** Read geometry together with the server content identity used to cache it. */
+  async getGpsTrackGeoJSONRecord(
+    trackId: string,
+    options: CacheOperationOptions = {},
+  ): Promise<{ geojson: unknown; sha256: string } | null> {
+    throwIfAborted(options.signal);
+    try {
+      const entry = await this.store.get('geojson', this.getGpsTrackGeoJSONKey(trackId));
+      throwIfAborted(options.signal);
+      const stored = entry?.data as unknown;
+      if (
+        stored
+        && typeof stored === 'object'
+        && 'geojson' in stored
+      ) {
+        const record = stored as { geojson: unknown; sha256?: unknown };
+        return {
+          geojson: record.geojson,
+          sha256: typeof record.sha256 === 'string' ? record.sha256 : '',
+        };
+      }
+      return stored === undefined || stored === null
+        ? null
+        : { geojson: stored, sha256: '' };
+    } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
+      throw error;
     }
   }
 

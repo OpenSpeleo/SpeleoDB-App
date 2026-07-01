@@ -155,9 +155,10 @@ the averaging session's side effects from the modal.
 
 The unified `controller.gpsTracks` snapshot, produced by `GpsTrackCoordinator`, is **rebuilt only when
 `gpsTracksRevision` changes** (a recording/edit/delete/sync or a queue change),
-not on every `notify()`. Unrelated notifies (tile-prefetch progress,
-online/sync status) reuse the same array reference, so the Dashboard's
-`gps-tracks` map source is not recomputed/re-fed on every tick and
+not on every `notify()`. Offline-map progress uses a separate external store
+and never reaches this controller observer; other online/sync notifies reuse
+the same array reference, so the Dashboard's `gps-tracks` map source is not
+recomputed/re-fed on every tick and
 `summarizeTrack` does not run over every local recording each time.
 
 ## Shared GPS reading gate (one path, two cadences)
@@ -236,9 +237,17 @@ GeoJSON with **`@turf/helpers`**:
   (LineString/MultiLineString features) back into `RecordedPoint[]` for display
   and GPX re-export of a remote track.
 
-Server tracks are delivered as a pre-signed GeoJSON URL (`file`) and downloaded
-lazily on first toggle (`controller.getGpsTrackPoints` -> cache-first
-`getGpsTrackGeoJSON`), exactly like project geojson. GPX remains an
+Server tracks are delivered as a pre-signed GeoJSON URL (`file`). Geometry is
+downloaded lazily for display and eagerly with bounded concurrency during full
+sync for offline tile planning. The cached FeatureCollection carries the server
+SHA-256 identity, so changed server bytes cannot reuse stale geometry
+(`getGpsTrackGeoJSONRecord`). Ordinary display deliberately accepts valid
+legacy cached geometry even when it lacks that SHA, preserving existing offline
+maps. Planning is stricter: it requires the current non-empty server SHA and a
+matching valid cache record, or refreshes up to three server tracks concurrently.
+A missing SHA/URL, unavailable network, invalid response, or failed cache write
+aborts the whole rolling replacement so partial GPS coverage cannot replace the
+active generations. GPX remains an
 interchange/export/upload format generated on demand from `RecordedPoint[]`.
 
 ## Server contracts (SpeleoDB)

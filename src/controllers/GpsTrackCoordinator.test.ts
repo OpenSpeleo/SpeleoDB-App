@@ -53,6 +53,7 @@ function createHarness(options: {
   let purging = options.purging ?? false;
   let now = 10_000;
   let cachedGeoJSON: unknown = null;
+  let cachedSha256 = '';
   let cachedRemote = options.remote ?? null;
   const store = {
     list: vi.fn(async () => options.local ?? []),
@@ -64,8 +65,17 @@ function createHarness(options: {
     setGpsTracks: vi.fn(async (tracks: RemoteGpsTrack[]) => { cachedRemote = tracks; }),
     removeGpsTrackGeoJSON: vi.fn(async (_id: string) => {}),
     getGpsTrackGeoJSON: vi.fn(async (_id: string) => cachedGeoJSON),
-    setGpsTrackGeoJSON: vi.fn(async (_id: string, value: GeoJSON.FeatureCollection) => {
+    getGpsTrackGeoJSONRecord: vi.fn(async (_id: string) => (
+      cachedGeoJSON === null ? null : { geojson: cachedGeoJSON, sha256: cachedSha256 }
+    )),
+    setGpsTrackGeoJSON: vi.fn(async (
+      _id: string,
+      value: GeoJSON.FeatureCollection,
+      sha256 = '',
+    ) => {
       cachedGeoJSON = value;
+      cachedSha256 = sha256;
+      return true;
     }),
   };
   const transport = {
@@ -106,7 +116,10 @@ function createHarness(options: {
     store,
     transport,
     setActive(value: boolean) { active = value; },
-    setCachedGeoJSON(value: unknown) { cachedGeoJSON = value; },
+    setCachedGeoJSON(value: unknown, sha256 = REMOTE.sha256) {
+      cachedGeoJSON = value;
+      cachedSha256 = sha256;
+    },
     setNow(value: number) { now = value; },
     setPurging(value: boolean) { purging = value; },
   };
@@ -263,7 +276,11 @@ describe('GpsTrackCoordinator', () => {
       .toEqual({ fileName: 'Local.gpx', gpx: '<gpx>local-1</gpx>' });
 
     expect(await harness.coordinator.getPoints('remote-1')).toHaveLength(2);
-    expect(harness.cache.setGpsTrackGeoJSON).toHaveBeenCalledWith('remote-1', GEOJSON);
+    expect(harness.cache.setGpsTrackGeoJSON).toHaveBeenCalledWith(
+      'remote-1',
+      GEOJSON,
+      REMOTE.sha256,
+    );
     expect(await harness.coordinator.buildGpxFile(harness.coordinator.tracks[0]))
       .toEqual({ fileName: 'Remote.gpx', gpx: '<gpx>remote-1</gpx>' });
   });
@@ -296,5 +313,51 @@ describe('GpsTrackCoordinator', () => {
     allowConsoleWarn('Failed to download GPS track GeoJSON:', failure);
     abort.transport.downloadJSON.mockRejectedValueOnce(failure);
     await expect(abort.coordinator.getGeoJSON('remote-1')).resolves.toBeNull();
+  });
+
+  it('eagerly refreshes server geometry when the SHA identity changes', async () => {
+    const harness = createHarness({ remote: [REMOTE] });
+    await harness.coordinator.load();
+    harness.setCachedGeoJSON(GEOJSON, 'old-sha');
+
+    const sources = await harness.coordinator.getPrefetchSources();
+
+    expect(harness.transport.downloadJSON).toHaveBeenCalledWith(REMOTE.fileUrl, {
+      signal: undefined,
+    });
+    expect(harness.cache.setGpsTrackGeoJSON).toHaveBeenCalledWith(
+      REMOTE.id,
+      GEOJSON,
+      REMOTE.sha256,
+      { signal: undefined },
+    );
+    expect(sources).toMatchObject([{
+      targetKind: 'gps-track-server',
+      targetId: REMOTE.id,
+      sourceRevision: REMOTE.sha256,
+    }]);
+  });
+
+  it('keeps legacy cached server geometry available for ordinary display', async () => {
+    const harness = createHarness({ remote: [REMOTE] });
+    await harness.coordinator.load();
+    harness.setCachedGeoJSON(GEOJSON, '');
+
+    await expect(harness.coordinator.getGeoJSON(REMOTE.id)).resolves.toEqual(GEOJSON);
+    expect(harness.transport.downloadJSON).not.toHaveBeenCalled();
+  });
+
+  it('fails planning when current server geometry cannot be identified or downloaded', async () => {
+    const missingSha = createHarness({ remote: [{ ...REMOTE, sha256: '' }] });
+    await missingSha.coordinator.load();
+    await expect(missingSha.coordinator.getPrefetchSources()).rejects.toThrow(
+      'server SHA unavailable',
+    );
+
+    const missingUrl = createHarness({ remote: [{ ...REMOTE, fileUrl: '' }] });
+    await missingUrl.coordinator.load();
+    await expect(missingUrl.coordinator.getPrefetchSources()).rejects.toThrow(
+      'download URL unavailable',
+    );
   });
 });

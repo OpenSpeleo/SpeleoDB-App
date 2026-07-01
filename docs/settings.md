@@ -21,11 +21,18 @@ Displays live sync statistics and a manual sync trigger.
 |---|---|---|
 | Last sync | `lastSyncedAt` from `useSpeleoDB()`, formatted via `formatLastSync()` (device-locale absolute date + time, or `Never`) | Reactive (controller notify after every successful project-list refresh) |
 | Synced projects | `projects` from `useSpeleoDB()`, filtered to those with GeoJSON | Reactive (context update) |
-| Cache size | `getTotalCacheBytes()` from `TileCacheRepository` | Polled every 3 s while on `/settings` |
-| Sync progress | Computed from `tilePrefetchJobs` + manual tile count | Reactive + polled |
-| Tiles synced | Same as sync progress, formatted as `processed / total` | Reactive + polled |
+| Cache size | `OfflineMapSyncSnapshot.cacheBytes` | Event-driven after durable writes |
+| Sync progress | Current operation completion from the offline-map store | Paint cadence |
+| Tiles synced | `completed / (canonical coordinate count × enabled layer count)` | Paint cadence |
+| Download speed | Tiles/second plus a compact ETA (`h`, `m`, or `s`) | Paint cadence |
 
-The **Resync button** (emerald-green pill labelled `Resync` with the circular-arrow `syncOutline` icon, in the section header; `app-btn app-btn--compact` + `bg-emerald-600/90`, matching the panels' "Show all" buttons but green) calls `controller.syncProjects()`. It does not attempt offline reconnect. `syncProjects()` returns a structured phase result (cache load, project refresh, GeoJSON sync, overlay sync, tile-prefetch scheduling), but the Settings page still treats sync as a fire-and-refresh action: errors are caught and swallowed, and cache stats are refreshed afterward regardless.
+The **Resync button** (compact success variant with the circular-arrow
+`syncOutline` icon in the section header) calls `controller.syncProjects()`.
+It does not attempt offline reconnect. `syncProjects()` returns a structured
+phase result (cache load, project refresh, GeoJSON sync, overlay sync,
+offline-map scheduling). Errors are caught locally; cache statistics and map
+progress continue through the dedicated event stream rather than a follow-up
+query.
 
 The button is **disabled while offline-locked** (`isOfflineLocked`): syncing is an online-only action, and going back online is handled by the dedicated **Go Online** button (see Account section). It is also disabled while `syncStatus === 'syncing'`, where it shows an inline spinner plus a `Syncing…` label (`data-testid="sync-status-label"`) to prevent double-submission. The `data-testid` remains `sync-button`.
 
@@ -33,7 +40,29 @@ The button is **disabled while offline-locked** (`isOfflineLocked`): syncing is 
 
 `Last sync` is set by `SpeleoDBController.syncProjects()` only after the project-list refresh succeeds and the refreshed list is persisted via `cache.setProjects()`. The timestamp therefore reflects a successful project refresh phase, not completion of the later GeoJSON / overlay / tile-prefetch phases. Timeouts, transport errors, and non-2xx responses do **not** advance the timestamp. The value is persisted via `PreferencesService.setPreferences({ lastSyncedAt })`, restored on the next app launch via `restoreSession()`, and reset to `null` on logout.
 
-Manual tile count and cache byte totals are read from IndexedDB via cursor-based iteration to avoid loading the full metadata store into memory.
+The engine reads the aggregate cache record during preload, then publishes byte
+changes after durable writes. Settings never scans tile metadata or polls
+IndexedDB. Browsing-only tiles do not count as offline coverage. Failed attempts
+remain in the denominator, are shown in the overall state and affected layer
+subtitle, and cannot produce a false 100% state. During initial migration or
+plan recovery the counter reads **Preparing…**, never `0 / 0`.
+
+ETA omits zero-value units. Seconds are shown only for estimates under one
+minute; minute and hour estimates intentionally hide seconds to avoid noisy
+countdown churn.
+
+The overall completed count is summed from the same bounded per-layer counters
+rendered in the Map Layers rows. A persisted counter cannot exceed its layer
+total or compensate for missing tiles in another layer. **Tiles synced** is the
+only coverage counter shown; retained-generation state remains an internal
+rolling-refresh safety mechanism.
+
+**Refresh offline maps** is a compact, solid, full-width action at the bottom
+of the Map Layers list. It opens a confirmation and calls
+`controller.refreshOfflineMaps()`. It is disabled offline and while a refresh
+is active. The rolling refresh covers satellite and enabled optional layers,
+bypasses the 180-day freshness check, and keeps old tiles usable until valid
+replacements commit.
 
 ### Map Settings
 
@@ -46,9 +75,24 @@ Manual tile count and cache byte totals are read from IndexedDB via cursor-based
 Lists every map tile layer (`MAP_LAYERS`) with an offline-sync toggle and a per-layer sync percentage. The layer name renders in white with a smaller muted subtitle. Label lines use `<span class="block">` rather than `<p>`: Ionic ships an unlayered `ion-label p { color; font-size; margin }` rule that would otherwise override Tailwind's color/size and add asymmetric top margin. See `docs/map-layers.md` for the full feature.
 
 - The satellite layer toggle is forced ON and disabled (satellite is always synced).
-- Other layers (ESRI Hillshade light/dark) are opt-in. Toggling calls `controller.setLayerOfflineSync(layerId, enabled)`, which persists the opt-in, and either immediately schedules that layer's prefetch (when enabling while online) or removes its jobs + evicts its tiles (when disabling).
+- Other layers (ESRI Hillshade light/dark) are opt-in. Toggling calls
+  `controller.setLayerOfflineSync(layerId, enabled)`. Enabling reuses the active
+  satellite plan and falls back to full planning only when no valid plan exists.
+  Disabling releases successfully before eviction, refreshes statistics, and
+  resumes remaining layers from that plan. Failure rolls the toggle back.
 - Extra-layer toggles are disabled while the app is offline-locked (`isOfflineLocked`): enabling needs the network to prefetch and disabling reconciles cached tiles, so neither is allowed offline. Such rows show "Offline sync off (unavailable offline)".
-- Per-layer percentage is derived via `useMemo` from `tilePrefetchJobs` grouped by `layerId`. Runtime-cached (manual) tiles are excluded from per-layer math.
+- Every layer uses the same immutable coordinate count `N`; overall expected
+  coverage is exactly `N * enabled layer count`. Enabling a layer changes the
+  total once and never reconstructs it from streamed jobs.
+- Current-operation progress and last committed usable coverage are separate.
+  Rolling refresh can restart its replacement counter without making usable
+  coverage move backward.
+- Every tile transition updates in-memory state immediately. React publication
+  is coalesced to the next animation frame, with a 50 ms WebView fallback, and
+  is independent of one-second durable checkpoints.
+- Snapshots also expose audited and queued counters. Completed and failed are
+  mutually exclusive normalized layer values; persisted corrupt counters are
+  repaired during preload rather than clamped only in the view.
 - `layerOfflineSync` is shared state owned by `AuthenticatedAppShell` and passed to both Dashboard (for offline selection gating) and Settings.
 
 ### Tutorial
@@ -75,8 +119,9 @@ A dedicated section rendered **only while offline-locked** (`isOfflineLocked`), 
 
 ## State ownership
 
-- Sync stats (`cacheBytes`, `manualTileCount`): local state, polled via `useEffect`.
-- Sync metrics (`syncTotalTiles`, `syncProcessedTiles`, `syncPct`): derived via `useMemo` from `tilePrefetchJobs` + `manualTileCount`.
+- Cache bytes and sync metrics: read from `offlineMapSync`, a dedicated
+  `useSyncExternalStore` subscription. Per-tile events never publish through
+  the controller-wide observer.
 - `lastSyncedAt`: owned by `SpeleoDBController`, persisted via `PreferencesService`, exposed through `useSpeleoDB()`. UI is read-only.
 - `showLandmarks`: shared state owned by `AuthenticatedAppShell`, passed via props.
 - `colorMode`: shared state owned by `AuthenticatedAppShell`, passed via props.
@@ -88,12 +133,12 @@ A dedicated section rendered **only while offline-locked** (`isOfflineLocked`), 
 - Logout modal: local state (`showLogoutConfirmModal`, `isLoggingOut`).
 - Reconnect flow: local state (`isReconnecting`, `showReconnectFailedModal`). The authoritative online/offline state (`isOfflineLocked`) is owned by `SpeleoDBController` and consumed read-only via `useSpeleoDB()`.
 
-## Polling lifecycle
+## Progress lifecycle
 
-The 3-second polling interval for cache stats starts when Settings mounts. The
-authenticated shell unmounts Settings on every other route, so the effect
-cleanup stops the interval. Returning to `/settings` mounts a fresh page,
-refreshes immediately, and starts one new interval.
+There is no Settings polling interval. The offline-map store is updated after
+each audit, commit, and failure and notifies the mounted page at paint cadence.
+Leaving Settings removes only its subscription; synchronization and durable
+checkpoints continue without a hidden page timer.
 
 ## Offline behavior
 
@@ -105,7 +150,8 @@ refreshes immediately, and starts one new interval.
 
 - Page component: `src/pages/Settings.tsx`
 - Tab bar: `src/components/AppTabBar.tsx`
-- Tile cache queries: `src/services/tileCache/TileCacheRepository.ts`
+- Offline-map engine/store: `src/services/OfflineMapSyncEngine.ts`,
+  `src/services/OfflineMapSyncStore.ts`
 - Landmark persistence: `src/services/PreferencesService.ts`
 - Color mode persistence: `src/services/PreferencesService.ts`
 - Measurement unit persistence: `src/services/PreferencesService.ts`
@@ -117,7 +163,8 @@ refreshes immediately, and starts one new interval.
 ## Change checklist
 
 1. Keep sync metric computation inside `useMemo`.
-2. Verify the polling interval stops when navigating away from `/settings`.
+2. Verify Settings never polls IndexedDB and only the offline-map subscription
+   updates per-tile rows.
 3. Verify the logout guard prevents double-submission.
 4. Verify landmark toggle propagates to Dashboard map layers in real time.
 5. Verify color mode selector propagates to Dashboard map rendering in real time.

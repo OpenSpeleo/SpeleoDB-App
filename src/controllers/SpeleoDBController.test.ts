@@ -4,10 +4,11 @@ import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import { type HttpResponse } from '../services/HttpClient';
 import type { AuthTokenResponse } from '../types';
-import { TilePrefetchService } from '../services/TilePrefetchService';
+import type { OfflineMapSyncEngineLike } from '../services/OfflineMapSyncEngine';
+import { EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT } from '../services/OfflineMapSyncStore';
+import type { OfflineMapSyncRequest } from '../types/offlineMapSync';
 import type { Project } from '../types/project';
-import type { TilePrefetchJobState } from '../types/tilePrefetch';
-import { getTile, upsertTile } from '../services/tileCache/TileCacheRepository';
+import { __seedTileCacheEntryForTests, getTile } from '../services/tileCache/TileCacheRepository';
 import { allowConsoleWarn } from '../test/consoleGuard';
 import { createAbortError } from '../utils/abort';
 import { OfflineOpStore } from '../offline/OfflineOpStore';
@@ -18,6 +19,32 @@ import type { RecordingNotificationPermissionGuard } from '../services/Recording
 import { ProjectGeoJSONAnalysisError } from '../services/ProjectGeoJSONAnalyzer';
 import type { LocalGpsTrack, RecordedPoint } from '../types/gpsTrack';
 import type { SessionStore, StoredSession } from '../services/SecureSessionStore';
+
+function expectRebuildRequest(
+  request: OfflineMapSyncRequest,
+): asserts request is Extract<OfflineMapSyncRequest, { mode: 'rebuild' }> {
+  expect(request.mode).toBe('rebuild');
+  if (request.mode !== 'rebuild') throw new Error('Expected a rebuild request');
+}
+
+// Tests that exercise controller behavior without an explicit engine must not
+// leave a real background downloader running into the next test. Engine
+// integration is covered at its own storage/network seam.
+vi.mock('../services/LazyOfflineMapSyncEngine', () => ({
+  LazyOfflineMapSyncEngine: class {
+    subscribe() { return () => {}; }
+    getSnapshot() { return EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT; }
+    async preload() {}
+    async schedule() {
+      return { coordinateCount: 0, scheduledTileCount: 0, failedTileCount: 0 };
+    }
+    async waitForIdle() {}
+    resumeBlocked() {}
+    async releaseLayer() {}
+    cancel() {}
+    dispose() {}
+  },
+}));
 
 function createProjectFixture(
   overrides: Omit<Partial<Project>, 'latest_commit'> & {
@@ -181,6 +208,7 @@ function createMockCache(): ProjectCacheService {
   // Stateful GPS-track caches so applyGpsTrackUpsert/Removal + sync reflect back.
   let gpsTracks: unknown[] | null = null;
   const gpsGeo = new Map<string, unknown>();
+  const overlayGeoJSON = new Map<string, unknown>();
   const projectGeoJSON = new Map<string, import('../types/projectGeoJSON').ProjectGeoJSONCacheRecord>();
   const cache = {
     getProjects: vi.fn(async () => null),
@@ -215,8 +243,11 @@ function createMockCache(): ProjectCacheService {
       return true;
     }),
     acknowledgeProjectGeoJSONQuarantine: vi.fn(async () => true),
-    getOverlayGeoJSON: vi.fn(async () => null),
-    setOverlayGeoJSON: vi.fn(async () => true),
+    getOverlayGeoJSON: vi.fn(async (id: string) => overlayGeoJSON.get(id) ?? null),
+    setOverlayGeoJSON: vi.fn(async (id: string, value: unknown) => {
+      overlayGeoJSON.set(id, value);
+      return true;
+    }),
     getCachedCommitId: vi.fn(async () => null),
     getLandmarkCollections: vi.fn(async () => null),
     setLandmarkCollections: vi.fn(async () => true),
@@ -235,6 +266,12 @@ function createMockCache(): ProjectCacheService {
     }),
     clearAll: vi.fn(async () => {}),
   } as unknown as ProjectCacheService;
+  cache.getOverlayGeoJSONForOfflineMap = vi.fn(
+    async (id, options) => (
+      await cache.getOverlayGeoJSON(id, options)
+      ?? { type: 'FeatureCollection', features: [] }
+    ),
+  );
   return cache;
 }
 
@@ -258,22 +295,20 @@ function createMemoryOpStore(): OfflineOpStore {
 }
 
 function createMockTilePrefetch(
-  overrides: Partial<TilePrefetchService> = {},
-): TilePrefetchService {
+  overrides: Partial<OfflineMapSyncEngineLike> = {},
+): OfflineMapSyncEngineLike {
   return {
-    enqueueProjects: vi.fn(async () => {}),
-    enqueueTileUrls: vi.fn(async () => {}),
-    removeLayer: vi.fn(async () => {}),
-    removeTarget: vi.fn(async () => {}),
-    resumeBlockedJobs: vi.fn(),
-    subscribe: vi.fn((listener: (jobs: TilePrefetchJobState[]) => void) => {
-      listener([]);
-      return () => {};
-    }),
+    subscribe: vi.fn(() => () => {}),
+    getSnapshot: vi.fn(() => EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT),
+    preload: vi.fn(async () => {}),
+    schedule: vi.fn(async () => ({ coordinateCount: 0, scheduledTileCount: 0, failedTileCount: 0 })),
+    resumeBlocked: vi.fn(),
+    releaseLayer: vi.fn(async () => {}),
+    cancel: vi.fn(),
     waitForIdle: vi.fn(async () => {}),
     dispose: vi.fn(),
     ...overrides,
-  } as unknown as TilePrefetchService;
+  };
 }
 
 /**
@@ -281,45 +316,34 @@ function createMockTilePrefetch(
  * can simulate a storage-blocked job reaching the controller.
  */
 function createControllableTilePrefetch() {
-  let listenerRef: (jobs: TilePrefetchJobState[]) => void = () => {};
-  const resumeBlockedJobs = vi.fn();
+  let listenerRef: () => void = () => {};
+  let snapshot = EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT;
+  const resumeBlocked = vi.fn();
   const service = {
-    enqueueProjects: vi.fn(async () => {}),
-    enqueueTileUrls: vi.fn(async () => {}),
-    removeLayer: vi.fn(async () => {}),
-    removeTarget: vi.fn(async () => {}),
-    resumeBlockedJobs,
-    subscribe: vi.fn((listener: (jobs: TilePrefetchJobState[]) => void) => {
+    subscribe: vi.fn((listener: () => void) => {
       listenerRef = listener;
-      listener([]);
       return () => {};
     }),
+    getSnapshot: vi.fn(() => snapshot),
+    preload: vi.fn(async () => {}),
+    schedule: vi.fn(async () => ({ coordinateCount: 0, scheduledTileCount: 0, failedTileCount: 0 })),
+    resumeBlocked,
+    releaseLayer: vi.fn(async () => {}),
+    cancel: vi.fn(),
     waitForIdle: vi.fn(async () => {}),
     dispose: vi.fn(),
-  } as unknown as TilePrefetchService;
+  } satisfies OfflineMapSyncEngineLike;
   return {
     service,
-    resumeBlockedJobs,
-    emit: (jobs: TilePrefetchJobState[]) => listenerRef(jobs),
-  };
-}
-
-function blockedLandmarkJob(): TilePrefetchJobState {
-  return {
-    layerId: 'esri-satellite',
-    projectId: 'landmarks',
-    commitId: 'sig-1',
-    status: 'paused',
-    zoomMin: 0,
-    zoomMax: 18,
-    padMeters: 50,
-    totalTiles: 10,
-    completedTiles: 0,
-    failedTiles: 0,
-    bytesDownloaded: 0,
-    estimatedBytes: 0,
-    blockedByStorage: true,
-    updatedAt: 1,
+    resumeBlocked,
+    emit: (blockedByStorage: boolean) => {
+      snapshot = {
+        ...EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT,
+        blockedByStorage,
+        phase: blockedByStorage ? 'storage-blocked' : 'idle',
+      };
+      listenerRef();
+    },
   };
 }
 
@@ -358,7 +382,7 @@ describe('SpeleoDBController', () => {
     service = createMockService();
     prefs = createMockPrefs();
     cache = createMockCache();
-    controller = new SpeleoDBController(service, prefs, cache);
+    controller = new SpeleoDBController(service, prefs, cache, createMockTilePrefetch());
     vi.restoreAllMocks();
   });
 
@@ -743,7 +767,7 @@ describe('SpeleoDBController', () => {
 
     it('clears cached map tiles on logout', async () => {
       const tileUrl = 'https://tiles.example.com/logout-clear.png';
-      await upsertTile(tileUrl, new Uint8Array([1, 2, 3]).buffer, {
+      await __seedTileCacheEntryForTests(tileUrl, new Uint8Array([1, 2, 3]).buffer, {
         pinnedByAutoPrefetch: false,
       });
       expect(await getTile(tileUrl)).not.toBeNull();
@@ -754,12 +778,11 @@ describe('SpeleoDBController', () => {
     });
 
     it('waits for project cache cleanup before resolving logout', async () => {
-      const mockTilePrefetch = {
+      const mockTilePrefetch = createMockTilePrefetch({
         subscribe: vi.fn(() => () => {}),
-        enqueueProjects: vi.fn(async () => {}),
         waitForIdle: vi.fn(async () => {}),
         dispose: vi.fn(),
-      } as unknown as TilePrefetchService;
+      });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       const clearAllResolver: { fn?: () => void } = {};
@@ -784,40 +807,14 @@ describe('SpeleoDBController', () => {
     });
 
     it('tears down in-memory tile prefetch runtime state on logout', async () => {
-      const unsubscribe = vi.fn();
-      let listener: (jobs: TilePrefetchJobState[]) => void = () => {};
-      const mockTilePrefetch = {
-        subscribe: vi.fn((cb: (jobs: TilePrefetchJobState[]) => void) => {
-          listener = cb;
-          return unsubscribe;
-        }),
-        enqueueProjects: vi.fn(async () => {}),
-        dispose: vi.fn(),
-      } as unknown as TilePrefetchService;
+      const mockTilePrefetch = createMockTilePrefetch({ dispose: vi.fn() });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
-      listener([{
-        layerId: 'esri-satellite',
-        projectId: 'p1',
-        commitId: 'c1',
-        status: 'queued',
-        zoomMin: 0,
-        zoomMax: 0,
-        padMeters: 50,
-        totalTiles: 1,
-        completedTiles: 0,
-        failedTiles: 0,
-        bytesDownloaded: 0,
-        estimatedBytes: 0,
-        updatedAt: Date.now(),
-      }]);
-      expect(controller.tilePrefetchJobs.length).toBe(1);
+      expect(controller.offlineMapSyncSnapshot.phase).toBe('idle');
 
       await controller.logout();
 
-      expect(unsubscribe).toHaveBeenCalledOnce();
       expect(mockTilePrefetch.dispose).toHaveBeenCalledOnce();
-      expect(controller.tilePrefetchJobs.length).toBe(0);
     });
   });
 
@@ -1371,7 +1368,7 @@ describe('SpeleoDBController', () => {
       expect(ctrl.isAuthenticated()).toBe(false);
       expect(cache.setValidatedProjectGeoJSON).not.toHaveBeenCalled();
       expect(cache.setQuarantinedProjectGeoJSON).not.toHaveBeenCalled();
-      expect(tilePrefetch.enqueueProjects).not.toHaveBeenCalled();
+      expect(tilePrefetch.schedule).not.toHaveBeenCalled();
       expect(ctrl.projectGeoJSONWarnings).toEqual([]);
       expect(ctrl.projects).toEqual([]);
       expect(ctrl.lastSyncedAt).toBeNull();
@@ -1616,11 +1613,10 @@ describe('SpeleoDBController', () => {
       expect(second.phases.geojsonSync).toMatchObject({ quarantinedProjectCount: 1 });
       expect(downloadJSON).toHaveBeenCalledOnce();
       expect(quarantineCache.setQuarantinedProjectGeoJSON).toHaveBeenCalledOnce();
-      expect(quarantineTile.enqueueProjects).not.toHaveBeenCalled();
-      expect(quarantineTile.removeTarget).toHaveBeenCalledWith(
-        'p1',
-        { signal: expect.any(AbortSignal) },
-      );
+      expect(quarantineTile.schedule).toHaveBeenCalled();
+      expect(vi.mocked(quarantineTile.schedule).mock.calls.every(
+        ([request]) => request.mode === 'rebuild' && request.plan.projects.length === 0,
+      )).toBe(true);
       expect(quarantineController.projectGeoJSONWarnings).toEqual([
         expect.objectContaining({ projectId: 'p1', commitId: 'commit-1', reason: 'bbox_too_large' }),
       ]);
@@ -1845,14 +1841,18 @@ describe('SpeleoDBController', () => {
         skippedProjectCount: 1,
         failedProjectCount: 1,
       });
-      expect(failingCache.getProjectGeoJSONRecord).toHaveBeenCalledOnce();
+      // Validation reads once; each replacement attempt re-reads the required
+      // current record and fails closed instead of omitting the project.
+      expect(failingCache.getProjectGeoJSONRecord).toHaveBeenCalledTimes(3);
       expect(failingCache.setValidatedProjectGeoJSON).not.toHaveBeenCalled();
       expect(failingCache.setQuarantinedProjectGeoJSON).not.toHaveBeenCalled();
       expect(analyzer.analyze).not.toHaveBeenCalled();
       expect(readFailureController.projectGeoJSONWarnings).toEqual([
         expect.objectContaining({ reason: 'validation_unavailable', persistent: false }),
       ]);
-      expect(tilePrefetch.removeTarget).toHaveBeenCalledTimes(2);
+      expect(tilePrefetch.schedule).not.toHaveBeenCalled();
+      expect(first.phases.tilePrefetch.status).toBe('failed');
+      expect(second.phases.tilePrefetch.status).toBe('failed');
     });
 
     it('keeps unversioned legacy bytes fail-closed offline without attributing or analyzing them', async () => {
@@ -2060,13 +2060,12 @@ describe('SpeleoDBController', () => {
 
   describe('syncProjects tile prefetch', () => {
     it('enqueues prefetch jobs after geojson sync', async () => {
-      const enqueueProjects = vi.fn(async () => {});
-      const subscribe = vi.fn(() => () => {});
-      const mockTilePrefetch = {
-        enqueueProjects,
-        enqueueTileUrls: vi.fn(async () => {}),
-        subscribe,
-      } as unknown as TilePrefetchService;
+      const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
+        coordinateCount: 1,
+        scheduledTileCount: 1,
+        failedTileCount: 0,
+      }));
+      const mockTilePrefetch = createMockTilePrefetch({ schedule });
 
       cache.getGeoJSON = vi.fn(async () => ({
         type: 'FeatureCollection',
@@ -2082,27 +2081,22 @@ describe('SpeleoDBController', () => {
       await controller.syncProjects();
       await Promise.resolve();
 
-      expect(enqueueProjects).toHaveBeenCalledOnce();
-      const firstCall = enqueueProjects.mock.calls.at(0);
-      expect(firstCall).toBeDefined();
-      if (!firstCall) return;
-      const [projects, request] = firstCall as unknown as [
-        Array<{ projectId: string }>,
-        { minZoom: number; maxZoom: number; padMeters: number },
-      ];
-      expect(projects[0].projectId).toBe('p1');
-      expect(request.minZoom).toBe(0);
-      expect(request.maxZoom).toBe(18);
-      expect(request.padMeters).toBe(50);
+      expect(schedule).toHaveBeenCalledOnce();
+      const request = schedule.mock.calls[0][0];
+      expectRebuildRequest(request);
+      expect(request.plan.projects).toHaveLength(1);
+      expect(request.plan.minZoom).toBe(0);
+      expect(request.plan.maxZoom).toBe(18);
+      expect(request.plan.padMeters).toBe(50);
     });
 
     it('enqueues a combined landmarks tile prefetch job from cached landmark points', async () => {
-      const enqueueTileUrls = vi.fn(async () => {});
-      const mockTilePrefetch = {
-        enqueueProjects: vi.fn(async () => {}),
-        enqueueTileUrls,
-        subscribe: vi.fn(() => () => {}),
-      } as unknown as TilePrefetchService;
+      const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
+        coordinateCount: 7,
+        scheduledTileCount: 7,
+        failedTileCount: 0,
+      }));
+      const mockTilePrefetch = createMockTilePrefetch({ schedule });
 
       cache.getGeoJSON = vi.fn(async () => ({
         type: 'FeatureCollection',
@@ -2126,27 +2120,22 @@ describe('SpeleoDBController', () => {
       const result = await controller.syncProjects();
       await Promise.resolve();
 
-      expect(enqueueTileUrls).toHaveBeenCalledOnce();
-      const [target] = enqueueTileUrls.mock.calls.at(0) as unknown as [
-        { id: string; commitId: string; tileUrls: string[]; zoomMin: number; zoomMax: number; padMeters: number },
-      ];
-      expect(target.id).toBe('landmarks');
-      expect(target.zoomMin).toBe(0);
-      expect(target.zoomMax).toBe(18);
-      expect(target.padMeters).toBe(50);
-      expect(target.tileUrls.length).toBeGreaterThan(0);
-      expect(target.commitId).toMatch(/^sig-2-/);
+      const request = schedule.mock.calls[0][0];
+      expectRebuildRequest(request);
+      expect(request.plan.points).toEqual(
+        expect.arrayContaining([[10.4, 45.3], [-73.9, 40.7]]),
+      );
       expect(result.phases.tilePrefetch.landmarkScheduled).toBe(true);
-      expect(result.phases.tilePrefetch.landmarkTileCount).toBe(target.tileUrls.length);
+      expect(result.phases.tilePrefetch.landmarkTileCount).toBe(7);
     });
 
     it('skips landmark tile prefetch when there are no landmark points', async () => {
-      const enqueueTileUrls = vi.fn(async () => {});
-      const mockTilePrefetch = {
-        enqueueProjects: vi.fn(async () => {}),
-        enqueueTileUrls,
-        subscribe: vi.fn(() => () => {}),
-      } as unknown as TilePrefetchService;
+      const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
+        coordinateCount: 0,
+        scheduledTileCount: 0,
+        failedTileCount: 0,
+      }));
+      const mockTilePrefetch = createMockTilePrefetch({ schedule });
 
       cache.getOverlayGeoJSON = vi.fn(async () => ({ type: 'FeatureCollection', features: [] }));
 
@@ -2155,18 +2144,20 @@ describe('SpeleoDBController', () => {
 
       const result = await controller.syncProjects();
 
-      expect(enqueueTileUrls).not.toHaveBeenCalled();
+      const request = schedule.mock.calls[0][0];
+      expectRebuildRequest(request);
+      expect(request.plan.points).toEqual([]);
       expect(result.phases.tilePrefetch.landmarkScheduled).toBe(false);
       expect(result.phases.tilePrefetch.landmarkTileCount).toBe(0);
     });
 
     it('produces a stable landmark signature across repeated syncs', async () => {
-      const enqueueTileUrls = vi.fn(async () => {});
-      const mockTilePrefetch = {
-        enqueueProjects: vi.fn(async () => {}),
-        enqueueTileUrls,
-        subscribe: vi.fn(() => () => {}),
-      } as unknown as TilePrefetchService;
+      const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
+        coordinateCount: 1,
+        scheduledTileCount: 1,
+        failedTileCount: 0,
+      }));
+      const mockTilePrefetch = createMockTilePrefetch({ schedule });
 
       cache.getOverlayGeoJSON = vi.fn(async (id: string) =>
         id === 'landmarks'
@@ -2185,19 +2176,20 @@ describe('SpeleoDBController', () => {
       await controller.syncProjects();
       await controller.syncProjects();
 
-      const first = enqueueTileUrls.mock.calls.at(0) as unknown as [{ commitId: string }];
-      const second = enqueueTileUrls.mock.calls.at(1) as unknown as [{ commitId: string }];
-      expect(first[0].commitId).toBe(second[0].commitId);
+      const firstRequest = schedule.mock.calls[0][0];
+      const secondRequest = schedule.mock.calls[1][0];
+      expectRebuildRequest(firstRequest);
+      expectRebuildRequest(secondRequest);
+      expect(firstRequest.plan.sourceRevision).toBe(secondRequest.plan.sourceRevision);
     });
 
     it('schedules satellite first, then enabled extra layers at their max zoom', async () => {
-      const enqueueProjects = vi.fn(async () => {});
-      const mockTilePrefetch = {
-        enqueueProjects,
-        enqueueTileUrls: vi.fn(async () => {}),
-        removeLayer: vi.fn(async () => {}),
-        subscribe: vi.fn(() => () => {}),
-      } as unknown as TilePrefetchService;
+      const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
+        coordinateCount: 1,
+        scheduledTileCount: 2,
+        failedTileCount: 0,
+      }));
+      const mockTilePrefetch = createMockTilePrefetch({ schedule });
 
       cache.getGeoJSON = vi.fn(async () => ({
         type: 'FeatureCollection',
@@ -2214,29 +2206,23 @@ describe('SpeleoDBController', () => {
       await controller.syncProjects();
       await Promise.resolve();
 
-      const calls = enqueueProjects.mock.calls as unknown as Array<
-        [unknown, { maxZoom: number; tileUrlTemplate: string }, { layerId?: string } | undefined]
-      >;
-      const layerIds = calls.map((c) => c[2]?.layerId);
+      const request = schedule.mock.calls[0][0];
+      expectRebuildRequest(request);
+      const layerIds = request.layers.map((layer) => layer.id);
       expect(layerIds[0]).toBe('esri-satellite');
       expect(layerIds).toContain('esri-world-hillshade');
-
-      const hillCall = calls.find((c) => c[2]?.layerId === 'esri-world-hillshade');
-      expect(hillCall).toBeDefined();
-      const request = hillCall![1];
-      // Hillshade matches satellite's z18 for offline parity.
-      expect(request.maxZoom).toBe(18);
-      expect(request.tileUrlTemplate).toContain('World_Hillshade');
+      expect(request.plan.maxZoom).toBe(18);
+      expect(request.layers.find((layer) => layer.id === 'esri-world-hillshade')?.tileUrlTemplate)
+        .toContain('World_Hillshade');
     });
 
     it('schedules only satellite when no extra layers are enabled', async () => {
-      const enqueueProjects = vi.fn(async () => {});
-      const mockTilePrefetch = {
-        enqueueProjects,
-        enqueueTileUrls: vi.fn(async () => {}),
-        removeLayer: vi.fn(async () => {}),
-        subscribe: vi.fn(() => () => {}),
-      } as unknown as TilePrefetchService;
+      const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
+        coordinateCount: 1,
+        scheduledTileCount: 1,
+        failedTileCount: 0,
+      }));
+      const mockTilePrefetch = createMockTilePrefetch({ schedule });
 
       cache.getGeoJSON = vi.fn(async () => ({
         type: 'FeatureCollection',
@@ -2249,21 +2235,17 @@ describe('SpeleoDBController', () => {
       await controller.syncProjects();
       await Promise.resolve();
 
-      const calls = enqueueProjects.mock.calls as unknown as Array<
-        [unknown, unknown, { layerId?: string } | undefined]
-      >;
-      const layerIds = calls.map((c) => c[2]?.layerId);
+      const layerIds = schedule.mock.calls[0][0].layers.map((layer) => layer.id);
       expect(layerIds).toEqual(['esri-satellite']);
     });
 
     it('setLayerOfflineSync(true) persists opt-in and schedules that layer', async () => {
-      const enqueueProjects = vi.fn(async () => {});
-      const mockTilePrefetch = {
-        enqueueProjects,
-        enqueueTileUrls: vi.fn(async () => {}),
-        removeLayer: vi.fn(async () => {}),
-        subscribe: vi.fn(() => () => {}),
-      } as unknown as TilePrefetchService;
+      const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
+        coordinateCount: 1,
+        scheduledTileCount: 1,
+        failedTileCount: 0,
+      }));
+      const mockTilePrefetch = createMockTilePrefetch({ schedule });
 
       cache.getGeoJSON = vi.fn(async () => ({
         type: 'FeatureCollection',
@@ -2273,26 +2255,19 @@ describe('SpeleoDBController', () => {
       await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
       await controller.syncProjects();
-      enqueueProjects.mockClear();
+      schedule.mockClear();
 
       await controller.setLayerOfflineSync('esri-world-hillshade', true);
 
       expect(prefs.getPreferences().layerOfflineSync?.['esri-world-hillshade']).toBe(true);
-      const calls = enqueueProjects.mock.calls as unknown as Array<
-        [unknown, unknown, { layerId?: string } | undefined]
-      >;
-      const hillCall = calls.find((c) => c[2]?.layerId === 'esri-world-hillshade');
-      expect(hillCall).toBeDefined();
+      expect(schedule).toHaveBeenCalledOnce();
+      expect(schedule.mock.calls[0][0].layers.map((layer) => layer.id))
+        .toContain('esri-world-hillshade');
     });
 
     it('setLayerOfflineSync(false) removes jobs and evicts the layer tiles', async () => {
-      const removeLayer = vi.fn(async () => {});
-      const mockTilePrefetch = {
-        enqueueProjects: vi.fn(async () => {}),
-        enqueueTileUrls: vi.fn(async () => {}),
-        removeLayer,
-        subscribe: vi.fn(() => () => {}),
-      } as unknown as TilePrefetchService;
+      const releaseLayer = vi.fn(async () => {});
+      const mockTilePrefetch = createMockTilePrefetch({ releaseLayer });
 
       await prefs.session.establish({
         token: 'tok',
@@ -2303,7 +2278,7 @@ describe('SpeleoDBController', () => {
 
       const hillTileUrl =
         'https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer/tile/5/1/2';
-      await upsertTile(hillTileUrl, new Uint8Array([1, 2, 3]).buffer, {
+      await __seedTileCacheEntryForTests(hillTileUrl, new Uint8Array([1, 2, 3]).buffer, {
         pinnedByAutoPrefetch: true,
       });
       expect(await getTile(hillTileUrl)).not.toBeNull();
@@ -2311,34 +2286,36 @@ describe('SpeleoDBController', () => {
       await controller.setLayerOfflineSync('esri-world-hillshade', false);
 
       expect(prefs.getPreferences().layerOfflineSync?.['esri-world-hillshade']).toBe(false);
-      expect(removeLayer).toHaveBeenCalledWith('esri-world-hillshade');
+      expect(releaseLayer).toHaveBeenCalledWith('esri-world-hillshade');
       expect(await getTile(hillTileUrl)).toBeNull();
     });
 
     it('setLayerOfflineSync ignores the forced satellite layer', async () => {
-      const removeLayer = vi.fn(async () => {});
-      const enqueueProjects = vi.fn(async () => {});
-      const mockTilePrefetch = {
-        enqueueProjects,
-        enqueueTileUrls: vi.fn(async () => {}),
-        removeLayer,
-        subscribe: vi.fn(() => () => {}),
-      } as unknown as TilePrefetchService;
+      const releaseLayer = vi.fn(async () => {});
+      const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
+        coordinateCount: 0,
+        scheduledTileCount: 0,
+        failedTileCount: 0,
+      }));
+      const mockTilePrefetch = createMockTilePrefetch({ releaseLayer, schedule });
 
       await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.setLayerOfflineSync('esri-satellite', false);
 
-      expect(removeLayer).not.toHaveBeenCalled();
-      expect(enqueueProjects).not.toHaveBeenCalled();
+      expect(releaseLayer).not.toHaveBeenCalled();
+      expect(schedule).not.toHaveBeenCalled();
       expect(prefs.getPreferences().layerOfflineSync?.['esri-satellite']).toBeUndefined();
     });
 
     it('aborts an in-flight layer prefetch when the user logs out', async () => {
-      const enqueueProjects = vi.fn(async () => {});
-      const enqueueTileUrls = vi.fn(async () => {});
-      const mockTilePrefetch = createMockTilePrefetch({ enqueueProjects, enqueueTileUrls });
+      const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
+        coordinateCount: 1,
+        scheduledTileCount: 1,
+        failedTileCount: 0,
+      }));
+      const mockTilePrefetch = createMockTilePrefetch({ schedule });
 
       cache.getGeoJSON = vi.fn(async () => ({
         type: 'FeatureCollection',
@@ -2350,26 +2327,28 @@ describe('SpeleoDBController', () => {
       await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
       await controller.syncProjects();
-      enqueueProjects.mockClear();
-      enqueueTileUrls.mockClear();
+      schedule.mockClear();
 
-      // Now hang the *layer* prefetch at the landmark-load step so we can log
-      // out while it is in flight (sync above used the default null overlay).
-      const deferred = createDeferred<GeoJSON.FeatureCollection | null>();
-      cache.getOverlayGeoJSON = vi.fn(() => deferred.promise);
+      // Hang the active-plan reuse request so logout can invalidate it.
+      const deferred = createDeferred<{
+        coordinateCount: number;
+        scheduledTileCount: number;
+        failedTileCount: number;
+      }>();
+      schedule.mockImplementationOnce(() => deferred.promise);
 
       const pending = controller.setLayerOfflineSync('esri-world-hillshade', true);
       await flushPromises(3);
+      const layerRequest = schedule.mock.calls[0][0];
 
-      // Logging out must abort the layer-prefetch context (not just the sync /
-      // validation contexts), so the in-flight prefetch bails before enqueueing.
+      // Logging out aborts the layer request even if the engine settles late.
       await controller.logout();
 
-      deferred.resolve(null);
-      await pending;
+      deferred.resolve({ coordinateCount: 1, scheduledTileCount: 2, failedTileCount: 0 });
 
-      expect(enqueueTileUrls).not.toHaveBeenCalled();
-      expect(enqueueProjects).not.toHaveBeenCalled();
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+      expect(layerRequest.mode).toBe('reuse-active-plan');
+      expect(layerRequest.signal?.aborted).toBe(true);
     });
 
     it('does not call network project sync while offline lock is active', async () => {
@@ -2865,7 +2844,7 @@ describe('SpeleoDBController', () => {
       expect(ctrl.isTileCacheOverLimit).toBe(false);
       expect(ctrl.needsAutoStoragePrompt).toBe(false);
 
-      tp.emit([blockedLandmarkJob()]);
+      tp.emit(true);
 
       expect(ctrl.isTileCacheOverLimit).toBe(true);
       expect(ctrl.needsAutoStoragePrompt).toBe(true);
@@ -2875,7 +2854,7 @@ describe('SpeleoDBController', () => {
     it('acknowledging the prompt persists it and suppresses the auto popup (warning stays)', () => {
       const tp = createControllableTilePrefetch();
       const ctrl = new SpeleoDBController(service, prefs, cache, tp.service);
-      tp.emit([blockedLandmarkJob()]);
+      tp.emit(true);
 
       ctrl.acknowledgeStoragePrompt();
 
@@ -2897,7 +2876,7 @@ describe('SpeleoDBController', () => {
       const tp = createControllableTilePrefetch();
       const ctrl = new SpeleoDBController(service, acknowledgedPrefs, cache, tp.service);
 
-      tp.emit([blockedLandmarkJob()]);
+      tp.emit(true);
 
       expect(ctrl.isTileCacheOverLimit).toBe(true);
       expect(ctrl.needsAutoStoragePrompt).toBe(false);
@@ -2906,7 +2885,7 @@ describe('SpeleoDBController', () => {
     it('approving persists both flags, clears over-limit, and resumes prefetch', () => {
       const tp = createControllableTilePrefetch();
       const ctrl = new SpeleoDBController(service, prefs, cache, tp.service);
-      tp.emit([blockedLandmarkJob()]);
+      tp.emit(true);
 
       ctrl.approveTileCacheOverLimit();
 
@@ -2920,7 +2899,7 @@ describe('SpeleoDBController', () => {
       // Approval lifts the cap, so the over-limit condition no longer surfaces.
       expect(ctrl.isTileCacheOverLimit).toBe(false);
       expect(ctrl.needsAutoStoragePrompt).toBe(false);
-      expect(tp.resumeBlockedJobs).toHaveBeenCalledOnce();
+      expect(tp.resumeBlocked).toHaveBeenCalledOnce();
     });
 
     it('manual request re-opens the prompt even after acknowledgement', () => {
@@ -2931,7 +2910,7 @@ describe('SpeleoDBController', () => {
       });
       const tp = createControllableTilePrefetch();
       const ctrl = new SpeleoDBController(service, acknowledgedPrefs, cache, tp.service);
-      tp.emit([blockedLandmarkJob()]);
+      tp.emit(true);
 
       expect(ctrl.needsAutoStoragePrompt).toBe(false);
       expect(ctrl.storageConsentRequired).toBe(false);
@@ -2954,9 +2933,9 @@ describe('SpeleoDBController', () => {
       // A real cap-lift would have cleared the flag; simulate the runtime
       // failing to propagate by emitting a still-blocked job after approval.
       allowConsoleWarn(/blocked by storage while overflow is approved/);
-      tp.emit([blockedLandmarkJob()]);
+      tp.emit(true);
       // Latched: a second emit of the same stuck state must not warn again.
-      tp.emit([blockedLandmarkJob()]);
+      tp.emit(true);
 
       // The Settings warning still stays hidden (approval semantics unchanged).
       expect(ctrl.isTileCacheOverLimit).toBe(false);
@@ -3842,8 +3821,8 @@ function gpsControllerWith(opts: {
   remoteTracks?: Record<string, unknown>[];
   /** Make token validation fail so validateSession() locks the app offline. */
   failValidate?: boolean;
-  /** Inject a specific tile-prefetch service (e.g. a controllable one). */
-  tilePrefetch?: TilePrefetchService;
+  /** Inject a specific offline-map engine (e.g. a controllable one). */
+  tilePrefetch?: OfflineMapSyncEngineLike;
 } = {}) {
   const store = opts.store ?? createMemoryGpsStore();
   const watcher = opts.watcher ?? createFakeWatcher();
@@ -4374,7 +4353,7 @@ describe('SpeleoDBController GPS tracks', () => {
       // A GPS-neutral notify (tile prefetch progress) must NOT rebuild the list:
       // the reference stays identical so the Dashboard's gps-tracks map source
       // is not re-fed on every prefetch tick.
-      tile.emit([blockedLandmarkJob()]);
+      tile.emit(true);
       expect(controller.gpsTracks).toBe(before);
 
       // An actual GPS change DOES produce a new reference + content.

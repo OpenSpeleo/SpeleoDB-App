@@ -6,6 +6,9 @@ This folder contains product and engineering documentation for core app behavior
 
 - `authentication.md`: email/password and OAuth-token login flows, session persistence, identity handling, security boundaries, and offline behavior.
 - `offline-mode.md`: how offline mode works, startup auth timeout behavior, logout rules, and test expectations.
+- `tile-cache-architecture.md`: cache-first tile serving, 180-day freshness,
+  fail-closed streamed planning, additive IndexedDB v8 staging/layer generations, six-worker
+  downloads, paint-cadence progress, refresh, and performance regression seams.
 - `logout-behavior.md`: when logout/cache purge happens and what data is cleared.
 - `security-storage.md`: native credential storage, session migration ordering,
   rollback, backup boundaries, and platform verification.
@@ -56,7 +59,8 @@ This folder contains product and engineering documentation for core app behavior
 - `project-colors.md`: model-driven `project.color` contract, fallback semantics, and downstream consumers.
 - `guided-tour.md`: interactive guided tour flow, driver.js integration, step definitions, and architecture.
 - `dashboard-map-overlays.md`: read-only dashboard overlay endpoints, icon/label mapping, marker detail modal contract, share functionality, and offline cache lifecycle.
-- `settings.md`: Settings page sections (sync stats, map settings, tutorial, account), state ownership, polling lifecycle, and offline behavior.
+- `settings.md`: Settings page sections (event-driven sync stats, map settings,
+  tutorial, account), state ownership, progress lifecycle, and offline behavior.
 - `map-depth-and-scale.md`: dashboard distance scale, project/depth color mode selector, depth gauge behavior, and touch-first depth probe contract.
 - `depth-domain-per-project-cache.md`: design rationale, performance analysis, and test coverage for the per-project depth domain caching optimization.
 - `app-permissions.md`: native permissions (location, internet), privacy guarantees, and purpose strings for iOS and Android.

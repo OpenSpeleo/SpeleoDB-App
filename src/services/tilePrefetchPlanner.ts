@@ -172,17 +172,16 @@ function applyTileTemplate(
     .replace('{y}', String(y));
 }
 
-function collectTileUrls(
+function* iterateTileUrlsForBounds(
   bounds: Bounds,
   request: TilePrefetchRequest,
-  sink: (url: string) => void,
-): void {
+): Generator<string> {
   for (let zoom = request.minZoom; zoom <= request.maxZoom; zoom += 1) {
     const ranges = tileRangesForZoom(bounds, zoom);
     for (const range of ranges) {
       for (let x = range.xMin; x <= range.xMax; x += 1) {
         for (let y = range.yMin; y <= range.yMax; y += 1) {
-          sink(applyTileTemplate(request.tileUrlTemplate, zoom, x, y));
+          yield applyTileTemplate(request.tileUrlTemplate, zoom, x, y);
         }
       }
     }
@@ -198,6 +197,29 @@ export function buildTileUrlsForProjectBounds(
   projectBounds: ProjectGeoJSONBounds,
   request: TilePrefetchRequest,
 ): string[] {
+  const urls: string[] = [];
+  visitTileUrlsForProjectBounds(projectBounds, request, (url) => urls.push(url));
+  return urls;
+}
+
+export function visitTileUrlsForProjectBounds(
+  projectBounds: ProjectGeoJSONBounds,
+  request: TilePrefetchRequest,
+  sink: (url: string) => void,
+): void {
+  const seen = new Set<string>();
+  for (const url of iterateRawTileUrlsForProjectBounds(projectBounds, request)) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    sink(url);
+  }
+}
+
+/** Raw iterator for the offline planner; durable staging owns global dedupe. */
+export function* iterateRawTileUrlsForProjectBounds(
+  projectBounds: ProjectGeoJSONBounds,
+  request: TilePrefetchRequest,
+): Generator<string> {
   const latPad = metersToLatitudeDegrees(request.padMeters);
   const south = clampWebMercatorLatitude(projectBounds.south - latPad);
   const north = clampWebMercatorLatitude(projectBounds.north + latPad);
@@ -209,9 +231,7 @@ export function buildTileUrlsForProjectBounds(
     south,
     north,
   };
-  const urls = new Set<string>();
-  collectTileUrls(bounds, request, (url) => urls.add(url));
-  return Array.from(urls);
+  yield* iterateTileUrlsForBounds(bounds, request);
 }
 
 // ==================== Point collectors (landmarks) ====================
@@ -261,7 +281,29 @@ export function buildTileUrlsForPoints(
   points: ReadonlyArray<readonly [number, number]>,
   request: TilePrefetchRequest,
 ): string[] {
-  const urls = new Set<string>();
+  const urls: string[] = [];
+  visitTileUrlsForPoints(points, request, (url) => urls.push(url));
+  return urls;
+}
+
+export function visitTileUrlsForPoints(
+  points: ReadonlyArray<readonly [number, number]>,
+  request: TilePrefetchRequest,
+  sink: (url: string) => void,
+): void {
+  const seen = new Set<string>();
+  for (const url of iterateRawTileUrlsForPoints(points, request)) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    sink(url);
+  }
+}
+
+/** Raw iterator for the offline planner; durable staging owns global dedupe. */
+export function* iterateRawTileUrlsForPoints(
+  points: ReadonlyArray<readonly [number, number]>,
+  request: TilePrefetchRequest,
+): Generator<string> {
   for (const [lng, lat] of points) {
     if (
       !Number.isFinite(lng)
@@ -273,9 +315,144 @@ export function buildTileUrlsForPoints(
     ) continue;
     const bounds = computePaddedBoundsFromCoords([lng], lat, lat, request.padMeters);
     if (!bounds) continue;
-    collectTileUrls(bounds, request, (url) => urls.add(url));
+    yield* iterateTileUrlsForBounds(bounds, request);
   }
-  return Array.from(urls);
+}
+
+function longitudeToFractionalTileX(lng: number, zoom: number): number {
+  return ((normalizeLongitude(lng) + 180) / 360) * 2 ** zoom;
+}
+
+function latitudeToFractionalTileY(lat: number, zoom: number): number {
+  const rad = clampWebMercatorLatitude(lat) * Math.PI / 180;
+  return (1 - Math.log(Math.tan(Math.PI / 4 + rad / 2)) / Math.PI)
+    / 2 * 2 ** zoom;
+}
+
+function* iteratePathTilesWithPadding(
+  request: TilePrefetchRequest,
+  zoom: number,
+  x: number,
+  y: number,
+  latitude: number,
+): Generator<string> {
+  const count = 2 ** zoom;
+  const metersPerTile = 40_075_016.686 * Math.max(Math.cos(latitude * Math.PI / 180), 1e-6)
+    / count;
+  const radius = Math.max(0, Math.ceil(request.padMeters / metersPerTile));
+  for (let dx = -radius; dx <= radius; dx += 1) {
+    const wrappedX = ((x + dx) % count + count) % count;
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      const tileY = y + dy;
+      if (tileY < 0 || tileY >= count) continue;
+      yield applyTileTemplate(request.tileUrlTemplate, zoom, wrappedX, tileY);
+    }
+  }
+}
+
+/**
+ * Path-aware GPS collector. Each segment is traversed in Web-Mercator tile
+ * space at every requested zoom and expanded only by the configured padding.
+ * This avoids the enormous mostly-empty rectangle produced by a track bbox,
+ * including for tracks that cross the antimeridian.
+ */
+export function buildTileUrlsForPaths(
+  paths: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
+  request: TilePrefetchRequest,
+): string[] {
+  const urls: string[] = [];
+  visitTileUrlsForPaths(paths, request, (url) => urls.push(url));
+  return urls;
+}
+
+export function visitTileUrlsForPaths(
+  paths: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
+  request: TilePrefetchRequest,
+  sink: (url: string) => void,
+): void {
+  const seen = new Set<string>();
+  for (const url of iterateRawTileUrlsForPaths(paths, request)) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    sink(url);
+  }
+}
+
+/** Raw iterator for the offline planner; durable staging owns global dedupe. */
+export function* iterateRawTileUrlsForPaths(
+  paths: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
+  request: TilePrefetchRequest,
+): Generator<string> {
+  for (const path of paths) {
+    let previous: readonly [number, number] | null = null;
+    let emittedSegment = false;
+    for (const coordinate of path) {
+      const [endLng, endLat] = coordinate;
+      if (
+        !Number.isFinite(endLng)
+        || !Number.isFinite(endLat)
+        || endLng < -180
+        || endLng > 180
+        || endLat < -90
+        || endLat > 90
+      ) continue;
+      if (!previous) {
+        previous = coordinate;
+        continue;
+      }
+      const [startLng, startLat] = previous;
+      for (let zoom = request.minZoom; zoom <= request.maxZoom; zoom += 1) {
+        const count = 2 ** zoom;
+        let startX = longitudeToFractionalTileX(startLng, zoom);
+        let endX = longitudeToFractionalTileX(endLng, zoom);
+        if (Math.abs(endX - startX) > count / 2) {
+          if (startX < endX) startX += count;
+          else endX += count;
+        }
+        const startY = latitudeToFractionalTileY(startLat, zoom);
+        const endY = latitudeToFractionalTileY(endLat, zoom);
+        const steps = Math.max(1, Math.ceil(
+          Math.max(Math.abs(endX - startX), Math.abs(endY - startY)) * 2,
+        ));
+        for (let step = 0; step <= steps; step += 1) {
+          const ratio = step / steps;
+          const x = Math.floor(startX + (endX - startX) * ratio);
+          const y = Math.floor(startY + (endY - startY) * ratio);
+          const latitude = startLat + (endLat - startLat) * ratio;
+          yield* iteratePathTilesWithPadding(request, zoom, x, y, latitude);
+        }
+      }
+      emittedSegment = true;
+      previous = coordinate;
+    }
+    if (previous && !emittedSegment) {
+      yield* iterateRawTileUrlsForPoints([previous], request);
+    }
+  }
+}
+
+/** Extract LineString/MultiLineString coordinates without joining disjoint paths. */
+export function extractLineCoordinatePaths(
+  featureCollection: GeoJSON.FeatureCollection | null | undefined,
+): Array<Array<[number, number]>> {
+  const paths: Array<Array<[number, number]>> = [];
+  for (const feature of featureCollection?.features ?? []) {
+    const geometry = feature?.geometry;
+    if (!geometry) continue;
+    const candidates = geometry.type === 'LineString'
+      ? [geometry.coordinates]
+      : geometry.type === 'MultiLineString'
+        ? geometry.coordinates
+        : [];
+    for (const candidate of candidates) {
+      const path = candidate
+        .filter((position) => Array.isArray(position) && position.length >= 2)
+        .map((position) => [position[0], position[1]] as [number, number])
+        .filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat));
+      if (path.length > 0) paths.push(path);
+    }
+  }
+  return paths;
 }
 
 /**

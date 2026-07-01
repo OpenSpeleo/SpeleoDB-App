@@ -4,7 +4,8 @@ import { SpeleoDBController, type PreferencesPort } from '../controllers/SpeleoD
 import { allowConsoleWarn } from '../test/consoleGuard';
 import type { Project } from '../types/project';
 import type { SpeleoDBService } from './SpeleoDBService';
-import type { TilePrefetchServiceLike } from './TilePrefetchService';
+import type { OfflineMapSyncEngineLike } from './OfflineMapSyncEngine';
+import { EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT } from './OfflineMapSyncStore';
 import { CacheStore } from './CacheStore';
 import { ProjectCacheService } from './ProjectCacheService';
 
@@ -82,17 +83,15 @@ function persistencePreferences(): PreferencesPort {
   };
 }
 
-function persistenceTilePrefetch(): TilePrefetchServiceLike {
+function persistenceTilePrefetch(): OfflineMapSyncEngineLike {
   return {
-    subscribe: vi.fn((listener) => {
-      listener([]);
-      return () => {};
-    }),
-    enqueueProjects: vi.fn(async () => {}),
-    enqueueTileUrls: vi.fn(async () => {}),
-    removeLayer: vi.fn(async () => {}),
-    removeTarget: vi.fn(async () => {}),
-    resumeBlockedJobs: vi.fn(),
+    subscribe: vi.fn(() => () => {}),
+    getSnapshot: vi.fn(() => EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT),
+    preload: vi.fn(async () => {}),
+    schedule: vi.fn(async () => ({ coordinateCount: 0, scheduledTileCount: 0, failedTileCount: 0 })),
+    resumeBlocked: vi.fn(),
+    releaseLayer: vi.fn(async () => {}),
+    cancel: vi.fn(),
     waitForIdle: vi.fn(async () => {}),
     dispose: vi.fn(),
   };

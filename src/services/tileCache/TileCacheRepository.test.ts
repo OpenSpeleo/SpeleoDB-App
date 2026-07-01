@@ -1,28 +1,47 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import {
   TILE_DB_NAME,
   TILE_STORE,
   PREFETCH_JOB_STORE,
   TILE_METADATA_STORE,
+  TILE_OWNER_STORE,
   TILE_STATS_STORE,
+  OFFLINE_MAP_PLAN_STORE,
+  OFFLINE_MAP_PLAN_CHUNK_STORE,
+  OFFLINE_MAP_PLAN_COORDINATE_STORE,
+  OFFLINE_MAP_GENERATION_STORE,
+  OFFLINE_MAP_MEMBERSHIP_STORE,
   __resetTileCacheRepositoryForTests,
   __closeTileCacheRepositoryForTests,
-  deletePrefetchJobsByLayer,
-  deletePrefetchJobsByTarget,
+  __seedTileCacheEntryForTests,
   deleteTilesByUrlPrefixes,
-  getAllPrefetchJobs,
-  getPrefetchJob,
-  getManualTileCount,
+  claimCachedTilesForOfflineGeneration,
+  activateOfflineMapGeneration,
+  commitOfflineMapPlan,
+  countStagedOfflineMapCoordinates,
+  deleteStagedOfflineMapCoordinates,
   getTile,
   getTileCacheStats,
   getTileMetadata,
-  getTotalCacheBytes,
-  prefetchJobKey,
-  setPrefetchJob,
-  upsertTile,
+  getOfflineMapGenerations,
+  getOfflineMapPlanByRevision,
+  getOfflineMapPlanById,
+  getOfflineMapPlanChunk,
+  getStagedOfflineMapCoordinatePage,
+  openTileDB,
+  garbageCollectOfflineMapPlans,
+  normalizeOfflineMapGenerationCounters,
+  recoverOfflineMapPlanStorage,
+  repairTileCacheStats,
+  releaseOfflineMapGeneration,
+  runOfflineMapV7Migration,
+  setOfflineMapGeneration,
+  putOfflineMapPlanChunk,
+  stageOfflineMapCoordinates,
+  writeNoDataTile,
+  writeTileWithCapacity,
 } from './TileCacheRepository';
-import type { TilePrefetchJobState } from '../../types/tilePrefetch';
 
 function deleteDatabase(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -58,23 +77,149 @@ function seedLegacyV3Database(legacyJob: Record<string, unknown>, bareKey: strin
   });
 }
 
-function makeJob(overrides: Partial<TilePrefetchJobState> = {}): TilePrefetchJobState {
-  return {
-    layerId: 'esri-satellite',
-    projectId: 'p1',
-    commitId: 'c1',
-    status: 'queued',
-    zoomMin: 0,
-    zoomMax: 18,
-    padMeters: 50,
-    totalTiles: 1,
-    completedTiles: 0,
-    failedTiles: 0,
-    bytesDownloaded: 0,
-    estimatedBytes: 0,
-    updatedAt: 1,
-    ...overrides,
-  };
+function seedLegacyV4Tile(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(TILE_DB_NAME, 4);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(TILE_STORE)) db.createObjectStore(TILE_STORE);
+      if (!db.objectStoreNames.contains(PREFETCH_JOB_STORE)) db.createObjectStore(PREFETCH_JOB_STORE);
+      if (!db.objectStoreNames.contains(TILE_METADATA_STORE)) db.createObjectStore(TILE_METADATA_STORE);
+      if (!db.objectStoreNames.contains(TILE_STATS_STORE)) db.createObjectStore(TILE_STATS_STORE);
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(
+        [TILE_STORE, TILE_METADATA_STORE, TILE_STATS_STORE],
+        'readwrite',
+      );
+      tx.objectStore(TILE_STORE).put(new ArrayBuffer(25), url);
+      tx.objectStore(TILE_METADATA_STORE).put({
+        url,
+        sizeBytes: 25,
+        lastAccessedAt: 10,
+        pinnedByAutoPrefetch: false,
+        createdAt: 10,
+        updatedAt: 10,
+      }, url);
+      tx.objectStore(TILE_STATS_STORE).put({
+        totalBytes: 999,
+        tileCount: 99,
+        pinnedBytes: 0,
+        pinnedTileCount: 0,
+        updatedAt: 10,
+      }, 'global');
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function seedBrokenV5Tile(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(TILE_DB_NAME, 5);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(TILE_STORE)) db.createObjectStore(TILE_STORE);
+      if (!db.objectStoreNames.contains(PREFETCH_JOB_STORE)) db.createObjectStore(PREFETCH_JOB_STORE);
+      if (!db.objectStoreNames.contains(TILE_METADATA_STORE)) db.createObjectStore(TILE_METADATA_STORE);
+      if (!db.objectStoreNames.contains(TILE_STATS_STORE)) db.createObjectStore(TILE_STATS_STORE);
+      if (!db.objectStoreNames.contains(TILE_OWNER_STORE)) db.createObjectStore(TILE_OWNER_STORE);
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(
+        [TILE_STORE, TILE_METADATA_STORE, TILE_STATS_STORE],
+        'readwrite',
+      );
+      tx.objectStore(TILE_STORE).put(new ArrayBuffer(25), url);
+      tx.objectStore(TILE_METADATA_STORE).put({
+        url,
+        sizeBytes: 25,
+        fetchedAt: 0,
+        lastAccessedAt: 10,
+        prefetchOwnerCount: 0,
+        pinnedByAutoPrefetch: false,
+        createdAt: 10,
+        updatedAt: 10,
+      }, url);
+      tx.objectStore(TILE_STATS_STORE).put({
+        totalBytes: 25,
+        tileCount: 1,
+        pinnedBytes: 0,
+        pinnedTileCount: 0,
+        updatedAt: 10,
+      }, 'global');
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function seedLegacyV6Ownership(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(TILE_DB_NAME, 6);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(TILE_STORE)) db.createObjectStore(TILE_STORE);
+      if (!db.objectStoreNames.contains(PREFETCH_JOB_STORE)) db.createObjectStore(PREFETCH_JOB_STORE);
+      if (!db.objectStoreNames.contains(TILE_METADATA_STORE)) db.createObjectStore(TILE_METADATA_STORE);
+      if (!db.objectStoreNames.contains(TILE_STATS_STORE)) db.createObjectStore(TILE_STATS_STORE);
+      if (!db.objectStoreNames.contains(TILE_OWNER_STORE)) db.createObjectStore(TILE_OWNER_STORE);
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(
+        [TILE_STORE, TILE_METADATA_STORE, TILE_STATS_STORE, TILE_OWNER_STORE],
+        'readwrite',
+      );
+      tx.objectStore(TILE_STORE).put(new ArrayBuffer(25), url);
+      tx.objectStore(TILE_METADATA_STORE).put({
+        url,
+        sizeBytes: 25,
+        fetchedAt: 0,
+        lastAccessedAt: 10,
+        prefetchOwnerCount: 2,
+        pinnedByAutoPrefetch: true,
+        createdAt: 10,
+        updatedAt: 10,
+      }, url);
+      tx.objectStore(TILE_STATS_STORE).put({
+        totalBytes: 25,
+        tileCount: 1,
+        pinnedBytes: 25,
+        pinnedTileCount: 1,
+        updatedAt: 10,
+      }, 'global');
+      const ownerStore = tx.objectStore(TILE_OWNER_STORE);
+      ownerStore.put({
+        ownerKey: 'esri-satellite::project::p1',
+        generation: 1,
+        url,
+        updatedAt: 10,
+      }, `a\u0000${url}`);
+      ownerStore.put({
+        ownerKey: 'esri-satellite::landmarks::landmarks',
+        generation: 2,
+        url,
+        updatedAt: 10,
+      }, `b\u0000${url}`);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  });
 }
 
 describe('TileCacheRepository', () => {
@@ -84,58 +229,340 @@ describe('TileCacheRepository', () => {
     __resetTileCacheRepositoryForTests();
   });
 
-  describe('prefetchJobKey + composite keying', () => {
-    it('namespaces jobs by layer so same target stays distinct per layer', async () => {
-      expect(prefetchJobKey('esri-satellite', 'p1')).toBe('esri-satellite::p1');
+  describe('v8 offline-map model', () => {
+    it('persists compact immutable plans and their coordinate chunks', async () => {
+      await openTileDB();
+      await putOfflineMapPlanChunk({
+        planId: 'plan-1',
+        index: 0,
+        coordinates: new Uint32Array([1, 2, 3, 4, 5, 6]),
+      });
+      await commitOfflineMapPlan({
+        id: 'plan-1',
+        sourceRevision: 'revision-1',
+        coverageVersion: 1,
+        coordinateCount: 2,
+        chunkCount: 1,
+        createdAt: 100,
+      });
 
-      await setPrefetchJob(makeJob({ layerId: 'esri-satellite', projectId: 'p1' }));
-      await setPrefetchJob(makeJob({ layerId: 'esri-world-hillshade', projectId: 'p1' }));
+      expect(await getOfflineMapPlanByRevision('revision-1')).toMatchObject({
+        id: 'plan-1',
+        coordinateCount: 2,
+      });
+      const chunk = await getOfflineMapPlanChunk('plan-1', 0);
+      expect([...chunk!.coordinates]).toEqual([1, 2, 3, 4, 5, 6]);
 
-      const all = await getAllPrefetchJobs();
-      expect(all.length).toBe(2);
+      const db = await openTileDB();
+      expect([...db.objectStoreNames]).toEqual(expect.arrayContaining([
+        OFFLINE_MAP_PLAN_STORE,
+        OFFLINE_MAP_PLAN_CHUNK_STORE,
+        OFFLINE_MAP_PLAN_COORDINATE_STORE,
+        OFFLINE_MAP_GENERATION_STORE,
+        OFFLINE_MAP_MEMBERSHIP_STORE,
+      ]));
+    });
 
-      const sat = await getPrefetchJob('esri-satellite', 'p1');
-      const hill = await getPrefetchJob('esri-world-hillshade', 'p1');
-      expect(sat?.layerId).toBe('esri-satellite');
-      expect(hill?.layerId).toBe('esri-world-hillshade');
+    it('deduplicates raw coordinates in bounded staging and pages them in key order', async () => {
+      await stageOfflineMapCoordinates(
+        'build-1',
+        new Uint32Array([18, 2, 3, 5, 1, 1, 18, 2, 3]),
+      );
+
+      expect(await countStagedOfflineMapCoordinates('build-1')).toBe(2);
+      const first = await getStagedOfflineMapCoordinatePage('build-1', null, 1);
+      const second = await getStagedOfflineMapCoordinatePage('build-1', first.lastKey, 1);
+      expect([...first.coordinates]).toEqual([5, 1, 1]);
+      expect([...second.coordinates]).toEqual([18, 2, 3]);
+
+      await deleteStagedOfflineMapCoordinates('build-1');
+      expect(await countStagedOfflineMapCoordinates('build-1')).toBe(0);
+    });
+
+    it('marks and returns every previous active generation during activation', async () => {
+      const base = {
+        planId: 'plan-1', totalTiles: 1, completedTiles: 1, failedTiles: 0,
+        bytesDownloaded: 0, refreshAfter: 1000, updatedAt: 1,
+      };
+      await setOfflineMapGeneration({
+        ...base, id: 'old-1', layerId: 'esri-satellite', status: 'active',
+      });
+      await setOfflineMapGeneration({
+        ...base, id: 'old-2', layerId: 'esri-satellite', status: 'active',
+      });
+      await setOfflineMapGeneration({
+        ...base, id: 'next', layerId: 'esri-satellite', status: 'pending',
+      });
+
+      await expect(activateOfflineMapGeneration('next', 2)).resolves.toEqual([
+        'old-1', 'old-2',
+      ]);
+      expect(await getOfflineMapGenerations()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'old-1', status: 'releasing' }),
+        expect.objectContaining({ id: 'old-2', status: 'releasing' }),
+        expect.objectContaining({ id: 'next', status: 'active' }),
+      ]));
+    });
+
+    it('garbage-collects only plans with no generation references', async () => {
+      await putOfflineMapPlanChunk({
+        planId: 'retained-plan', index: 0, coordinates: new Uint32Array([1, 2, 3]),
+      });
+      await putOfflineMapPlanChunk({
+        planId: 'obsolete-plan', index: 0, coordinates: new Uint32Array([1, 2, 3]),
+      });
+      await commitOfflineMapPlan({
+        id: 'retained-plan', sourceRevision: 'retained-revision', coverageVersion: 2,
+        coordinateCount: 1, chunkCount: 1, createdAt: 1,
+      });
+      await commitOfflineMapPlan({
+        id: 'obsolete-plan', sourceRevision: 'obsolete-revision', coverageVersion: 2,
+        coordinateCount: 1, chunkCount: 1, createdAt: 1,
+      });
+      await setOfflineMapGeneration({
+        id: 'active', planId: 'retained-plan', layerId: 'esri-satellite',
+        status: 'active', totalTiles: 0, completedTiles: 0, failedTiles: 0,
+        bytesDownloaded: 0, refreshAfter: 1, updatedAt: 1,
+      });
+
+      await garbageCollectOfflineMapPlans();
+
+      expect(await getOfflineMapPlanById('retained-plan')).not.toBeNull();
+      expect(await getOfflineMapPlanById('obsolete-plan')).toBeNull();
+      expect(await getOfflineMapPlanChunk('retained-plan', 0)).not.toBeNull();
+      expect(await getOfflineMapPlanChunk('obsolete-plan', 0)).toBeNull();
+    });
+
+    it('removes crashed staging and chunks that were never published', async () => {
+      await stageOfflineMapCoordinates('crashed-build', new Uint32Array([1, 2, 3]));
+      await putOfflineMapPlanChunk({
+        planId: 'crashed-plan', index: 0, coordinates: new Uint32Array([1, 2, 3]),
+      });
+
+      await recoverOfflineMapPlanStorage();
+
+      expect(await countStagedOfflineMapCoordinates('crashed-build')).toBe(0);
+      expect(await getOfflineMapPlanChunk('crashed-plan', 0)).toBeNull();
+    });
+
+    it('persists normalized generation counters instead of repeatedly clamping views', async () => {
+      await setOfflineMapGeneration({
+        id: 'corrupt-counters', planId: 'plan', layerId: 'esri-satellite',
+        status: 'active', totalTiles: 3.8, completedTiles: 9,
+        failedTiles: Number.NaN, bytesDownloaded: 0, refreshAfter: 0, updatedAt: 1,
+      });
+
+      await normalizeOfflineMapGenerationCounters(10);
+
+      expect(await getOfflineMapGenerations()).toEqual([
+        expect.objectContaining({
+          id: 'corrupt-counters', totalTiles: 3, completedTiles: 3,
+          failedTiles: 0, updatedAt: 10,
+        }),
+      ]);
+    });
+
+    it.each(['payload', 'tombstone'] as const)(
+      'aborts a real IndexedDB %s write transaction before commit',
+      async (kind) => {
+        const url = `https://tiles.example.com/abort-${kind}`;
+        const generationId = `generation-abort-${kind}`;
+        await setOfflineMapGeneration({
+          id: generationId, planId: 'plan', layerId: 'esri-satellite',
+          status: 'pending', totalTiles: 1, completedTiles: 0, failedTiles: 0,
+          bytesDownloaded: 0, refreshAfter: 0, updatedAt: 1,
+        });
+        const db = await openTileDB();
+        const probe = db.transaction(TILE_STORE, 'readonly');
+        const prototype = Object.getPrototypeOf(probe.objectStore(TILE_STORE)) as IDBObjectStore;
+        const originalPut = prototype.put;
+        const controller = new AbortController();
+        let aborted = false;
+        const spy = vi.spyOn(prototype, 'put').mockImplementation(function (
+          this: IDBObjectStore,
+          ...args
+        ) {
+          const request = originalPut.apply(this, args as Parameters<IDBObjectStore['put']>);
+          if (!aborted) {
+            aborted = true;
+            queueMicrotask(() => controller.abort());
+          }
+          return request;
+        });
+        try {
+          const options = {
+            signal: controller.signal,
+            offlineMembership: { generationId, layerId: 'esri-satellite' },
+          };
+          const write = kind === 'payload'
+            ? writeTileWithCapacity(url, new ArrayBuffer(8), {
+              ...options, isOnline: true, maxCacheBytes: 100, allowPinnedOverflow: false,
+            })
+            : writeNoDataTile(url, options);
+          await expect(write).rejects.toMatchObject({ name: 'AbortError' });
+        } finally {
+          spy.mockRestore();
+        }
+        expect(await getTile(url)).toBeNull();
+        expect(await getTileMetadata(url)).toBeNull();
+        expect(await getTileCacheStats()).toMatchObject({ totalBytes: 0, tileCount: 0 });
+      },
+    );
+
+    it('migrates v6 ownership by layer without deleting payloads or forcing stale freshness', async () => {
+      const url = 'https://tiles.example.com/legacy-v6.png';
+      const migrationTime = 123_456;
+      await seedLegacyV6Ownership(url);
+      __resetTileCacheRepositoryForTests();
+
+      await runOfflineMapV7Migration(migrationTime);
+
+      expect((await getTile(url))?.byteLength).toBe(25);
+      expect(await getTileMetadata(url)).toMatchObject({
+        fetchedAt: migrationTime,
+        prefetchOwnerCount: 1,
+        pinnedByAutoPrefetch: true,
+      });
+      expect(await getOfflineMapGenerations()).toEqual([
+        expect.objectContaining({
+          id: 'legacy-v7:esri-satellite',
+          layerId: 'esri-satellite',
+          status: 'active',
+          totalTiles: 1,
+          completedTiles: 1,
+        }),
+      ]);
+    });
+
+    it('promotes cached tiles to a layer generation and releases them without touching bytes', async () => {
+      const url = 'https://tiles.example.com/generation.png';
+      await __seedTileCacheEntryForTests(
+        url, new ArrayBuffer(25), { pinnedByAutoPrefetch: false, now: 100 },
+      );
+      await setOfflineMapGeneration({
+        id: 'generation-1',
+        planId: 'plan-1',
+        layerId: 'esri-satellite',
+        status: 'pending',
+        totalTiles: 1,
+        completedTiles: 0,
+        failedTiles: 0,
+        bytesDownloaded: 0,
+        refreshAfter: 0,
+        updatedAt: 100,
+      });
+
+      const claimed = await claimCachedTilesForOfflineGeneration(
+        [url],
+        'generation-1',
+        'esri-satellite',
+        101,
+      );
+      expect(claimed[0]).toMatchObject({ prefetchOwnerCount: 1 });
+      expect(await activateOfflineMapGeneration('generation-1', 102)).toEqual([]);
+      await releaseOfflineMapGeneration('generation-1', 103);
+
+      expect((await getTile(url))?.byteLength).toBe(25);
+      expect(await getTileMetadata(url)).toMatchObject({
+        prefetchOwnerCount: 0,
+        pinnedByAutoPrefetch: false,
+      });
+    });
+
+    it('rejects a cancelled generation write inside the atomic transaction', async () => {
+      const url = 'https://tiles.example.com/cancelled-generation.png';
+      await setOfflineMapGeneration({
+        id: 'generation-cancelled',
+        planId: 'plan-1',
+        layerId: 'esri-satellite',
+        status: 'pending',
+        totalTiles: 1,
+        completedTiles: 0,
+        failedTiles: 0,
+        bytesDownloaded: 0,
+        refreshAfter: 0,
+        updatedAt: 100,
+      });
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(writeTileWithCapacity(url, new ArrayBuffer(25), {
+        isOnline: true,
+        maxCacheBytes: 1_000,
+        allowPinnedOverflow: false,
+        signal: controller.signal,
+        offlineMembership: {
+          generationId: 'generation-cancelled',
+          layerId: 'esri-satellite',
+        },
+      })).rejects.toMatchObject({ name: 'AbortError' });
+      expect(await getTile(url)).toBeNull();
+    });
+
+    it('commits and reclaims a zero-byte no-data tombstone with generation ownership', async () => {
+      const url = 'https://tiles.example.com/no-data.png';
+      await __seedTileCacheEntryForTests(
+        url, new ArrayBuffer(25), { pinnedByAutoPrefetch: false, now: 100 },
+      );
+      await setOfflineMapGeneration({
+        id: 'generation-no-data',
+        planId: 'plan-1',
+        layerId: 'esri-world-hillshade',
+        status: 'pending',
+        totalTiles: 1,
+        completedTiles: 0,
+        failedTiles: 0,
+        bytesDownloaded: 0,
+        refreshAfter: 0,
+        updatedAt: 100,
+      });
+
+      await expect(writeNoDataTile(url, {
+        now: 101,
+        offlineMembership: {
+          generationId: 'generation-no-data',
+          layerId: 'esri-world-hillshade',
+        },
+      })).resolves.toEqual({ cacheDeltaBytes: -25 });
+
+      expect(await getTile(url)).toBeNull();
+      expect(await getTileMetadata(url)).toMatchObject({
+        isNoData: true,
+        sizeBytes: 0,
+        fetchedAt: 101,
+        prefetchOwnerCount: 1,
+      });
+      expect(await getTileCacheStats()).toMatchObject({
+        totalBytes: 0,
+        tileCount: 1,
+        pinnedBytes: 0,
+        pinnedTileCount: 1,
+      });
+      expect((await claimCachedTilesForOfflineGeneration(
+        [url],
+        'generation-no-data',
+        'esri-world-hillshade',
+        102,
+      ))[0]).toMatchObject({ isNoData: true, prefetchOwnerCount: 1 });
+
+      await releaseOfflineMapGeneration('generation-no-data', 103);
+      expect(await getTileMetadata(url)).toMatchObject({
+        isNoData: true,
+        prefetchOwnerCount: 0,
+      });
+      expect(await getTileCacheStats()).toMatchObject({ pinnedTileCount: 0 });
     });
   });
 
-  describe('deletePrefetchJobsByLayer', () => {
-    it('removes only the targeted layer jobs', async () => {
-      await setPrefetchJob(makeJob({ layerId: 'esri-satellite', projectId: 'p1' }));
-      await setPrefetchJob(makeJob({ layerId: 'esri-world-hillshade', projectId: 'p1' }));
-      await setPrefetchJob(makeJob({ layerId: 'esri-world-hillshade', projectId: 'landmarks' }));
-
-      await deletePrefetchJobsByLayer('esri-world-hillshade');
-
-      const all = await getAllPrefetchJobs();
-      expect(all.map((j) => j.layerId)).toEqual(['esri-satellite']);
-    });
-  });
-
-  describe('deletePrefetchJobsByTarget', () => {
-    it('removes the target across layers without deleting other jobs', async () => {
-      await setPrefetchJob(makeJob({ layerId: 'esri-satellite', projectId: 'p1' }));
-      await setPrefetchJob(makeJob({ layerId: 'esri-world-hillshade', projectId: 'p1' }));
-      await setPrefetchJob(makeJob({ layerId: 'esri-satellite', projectId: 'p2' }));
-
-      await deletePrefetchJobsByTarget('p1');
-
-      const all = await getAllPrefetchJobs();
-      expect(all.map((job) => job.projectId)).toEqual(['p2']);
-    });
-  });
-
-  describe('upsertTile', () => {
+  describe('test cache seeding', () => {
     it('replaces a pinned tile without double-counting or dropping its pin', async () => {
       const url = 'https://tiles.example.com/replaced.png';
-      await upsertTile(url, new ArrayBuffer(100), {
+      await __seedTileCacheEntryForTests(url, new ArrayBuffer(100), {
         pinnedByAutoPrefetch: true,
         now: 1,
       });
 
-      await upsertTile(url, new ArrayBuffer(40), {
+      await __seedTileCacheEntryForTests(url, new ArrayBuffer(40), {
         pinnedByAutoPrefetch: false,
         now: 2,
       });
@@ -144,7 +571,10 @@ describe('TileCacheRepository', () => {
       expect(await getTileMetadata(url)).toEqual({
         url,
         sizeBytes: 40,
+        isNoData: false,
+        fetchedAt: 2,
         lastAccessedAt: 2,
+        prefetchOwnerCount: 1,
         pinnedByAutoPrefetch: true,
         createdAt: 1,
         updatedAt: 2,
@@ -163,10 +593,14 @@ describe('TileCacheRepository', () => {
     it('evicts matching tiles (incl. pinned) and updates stats', async () => {
       const satUrl = 'https://services.arcgisonline.com/sat/5/1/2';
       const hillUrl = 'https://server.arcgisonline.com/hill/5/1/2';
-      await upsertTile(satUrl, new ArrayBuffer(100), { pinnedByAutoPrefetch: true });
-      await upsertTile(hillUrl, new ArrayBuffer(50), { pinnedByAutoPrefetch: true });
+      await __seedTileCacheEntryForTests(
+        satUrl, new ArrayBuffer(100), { pinnedByAutoPrefetch: true },
+      );
+      await __seedTileCacheEntryForTests(
+        hillUrl, new ArrayBuffer(50), { pinnedByAutoPrefetch: true },
+      );
 
-      expect(await getTotalCacheBytes()).toBe(150);
+      expect((await getTileCacheStats()).totalBytes).toBe(150);
 
       // The tile_cache_stats store (read by getTileCacheStats, NOT the metadata
       // cursor) must also reflect both pinned upserts.
@@ -185,8 +619,8 @@ describe('TileCacheRepository', () => {
 
       // Only the satellite tile remains (its bytes), confirmed via the
       // metadata-cursor totals used by Settings.
-      expect(await getTotalCacheBytes()).toBe(100);
-      expect(await getManualTileCount()).toBe(0); // both were pinned
+      expect((await getTileCacheStats()).totalBytes).toBe(100);
+      expect((await getTileCacheStats()).pinnedTileCount).toBe(1);
 
       // The stats store must be decremented in lock-step with the eviction
       // (this is the accounting the author could not verify under fake-indexeddb).
@@ -203,8 +637,8 @@ describe('TileCacheRepository', () => {
     });
   });
 
-  describe('v3 -> v4 migration', () => {
-    it('namespaces legacy bare-keyed jobs to the satellite layer', async () => {
+  describe('legacy job retirement', () => {
+    it('drops obsolete per-target job snapshots during the v7 upgrade', async () => {
       await seedLegacyV3Database(
         {
           projectId: 'legacy-project',
@@ -223,71 +657,122 @@ describe('TileCacheRepository', () => {
         'legacy-project',
       );
 
-      // Opening through the repository (v4) triggers the migration.
-      const all = await getAllPrefetchJobs();
-      expect(all.length).toBe(1);
-      expect(all[0].layerId).toBe('esri-satellite');
-      expect(all[0].projectId).toBe('legacy-project');
-
-      const migrated = await getPrefetchJob('esri-satellite', 'legacy-project');
-      expect(migrated?.commitId).toBe('legacy-commit');
+      const db = await openTileDB();
+      expect(db.objectStoreNames.contains(PREFETCH_JOB_STORE)).toBe(false);
     });
+  });
 
-    it('is a no-op when the legacy prefetch store is empty', async () => {
-      // Seed a v3 DB with the stores but no jobs, then open via the repository.
-      await new Promise<void>((resolve, reject) => {
-        const req = indexedDB.open(TILE_DB_NAME, 3);
-        req.onupgradeneeded = () => {
-          const db = req.result;
-          if (!db.objectStoreNames.contains(TILE_STORE)) db.createObjectStore(TILE_STORE);
-          if (!db.objectStoreNames.contains(PREFETCH_JOB_STORE)) {
-            db.createObjectStore(PREFETCH_JOB_STORE);
-          }
-          if (!db.objectStoreNames.contains(TILE_METADATA_STORE)) {
-            db.createObjectStore(TILE_METADATA_STORE);
-          }
-          if (!db.objectStoreNames.contains(TILE_STATS_STORE)) {
-            db.createObjectStore(TILE_STATS_STORE);
-          }
-        };
-        req.onsuccess = () => {
-          req.result.close();
-          resolve();
-        };
-        req.onerror = () => reject(req.error);
+  describe('legacy tile migration', () => {
+    it('keeps v4 bytes, treats unknown fetch dates as fresh, and rebuilds stats', async () => {
+      const url = 'https://tiles.example.com/legacy-v4';
+      const migratedAfter = Date.now();
+      await seedLegacyV4Tile(url);
+
+      expect((await getTile(url))?.byteLength).toBe(25);
+      const metadata = await getTileMetadata(url);
+      expect(metadata?.fetchedAt).toBeGreaterThanOrEqual(migratedAfter);
+      expect(metadata).toMatchObject({ prefetchOwnerCount: 0 });
+      expect(await getTileCacheStats()).toMatchObject({
+        totalBytes: 25,
+        tileCount: 1,
+        pinnedBytes: 0,
+        pinnedTileCount: 0,
       });
-
-      expect(await getAllPrefetchJobs()).toEqual([]);
     });
 
-    it('does not double-namespace a job that already carries a layerId', async () => {
-      // A job written with a composite key + layerId (as if a partial/older v4
-      // already ran) must survive the migration unchanged (idempotent re-key).
-      await seedLegacyV3Database(
-        {
-          layerId: 'esri-world-hillshade',
-          projectId: 'p9',
-          commitId: 'c9',
-          status: 'done',
-          zoomMin: 0,
-          zoomMax: 18,
-          padMeters: 50,
-          totalTiles: 1,
-          completedTiles: 1,
-          failedTiles: 0,
-          bytesDownloaded: 10,
-          estimatedBytes: 10,
-          updatedAt: 7,
-        },
-        prefetchJobKey('esri-world-hillshade', 'p9'),
+    it('repairs zero fetch dates from the previous v5 migration without deleting bytes', async () => {
+      const url = 'https://tiles.example.com/legacy-v5';
+      const migratedAfter = Date.now();
+      await seedBrokenV5Tile(url);
+
+      expect((await getTile(url))?.byteLength).toBe(25);
+      expect((await getTileMetadata(url))?.fetchedAt).toBeGreaterThanOrEqual(migratedAfter);
+      expect(await getTileCacheStats()).toMatchObject({ totalBytes: 25, tileCount: 1 });
+    });
+  });
+
+  describe('serialized atomic capacity writes', () => {
+    it('keeps concurrent browsing writes within the cap and consistent with stats', async () => {
+      const options = {
+        isOnline: true,
+        maxCacheBytes: 100,
+        allowPinnedOverflow: false,
+      };
+      await Promise.all([
+        writeTileWithCapacity('https://tiles.example.com/a', new ArrayBuffer(80), options),
+        writeTileWithCapacity('https://tiles.example.com/b', new ArrayBuffer(80), options),
+      ]);
+
+      const stats = await getTileCacheStats();
+      expect(stats.totalBytes).toBe(80);
+      expect(stats.tileCount).toBe(1);
+      const resident = [
+        await getTile('https://tiles.example.com/a'),
+        await getTile('https://tiles.example.com/b'),
+      ].filter(Boolean);
+      expect(resident).toHaveLength(1);
+    });
+
+    it('never applies approved overflow to an ordinary browsing tile', async () => {
+      await __seedTileCacheEntryForTests(
+        'https://tiles.example.com/pinned',
+        new ArrayBuffer(80),
+        { pinnedByAutoPrefetch: true },
       );
 
-      const all = await getAllPrefetchJobs();
-      expect(all).toHaveLength(1);
-      expect(all[0].layerId).toBe('esri-world-hillshade');
-      expect(await getPrefetchJob('esri-world-hillshade', 'p9')).not.toBeNull();
-      // It must NOT have been re-keyed under the satellite layer.
-      expect(await getPrefetchJob('esri-satellite', 'p9')).toBeNull();
+      await expect(writeTileWithCapacity(
+        'https://tiles.example.com/runtime',
+        new ArrayBuffer(80),
+        {
+          isOnline: true,
+          maxCacheBytes: 100,
+          allowPinnedOverflow: true,
+        },
+      )).rejects.toMatchObject({ name: 'TileCacheCapacityError' });
+      expect((await getTileCacheStats()).totalBytes).toBe(80);
+    });
+  });
+
+  it('recovers in-process after a transient database-open failure', async () => {
+    const originalOpen = indexedDB.open.bind(indexedDB);
+    Object.defineProperty(indexedDB, 'open', {
+      value: () => { throw new Error('transient open failure'); },
+      configurable: true,
+    });
+    await expect(openTileDB()).rejects.toThrow('transient open failure');
+    Object.defineProperty(indexedDB, 'open', {
+      value: originalOpen,
+      configurable: true,
+    });
+
+    await expect(openTileDB()).resolves.toBeDefined();
+  });
+
+  it('repairs aggregate statistics from authoritative metadata', async () => {
+    await __seedTileCacheEntryForTests('https://tiles.example.com/repair', new ArrayBuffer(42), {
+      pinnedByAutoPrefetch: true,
+      now: 10,
+    });
+    const db = await openTileDB();
+    const tx = db.transaction(TILE_STATS_STORE, 'readwrite');
+    tx.objectStore(TILE_STATS_STORE).put({
+      totalBytes: 0,
+      tileCount: 0,
+      pinnedBytes: 0,
+      pinnedTileCount: 0,
+      updatedAt: 0,
+    }, 'global');
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+
+    await expect(repairTileCacheStats(20)).resolves.toMatchObject({
+      totalBytes: 42,
+      tileCount: 1,
+      pinnedBytes: 42,
+      pinnedTileCount: 1,
+      updatedAt: 20,
     });
   });
 });

@@ -78,7 +78,6 @@ const defaultProps: ProjectPanelProps = {
     p2: '#00aa00',
     p3: '#0000aa',
   },
-  tilePrefetchByProject: {},
   countryVisibility: {},
   countryCollapsed: {},
   onToggleProject: vi.fn(),

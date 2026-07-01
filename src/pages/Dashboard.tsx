@@ -15,7 +15,6 @@ import {
 import type { MapRef } from 'react-map-gl/maplibre';
 
 import { useSpeleoDB } from '../context/useSpeleoDB';
-import { DEFAULT_MAP_LAYER_ID } from '../constants';
 import type { MapLayerId } from '../types/mapLayer';
 import type { DashboardPanel, DashboardPanelChange } from '../types/dashboardPanel';
 import { registerTileCacheProtocol } from '../services/TileCacheService';
@@ -75,7 +74,6 @@ const Dashboard: React.FC<DashboardProps> = ({
   const {
     controller,
     projects,
-    tilePrefetchJobs,
     isOfflineLocked,
     landmarksRevision,
     mapDataRevision,
@@ -113,7 +111,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     sortedProjects,
     projectColorsById,
     geoJsonProjects,
-    currentProjectMapData,
     geoJsonData,
     projectBounds,
     overlayGeoJsonData,
@@ -148,19 +145,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     mapRef,
     onClosePanel: closeProjectPanel,
   });
-  // Project panel progress reflects the satellite layer only (extra layers have
-  // their own per-layer progress in Settings).
-  const tilePrefetchByProject = useMemo(
-    () =>
-      Object.fromEntries(
-        tilePrefetchJobs
-          .filter((job) =>
-            job.layerId === DEFAULT_MAP_LAYER_ID
-            && Boolean(currentProjectMapData[job.projectId]))
-          .map((job) => [job.projectId, job] as const),
-      ),
-    [currentProjectMapData, tilePrefetchJobs],
-  );
   const visibleOverlayGeoJsonData = useVisibleDashboardOverlays(
     overlayGeoJsonData,
     effectiveActiveProjectIds,
@@ -175,7 +159,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     const bounds = computeBounds(projectBounds, effectiveActiveProjectIds);
     if (bounds && mapRef.current) {
       didFitRef.current = true;
-      mapRef.current.fitBounds(bounds, { padding: 50, maxZoom: 14, duration: 800 });
+      mapRef.current.fitBounds(bounds, { padding: 50, maxZoom: 14, duration: 0 });
     }
   }, [effectiveActiveProjectIds, geoJsonData, projectBounds]);
 
@@ -392,7 +376,6 @@ const Dashboard: React.FC<DashboardProps> = ({
             activeProjectIds={panelActiveProjectIds}
             geoJsonData={geoJsonData}
             projectColorsById={projectColorsById}
-            tilePrefetchByProject={tilePrefetchByProject}
             countryVisibility={countryVisibility}
             countryCollapsed={countryCollapsed}
             onToggleProject={handleToggleProject}

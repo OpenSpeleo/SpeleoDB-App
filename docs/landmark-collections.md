@@ -123,8 +123,8 @@ unpinned tiles remain to evict, the tile cache raises `TileCacheCapacityError`.
 
 The app then surfaces a one-time consent prompt instead of silently failing:
 
-- `TilePrefetchService` flags the affected job `blockedByStorage` and halts the
-  queue (no hammering of doomed writes).
+- `OfflineMapSyncEngine` publishes `storage-blocked` and pauses the six-worker
+  queue once (no hammering of doomed writes).
 - The controller derives `isTileCacheOverLimit` / `needsAutoStoragePrompt` and
   shows a consent modal **once**. Both "Allow more storage" and "Not now" persist
   `tileCacheOverLimitPromptAcknowledged`, so the prompt never auto-reappears (this

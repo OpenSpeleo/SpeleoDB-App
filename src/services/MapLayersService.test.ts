@@ -38,6 +38,13 @@ describe('MapLayersService', () => {
         expect(layer.tileUrlTemplate).toContain('{y}');
       }
     });
+
+    it('scopes the verified no-data fingerprint to satellite only', () => {
+      expect(getMapLayerById('esri-satellite')?.noDataSha256Hashes)
+        .toEqual(MAP.MISSING_TILE_SHA256_HASHES);
+      expect(getMapLayerById('esri-world-hillshade')?.noDataSha256Hashes).toEqual([]);
+      expect(getMapLayerById('esri-world-hillshade-dark')?.noDataSha256Hashes).toEqual([]);
+    });
   });
 
   describe('resolveMapLayer', () => {

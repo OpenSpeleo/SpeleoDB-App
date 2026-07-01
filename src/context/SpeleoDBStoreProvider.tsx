@@ -74,11 +74,6 @@ export function SpeleoDBStoreProvider({ children }: SpeleoDBStoreProviderProps) 
     () => controller.mapDataRevision,
   )
 
-  const tilePrefetchJobs = useSyncExternalStore(
-    (cb) => controller.subscribe(cb),
-    () => controller.tilePrefetchJobs,
-  )
-
   const landmarksRevision = useSyncExternalStore(
     (cb) => controller.subscribe(cb),
     () => controller.landmarksRevision,
@@ -154,7 +149,6 @@ export function SpeleoDBStoreProvider({ children }: SpeleoDBStoreProviderProps) 
     lastSyncedAt,
     projectGeoJSONWarnings,
     mapDataRevision,
-    tilePrefetchJobs,
     landmarksRevision,
     pendingOpsCount,
     pendingOpsRevision,

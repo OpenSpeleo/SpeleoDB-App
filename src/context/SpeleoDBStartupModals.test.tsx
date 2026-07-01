@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import type { ProjectGeoJSONWarning } from '../types/projectGeoJSON';
 
 const mockController = {
-  preloadTilePrefetch: vi.fn(async () => {}),
+  preloadOfflineMaps: vi.fn(async () => {}),
   approveTileCacheOverLimit: vi.fn(),
   acknowledgeStoragePrompt: vi.fn(),
   clearStorageConsentRequest: vi.fn(),
@@ -22,10 +22,6 @@ vi.mock('./useSpeleoDB', () => ({
     controller: mockController,
     projectGeoJSONWarnings: mockProjectGeoJSONWarnings,
   }),
-}));
-
-vi.mock('../services/TileCacheRuntime', () => ({
-  runTileCacheStartupMaintenanceRuntime: vi.fn(async () => {}),
 }));
 
 vi.mock('@ionic/react', () => ({

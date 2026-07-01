@@ -106,6 +106,14 @@ export const MAP = {
   MAX_ZOOM: 19.9,
   // Hard cap for all cached tile payloads (prefetch + runtime map browsing).
   TILE_CACHE_MAX_BYTES: 500 * 1024 * 1024,
+  // Provider payloads remain fresh for a deterministic 180 days from the
+  // successful fetch time. Accessing a tile never extends this deadline.
+  TILE_CACHE_MAX_AGE_MS: 180 * 24 * 60 * 60 * 1000,
+  // A missing tile must not hold the MapLibre protocol request indefinitely on
+  // a connected-but-stalled mobile network.
+  TILE_FETCH_TIMEOUT_MS: 10_000,
+  // Runtime browsing updates unpinned LRU metadata at most once per day.
+  TILE_LRU_TOUCH_INTERVAL_MS: 24 * 60 * 60 * 1000,
   // Long-press to drop a map point / create a landmark. Raised from 300ms so the
   // circular loading ring has time to visibly fill before the modal opens.
   // See docs/landmark-crud.md.
@@ -215,6 +223,7 @@ export const MAP_LAYERS: readonly MapLayerDefinition[] = [
     id: 'esri-satellite',
     label: 'ESRI - Satellite',
     tileUrlTemplate: MAP.TILE_URL_TEMPLATE,
+    noDataSha256Hashes: MAP.MISSING_TILE_SHA256_HASHES,
     tileSize: 256,
     maxZoom: 18,
     attribution: 'Sources: Esri, USGS, NOAA',
@@ -226,6 +235,9 @@ export const MAP_LAYERS: readonly MapLayerDefinition[] = [
     label: 'ESRI - World Hillshade',
     tileUrlTemplate:
       'https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}',
+    // The website fingerprint above is satellite-specific. Do not classify
+    // hillshade bytes as authoritative absence without provider evidence.
+    noDataSha256Hashes: [],
     tileSize: 256,
     // The World_Hillshade cache exposes 24 LODs (0-23). Match satellite's z18
     // so offline prefetch depth + display sharpness reach parity with the
@@ -242,6 +254,7 @@ export const MAP_LAYERS: readonly MapLayerDefinition[] = [
     label: 'ESRI - World Hillshade Dark',
     tileUrlTemplate:
       'https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade_Dark/MapServer/tile/{z}/{y}/{x}',
+    noDataSha256Hashes: [],
     tileSize: 256,
     // See esri-world-hillshade: matched to satellite's z18 for offline parity.
     maxZoom: 18,
@@ -296,8 +309,21 @@ export const TILE_PREFETCH = {
     maxZoom: 18,
     padMeters: 50,
   },
+  STATION_REQUEST: {
+    tileUrlTemplate: MAP.TILE_URL_TEMPLATE,
+    minZoom: 0,
+    maxZoom: 18,
+    padMeters: 50,
+  },
+  GPS_TRACK_REQUEST: {
+    tileUrlTemplate: MAP.TILE_URL_TEMPLATE,
+    minZoom: 0,
+    maxZoom: 18,
+    padMeters: 50,
+  },
   // Synthetic prefetch-job id for the single combined landmarks job.
   LANDMARK_TARGET_ID: 'landmarks',
+  STATION_TARGET_ID: 'stations',
 } as const;
 
 // ==================== COLORS ====================

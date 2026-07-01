@@ -19,7 +19,6 @@
 import React from 'react';
 import { IonToggle } from '@ionic/react';
 import type { Project } from '../types/project';
-import type { TilePrefetchJobState } from '../types/tilePrefetch';
 import { getProjectColor } from '../utils/projectColors';
 import { countryFlag } from '../utils/countryFlag';
 
@@ -34,7 +33,6 @@ export interface ProjectPanelProps {
   activeProjectIds: Set<string>;
   geoJsonData: Record<string, unknown>;
   projectColorsById: Record<string, string>;
-  tilePrefetchByProject: Record<string, TilePrefetchJobState | undefined>;
   countryVisibility: Record<string, boolean>;
   countryCollapsed: Record<string, boolean>;
   onToggleProject: (projectId: string) => void;
@@ -48,20 +46,6 @@ export interface ProjectPanelProps {
 }
 
 // ==================== Helpers ====================
-
-function prefetchStatusLabel(job: TilePrefetchJobState | undefined): string | null {
-  if (!job) return null;
-  const processed = job.completedTiles + job.failedTiles;
-  const pct = job.totalTiles > 0 ? Math.floor((processed / job.totalTiles) * 100) : 0;
-
-  if (job.status === 'done') return `Map ready (${pct}%)`;
-  if (job.status === 'error') return `Map prefetch failed (${pct}%)`;
-  if (job.status === 'paused') return `Map prefetch paused (${pct}%)`;
-  if (job.status === 'downloading' || job.status === 'queued') {
-    return `Caching map (${pct}%)`;
-  }
-  return null;
-}
 
 function isCountryOn(
   country: string,
@@ -176,7 +160,6 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
   activeProjectIds,
   geoJsonData,
   projectColorsById,
-  tilePrefetchByProject,
   countryVisibility,
   countryCollapsed,
   onToggleProject,
@@ -200,7 +183,6 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
     const effectiveOn = individualOn && countryOn;
     const color = getProjectColor(project.id, projectColorsById);
     const hasGeoJson = project.id in geoJsonData;
-    const prefetchLabel = prefetchStatusLabel(tilePrefetchByProject[project.id]);
 
     return (
       <li key={project.id} className="hover:bg-slate-700/30 transition-colors">
@@ -229,11 +211,6 @@ const ProjectPanel: React.FC<ProjectPanelProps> = ({
                 >
                   {project.name}
                 </span>
-                {prefetchLabel && (
-                  <span className="block text-[10px] text-emerald-300/90 truncate">
-                    {prefetchLabel}
-                  </span>
-                )}
               </div>
             </button>
           </div>

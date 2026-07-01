@@ -3,7 +3,6 @@ import { IonButton, IonContent, IonModal } from '@ionic/react'
 
 import logoPng from '../assets/media/logo.png'
 import { MAP } from '../constants'
-import { runTileCacheStartupMaintenanceRuntime } from '../services/TileCacheRuntime'
 import type { StartupUiCoordinatorResult } from './useStartupUiCoordinator'
 import { useSpeleoDB } from './useSpeleoDB'
 
@@ -49,8 +48,7 @@ export function SpeleoDBStartupModals({
 
   useEffect(() => {
     if (!authState.isAuthenticated) return
-    void controller.preloadTilePrefetch()
-    void runTileCacheStartupMaintenanceRuntime()
+    void controller.preloadOfflineMaps()
   }, [authState.isAuthenticated, controller])
 
   useEffect(() => {

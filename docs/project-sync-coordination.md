@@ -34,7 +34,11 @@ One run proceeds in this order:
 4. Validate project GeoJSON through the bounded three-worker pool.
 5. Refresh shared overlays, skipping landmarks when pending mutations could be
    overwritten.
-6. Refresh GPS metadata and schedule tiles through injected, abort-aware hooks.
+6. Refresh GPS metadata, then hand validated bounds/points/paths to
+   `TileCoordinator`; it independently revalidates complete current planning
+   inputs and schedules one cryptographically identified canonical plan through
+   a monotonic abort-aware hook. Planning failure preserves active coverage and
+   reports a failed tile phase rather than publishing a partial replacement.
 7. Publish exactly one terminal map-data revision for the current run.
 
 A superseding sync or logout aborts the active `CancellationContext`. Every
@@ -62,6 +66,11 @@ response classes, cached fallback, overlapping runs, logout races, exact phase
 counters, quarantine persistence, warning identity, overlay protection, and
 tile/GPS hook ordering through the public façade. Geometry, worker, cache, and
 tile seams retain their dedicated tests.
+
+Offline-map scheduling resolves once its immutable denominator and layer
+generations are installed; the six-worker download pipeline continues through
+its dedicated store. Per-tile progress does not publish a project/controller
+state change, so project sync subscribers do not rerender for map downloads.
 
 The extraction adds no requests, retries, timers, or scans. GeoJSON concurrency
 remains capped at three; project arrays and warning arrays retain stable

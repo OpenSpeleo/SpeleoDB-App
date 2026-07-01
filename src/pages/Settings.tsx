@@ -18,9 +18,8 @@ import {
 import { chevronDownOutline, syncOutline, warningOutline } from 'ionicons/icons';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
-import { useSpeleoDB } from '../context/useSpeleoDB';
+import { useOfflineMapSync, useSpeleoDB } from '../context/useSpeleoDB';
 import { MAP, MAP_LAYERS } from '../constants';
-import { getManualTileCount, getTotalCacheBytes } from '../services/tileCache/TileCacheRepository';
 import AppTabBar from '../components/AppTabBar';
 import ReconnectFailedModal from '../components/ReconnectFailedModal';
 import {
@@ -45,6 +44,16 @@ function formatBytes(bytes: number): string {
 
 function formatNumber(n: number): string {
   return n.toLocaleString();
+}
+
+function formatEta(etaSeconds: number | null): string | null {
+  if (etaSeconds === null || !Number.isFinite(etaSeconds) || etaSeconds <= 0) return null;
+  const totalSeconds = Math.ceil(etaSeconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (hours > 0) return `${hours}h${minutes > 0 ? ` ${minutes}m` : ''} left`;
+  if (minutes > 0) return `${minutes}m left`;
+  return `${totalSeconds}s left`;
 }
 
 const MAP_SELECT_CLASS = 'appearance-none min-w-[148px] rounded-lg border border-slate-500/70 bg-slate-800/90 text-sm text-slate-100 px-3 py-2 pr-9 shadow-inner shadow-black/20 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-cyan-400/60 focus:border-cyan-400/60';
@@ -81,7 +90,6 @@ const Settings: React.FC<SettingsProps> = ({
     controller,
     projects,
     syncStatus,
-    tilePrefetchJobs,
     lastSyncedAt,
     isTileCacheOverLimit,
     isTileCacheOverLimitApproved,
@@ -89,10 +97,11 @@ const Settings: React.FC<SettingsProps> = ({
     pendingOpsCount,
     gpsRecordingState,
   } = useSpeleoDB();
+  const offlineMapSync = useOfflineMapSync();
 
-  const [cacheBytes, setCacheBytes] = useState(0);
-  const [manualTileCount, setManualTileCount] = useState(0);
   const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
+  const [showRefreshConfirmModal, setShowRefreshConfirmModal] = useState(false);
+  const [isRefreshingOfflineMaps, setIsRefreshingOfflineMaps] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const {
     isReconnecting,
@@ -106,17 +115,6 @@ const Settings: React.FC<SettingsProps> = ({
       history.push('/login');
     }
   }, [history, controller]);
-
-  useEffect(() => {
-    const refresh = () => {
-      getTotalCacheBytes().then(setCacheBytes).catch(() => {});
-      getManualTileCount().then(setManualTileCount).catch(() => {});
-    };
-
-    refresh();
-    const interval = setInterval(refresh, 3000);
-    return () => clearInterval(interval);
-  }, []);
 
   const handleToggleLandmarks = useCallback(
     (checked: boolean) => {
@@ -133,15 +131,28 @@ const Settings: React.FC<SettingsProps> = ({
     } catch {
       // Sync failure is non-fatal; cache stats are still refreshed below.
     }
-    getTotalCacheBytes().then(setCacheBytes).catch(() => {});
-    getManualTileCount().then(setManualTileCount).catch(() => {});
   }, [controller]);
 
+  const handleConfirmRefreshOfflineMaps = useCallback(async () => {
+    if (isRefreshingOfflineMaps || isOfflineLocked) return;
+    setIsRefreshingOfflineMaps(true);
+    setShowRefreshConfirmModal(false);
+    try {
+      await controller.refreshOfflineMaps();
+    } finally {
+      setIsRefreshingOfflineMaps(false);
+    }
+  }, [controller, isOfflineLocked, isRefreshingOfflineMaps]);
+
   const handleToggleLayerSync = useCallback(
-    (layerId: string, enabled: boolean) => {
-      onLayerOfflineSyncChange({ ...layerOfflineSync, [layerId]: enabled });
-      void controller.setLayerOfflineSync(layerId, enabled);
-      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+    async (layerId: string, enabled: boolean) => {
+      try {
+        await controller.setLayerOfflineSync(layerId, enabled);
+        onLayerOfflineSyncChange({ ...layerOfflineSync, [layerId]: enabled });
+        Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+      } catch {
+        // Keep the controlled toggle at its previous value when release/eviction fails.
+      }
     },
     [controller, layerOfflineSync, onLayerOfflineSyncChange],
   );
@@ -195,44 +206,60 @@ const Settings: React.FC<SettingsProps> = ({
     [projects],
   );
 
+  const enabledLayerIds = useMemo(() => new Set(
+    MAP_LAYERS
+      .filter((layer) => layer.forcedOffline || layerOfflineSync[layer.id] === true)
+      .map((layer) => layer.id),
+  ), [layerOfflineSync]);
+
   const {
     syncPct,
     syncProcessedTiles,
     syncTotalTiles,
+    layerSyncPctById,
+    layerProgressById,
+    layerDisplayCompletedById,
   } = useMemo(() => {
-    let prefetchTotal = 0;
-    let prefetchDone = 0;
-    for (const job of tilePrefetchJobs) {
-      prefetchTotal += job.totalTiles;
-      prefetchDone += job.completedTiles + job.failedTiles;
+    const operationHasLockedTotal = offlineMapSync.coordinateCount !== null;
+    const totalTiles = operationHasLockedTotal
+      ? offlineMapSync.totalTiles
+      : offlineMapSync.coverageTotalTiles;
+    const progressById = Object.fromEntries(
+      offlineMapSync.layers.map((layer) => [layer.layerId, layer] as const),
+    );
+    const percentages: Record<string, number> = {};
+    const displayCompletedById: Record<string, number> = {};
+    for (const layerId of enabledLayerIds) {
+      const layer = progressById[layerId];
+      const total = layer?.totalTiles ?? offlineMapSync.coordinateCount ?? 0;
+      const rawCompleted = operationHasLockedTotal
+        ? layer?.completedTiles ?? 0
+        : layer?.usableTiles ?? 0;
+      const completed = Math.min(total, Math.max(0, rawCompleted));
+      displayCompletedById[layerId] = completed;
+      percentages[layerId] = total > 0
+        ? Math.min(100, Math.floor((completed / total) * 100))
+        : 0;
     }
+    const completedTiles = operationHasLockedTotal && offlineMapSync.layers.length > 0
+      ? offlineMapSync.layers.reduce(
+        (sum, layer) => sum + Math.min(layer.totalTiles, Math.max(0, layer.completedTiles)),
+        0,
+      )
+      : operationHasLockedTotal
+        ? Math.min(totalTiles, Math.max(0, offlineMapSync.completedTiles))
+        : Math.min(totalTiles, Math.max(0, offlineMapSync.coverageCompletedTiles));
 
-    const totalTiles = prefetchTotal + manualTileCount;
-    const processedTiles = prefetchDone + manualTileCount;
     return {
       syncTotalTiles: totalTiles,
-      syncProcessedTiles: processedTiles,
-      syncPct: totalTiles > 0 ? Math.floor((processedTiles / totalTiles) * 100) : 0,
+      syncProcessedTiles: completedTiles,
+      syncPct: totalTiles > 0 ? Math.floor((completedTiles / totalTiles) * 100) : 0,
+      layerSyncPctById: percentages,
+      layerProgressById: progressById,
+      layerDisplayCompletedById: displayCompletedById,
     };
-  }, [manualTileCount, tilePrefetchJobs]);
-
-  // Per-layer sync percentage from prefetch jobs (pinned tiles), grouped by
-  // layer. Runtime-cached (manual) tiles are excluded here since they cannot be
-  // reliably attributed to a single layer.
-  const layerSyncPctById = useMemo(() => {
-    const totals = new Map<string, { total: number; processed: number }>();
-    for (const job of tilePrefetchJobs) {
-      const entry = totals.get(job.layerId) ?? { total: 0, processed: 0 };
-      entry.total += job.totalTiles;
-      entry.processed += job.completedTiles + job.failedTiles;
-      totals.set(job.layerId, entry);
-    }
-    const result: Record<string, number> = {};
-    for (const [layerId, { total, processed }] of totals) {
-      result[layerId] = total > 0 ? Math.floor((processed / total) * 100) : 0;
-    }
-    return result;
-  }, [tilePrefetchJobs]);
+  }, [enabledLayerIds, offlineMapSync]);
+  const etaLabel = formatEta(offlineMapSync.etaSeconds);
 
   return (
     <IonPage>
@@ -287,23 +314,46 @@ const Settings: React.FC<SettingsProps> = ({
           <IonItem>
             <IonLabel>Cache size</IonLabel>
             <span slot="end" className="text-sm text-slate-400" data-testid="cache-size">
-              {formatBytes(cacheBytes)}
+              {formatBytes(offlineMapSync.cacheBytes)}
             </span>
           </IonItem>
 
           <IonItem>
-            <IonLabel>Sync progress</IonLabel>
+            <IonLabel>
+              {offlineMapSync.phase === 'planning' ? 'Preparing offline maps' : 'Sync progress'}
+            </IonLabel>
             <span slot="end" className="text-sm text-slate-400" data-testid="sync-pct">
-              {syncPct}%
+              {offlineMapSync.phase === 'planning' ? 'Preparing…' : `${syncPct}%`}
             </span>
           </IonItem>
 
           <IonItem>
             <IonLabel>Tiles synced</IonLabel>
             <span slot="end" className="text-sm text-slate-400" data-testid="sync-tiles">
-              {formatNumber(syncProcessedTiles)} / {formatNumber(syncTotalTiles)}
+              {offlineMapSync.phase === 'planning' && syncTotalTiles === 0
+                ? 'Preparing…'
+                : `${formatNumber(syncProcessedTiles)} / ${formatNumber(syncTotalTiles)}`}
             </span>
           </IonItem>
+
+          {offlineMapSync.failedTiles > 0 && (
+            <IonItem>
+              <IonLabel>Failed tiles</IonLabel>
+              <span slot="end" className="text-sm text-amber-300" data-testid="failed-tiles">
+                {formatNumber(offlineMapSync.failedTiles)}
+              </span>
+            </IonItem>
+          )}
+
+          {(offlineMapSync.phase === 'auditing' || offlineMapSync.phase === 'downloading') && (
+            <IonItem>
+              <IonLabel>Download speed</IonLabel>
+              <span slot="end" className="text-sm text-slate-400" data-testid="offline-map-speed">
+                {offlineMapSync.tilesPerSecond.toFixed(1)} tiles/s
+                {etaLabel !== null ? ` · ${etaLabel}` : ''}
+              </span>
+            </IonItem>
+          )}
 
           {isTileCacheOverLimitApproved && (
             <IonItem data-testid="storage-approved-status">
@@ -409,12 +459,19 @@ const Settings: React.FC<SettingsProps> = ({
           {MAP_LAYERS.map((layer) => {
             const isEnabled = layer.forcedOffline || layerOfflineSync[layer.id] === true;
             const pct = layerSyncPctById[layer.id] ?? 0;
+            const progress = layerProgressById[layer.id];
             // Toggling an extra layer requires network (enabling schedules a
             // prefetch; both states reconcile cached tiles), so lock it while
             // offline. The forced satellite layer is always disabled anyway.
             const toggleDisabled = layer.forcedOffline || isOfflineLocked;
+            const progressCount = progress
+              ? ` · ${formatNumber(layerDisplayCompletedById[layer.id] ?? 0)} / ${formatNumber(progress.totalTiles)}`
+              : '';
+            const failureCount = progress && progress.failedTiles > 0
+              ? ` · ${formatNumber(progress.failedTiles)} failed`
+              : '';
             const statusText = isEnabled
-              ? `Offline sync ${pct}%${layer.forcedOffline ? ' (always on)' : ''}`
+              ? `Offline sync ${pct}%${progressCount}${failureCount}${layer.forcedOffline ? ' (always on)' : ''}`
               : isOfflineLocked
                 ? 'Offline sync off (unavailable offline)'
                 : 'Offline sync off';
@@ -433,13 +490,40 @@ const Settings: React.FC<SettingsProps> = ({
                   slot="end"
                   checked={isEnabled}
                   disabled={toggleDisabled}
-                  onIonChange={(e) => handleToggleLayerSync(layer.id, e.detail.checked)}
+                  onIonChange={(e) => void handleToggleLayerSync(layer.id, e.detail.checked)}
                   data-testid={`layer-toggle-${layer.id}`}
                   aria-label={`Offline sync ${layer.label}`}
                 />
               </IonItem>
             );
           })}
+
+          <div className="px-4 py-3">
+            <button
+              type="button"
+              onClick={() => setShowRefreshConfirmModal(true)}
+              disabled={
+                isOfflineLocked
+                || isRefreshingOfflineMaps
+                || controller.isOfflineMapRefreshActive
+              }
+              data-testid="refresh-offline-maps-button"
+              className="app-btn app-btn--compact app-btn--info w-full justify-center gap-2"
+            >
+              <IonIcon
+                icon={syncOutline}
+                className={
+                  isRefreshingOfflineMaps || controller.isOfflineMapRefreshActive
+                    ? 'animate-spin'
+                    : ''
+                }
+                aria-hidden="true"
+              />
+              {isRefreshingOfflineMaps || controller.isOfflineMapRefreshActive
+                ? 'Refreshing offline maps…'
+                : 'Refresh offline maps'}
+            </button>
+          </div>
         </IonList>
 
         {/* Tutorial */}
@@ -491,6 +575,40 @@ const Settings: React.FC<SettingsProps> = ({
         </IonList>
 
         {/* Logout confirmation modal */}
+        <IonModal
+          isOpen={showRefreshConfirmModal}
+          onDidDismiss={() => setShowRefreshConfirmModal(false)}
+        >
+          <IonContent className="ion-padding">
+            <div className="flex flex-col h-full justify-center max-w-sm mx-auto text-center">
+              <h2 className="text-xl font-semibold text-slate-100 mb-3">
+                Refresh offline maps?
+              </h2>
+              <p className="text-slate-300 text-sm mb-6">
+                Satellite imagery and enabled offline layers will be downloaded again.
+                Existing tiles remain available until each replacement is safely stored.
+              </p>
+              <div className="grid grid-cols-1 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowRefreshConfirmModal(false)}
+                  className="app-btn app-btn--secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmRefreshOfflineMaps()}
+                  className="app-btn app-btn--info"
+                  data-testid="confirm-refresh-offline-maps"
+                >
+                  Refresh now
+                </button>
+              </div>
+            </div>
+          </IonContent>
+        </IonModal>
+
         <IonModal
           isOpen={showLogoutConfirmModal}
           onDidDismiss={() => setShowLogoutConfirmModal(false)}

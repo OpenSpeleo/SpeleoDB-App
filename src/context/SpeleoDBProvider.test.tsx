@@ -5,36 +5,45 @@ import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import { SpeleoDBProvider } from './SpeleoDBProvider';
-import { useSpeleoDB } from './useSpeleoDB';
+import { useOfflineMapSync, useSpeleoDB } from './useSpeleoDB';
+import type { OfflineMapSyncSnapshot } from '../types/offlineMapSync';
 
 const {
   mockValidateSession,
   mockLogout,
   mockStoreSubscribers,
+  mockOfflineMapSubscribers,
   emitStoreUpdate,
+  emitOfflineMapUpdate,
   mockIsOfflineLockedRef,
   mockIsAuthenticated,
   mockGetPreferences,
   mockSetPreferences,
   mockClearPreferences,
   mockPreloadTilePrefetch,
-  mockRunTileCacheStartupMaintenance,
   mockStartGuidedTour,
   mockDestroyGuidedTour,
   mockSplashHide,
   authStateSnapshotRef,
   projectsSnapshot,
-  tilePrefetchJobsSnapshot,
+  offlineMapSyncSnapshotRef,
   syncStatusRef,
   mapDataRevisionRef,
 } = vi.hoisted(() => {
   const storeSubscribers = new Set<() => void>();
+  const offlineMapSubscribers = new Set<() => void>();
   return {
     mockValidateSession: vi.fn(),
     mockLogout: vi.fn(),
     mockStoreSubscribers: storeSubscribers,
+    mockOfflineMapSubscribers: offlineMapSubscribers,
     emitStoreUpdate: () => {
       for (const listener of storeSubscribers) {
+        listener();
+      }
+    },
+    emitOfflineMapUpdate: () => {
+      for (const listener of offlineMapSubscribers) {
         listener();
       }
     },
@@ -44,7 +53,6 @@ const {
     mockSetPreferences: vi.fn(),
     mockClearPreferences: vi.fn(),
     mockPreloadTilePrefetch: vi.fn().mockResolvedValue(undefined),
-    mockRunTileCacheStartupMaintenance: vi.fn(),
     mockStartGuidedTour: vi.fn().mockResolvedValue(undefined),
     mockDestroyGuidedTour: vi.fn(),
     mockSplashHide: vi.fn().mockResolvedValue(undefined),
@@ -60,7 +68,28 @@ const {
       },
     },
     projectsSnapshot: [] as unknown[],
-    tilePrefetchJobsSnapshot: [] as unknown[],
+    offlineMapSyncSnapshotRef: { current: {
+      sessionId: null,
+      phase: 'idle',
+      coordinateCount: null,
+      enabledLayerCount: 0,
+      totalTiles: 0,
+      completedTiles: 0,
+      failedTiles: 0,
+      cachedFreshTiles: 0,
+      auditedTiles: 0,
+      queuedTiles: 0,
+      downloadedTiles: 0,
+      activeDownloads: 0,
+      bytesDownloaded: 0,
+      tilesPerSecond: 0,
+      etaSeconds: null,
+      cacheBytes: 0,
+      blockedByStorage: false,
+      coverageTotalTiles: 0,
+      coverageCompletedTiles: 0,
+      layers: [],
+    } as OfflineMapSyncSnapshot },
     syncStatusRef: { current: 'idle' as string },
     mapDataRevisionRef: { current: 0 },
   };
@@ -108,10 +137,6 @@ vi.mock('@ionic/react', () => ({
   ),
 }));
 
-vi.mock('../services/TileCacheRuntime', () => ({
-  runTileCacheStartupMaintenanceRuntime: mockRunTileCacheStartupMaintenance,
-}));
-
 vi.mock('@capacitor/splash-screen', () => ({
   SplashScreen: {
     hide: mockSplashHide,
@@ -142,12 +167,19 @@ vi.mock('../controllers/SpeleoDBController', () => {
   class SpeleoDBController {
     validateSession = mockValidateSession;
     logout = mockLogout;
-    preloadTilePrefetch = mockPreloadTilePrefetch;
+    preloadOfflineMaps = mockPreloadTilePrefetch;
 
     subscribe(listener: () => void): () => void {
       mockStoreSubscribers.add(listener);
       return () => {
         mockStoreSubscribers.delete(listener);
+      };
+    }
+
+    subscribeOfflineMapSync(listener: () => void): () => void {
+      mockOfflineMapSubscribers.add(listener);
+      return () => {
+        mockOfflineMapSubscribers.delete(listener);
       };
     }
 
@@ -183,8 +215,8 @@ vi.mock('../controllers/SpeleoDBController', () => {
       return mapDataRevisionRef.current;
     }
 
-    get tilePrefetchJobs() {
-      return tilePrefetchJobsSnapshot;
+    get offlineMapSyncSnapshot() {
+      return offlineMapSyncSnapshotRef.current;
     }
   }
 
@@ -195,6 +227,7 @@ describe('SpeleoDBProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockStoreSubscribers.clear();
+    mockOfflineMapSubscribers.clear();
 
     mockGetPreferences.mockReturnValue({
       email: 'user@example.com',
@@ -205,7 +238,6 @@ describe('SpeleoDBProvider', () => {
     mockLogout.mockResolvedValue(undefined);
     mockIsAuthenticated.mockReturnValue(true);
     mockIsOfflineLockedRef.current = false;
-    mockRunTileCacheStartupMaintenance.mockResolvedValue(undefined);
     mockSplashHide.mockClear();
     mockSplashHide.mockResolvedValue(undefined);
     authStateSnapshotRef.current = {
@@ -215,6 +247,58 @@ describe('SpeleoDBProvider', () => {
     };
     syncStatusRef.current = 'idle';
     mapDataRevisionRef.current = 0;
+    offlineMapSyncSnapshotRef.current = {
+      ...offlineMapSyncSnapshotRef.current,
+      sessionId: null,
+      phase: 'idle',
+      coordinateCount: null,
+      totalTiles: 0,
+      completedTiles: 0,
+      layers: [],
+    };
+  });
+
+  it('publishes tile progress directly without rerendering unrelated context consumers', async () => {
+    const unrelatedRender = vi.fn();
+
+    function ProgressProbe() {
+      const progress = useOfflineMapSync();
+      return <div data-testid="tile-progress">{progress.completedTiles}</div>;
+    }
+
+    function UnrelatedProbe() {
+      const { projects } = useSpeleoDB();
+      unrelatedRender();
+      return <div data-testid="project-count">{projects.length}</div>;
+    }
+
+    render(
+      <Router history={createMemoryHistory({ initialEntries: ['/dashboard'] })}>
+        <SpeleoDBProvider>
+          <ProgressProbe />
+          <UnrelatedProbe />
+        </SpeleoDBProvider>
+      </Router>,
+    );
+    expect(screen.getByTestId('tile-progress')).toHaveTextContent('0');
+    const unrelatedRendersBeforeProgress = unrelatedRender.mock.calls.length;
+
+    act(() => {
+      offlineMapSyncSnapshotRef.current = {
+        ...offlineMapSyncSnapshotRef.current,
+        sessionId: 'session-1',
+        phase: 'downloading',
+        coordinateCount: 10,
+        totalTiles: 10,
+        completedTiles: 1,
+      };
+      emitOfflineMapUpdate();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tile-progress')).toHaveTextContent('1');
+    });
+    expect(unrelatedRender).toHaveBeenCalledTimes(unrelatedRendersBeforeProgress);
   });
 
   it('publishes map-data revisions without changing the stable projects snapshot', async () => {
