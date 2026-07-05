@@ -7,7 +7,7 @@ import { createMemoryHistory } from 'history';
 import Dashboard from './Dashboard';
 import { MAP } from '../constants';
 import type { Project } from '../types/project';
-import type { GpsTrackListItem } from '../types/gpsTrack';
+import type { GpsTrackListItem, RecordedPoint } from '../types/gpsTrack';
 import type { DashboardPanel } from '../types/dashboardPanel';
 import { LandmarkMutationError } from '../types/landmark';
 import { allowConsoleWarn } from '../test/consoleGuard';
@@ -174,22 +174,59 @@ vi.mock('@ionic/react', () => ({
   IonIcon: () => <span data-testid="ion-icon" />,
 }));
 
-const { mockRequestPermissions, mockGetCurrentPosition } = vi.hoisted(() => ({
+const {
+  mockRequestPermissions,
+  mockWatchPosition,
+  mockClearWatch,
+  locationWatchCallbackRef,
+  appStateCallbackRef,
+  headingCallbackRef,
+  mockStartHeading,
+  mockStopHeading,
+} = vi.hoisted(() => ({
   mockRequestPermissions: vi.fn().mockResolvedValue({ location: 'granted' }),
-  mockGetCurrentPosition: vi.fn().mockResolvedValue({
-    coords: { latitude: 46.6, longitude: 2.3, accuracy: 10 },
-    timestamp: Date.now(),
-  }),
+  mockWatchPosition: vi.fn(),
+  mockClearWatch: vi.fn().mockResolvedValue(undefined),
+  locationWatchCallbackRef: { current: null as ((position: unknown, error?: unknown) => void) | null },
+  appStateCallbackRef: { current: null as ((state: { isActive: boolean }) => void) | null },
+  headingCallbackRef: { current: null as ((event: { value: number }) => void) | null },
+  mockStartHeading: vi.fn().mockResolvedValue(undefined),
+  mockStopHeading: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@capacitor/core', () => ({
-  Capacitor: { getPlatform: () => 'android' },
+  Capacitor: { getPlatform: () => 'android', isNativePlatform: () => true },
 }));
 
 vi.mock('@capacitor/geolocation', () => ({
   Geolocation: {
-    getCurrentPosition: mockGetCurrentPosition,
     requestPermissions: mockRequestPermissions,
+    watchPosition: mockWatchPosition,
+    clearWatch: mockClearWatch,
+  },
+}));
+
+vi.mock('@capacitor/app', () => ({
+  App: {
+    getState: vi.fn(async () => ({ isActive: true })),
+    addListener: vi.fn(async (
+      _name: string,
+      listener: (state: { isActive: boolean }) => void,
+    ) => {
+      appStateCallbackRef.current = listener;
+      return { remove: vi.fn(async () => { appStateCallbackRef.current = null; }) };
+    }),
+  },
+}));
+
+vi.mock('@capgo/capacitor-compass', () => ({
+  CapgoCompass: {
+    addListener: vi.fn(async (_name: string, listener: (event: { value: number }) => void) => {
+      headingCallbackRef.current = listener;
+      return { remove: vi.fn(async () => { headingCallbackRef.current = null; }) };
+    }),
+    startListening: mockStartHeading,
+    stopListening: mockStopHeading,
   },
 }));
 
@@ -269,8 +306,14 @@ vi.mock('react-map-gl/maplibre', () => {
 
   return {
     default: MapMock,
-    Source: ({ children }: { children?: React.ReactNode }) => (
-      <div data-testid="map-source">{children}</div>
+    Source: ({ children, id, data }: {
+      children?: React.ReactNode;
+      id?: string;
+      data?: unknown;
+    }) => (
+      <div data-testid="map-source" data-source-id={id} data-source-data={JSON.stringify(data)}>
+        {children}
+      </div>
     ),
     Layer: ({
       id,
@@ -326,6 +369,15 @@ vi.mock('react-map-gl/maplibre', () => {
         />
       );
     },
+    Marker: ({ children, longitude, latitude }: {
+      children?: React.ReactNode;
+      longitude: number;
+      latitude: number;
+    }) => (
+      <div data-testid="user-location-marker" data-longitude={longitude} data-latitude={latitude}>
+        {children}
+      </div>
+    ),
     NavigationControl: () => <div data-testid="nav-control" />,
   };
 });
@@ -451,7 +503,7 @@ const mockController = {
   updateLandmark: mockUpdateLandmark,
   deleteLandmark: mockDeleteLandmark,
   // GPS recording surface (defaults are inert for non-GPS Dashboard tests).
-  currentTrackPoints: [],
+  currentTrackPoints: [] as RecordedPoint[],
   startTrackRecording: vi.fn().mockResolvedValue(undefined),
   pauseTrackRecording: vi.fn().mockResolvedValue(undefined),
   resumeTrackRecording: vi.fn().mockResolvedValue(undefined),
@@ -493,6 +545,7 @@ function renderDashboard(options?: {
   measurementUnit?: 'feet' | 'meters';
   selectedMapLayerId?: 'esri-satellite' | 'esri-world-hillshade' | 'esri-world-hillshade-dark';
   layerOfflineSync?: Record<string, boolean>;
+  routeActive?: boolean;
 }) {
   const history = createMemoryHistory({ initialEntries: ['/dashboard'] });
   const initialShowLandmarks = options?.showLandmarks ?? mockGetShowLandmarks();
@@ -500,6 +553,7 @@ function renderDashboard(options?: {
   const initialMeasurementUnit = options?.measurementUnit ?? 'feet';
   const initialLayerId = options?.selectedMapLayerId ?? 'esri-satellite';
   const initialLayerOfflineSync = options?.layerOfflineSync ?? {};
+  let routeActive = options?.routeActive ?? true;
   const Harness: React.FC = () => {
     const [activeDashboardPanel, setActiveDashboardPanel] =
       React.useState<DashboardPanel>(null);
@@ -507,6 +561,7 @@ function renderDashboard(options?: {
     const [selectedMapLayerId, setSelectedMapLayerId] = React.useState(initialLayerId);
     return (
       <Dashboard
+        isActive={routeActive}
         activeDashboardPanel={activeDashboardPanel}
         onDashboardPanelChange={setActiveDashboardPanel}
         showLandmarks={showLandmarks}
@@ -529,6 +584,14 @@ function renderDashboard(options?: {
         <Harness />
       </Router>,
     ),
+    setDashboardActive: (active: boolean) => {
+      routeActive = active;
+      view.rerender(
+        <Router history={history}>
+          <Harness />
+        </Router>,
+      );
+    },
   });
 }
 
@@ -741,6 +804,22 @@ function mixedProjectFeatureCollection(): GeoJSON.FeatureCollection {
 describe('Dashboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGpsRecordingState = 'idle';
+    mockGpsTracks = [];
+    mockController.currentTrackPoints = [];
+    locationWatchCallbackRef.current = null;
+    appStateCallbackRef.current = null;
+    headingCallbackRef.current = null;
+    mockRequestPermissions.mockReset().mockResolvedValue({ location: 'granted' });
+    mockWatchPosition.mockReset().mockImplementation(
+      async (_options: unknown, callback: (position: unknown, error?: unknown) => void) => {
+        locationWatchCallbackRef.current = callback;
+        return 'live-location-watch';
+      },
+    );
+    mockClearWatch.mockReset().mockResolvedValue(undefined);
+    mockStartHeading.mockReset().mockResolvedValue(undefined);
+    mockStopHeading.mockReset().mockResolvedValue(undefined);
     mockGetCachedLayerStyle.mockResolvedValue({
       version: 8,
       sources: {},
@@ -2656,7 +2735,9 @@ describe('Dashboard -- My Location button', () => {
   it('has accessible label', async () => {
     renderDashboard();
     await waitFor(() => {
-      expect(screen.getByLabelText('Go to my location')).toBeInTheDocument();
+      const button = screen.getByLabelText('Turn on live location');
+      expect(button).toBeInTheDocument();
+      expect(button).toHaveAttribute('aria-pressed', 'false');
     });
   });
 });
@@ -2697,34 +2778,243 @@ describe('Dashboard -- Map layer switcher', () => {
 });
 
 describe('Dashboard -- User location dot', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    vi.clearAllMocks();
+    mockGpsRecordingState = 'idle';
+    mockController.currentTrackPoints = [];
+    locationWatchCallbackRef.current = null;
+    appStateCallbackRef.current = null;
+    headingCallbackRef.current = null;
     mockRequestPermissions.mockReset().mockResolvedValue({ location: 'granted' });
-    mockGetCurrentPosition.mockReset().mockResolvedValue({
-      coords: { latitude: 46.6, longitude: 2.3, accuracy: 10 },
-      timestamp: Date.now(),
-    });
+    mockWatchPosition.mockReset().mockImplementation(
+      async (_options: unknown, callback: (position: unknown, error?: unknown) => void) => {
+        locationWatchCallbackRef.current = callback;
+        return 'live-location-watch';
+      },
+    );
+    mockClearWatch.mockReset().mockResolvedValue(undefined);
+    mockStartHeading.mockReset().mockResolvedValue(undefined);
+    mockStopHeading.mockReset().mockResolvedValue(undefined);
   });
 
-  it('renders user location dot layer after successful geolocation', async () => {
+  it('toggles a continuously watched manual dot and heading cone', async () => {
     renderDashboard();
 
     const btn = await screen.findByTestId('my-location-button');
     await userEvent.click(btn);
 
+    expect(btn).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByLabelText('Turn off live location')).toBeInTheDocument();
+    await waitFor(() => expect(mockWatchPosition).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      locationWatchCallbackRef.current?.({
+        coords: { latitude: 46.6, longitude: 2.3, accuracy: 10 },
+        timestamp: Date.now(),
+      });
+    });
+
     await waitFor(() => {
       const layer = document.querySelector('[data-layer-id="user-location-dot"]');
       expect(layer).not.toBeNull();
+    });
+    expect(mockMapFlyTo).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+    act(() => headingCallbackRef.current?.({ value: 45 }));
+    expect(await screen.findByTestId('user-location-heading-cone')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('my-location-button'));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="user-location-dot"]')).toBeNull();
+      expect(screen.queryByTestId('user-location-heading-cone')).not.toBeInTheDocument();
+      expect(screen.getByTestId('my-location-button')).toHaveAttribute('aria-pressed', 'false');
+    });
+    expect(mockClearWatch).toHaveBeenCalled();
+    await waitFor(() => expect(mockStopHeading).toHaveBeenCalledTimes(1));
+  });
+
+  it('uses an active recording for the dot and cone without manual mode', async () => {
+    mockGpsRecordingState = 'recording';
+    mockController.currentTrackPoints = [{
+      latitude: 46.61,
+      longitude: 2.31,
+      accuracy: 8,
+      timestamp: Date.now(),
+    }];
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="user-location-dot"]')).not.toBeNull();
+    });
+    expect(document.querySelector('[data-source-id="user-location-source"]'))
+      .toHaveAttribute('data-source-data', expect.stringContaining('[2.31,46.61]'));
+    expect(mockWatchPosition).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+    act(() => headingCallbackRef.current?.({ value: 90 }));
+    expect(await screen.findByTestId('user-location-heading-cone')).toBeInTheDocument();
+  });
+
+  it('retains a paused recording dot without consuming the compass', async () => {
+    mockGpsRecordingState = 'paused';
+    mockController.currentTrackPoints = [{
+      latitude: 46.62,
+      longitude: 2.32,
+      timestamp: Date.now(),
+    }];
+
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="user-location-dot"]')).not.toBeNull();
+    });
+    expect(screen.queryByTestId('user-location-heading-cone')).not.toBeInTheDocument();
+    expect(mockStartHeading).not.toHaveBeenCalled();
+    expect(mockWatchPosition).not.toHaveBeenCalled();
+  });
+
+  it('gives the fresher manual fix priority over a recording and keeps it after pause', async () => {
+    mockGpsRecordingState = 'recording';
+    mockController.currentTrackPoints = [{
+      latitude: 46.63,
+      longitude: 2.33,
+      timestamp: Date.now(),
+    }];
+    const view = renderDashboard();
+    await waitFor(() => {
+      expect(document.querySelector('[data-source-id="user-location-source"]'))
+        .toHaveAttribute('data-source-data', expect.stringContaining('[2.33,46.63]'));
+    });
+
+    await userEvent.click(await screen.findByTestId('my-location-button'));
+    await waitFor(() => expect(mockWatchPosition).toHaveBeenCalledTimes(1));
+    act(() => {
+      locationWatchCallbackRef.current?.({
+        coords: { latitude: 46.64, longitude: 2.34, accuracy: 7 },
+        timestamp: Date.now(),
+      });
+    });
+    await waitFor(() => {
+      expect(document.querySelector('[data-source-id="user-location-source"]'))
+        .toHaveAttribute('data-source-data', expect.stringContaining('[2.34,46.64]'));
+    });
+
+    mockGpsRecordingState = 'paused';
+    view.rerenderDashboard();
+
+    expect(document.querySelector('[data-source-id="user-location-source"]'))
+      .toHaveAttribute('data-source-data', expect.stringContaining('[2.34,46.64]'));
+    expect(screen.getByTestId('my-location-button')).toHaveAttribute('aria-pressed', 'true');
+
+    mockGpsRecordingState = 'idle';
+    view.rerenderDashboard();
+    expect(document.querySelector('[data-source-id="user-location-source"]'))
+      .toHaveAttribute('data-source-data', expect.stringContaining('[2.34,46.64]'));
+  });
+
+  it('removes and restores only the recording-owned cone across pause/resume/stop', async () => {
+    mockGpsRecordingState = 'recording';
+    mockController.currentTrackPoints = [{
+      latitude: 46.67,
+      longitude: 2.37,
+      timestamp: Date.now(),
+    }];
+    const view = renderDashboard();
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+    act(() => headingCallbackRef.current?.({ value: 180 }));
+    expect(await screen.findByTestId('user-location-heading-cone')).toBeInTheDocument();
+
+    mockGpsRecordingState = 'paused';
+    view.rerenderDashboard();
+    await waitFor(() => expect(mockStopHeading).toHaveBeenCalledTimes(1));
+    expect(document.querySelector('[data-layer-id="user-location-dot"]')).not.toBeNull();
+    expect(screen.queryByTestId('user-location-heading-cone')).not.toBeInTheDocument();
+
+    mockGpsRecordingState = 'recording';
+    view.rerenderDashboard();
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(2));
+    act(() => headingCallbackRef.current?.({ value: 181 }));
+    expect(await screen.findByTestId('user-location-heading-cone')).toBeInTheDocument();
+
+    mockGpsRecordingState = 'idle';
+    view.rerenderDashboard();
+    await waitFor(() => expect(mockStopHeading).toHaveBeenCalledTimes(2));
+    expect(document.querySelector('[data-layer-id="user-location-dot"]')).toBeNull();
+    expect(screen.queryByTestId('user-location-heading-cone')).not.toBeInTheDocument();
+  });
+
+  it('suspends native location and heading while the route or app is inactive', async () => {
+    const view = renderDashboard();
+    await userEvent.click(await screen.findByTestId('my-location-button'));
+    await waitFor(() => expect(mockWatchPosition).toHaveBeenCalledTimes(1));
+    act(() => {
+      locationWatchCallbackRef.current?.({
+        coords: { latitude: 46.65, longitude: 2.35, accuracy: 6 },
+        timestamp: Date.now(),
+      });
+    });
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+    act(() => headingCallbackRef.current?.({ value: 120 }));
+    expect(await screen.findByTestId('user-location-heading-cone')).toBeInTheDocument();
+    expect(mockMapFlyTo).toHaveBeenCalledTimes(1);
+
+    act(() => view.setDashboardActive(false));
+    await waitFor(() => {
+      expect(mockClearWatch).toHaveBeenCalledTimes(1);
+      expect(mockStopHeading).toHaveBeenCalledTimes(1);
+    });
+    expect(document.querySelector('[data-layer-id="user-location-dot"]')).not.toBeNull();
+    expect(screen.queryByTestId('user-location-heading-cone')).not.toBeInTheDocument();
+    expect(screen.getByTestId('my-location-button')).toHaveAttribute('aria-pressed', 'true');
+
+    act(() => view.setDashboardActive(true));
+    await waitFor(() => {
+      expect(mockWatchPosition).toHaveBeenCalledTimes(2);
+      expect(mockStartHeading).toHaveBeenCalledTimes(2);
+    });
+    act(() => {
+      locationWatchCallbackRef.current?.({
+        coords: { latitude: 46.66, longitude: 2.36, accuracy: 5 },
+        timestamp: Date.now(),
+      });
+    });
+    expect(mockMapFlyTo).toHaveBeenCalledTimes(1);
+
+    act(() => appStateCallbackRef.current?.({ isActive: false }));
+    await waitFor(() => {
+      expect(mockClearWatch).toHaveBeenCalledTimes(2);
+      expect(mockStopHeading).toHaveBeenCalledTimes(2);
+    });
+
+    act(() => appStateCallbackRef.current?.({ isActive: true }));
+    await waitFor(() => {
+      expect(mockWatchPosition).toHaveBeenCalledTimes(3);
+      expect(mockStartHeading).toHaveBeenCalledTimes(3);
     });
   });
 });
 
 describe('Dashboard -- Geolocation error modal', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    vi.clearAllMocks();
+    mockGpsRecordingState = 'idle';
+    mockController.currentTrackPoints = [];
+    locationWatchCallbackRef.current = null;
+    appStateCallbackRef.current = null;
+    headingCallbackRef.current = null;
     mockRequestPermissions.mockReset().mockResolvedValue({ location: 'granted' });
-    mockGetCurrentPosition.mockReset().mockResolvedValue({
-      coords: { latitude: 46.6, longitude: 2.3, accuracy: 10 },
-      timestamp: Date.now(),
-    });
+    mockWatchPosition.mockReset().mockImplementation(
+      async (_options: unknown, callback: (position: unknown, error?: unknown) => void) => {
+        locationWatchCallbackRef.current = callback;
+        return 'live-location-watch';
+      },
+    );
+    mockClearWatch.mockReset().mockResolvedValue(undefined);
   });
 
   it('shows error modal when permission is denied via requestPermissions return value', async () => {
@@ -2753,10 +3043,10 @@ describe('Dashboard -- Geolocation error modal', () => {
     });
   });
 
-  it('shows error modal when getCurrentPosition times out', async () => {
+  it('shows error modal when starting the location watch times out', async () => {
     const err = new Error('Could not obtain location in time.') as Error & { code: string };
     err.code = 'OS-PLUG-GLOC-0010';
-    mockGetCurrentPosition.mockRejectedValue(err);
+    mockWatchPosition.mockRejectedValue(err);
     renderDashboard();
 
     const btn = await screen.findByTestId('my-location-button');

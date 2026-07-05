@@ -2,13 +2,14 @@
 
 ## Implementation gates
 
-- [x] Reproduce the frozen **Tiles synced** value through the real engine-to-React
-  subscription seam and identify the root cause.
+- [x] Reproduce the frozen **Tiles synced** value through the real
+      engine-to-React subscription seam and identify the root cause.
 - [x] Make committed/audited tile progress visible without polling or durable
-  checkpoint coupling.
+      checkpoint coupling.
 - [x] Format remaining time using non-zero hours/minutes/seconds, hiding seconds
-  whenever minutes or hours are shown.
-- [x] Add focused regression tests for live subscription updates and ETA display.
+      whenever minutes or hours are shown.
+- [x] Add focused regression tests for live subscription updates and ETA
+      display.
 - [x] Update Settings/offline-map documentation for the display behavior.
 
 ## Verification gates
@@ -26,9 +27,9 @@ dedicated store, and the global context no longer carries the high-frequency
 snapshot. The paint scheduler also has a 50 ms one-shot fallback for mobile
 WebViews that defer `requestAnimationFrame` during Ionic transitions.
 
-ETA display now uses the largest useful units: seconds below one minute,
-minutes below one hour, and hours with non-zero minutes above one hour. Seconds
-are hidden whenever minutes or hours are present.
+ETA display now uses the largest useful units: seconds below one minute, minutes
+below one hour, and hours with non-zero minutes above one hour. Seconds are
+hidden whenever minutes or hours are present.
 
 Verification:
 
@@ -38,8 +39,8 @@ Verification:
   — passed.
 - `npm run typecheck` — passed.
 - `make ci` — 106 files, 1,778 tests passed with coverage; production build
-  completed. The first sandboxed attempt could not resolve
-  `stage.speleodb.org`; the network-enabled rerun passed.
+  completed. The first sandboxed attempt could not resolve `stage.speleodb.org`;
+  the network-enabled rerun passed.
 
 No native code changed. Physical-device timing remains part of the parent
 offline-map rearchitecture acceptance work; this correction is covered at the

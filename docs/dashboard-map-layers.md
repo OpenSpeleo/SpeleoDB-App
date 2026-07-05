@@ -13,8 +13,9 @@ expand the Dashboard state machine.
   and point layers, including depth-color expressions.
 - `OverlayMapLayers.tsx` owns landmark, surface/subsurface station, exploration
   lead, and cylinder layers, labels, icon availability, and visual fallbacks.
-- `GpsMapLayers.tsx` owns saved-track, active-recording, and user-location
-  sources and layers.
+- `GpsMapLayers.tsx` owns saved-track and active-recording line sources/layers.
+- `UserLocationIndicator.tsx` owns the shared manual/recording location dot and
+  phone-heading cone. See `docs/user-location-heading.md`.
 - `useDashboardMapData` supplies normalized, commit-gated project and overlay
   data; see `docs/dashboard-map-data.md`.
 - `DashboardMapCanvas.tsx` composes these focused layers with cached map style,
@@ -24,8 +25,10 @@ expand the Dashboard state machine.
   layer paint/layout declaration. Pointer interaction orchestration is owned by
   `useDashboardMapInteractions`; see `docs/dashboard-map-interactions.md`.
 
-The components are deliberately data-in/render-out. They do not fetch, mutate
-storage, schedule work, register listeners, or retain local state.
+The GeoJSON layer components are deliberately data-in/render-out. They do not
+fetch, mutate storage, schedule work, register listeners, or retain local state.
+`UserLocationIndicator` is the narrow exception: it subscribes to the shared
+heading provider only while its explicit `headingActive` input is true.
 
 ## Invariants
 
@@ -41,15 +44,19 @@ storage, schedule work, register listeners, or retain local state.
   cylinder fallbacks remain mutually exclusive with their icon layers.
 - Saved and active GPS tracks are separate sources; the active line is absent
   when recording is idle or has no points.
-- The user-location dot is absent until the page has obtained a location.
+- `user-location-dot` remains a direct child of `user-location-source`; its ID
+  remains stable for long-press collision protection.
+- The user-location indicator is absent when neither manual live mode nor an
+  active/paused recording supplies a valid point. A paused recording alone is
+  dot-only; a live manual mode or active recording may own the cone.
 
 ## Verification and performance
 
 `DashboardMapLayers.test.tsx` models `react-map-gl` source injection with
 `Children.map`/`cloneElement` and proves that every project geometry layer,
-subsurface icon, and GPS line receives its owning source ID. It also covers
-visibility/data omission and icon availability. The Dashboard characterization
-suite verifies the surrounding data and map-readiness orchestration.
-The split changes React component ownership only: it adds no MapLibre source,
-network request, timer, listener, or data scan. All production modules remain
-below the 600-line budget and all layer functions remain at or below 80 lines.
+subsurface icon, and GPS line receives its owning source ID.
+`UserLocationIndicator.test.tsx` proves the same direct source-injection
+contract for the dot plus its fixed SVG geometry and dot-only fallback. The
+Dashboard characterization suite verifies surrounding source selection,
+lifecycle, and map readiness. Heading updates rerender only the indicator; the
+cone is a fixed-size DOM marker and creates no zoom-dependent GeoJSON work.

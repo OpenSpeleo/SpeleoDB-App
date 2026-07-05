@@ -1,14 +1,15 @@
 # Project Colors
 
 Projects render with a model-stored hex color delivered by the
-`/api/v2/projects/geojson/` endpoint as `project.color`. The mobile app does
-not maintain a JS-side palette; this document defines the contract so the
-mobile and web map viewers always render the same project the same way.
+`/api/v2/projects/geojson/` endpoint as `project.color`. The mobile app does not
+maintain a JS-side palette; this document defines the contract so the mobile and
+web map viewers always render the same project the same way.
 
 ## Source of truth
 
-- The Django backend assigns each project a default color at creation time
-  from a 20-color perceptually-distinct palette (see `speleodb.common.enums.ColorPalette`).
+- The Django backend assigns each project a default color at creation time from
+  a 20-color perceptually-distinct palette (see
+  `speleodb.common.enums.ColorPalette`).
 - The DRF `ProjectSerializer` exposes the field as a 7-character hex string
   (`#rrggbb`, lowercase). Example payload:
 
@@ -37,20 +38,19 @@ renders because the panel sort is a pure function of `projects`.
 
 ```typescript
 function isValidHex(value: unknown): value is string {
-  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
+  return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value);
 }
 ```
 
 Any value failing `isValidHex` (missing field, malformed payload, CDN cache
-poisoning) resolves to `COLORS.FALLBACK` (`#94a3b8`, neutral slate gray).
-The fallback is never cached at the call site, so a subsequent valid value
-silently upgrades.
+poisoning) resolves to `COLORS.FALLBACK` (`#94a3b8`, neutral slate gray). The
+fallback is never cached at the call site, so a subsequent valid value silently
+upgrades.
 
 ## Consumers
 
-- `ProjectPanel`: the per-row color dot (filled when effectively visible,
-  hollow border when masked off by either the individual toggle or the
-  country gate).
+- `ProjectPanel`: the per-row color dot (filled when effectively visible, hollow
+  border when masked off by either the individual toggle or the country gate).
 - `Dashboard`: `<Layer>` `paint['line-color']` and `paint['fill-color']` in
   project color mode. In depth color mode the same color feeds
   `createDepthColorExpression` as the no-depth fallback so projects without
@@ -59,15 +59,15 @@ silently upgrades.
 ## Why no JS palette?
 
 Two clients (web and mobile) sharing model-stored colors guarantees that a
-project always renders the same way regardless of viewport width, sort
-order, or filter state. This is essential when caves are discussed across
-screen-shares of both apps.
+project always renders the same way regardless of viewport width, sort order, or
+filter state. This is essential when caves are discussed across screen-shares of
+both apps.
 
 ## Resilience
 
 If the backend rolls back the `color` field, every project falls back to the
-neutral gray and the app remains functional but loses color distinction
-between projects until the field returns. A single successful sync repopulates
+neutral gray and the app remains functional but loses color distinction between
+projects until the field returns. A single successful sync repopulates
 `ProjectCacheService` with fresh, color-bearing payloads and dots return to
 normal on the next render.
 

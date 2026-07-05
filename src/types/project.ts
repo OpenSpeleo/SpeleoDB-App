@@ -55,4 +55,3 @@ export interface Project {
   longitude?: number;
   latest_commit: ProjectCommit;
 }
-

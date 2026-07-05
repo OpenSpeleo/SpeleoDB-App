@@ -11,8 +11,10 @@ runtime cache invariants at their authoritative production seams.
 
 - [x] Review every staged and unstaged path against HEAD and the final worktree.
 - [x] Record the authoritative invariant, owner, callers, failure modes, and
-      evidence for planner, downloader, repository, runtime, coordination, and UI.
-- [x] Compare the removed scheduler with HEAD and `d556d2356915bb510a1fc0764a6d020d1718279d`.
+      evidence for planner, downloader, repository, runtime, coordination, and
+      UI.
+- [x] Compare the removed scheduler with HEAD and
+      `d556d2356915bb510a1fc0764a6d020d1718279d`.
 - [x] Preserve the staged index and keep corrective edits unstaged.
 
 ## Implementation gates
@@ -44,7 +46,8 @@ runtime cache invariants at their authoritative production seams.
       and bounded-memory measurements without presenting them as device p95.
 - [x] Run focused offline-map suites.
 - [x] Run lint, typecheck, production build, and complete `make ci`.
-- [x] Run hard button/source contract scans and both staged/unstaged diff checks.
+- [x] Run hard button/source contract scans and both staged/unstaged diff
+      checks.
 - [x] Run Capacitor sync, inspect native diffs, and run applicable Android/iOS
       builds and tests.
 - [x] Record missing physical-device evidence as release limitations.
@@ -67,10 +70,10 @@ runtime cache invariants at their authoritative production seams.
    lifetime seen set. Raw enumeration now uses 2,048-coordinate acknowledged
    chunks, v8 compound keys own dedupe, sorted typed chunks are compacted in
    bounded transactions, and the manifest commits last. Audit batches are 16,
-   workers are six, and total outstanding work is capped at 64 (which also bounds
-   ready and delayed-retry work). Startup removes crashed staging/chunk-only
-   builds; structural corruption rebuilds; old plans/chunks are collected in
-   bounded batches after a grace period.
+   workers are six, and total outstanding work is capped at 64 (which also
+   bounds ready and delayed-retry work). Startup removes crashed
+   staging/chunk-only builds; structural corruption rebuilds; old plans/chunks
+   are collected in bounded batches after a grace period.
 3. **High — cancellation did not own persistence or session lifetime.** Abort
    could arrive during an IndexedDB write, and stale background refresh could
    write after clear/logout. A cancellation arriving while the final generation
@@ -87,13 +90,15 @@ runtime cache invariants at their authoritative production seams.
    reuse request and falls back only for `OfflineMapPlanUnavailableError`.
    Disable cancels the session, releases successfully before prefix eviction,
    updates statistics, resumes remaining layers from the active plan, and rolls
-   preferences back on failure. Activation returns every prior active generation.
-5. **High — tile validation and no-data provenance were too weak.** One 10-second
-   deadline now covers headers, accepted raster content type, non-empty body,
-   hashing, and cancellation. Validation returns explicit raster/no-data
-   outcomes; HTTP/invalid responses never create tombstones. Hashes live on
-   `MapLayerDefinition`: the known fingerprint is satellite-only; both hillshade
-   lists remain empty. Configured hashing fails closed when unavailable.
+   preferences back on failure. Activation returns every prior active
+   generation.
+5. **High — tile validation and no-data provenance were too weak.** One
+   10-second deadline now covers headers, accepted raster content type,
+   non-empty body, hashing, and cancellation. Validation returns explicit
+   raster/no-data outcomes; HTTP/invalid responses never create tombstones.
+   Hashes live on `MapLayerDefinition`: the known fingerprint is satellite-only;
+   both hillshade lists remain empty. Configured hashing fails closed when
+   unavailable.
 6. **Medium — progress could freeze, lie, or be broken by observers.** The store
    now handles synchronous/frozen RAF, cancellation/disposal, listener mutation,
    and throwing observers. Audited/queued counters are normalized; corrupt
@@ -101,16 +106,16 @@ runtime cache invariants at their authoritative production seams.
    overall and by layer; migration shows “Preparing…”. The dedicated
    `useSyncExternalStore` seam still isolates unrelated context consumers.
 7. **Medium — historical evidence overstated the implementation.** Architecture,
-   layer/offline/Settings/GPS/coordination/logout docs and all five existing task
-   reviews now identify v8 staging, source completeness, actual hash provenance,
-   deterministic-vs-device evidence, and remaining release blockers.
+   layer/offline/Settings/GPS/coordination/logout docs and all five existing
+   task reviews now identify v8 staging, source completeness, actual hash
+   provenance, deterministic-vs-device evidence, and remaining release blockers.
 
 ### Migration and compatibility assessment
 
 The upgrade is additive: database version 8 creates only temporary coordinate
 staging and missing indexes. Existing URL payloads, metadata, v7 manifests,
-generations, and memberships are neither rewritten nor deleted. The resumable
-v6 ownership migration remains private, uses 250-record transactions, preserves
+generations, and memberships are neither rewritten nor deleted. The resumable v6
+ownership migration remains private, uses 250-record transactions, preserves
 valid freshness, and is completed before active coverage publication. Preload
 also removes crash staging, reclaims pending/failed/releasing generations, and
 persists only corrupt counter normalization.
@@ -126,8 +131,8 @@ planning must account for that standard IndexedDB downgrade limitation.
   16.7 simulated seconds versus a 100-second serial lower bound (5.99×), with
   measured dispatch gaps no greater than 100 ms.
 - Queue high-water regression reaches exactly 64 outstanding coordinates and
-  returns to zero on cancellation; planner/storage chunks never exceed 2,048
-  raw coordinates and cache audits never exceed 16.
+  returns to zero on cancellation; planner/storage chunks never exceed 2,048 raw
+  coordinates and cache audits never exceed 16.
 - Fresh unchanged coverage performs one manifest lookup and zero cache audits,
   generation writes, or network calls.
 - Frozen RAF publishes at the 50 ms fallback; synchronous RAF can publish
@@ -143,12 +148,12 @@ These are deterministic tests, not Android/iOS WebView p95 measurements.
 - `npm run build` — passed; worker chunk 5.78 kB and lazy sync engine 15.44 kB
   in this build (uncompressed output sizes).
 - `make ci` — sandboxed attempt failed only because live integration DNS for
-  `stage.speleodb.org` was blocked; final network-enabled rerun passed 106 files /
-  1,819 tests. Coverage: 89.63% statements, 81.89% branches, 92.61% functions,
+  `stage.speleodb.org` was blocked; final network-enabled rerun passed 106 files
+  / 1,819 tests. Coverage: 89.63% statements, 81.89% branches, 92.61% functions,
   91.56% lines. Its production build passed.
 - `rg 'app-btn[^"\n]*bg-' src --glob '*.tsx'` — zero matches.
-- `npm run test.unit -- --run src/pages/dashboard/DashboardMapLayers.test.tsx`
-  — 1 file / 6 source-injection contract tests passed.
+- `npm run test.unit -- --run src/pages/dashboard/DashboardMapLayers.test.tsx` —
+  1 file / 6 source-injection contract tests passed.
 - `git diff --check` — passed for unstaged corrections.
 - `git diff --cached --check` — still fails on the preserved baseline
   `tasks/lessons/online-cache-hits.md:12` blank EOF line. The worktree removes
@@ -156,8 +161,8 @@ These are deterministic tests, not Android/iOS WebView p95 measurements.
 - `npx cap sync` — passed; Android/iOS tracked diff remained empty.
 - Android `./gradlew testDebugUnitTest assembleDebug` — passed, 492 tasks.
 - Unsigned generic iOS device `xcodebuild ... build` — passed.
-- Signed iPhone 17 Pro / iOS 26.5 simulator `xcodebuild ... test` — passed all
-  9 `AppTests`.
+- Signed iPhone 17 Pro / iOS 26.5 simulator `xcodebuild ... test` — passed all 9
+  `AppTests`.
 
 ### Physical-device gaps and requirements still unproven
 
@@ -178,11 +183,11 @@ requirements.
 
 - Base remains `2502cb30972d81d7819b5e3014f6498e69ceb7e6`.
 - Staged index remains exactly 66 paths, 6,602 insertions / 3,917 deletions.
-- Corrective unstaged tracked work: 55 paths, 2,429 insertions / 1,014 deletions.
-- Untracked corrective files:
-  `tasks/todos/offline-map-adversarial-review.md` and
-  `tasks/lessons/rolling-replacement-input-completeness.md`, plus the follow-up
-  `tasks/todos/offline-map-planner-worker-stall.md` review.
+- Corrective unstaged tracked work: 55 paths, 2,429 insertions / 1,014
+  deletions.
+- Untracked corrective files: `tasks/todos/offline-map-adversarial-review.md`
+  and `tasks/lessons/rolling-replacement-input-completeness.md`, plus the
+  follow-up `tasks/todos/offline-map-planner-worker-stall.md` review.
 - Android/iOS tracked diffs: none. No files were staged, unstaged, reset, or
   committed by this correction; commit references: none.
 

@@ -103,8 +103,8 @@ Test on at least:
 3. Tap Upload.
 4. Expected: track becomes Pending upload, not Error.
 5. Restore network.
-6. Use Settings -> Go Online or Pending -> Try Reconnect, or relaunch the app and
-   let startup validation succeed.
+6. Use Settings -> Go Online or Pending -> Try Reconnect, or relaunch the app
+   and let startup validation succeed.
 7. Expected: pending GPS upload drains automatically.
 8. Confirm untouched Local tracks do not upload until the user taps Upload.
 
@@ -151,8 +151,8 @@ Test on at least:
    - Recording does not start.
    - Error toast is visible.
    - App is not stuck in Recording state.
-4. Repeat with Settings -> Location -> While Using only, then lock/background the
-   app.
+4. Repeat with Settings -> Location -> While Using only, then lock/background
+   the app.
 5. Expected:
    - If background delivery is not allowed, the app stops or surfaces a clear
      error rather than silently sitting at 0 points.
@@ -245,8 +245,8 @@ Include a short note:
 > user-initiated surface walking track while the app is backgrounded or the
 > screen is locked, then export/upload it as GPX. Background location is active
 > only during an explicit recording session and stops when the user taps Stop or
-> Cancel. The app also offers a foreground high-accuracy point averaging tool for
-> saving a landmark.
+> Cancel. The app also offers a foreground high-accuracy point averaging tool
+> for saving a landmark.
 
 ## Google Play Store Declarations
 
@@ -263,8 +263,8 @@ Declared or plugin-merged permissions to verify in the final merged manifest:
 
 Current implementation does not declare `ACCESS_BACKGROUND_LOCATION`. If future
 device testing proves true background-location permission is required, add it
-deliberately and complete the Play background-location declaration. Do not add it
-casually; it increases Play review scrutiny.
+deliberately and complete the Play background-location declaration. Do not add
+it casually; it increases Play review scrutiny.
 
 ### Google Play Console: Data Safety
 
@@ -281,8 +281,8 @@ In Play Console -> App content -> Data safety:
    locally until deleted/logout; averaging samples are ephemeral unless saved as
    a landmark.
 7. Data encrypted in transit: yes for SpeleoDB HTTPS uploads.
-8. User can request deletion: yes through account/project data handling and local
-   logout clearing on device.
+8. User can request deletion: yes through account/project data handling and
+   local logout clearing on device.
 
 ### Google Play Console: Foreground Service Declaration
 
@@ -340,11 +340,11 @@ If required:
 
 Include:
 
-> SpeleoDB records GPS only after the user explicitly starts GPS Track Recording.
-> Android shows a persistent foreground-service notification while recording.
-> The feature is for cave-survey fieldwork: recording a surface walking route to
-> overlay on cave survey data. Location is not used for advertising, analytics,
-> geofencing, or passive tracking.
+> SpeleoDB records GPS only after the user explicitly starts GPS Track
+> Recording. Android shows a persistent foreground-service notification while
+> recording. The feature is for cave-survey fieldwork: recording a surface
+> walking route to overlay on cave survey data. Location is not used for
+> advertising, analytics, geofencing, or passive tracking.
 
 ## Release Gate
 

@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RefObject } from 'react';
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
 import { MAP } from '../../constants';
+import type { LocationWatcher } from '../../services/GeolocationWatcher';
+import type { RecordedPoint } from '../../types/gpsTrack';
 import type { MapLayerId } from '../../types/mapLayer';
 import { PERMISSION_DENIED_SENTINEL } from '../../utils/geolocationError';
 import type { OverlayIconAvailability, OverlayImageMap } from './dashboardMapUtils';
@@ -15,7 +17,8 @@ const {
   mockGetCachedLayerStyle,
   mockPersistSelectedMapLayerId,
   mockRequestPermissions,
-  mockGetCurrentPosition,
+  mockWatchPosition,
+  mockClearWatch,
   mockImpact,
   mockLoadMapImage,
   mockLockMapOrientation,
@@ -23,7 +26,8 @@ const {
   mockGetCachedLayerStyle: vi.fn(),
   mockPersistSelectedMapLayerId: vi.fn(),
   mockRequestPermissions: vi.fn(),
-  mockGetCurrentPosition: vi.fn(),
+  mockWatchPosition: vi.fn(),
+  mockClearWatch: vi.fn(),
   mockImpact: vi.fn(),
   mockLoadMapImage: vi.fn(),
   mockLockMapOrientation: vi.fn(),
@@ -40,7 +44,8 @@ vi.mock('../../services/PreferencesService', () => ({
 vi.mock('@capacitor/geolocation', () => ({
   Geolocation: {
     requestPermissions: mockRequestPermissions,
-    getCurrentPosition: mockGetCurrentPosition,
+    watchPosition: mockWatchPosition,
+    clearWatch: mockClearWatch,
   },
 }));
 
@@ -86,15 +91,34 @@ function createDependencies(
   return {
     getLayerStyle: vi.fn(async (layerId) => ({ version: 8, layerId })),
     persistLayerId: vi.fn(),
-    requestLocationPermission: vi.fn(async () => 'granted'),
-    getCurrentLocation: vi.fn(async () => ({
-      coords: { longitude: -73.1, latitude: 45.5 },
-    })),
+    locationWatcher: {
+      requestPermissions: vi.fn(async () => 'granted'),
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined),
+    },
     impact: vi.fn(async () => undefined),
     loadIcons: vi.fn(async () => ICONS),
     lockOrientation: vi.fn(),
     reportStyleError: vi.fn(),
     ...overrides,
+  };
+}
+
+function createLocationWatcher(permission = 'granted') {
+  let onFix: ((point: RecordedPoint) => void) | null = null;
+  let onError: ((error: unknown) => void) | undefined;
+  const watcher: LocationWatcher = {
+    requestPermissions: vi.fn(async () => permission),
+    start: vi.fn(async (_options, nextFix, nextError) => {
+      onFix = nextFix;
+      onError = nextError;
+    }),
+    stop: vi.fn(async () => undefined),
+  };
+  return {
+    watcher,
+    emit(point: RecordedPoint) { onFix?.(point); },
+    fail(error: unknown) { onError?.(error); },
   };
 }
 
@@ -181,38 +205,14 @@ describe('useDashboardMapShell', () => {
     expect(result.current.mapViewMetrics).toEqual({ zoom: 12, latitude: 46 });
   });
 
-  it('exposes and dismisses permission denial while preserving the location contract', async () => {
-    const permission = deferred<string | undefined>();
-    const dependencies = createDependencies({
-      requestLocationPermission: vi.fn(() => permission.promise),
-    });
-    const { result } = renderHook(() => useDashboardMapShell({
-      mapRef: createMapRef(),
-      selectedMapLayerId: 'esri-satellite',
-      onSelectedMapLayerIdChange: vi.fn(),
-      dependencies,
-    }));
-
-    let locate!: Promise<void>;
-    act(() => { locate = result.current.goToMyLocation(); });
-    expect(result.current.isLocating).toBe(true);
-    await act(async () => {
-      permission.resolve('denied');
-      await locate;
-    });
-    expect(result.current.isLocating).toBe(false);
-    expect(result.current.geoError).toBe(PERMISSION_DENIED_SENTINEL);
-    expect(dependencies.getCurrentLocation).not.toHaveBeenCalled();
-    act(() => result.current.dismissGeoError());
-    expect(result.current.geoError).toBeNull();
-  });
-
-  it('flies to a granted position and contains rejected haptic feedback', async () => {
+  it('toggles live location, flies on the first fix, and contains rejected haptics', async () => {
     const map = { flyTo: vi.fn() } as unknown as OverlayImageMap & {
       flyTo: ReturnType<typeof vi.fn>;
     };
+    const location = createLocationWatcher();
     const hapticError = new Error('haptic unavailable');
     const dependencies = createDependencies({
+      locationWatcher: location.watcher,
       impact: vi.fn(async () => { throw hapticError; }),
     });
     const { result } = renderHook(() => useDashboardMapShell({
@@ -222,8 +222,11 @@ describe('useDashboardMapShell', () => {
       dependencies,
     }));
 
-    await act(() => result.current.goToMyLocation());
+    act(() => result.current.toggleLocationMode());
+    await waitFor(() => expect(location.watcher.start).toHaveBeenCalled());
+    act(() => location.emit({ longitude: -73.1, latitude: 45.5, timestamp: 1 }));
     expect(result.current.userLocation).toEqual({ lng: -73.1, lat: 45.5 });
+    expect(result.current.locationModeActive).toBe(true);
     expect(map.flyTo).toHaveBeenCalledWith({
       center: [-73.1, 45.5],
       zoom: 15,
@@ -231,32 +234,26 @@ describe('useDashboardMapShell', () => {
     });
     expect(dependencies.impact).toHaveBeenCalledOnce();
     expect(result.current.geoError).toBeNull();
+    act(() => result.current.toggleLocationMode());
+    expect(result.current.userLocation).toBeNull();
+    expect(result.current.locationModeActive).toBe(false);
+    await waitFor(() => expect(location.watcher.stop).toHaveBeenCalled());
   });
 
-  it('supports a granted position without a mounted map and reports native failures', async () => {
-    const dependencies = createDependencies();
-    const mapRef = createMapRef();
+  it('exposes and dismisses permission denial from the shared live-location seam', async () => {
+    const location = createLocationWatcher('denied');
+    const dependencies = createDependencies({ locationWatcher: location.watcher });
     const { result } = renderHook(() => useDashboardMapShell({
-      mapRef,
+      mapRef: createMapRef(),
       selectedMapLayerId: 'esri-satellite',
       onSelectedMapLayerIdChange: vi.fn(),
       dependencies,
     }));
-
-    await act(() => result.current.goToMyLocation());
-    expect(result.current.userLocation).toEqual({ lng: -73.1, lat: 45.5 });
-
-    const error = new Error('location unavailable');
-    dependencies.requestLocationPermission = vi.fn(async () => { throw error; });
-    const { result: failed } = renderHook(() => useDashboardMapShell({
-      mapRef,
-      selectedMapLayerId: 'esri-satellite',
-      onSelectedMapLayerIdChange: vi.fn(),
-      dependencies,
-    }));
-    await act(() => failed.current.goToMyLocation());
-    expect(failed.current.geoError).toBe(error);
-    expect(failed.current.isLocating).toBe(false);
+    act(() => result.current.toggleLocationMode());
+    await waitFor(() => expect(result.current.geoError).toBe(PERMISSION_DENIED_SENTINEL));
+    expect(location.watcher.start).not.toHaveBeenCalled();
+    act(() => result.current.dismissGeoError());
+    expect(result.current.geoError).toBeNull();
   });
 
   it('suppresses stale style success while reporting style failures', async () => {
@@ -287,9 +284,15 @@ describe('useDashboardMapShell', () => {
   it('wires the native defaults and redacted style diagnostics', async () => {
     mockGetCachedLayerStyle.mockResolvedValue({ version: 8 });
     mockRequestPermissions.mockResolvedValue({ location: 'granted' });
-    mockGetCurrentPosition.mockResolvedValue({
-      coords: { longitude: 2.3, latitude: 46.6 },
+    let nativeCallback: ((position: {
+      coords: { longitude: number; latitude: number };
+      timestamp: number;
+    } | null, error?: unknown) => void) | null = null;
+    mockWatchPosition.mockImplementation(async (_options, callback) => {
+      nativeCallback = callback;
+      return 'watch-1';
     });
+    mockClearWatch.mockResolvedValue(undefined);
     mockImpact.mockRejectedValue(new Error('no haptics'));
     mockLoadMapImage.mockResolvedValue(true);
     const map = { flyTo: vi.fn() } as unknown as OverlayImageMap & {
@@ -309,13 +312,21 @@ describe('useDashboardMapShell', () => {
       result.current.handleMapLoad();
     });
     await waitFor(() => expect(result.current.overlayIconsLoaded).toBe(true));
-    await act(() => result.current.goToMyLocation());
+    act(() => result.current.toggleLocationMode());
+    await waitFor(() => expect(mockWatchPosition).toHaveBeenCalled());
+    act(() => nativeCallback?.({
+      coords: { longitude: 2.3, latitude: 46.6 },
+      timestamp: 1,
+    }));
     expect(mockPersistSelectedMapLayerId).toHaveBeenCalledWith('esri-world-hillshade');
     expect(mockRequestPermissions).toHaveBeenCalledWith({ permissions: ['location'] });
-    expect(mockGetCurrentPosition).toHaveBeenCalledWith({
+    expect(mockWatchPosition).toHaveBeenCalledWith({
       enableHighAccuracy: true,
       timeout: 10_000,
-    });
+      maximumAge: 0,
+      interval: 1_000,
+      minimumUpdateInterval: 1_000,
+    }, expect.any(Function));
     expect(mockImpact).toHaveBeenCalledWith({ style: 'LIGHT' });
     expect(mockLoadMapImage).toHaveBeenCalledTimes(6);
     expect(mockLockMapOrientation).toHaveBeenCalledWith(mapRef.current);

@@ -2,9 +2,10 @@
 
 ## Intent
 
-Offline mutation replay and offline-map synchronization are durable, cancellation-sensitive
-subsystems. Their lifecycle must not depend on controller field ordering, and
-logout must tear both down before persistent data is cleared.
+Offline mutation replay and offline-map synchronization are durable,
+cancellation-sensitive subsystems. Their lifecycle must not depend on controller
+field ordering, and logout must tear both down before persistent data is
+cleared.
 
 `SpeleoDBController` remains the public façade. Ownership is split as follows:
 
@@ -29,8 +30,8 @@ results update landmark/GPS ground-truth caches owned by their domain seams.
   pending intent over that ground truth.
 - Queue reset on logout replaces in-memory operations without changing the
   persisted wire format; `ProjectCacheService.clearAll()` removes the store.
-- Replay and conflict APIs never bypass `OfflineOpQueue` ordering or
-  idempotency rules.
+- Replay and conflict APIs never bypass `OfflineOpQueue` ordering or idempotency
+  rules.
 
 ## Tile invariants
 
@@ -46,11 +47,11 @@ results update landmark/GPS ground-truth caches owned by their domain seams.
   cache statistics, and resumes remaining layers. Logout cancels all manual
   work.
 - Storage approval and acknowledgement are non-secret preferences. Runtime cap
-  state is updated at the same transition and the paused queue resumes only after
-  approval.
+  state is updated at the same transition and the paused queue resumes only
+  after approval.
 - Logout disposes the engine, waits for worker idleness, clears tile/plan/
-  generation persistence concurrently with the main cache, then creates a
-  fresh runtime.
+  generation persistence concurrently with the main cache, then creates a fresh
+  runtime.
 - Tile progress publishes through `subscribeOfflineMapSync`, never the global
   controller observer. Durable checkpoints cannot delay live UI counters.
 
@@ -62,7 +63,7 @@ storage consent, stalled diagnostics, cancellation, and logout teardown through
 the public façade. `OfflineOpQueue`, canonical planner, sync engine/store, and
 tile repository retain focused unit and race tests.
 
-Settings performs no polling. Project GeoJSON is read once per full sync and
-all enabled layers reuse one coordinate plan. Source planning may re-read a
-required record after validation to prove current-commit completeness. Tile
-cleanup remains concurrent with the main cache purge.
+Settings performs no polling. Project GeoJSON is read once per full sync and all
+enabled layers reuse one coordinate plan. Source planning may re-read a required
+record after validation to prove current-commit completeness. Tile cleanup
+remains concurrent with the main cache purge.

@@ -9,8 +9,10 @@ import type {
   LocalGpsTrack,
   RecordedPoint,
 } from '../../types/gpsTrack';
+import type { UserMapLocation } from '../../types/userLocation';
 import type { GpsAveragingPhase } from '../../components/GpsAveragingModal';
 import { trackPointsToFeatureCollection } from '../../utils/gpsTrackGeoJson';
+import { latestValidRecordingLocation } from '../../utils/userLocation';
 
 type RecordingController = Pick<
   SpeleoDBController,
@@ -45,6 +47,7 @@ export interface DashboardGpsRecordingActionOptions {
 export interface DashboardGpsRecordingActionState {
   currentTrackPoints: RecordedPoint[];
   currentTrackFeatureCollection: GeoJSON.FeatureCollection;
+  currentRecordingLocation: UserMapLocation | null;
   isRecorderOpen: boolean;
   showBatteryHint: boolean;
   recordingCancelOpen: boolean;
@@ -76,8 +79,12 @@ export interface DashboardGpsRecordingActionState {
 
 function useCurrentTrackGeometry(
   controller: RecordingController,
+  recordingState: GpsRecordingState,
   tracksRevision: number,
-): Pick<DashboardGpsRecordingActionState, 'currentTrackPoints' | 'currentTrackFeatureCollection'> {
+): Pick<
+  DashboardGpsRecordingActionState,
+  'currentTrackPoints' | 'currentTrackFeatureCollection' | 'currentRecordingLocation'
+> {
   const currentTrackPoints = useMemo(
     () => controller.currentTrackPoints,
     // A new fix is published by advancing the controller-owned revision.
@@ -88,7 +95,11 @@ function useCurrentTrackGeometry(
     () => trackPointsToFeatureCollection(currentTrackPoints, { name: 'Current GPS recording' }),
     [currentTrackPoints],
   );
-  return { currentTrackPoints, currentTrackFeatureCollection };
+  const currentRecordingLocation = useMemo(
+    () => recordingState === 'idle' ? null : latestValidRecordingLocation(currentTrackPoints),
+    [currentTrackPoints, recordingState],
+  );
+  return { currentTrackPoints, currentTrackFeatureCollection, currentRecordingLocation };
 }
 
 interface RecorderActionOptions {
@@ -288,7 +299,7 @@ export function useDashboardGpsRecordingActions({
     () => injectedBatteryGuard ?? new BatteryOptimizationGuard(),
     [injectedBatteryGuard],
   );
-  const geometry = useCurrentTrackGeometry(controller, tracksRevision);
+  const geometry = useCurrentTrackGeometry(controller, recordingState, tracksRevision);
   const recorder = useRecorderActions({ controller, recordingState, showToast, batteryGuard });
   const averaging = useAveragingActions(onSaveAveragedPoint);
   const { closeRecorder } = recorder;

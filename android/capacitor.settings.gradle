@@ -38,5 +38,8 @@ project(':capacitor-status-bar').projectDir = new File('../node_modules/@capacit
 include ':capawesome-team-capacitor-android-battery-optimization'
 project(':capawesome-team-capacitor-android-battery-optimization').projectDir = new File('../node_modules/@capawesome-team/capacitor-android-battery-optimization/android')
 
+include ':capgo-capacitor-compass'
+project(':capgo-capacitor-compass').projectDir = new File('../node_modules/@capgo/capacitor-compass/android')
+
 include ':sentry-capacitor'
 project(':sentry-capacitor').projectDir = new File('../node_modules/@sentry/capacitor/android')

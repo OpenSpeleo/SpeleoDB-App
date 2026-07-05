@@ -56,17 +56,18 @@ mutations without re-reading project map records.
 ## Performance
 
 The extraction preserves the existing request count and sequential cache-read
-ordering. Derived project records, GeoJSON, bounds, colors, landmark groups,
-and visible overlays are memoized. Project zoom and initial fit continue to use
+ordering. Derived project records, GeoJSON, bounds, colors, landmark groups, and
+visible overlays are memoized. Project zoom and initial fit continue to use
 prevalidated bounds and never rescan coordinates.
 
 ## Verification
 
-`useDashboardMapData.test.ts` directly covers zero-revision cache publication, project
-eligibility, valid/empty/malformed/stale commits, depth attachment, every
-overlay shape, failure containment, default diagnostics, revision clearing,
-commit replacement, and all late-success/late-failure cancellation pairings.
-It also covers global and project-linked overlay visibility. The module has
-100% statement, branch, function, and line coverage. `Dashboard.test.tsx`
-remains the integration characterization seam for controller revisions,
-quarantine transitions, panels, layers, overlays, and fit behavior.
+`useDashboardMapData.test.ts` directly covers zero-revision cache publication,
+project eligibility, valid/empty/malformed/stale commits, depth attachment,
+every overlay shape, failure containment, default diagnostics, revision
+clearing, commit replacement, and all late-success/late-failure cancellation
+pairings. It also covers global and project-linked overlay visibility. The
+module has 100% statement, branch, function, and line coverage.
+`Dashboard.test.tsx` remains the integration characterization seam for
+controller revisions, quarantine transitions, panels, layers, overlays, and fit
+behavior.

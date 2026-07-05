@@ -16,7 +16,6 @@ contract that was broken.
 - Keep `Layer` directly below `Source`; if a wrapper is unavoidable, forward
   `source` explicitly.
 - Make the test double reproduce the relevant third-party behavior. Rendering
-  children unchanged is insufficient when production clones or transforms
-  them.
+  children unchanged is insufficient when production clones or transforms them.
 - A refactor is not behavior-preserving until the owning integration contract
   has a red-before/green-after regression test.

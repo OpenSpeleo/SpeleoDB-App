@@ -6,19 +6,21 @@ builds. The workflow lives in `.github/workflows/ci.yml`.
 
 ## Stages
 
-1. **Prek Hooks** runs `PREK_HOME="$RUNNER_TEMP/prek" npx prek run -a
-   --show-diff-on-failure`, then `git diff --exit-code`. The diff check makes
-   hook auto-fixes fail CI instead of silently changing the runner checkout.
-2. **Full Vitest Suite** runs `npm run test.unit -- --run --reporter=verbose
-   --coverage --no-file-parallelism`. The `--run` flag is required in CI so
-   Vitest exits instead of entering watch mode. File-level serialization keeps
-   real SpeleoDB integration tests from issuing concurrent password-login
-   requests with the same account from a GitHub-hosted runner.
+1. **Prek Hooks** runs
+   `PREK_HOME="$RUNNER_TEMP/prek" npx prek run -a --show-diff-on-failure`, then
+   `git diff --exit-code`. The diff check makes hook auto-fixes fail CI instead
+   of silently changing the runner checkout.
+2. **Full Vitest Suite** runs
+   `npm run test.unit -- --run --reporter=verbose --coverage --no-file-parallelism`.
+   The `--run` flag is required in CI so Vitest exits instead of entering watch
+   mode. File-level serialization keeps real SpeleoDB integration tests from
+   issuing concurrent password-login requests with the same account from a
+   GitHub-hosted runner.
 3. **Production Web Build** runs `npm run build` and uploads `dist/` for native
    jobs.
-4. **Android Release Compile Smoke** downloads `dist/`, runs `npx cap sync
-   android`, and builds release-configuration APK/AAB files with a disposable
-   CI keystore.
+4. **Android Release Compile Smoke** downloads `dist/`, runs
+   `npx cap sync android`, and builds release-configuration APK/AAB files with a
+   disposable CI keystore.
 5. **iOS Release Compile Smoke** downloads `dist/`, runs `npx cap sync ios`,
    archives the Xcode project, then verifies an IPA signed by a disposable CI
    identity.
@@ -29,10 +31,10 @@ compile evidence only and are never attached to a GitHub release.
 
 ## Release Integrity
 
-Disposable CI credentials prove that release configurations compile and that
-the resulting bundles can be structurally signed. They do not establish
-publisher identity, store eligibility, update compatibility, entitlements, or
-installation on a target device. Accordingly:
+Disposable CI credentials prove that release configurations compile and that the
+resulting bundles can be structurally signed. They do not establish publisher
+identity, store eligibility, update compatibility, entitlements, or installation
+on a target device. Accordingly:
 
 - this CI workflow has no `contents: write` permission and never creates a
   GitHub release;

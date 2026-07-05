@@ -18,14 +18,17 @@ const pageLifecycle = vi.hoisted(() => ({
 vi.mock('./pages/Dashboard', () => ({
   default: function MockDashboard({
     activeDashboardPanel,
+    isActive,
   }: {
     activeDashboardPanel: DashboardPanel;
+    isActive: boolean;
   }) {
     const [mapState, setMapState] = React.useState(0);
     return (
       <div
         data-testid="dashboard-page"
         data-active-panel={activeDashboardPanel ?? 'none'}
+        data-route-active={isActive ? 'true' : 'false'}
       >
         Dashboard
         <button onClick={() => setMapState((current) => current + 1)}>
@@ -110,6 +113,7 @@ describe('AuthenticatedAppShell', () => {
 
     const dashboard = await screen.findByTestId('dashboard-page');
     expect(dashboard).toHaveAttribute('data-active-panel', 'none');
+    expect(dashboard).toHaveAttribute('data-route-active', 'false');
     await user.click(screen.getByRole('button', { name: 'Open projects' }));
     expect(dashboard).toHaveAttribute('data-active-panel', 'projects');
     await user.click(screen.getByRole('button', { name: 'Open landmarks' }));
@@ -132,6 +136,7 @@ describe('AuthenticatedAppShell', () => {
     );
 
     await user.click(await screen.findByRole('button', { name: 'Map state 0' }));
+    expect(screen.getByTestId('dashboard-page')).toHaveAttribute('data-route-active', 'true');
     expect(screen.getByRole('button', { name: 'Map state 1' })).toBeInTheDocument();
     expect(screen.queryByTestId('settings-page')).not.toBeInTheDocument();
     expect(screen.queryByTestId('pending-page')).not.toBeInTheDocument();
@@ -140,6 +145,7 @@ describe('AuthenticatedAppShell', () => {
     expect(await screen.findByTestId('settings-page')).toBeInTheDocument();
     expect(pageLifecycle.settingsMounted).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('dashboard-page')).toHaveTextContent('Map state 1');
+    expect(screen.getByTestId('dashboard-page')).toHaveAttribute('data-route-active', 'false');
 
     act(() => history.push('/pending'));
     expect(await screen.findByTestId('pending-page')).toBeInTheDocument();
@@ -151,5 +157,6 @@ describe('AuthenticatedAppShell', () => {
     expect(screen.queryByTestId('pending-page')).not.toBeInTheDocument();
     expect(pageLifecycle.pendingUnmounted).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Map state 1' })).toBeInTheDocument();
+    expect(screen.getByTestId('dashboard-page')).toHaveAttribute('data-route-active', 'true');
   });
 });

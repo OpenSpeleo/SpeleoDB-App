@@ -36,9 +36,9 @@ centralized in the existing map utility and marker-detail modules.
 
 ## Verification and performance
 
-`useDashboardMapInteractions.test.tsx` plus the Dashboard characterization
-suite execute every statement, branch, and function. Tests include already
-queued timer races, missing map capabilities, low/invalid zoom, query failures,
+`useDashboardMapInteractions.test.tsx` plus the Dashboard characterization suite
+execute every statement, branch, and function. Tests include already queued
+timer races, missing map capabilities, low/invalid zoom, query failures,
 movement and duration limits, touch/pen/mouse separation, multi-touch,
 cancellation, marker parsing, coordinate conversion, and rejected haptics.
 

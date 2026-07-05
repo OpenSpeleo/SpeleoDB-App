@@ -11,14 +11,15 @@ Node versions that do not support `--no-webstorage`.
 
 - [x] Fix `scripts/run-vitest.sh` so it detects the supported Node web-storage
       disable flag instead of unconditionally passing `--no-webstorage`.
-- [x] Update `.github/workflows/ci.yml` to add a `prek run -a` gate, full
-      Vitest coverage run, web build artifact, and native Android/iOS stages.
+- [x] Update `.github/workflows/ci.yml` to add a `prek run -a` gate, full Vitest
+      coverage run, web build artifact, and native Android/iOS stages.
 - [x] Keep integration tests secrets-gated and native Sentry DSNs safe for PRs
       where secrets are unavailable.
-- [x] Document the CI contract in `docs/ci.md` and link it from `docs/README.md`.
+- [x] Document the CI contract in `docs/ci.md` and link it from
+      `docs/README.md`.
 - [x] Run verification and record the results below.
-- [x] Fix follow-up CI failures from Dashboard async map effects and hosted-runner
-      password-auth behavior.
+- [x] Fix follow-up CI failures from Dashboard async map effects and
+      hosted-runner password-auth behavior.
 - [x] Re-run targeted and full verification for the follow-up fixes.
 
 ## Review
@@ -46,8 +47,8 @@ Node versions that do not support `--no-webstorage`.
   - `bash -n scripts/run-vitest.sh`: passed.
   - Workflow YAML parsed with Ruby/Psych: passed.
   - `git diff --check`: passed.
-  - `npm run test.unit -- --run --reporter=verbose --coverage`: passed
-    (53 files, 952 tests).
+  - `npm run test.unit -- --run --reporter=verbose --coverage`: passed (53
+    files, 952 tests).
   - `npm run test.unit -- --run src/pages/Dashboard.test.tsx --reporter=dot`:
     passed (88 tests).
   - `npm run build`: passed.
@@ -62,8 +63,8 @@ Node versions that do not support `--no-webstorage`.
     passed (53 files, 952 tests).
   - `npm run lint`: passed after the follow-up fixes.
   - `git diff --check`: passed after the follow-up fixes.
-  - `PREK_HOME=/private/tmp/prek npx prek run -a --show-diff-on-failure` ran
-    the hooks; lockfile, TypeScript, and build hooks passed, but the command
+  - `PREK_HOME=/private/tmp/prek npx prek run -a --show-diff-on-failure` ran the
+    hooks; lockfile, TypeScript, and build hooks passed, but the command
     returned non-zero locally because this implementation checkout is dirty and
     `prek` reported the existing diff as hook modifications. No TS/TSX files
     were changed by the hook.

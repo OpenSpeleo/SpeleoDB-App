@@ -259,4 +259,3 @@ export function getAppleMarketingModelName(identifier: string): string | undefin
 export function getAppleMarketingModelOrIdentifier(identifier: string): string {
   return getAppleMarketingModelName(identifier) ?? identifier;
 }
-

@@ -13,14 +13,14 @@ project-sync behavior:
 - `ProjectSyncCoordinator` owns project-list state, sync status, last-sync time,
   run cancellation, phase ordering, terminal map-data revision, and publication.
 - `ProjectGeoJSONCoordinator` owns per-commit download, normalization, worker
-  validation, durable quarantine, session-only fail-closed disposition,
-  warning acknowledgement, and active map-data reads.
+  validation, durable quarantine, session-only fail-closed disposition, warning
+  acknowledgement, and active map-data reads.
 - `ProjectOverlaySyncCoordinator` owns read-only overlay refresh and protects
   the landmarks ground truth while pending mutations exist or replay is active.
 
-All three production modules remain below the 600-line limit. Tile scheduling
-is an explicit `TileCoordinator` phase hook; GPS refresh remains an injected
-hook until GPS ownership is extracted in the next objective.
+All three production modules remain below the 600-line limit. Tile scheduling is
+an explicit `TileCoordinator` phase hook; GPS refresh remains an injected hook
+until GPS ownership is extracted in the next objective.
 
 ## Phase contract
 
@@ -51,9 +51,9 @@ cached data.
 
 Downloaded or legacy bytes are never active merely because they parse. The
 GeoJSON coordinator requires normalization, bounded worker analysis, commit
-matching, and a successful atomic cache write. Invalid, oversized, timed-out,
-or infrastructure-unverifiable data is removed from prefetch eligibility and
-either durably quarantined or blocked for the process lifetime.
+matching, and a successful atomic cache write. Invalid, oversized, timed-out, or
+infrastructure-unverifiable data is removed from prefetch eligibility and either
+durably quarantined or blocked for the process lifetime.
 
 Warning state and session dispositions are pruned by current project/commit.
 Acknowledgement is commit-conditional, so acknowledging an old warning cannot
@@ -61,11 +61,11 @@ hide a replacement file's failure.
 
 ## Verification and performance
 
-The existing controller characterization suite exercises orchestration,
-response classes, cached fallback, overlapping runs, logout races, exact phase
-counters, quarantine persistence, warning identity, overlay protection, and
-tile/GPS hook ordering through the public façade. Geometry, worker, cache, and
-tile seams retain their dedicated tests.
+The existing controller characterization suite exercises orchestration, response
+classes, cached fallback, overlapping runs, logout races, exact phase counters,
+quarantine persistence, warning identity, overlay protection, and tile/GPS hook
+ordering through the public façade. Geometry, worker, cache, and tile seams
+retain their dedicated tests.
 
 Offline-map scheduling resolves once its immutable denominator and layer
 generations are installed; the six-worker download pipeline continues through

@@ -5,10 +5,14 @@ import { MAP, MAP_LAYERS } from '../../constants';
 import MapLayerControl from '../../components/map/MapLayerControl';
 import DistanceScale from '../../components/map/DistanceScale';
 import DepthGauge from '../../components/map/DepthGauge';
+import { UserLocationIndicator } from '../../components/map/UserLocationIndicator';
 import GeolocationErrorModal from '../../components/GeolocationErrorModal';
+import { useAppForeground } from '../../hooks/useAppForeground';
 import type { MapColorMode } from '../../types/mapColorMode';
 import type { MapLayerId } from '../../types/mapLayer';
 import type { MeasurementUnit } from '../../types/measurementUnit';
+import type { UserMapLocation } from '../../types/userLocation';
+import { selectUserMapLocation } from '../../utils/userLocation';
 import { GpsMapLayers, type GpsMapLayersProps } from './GpsMapLayers';
 import { OverlayMapLayers, type OverlayMapLayersProps } from './OverlayMapLayers';
 import { ProjectMapLayers, type ProjectMapLayersProps } from './ProjectMapLayers';
@@ -33,7 +37,9 @@ interface DashboardMapCanvasProps {
   layerOfflineSync: Record<string, boolean>;
   projectLayers: ProjectMapLayersProps;
   overlayLayers: Omit<OverlayMapLayersProps, 'iconsLoaded' | 'iconAvailability'>;
-  gpsLayers: Omit<GpsMapLayersProps, 'userLocation'>;
+  gpsLayers: GpsMapLayersProps;
+  recordingLocation: UserMapLocation | null;
+  isActive: boolean;
   gestures: DashboardMapGestures;
   colorMode: MapColorMode;
   measurementUnit: MeasurementUnit;
@@ -47,8 +53,9 @@ interface MapViewportProps {
   mapStyle: Record<string, unknown> | null;
   projectLayers: ProjectMapLayersProps;
   overlayLayers: Omit<OverlayMapLayersProps, 'iconsLoaded' | 'iconAvailability'>;
-  gpsLayers: Omit<GpsMapLayersProps, 'userLocation'>;
-  userLocation: { lng: number; lat: number } | null;
+  gpsLayers: GpsMapLayersProps;
+  userLocation: UserMapLocation | null;
+  headingActive: boolean;
   iconsLoaded: boolean;
   iconAvailability: OverlayMapLayersProps['iconAvailability'];
   gestures: DashboardMapGestures;
@@ -63,6 +70,7 @@ function MapViewport({
   overlayLayers,
   gpsLayers,
   userLocation,
+  headingActive,
   iconsLoaded,
   iconAvailability,
   gestures,
@@ -95,28 +103,34 @@ function MapViewport({
         iconsLoaded={iconsLoaded}
         iconAvailability={iconAvailability}
       />
-      <GpsMapLayers {...gpsLayers} userLocation={userLocation} />
+      <GpsMapLayers {...gpsLayers} />
+      <UserLocationIndicator location={userLocation} headingActive={headingActive} />
     </Map>
   );
 }
 
 function MyLocationButton({
   isLocating,
+  isActive,
   onClick,
 }: {
   isLocating: boolean;
+  isActive: boolean;
   onClick: () => void;
 }) {
+  const engaged = isActive || isLocating;
   return (
     <button
       onClick={onClick}
-      disabled={isLocating}
-      className="absolute right-3 z-10 w-11 h-11 flex items-center justify-center
-                 rounded-full bg-slate-900/80 backdrop-blur-sm border border-slate-600/60
-                 text-slate-200 hover:bg-slate-800/90 disabled:opacity-50
-                 transition-colors shadow-lg shadow-black/40"
+      aria-pressed={engaged}
+      className={`absolute right-3 z-10 w-11 h-11 flex items-center justify-center
+                 rounded-full backdrop-blur-sm border text-slate-100
+                 transition-colors shadow-lg shadow-black/40
+                 ${engaged
+                   ? 'bg-blue-600 border-blue-400 hover:bg-blue-500'
+                   : 'bg-slate-900/80 border-slate-600/60 hover:bg-slate-800/90'}`}
       style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 12px)' }}
-      aria-label="Go to my location"
+      aria-label={engaged ? 'Turn off live location' : 'Turn on live location'}
       data-testid="my-location-button"
     >
       {isLocating ? (
@@ -139,15 +153,21 @@ function MapChrome({
   layerOfflineSync,
   onSelectLayer,
   isLocating,
+  isLocationModeActive,
   onLocate,
 }: Pick<DashboardMapCanvasProps, 'selectedMapLayerId' | 'isOfflineLocked' | 'layerOfflineSync'> & {
   onSelectLayer: (layerId: string) => void;
   isLocating: boolean;
+  isLocationModeActive: boolean;
   onLocate: () => void;
 }) {
   return (
     <>
-      <MyLocationButton isLocating={isLocating} onClick={onLocate} />
+      <MyLocationButton
+        isLocating={isLocating}
+        isActive={isLocationModeActive}
+        onClick={onLocate}
+      />
       <div
         className="absolute right-3 z-10"
         style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 64px)' }}
@@ -173,6 +193,8 @@ export function DashboardMapCanvas({
   projectLayers,
   overlayLayers,
   gpsLayers,
+  recordingLocation,
+  isActive,
   gestures,
   colorMode,
   measurementUnit,
@@ -180,12 +202,19 @@ export function DashboardMapCanvas({
   onMapReady,
   dependencies,
 }: DashboardMapCanvasProps) {
+  const appForeground = useAppForeground();
+  const runtimeActive = isActive && appForeground;
   const shell = useDashboardMapShell({
     mapRef,
     selectedMapLayerId,
     onSelectedMapLayerIdChange,
+    runtimeActive,
     dependencies,
   });
+  const userLocation = selectUserMapLocation(shell.userLocation, recordingLocation);
+  const headingActive = runtimeActive && (
+    shell.locationModeActive || gpsLayers.recordingState === 'recording'
+  );
   const handleShellMapLoad = shell.handleMapLoad;
   const handleMapLoad = useCallback(() => {
     handleShellMapLoad();
@@ -206,7 +235,8 @@ export function DashboardMapCanvas({
           projectLayers={projectLayers}
           overlayLayers={overlayLayers}
           gpsLayers={gpsLayers}
-          userLocation={shell.userLocation}
+          userLocation={userLocation}
+          headingActive={headingActive}
           iconsLoaded={shell.overlayIconsLoaded}
           iconAvailability={shell.overlayIconAvailability}
           gestures={gestures}
@@ -239,7 +269,8 @@ export function DashboardMapCanvas({
         layerOfflineSync={layerOfflineSync}
         onSelectLayer={shell.selectMapLayer}
         isLocating={shell.isLocating}
-        onLocate={shell.goToMyLocation}
+        isLocationModeActive={shell.locationModeActive}
+        onLocate={shell.toggleLocationMode}
       />
       <GeolocationErrorModal error={shell.geoError} onDismiss={shell.dismissGeoError} />
       {!shell.mapStyle && (

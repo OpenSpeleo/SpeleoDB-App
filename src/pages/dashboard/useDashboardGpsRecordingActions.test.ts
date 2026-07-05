@@ -125,6 +125,7 @@ describe('useDashboardGpsRecordingActions recording', () => {
 
     expect(result.current.currentTrackPoints).toBe(POINTS);
     expect(result.current.currentTrackFeatureCollection.features).toHaveLength(1);
+    expect(result.current.currentRecordingLocation).toBeNull();
 
     act(() => {
       result.current.openRecorder();
@@ -135,10 +136,21 @@ describe('useDashboardGpsRecordingActions recording', () => {
     expect(controller.pauseTrackRecording).toHaveBeenCalledTimes(1);
     expect(controller.resumeTrackRecording).toHaveBeenCalledTimes(1);
 
-    const nextPoints = [...POINTS, { latitude: 46, longitude: -74, timestamp: 3 }];
+    const nextPoints = [
+      ...POINTS,
+      { latitude: 46, longitude: -74, timestamp: 3 },
+      { latitude: Number.NaN, longitude: -75, timestamp: 4 },
+    ];
     controller.currentTrackPoints = nextPoints;
-    rerender({ recordingState: 'idle', tracksRevision: 1 });
+    rerender({ recordingState: 'recording', tracksRevision: 1 });
     expect(result.current.currentTrackPoints).toBe(nextPoints);
+    expect(result.current.currentRecordingLocation).toEqual({ lng: -74, lat: 46 });
+
+    rerender({ recordingState: 'paused', tracksRevision: 1 });
+    expect(result.current.currentRecordingLocation).toEqual({ lng: -74, lat: 46 });
+
+    rerender({ recordingState: 'idle', tracksRevision: 1 });
+    expect(result.current.currentRecordingLocation).toBeNull();
 
     act(() => result.current.closeRecorder());
     expect(result.current.isRecorderOpen).toBe(false);

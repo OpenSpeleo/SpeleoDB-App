@@ -2,8 +2,10 @@
 
 ## Plan
 
-- [x] Filter only `[project-geojson:bbox]` records at Vitest's console-reporting seam.
-- [x] Verify the controller suite still exercises bbox logging without printing the records.
+- [x] Filter only `[project-geojson:bbox]` records at Vitest's console-reporting
+      seam.
+- [x] Verify the controller suite still exercises bbox logging without printing
+      the records.
 - [x] Run lint, build, and the complete test suite with coverage.
 
 ## Verification gates
@@ -30,7 +32,8 @@ Verification:
   - TypeScript and the Vite production build passed.
 - `npm run test.unit -- --run --coverage --no-file-parallelism`
   - 103 files passed; 1,767 tests passed.
-  - Coverage: 89.65% statements, 82.63% branches, 93.07% functions, 91.72% lines.
+  - Coverage: 89.65% statements, 82.63% branches, 93.07% functions, 91.72%
+    lines.
 
 Native and physical-device verification are inapplicable because this changes
 only Vitest's reporting hook; no application or native runtime code changed.

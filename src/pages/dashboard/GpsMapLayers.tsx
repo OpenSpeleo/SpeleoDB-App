@@ -50,45 +50,16 @@ function RecordingGpsTrackLayer({
   );
 }
 
-function UserLocationLayer({ location }: { location: { lng: number; lat: number } | null }) {
-  if (!location) return null;
-  const data: GeoJSON.FeatureCollection = {
-    type: 'FeatureCollection',
-    features: [{
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [location.lng, location.lat] },
-      properties: {},
-    }],
-  };
-  return (
-    <Source id="user-location-source" type="geojson" data={data}>
-      <Layer
-        id="user-location-dot"
-        type="circle"
-        paint={{
-          'circle-radius': 8,
-          'circle-color': '#4285F4',
-          'circle-stroke-width': 3,
-          'circle-stroke-color': '#ffffff',
-          'circle-opacity': 0.9,
-        }}
-      />
-    </Source>
-  );
-}
-
 export interface GpsMapLayersProps {
   savedTrackFeatureCollection: GeoJSON.FeatureCollection;
   currentTrackFeatureCollection: GeoJSON.FeatureCollection;
   recordingState: GpsRecordingState;
-  userLocation: { lng: number; lat: number } | null;
 }
 
 export function GpsMapLayers({
   savedTrackFeatureCollection,
   currentTrackFeatureCollection,
   recordingState,
-  userLocation,
 }: GpsMapLayersProps) {
   return (
     <>
@@ -97,7 +68,6 @@ export function GpsMapLayers({
         featureCollection={currentTrackFeatureCollection}
         recordingState={recordingState}
       />
-      <UserLocationLayer location={userLocation} />
     </>
   );
 }

@@ -2,8 +2,8 @@
 
 ## Intent
 
-Authentication policy must remain independently testable and must not be
-coupled to the controller's project, map, tile, offline-mutation, or GPS state.
+Authentication policy must remain independently testable and must not be coupled
+to the controller's project, map, tile, offline-mutation, or GPS state.
 `SpeleoDBController` remains the stable public façade used by React while
 `SessionCoordinator` owns the session state machine.
 
@@ -28,22 +28,22 @@ The coordinator depends only on narrow ports:
   sync, and the tile-cache offline runtime flag.
 
 It does not import cache, GPS, map, tile-prefetch, offline-queue, React, or
-Capacitor implementations. The controller implements lifecycle hooks because
-it still owns the wider application cleanup and sync orchestration.
+Capacitor implementations. The controller implements lifecycle hooks because it
+still owns the wider application cleanup and sync orchestration.
 
 ## State transitions
 
-| Trigger | Validation result | Session | Connectivity | Follow-up |
-| --- | --- | --- | --- | --- |
-| Stored-session startup | 2xx | preserved | online/unlocked | startup continues |
-| Stored-session startup | 401/403 | purged | reset/unlocked | login required |
-| Stored-session startup | timeout, transport, or non-2xx response other than 401/403 | preserved | offline/locked | cached use continues |
-| Explicit reconnect | 2xx | preserved | online/unlocked | one project sync starts |
-| Explicit reconnect | 401/403 | purged | reset/unlocked | login required |
-| Explicit reconnect | timeout, transport, or non-2xx response other than 401/403 | preserved | offline/locked | no sync, no purge |
-| Login | validated + secure write succeeds | replaced | online/unlocked | UI notified |
-| Login | validation or secure write fails | unchanged | unchanged | error returned |
-| Logout | n/a | revoked | reset/unlocked | all user data purged |
+| Trigger                | Validation result                                          | Session   | Connectivity    | Follow-up               |
+| ---------------------- | ---------------------------------------------------------- | --------- | --------------- | ----------------------- |
+| Stored-session startup | 2xx                                                        | preserved | online/unlocked | startup continues       |
+| Stored-session startup | 401/403                                                    | purged    | reset/unlocked  | login required          |
+| Stored-session startup | timeout, transport, or non-2xx response other than 401/403 | preserved | offline/locked  | cached use continues    |
+| Explicit reconnect     | 2xx                                                        | preserved | online/unlocked | one project sync starts |
+| Explicit reconnect     | 401/403                                                    | purged    | reset/unlocked  | login required          |
+| Explicit reconnect     | timeout, transport, or non-2xx response other than 401/403 | preserved | offline/locked  | no sync, no purge       |
+| Login                  | validated + secure write succeeds                          | replaced  | online/unlocked | UI notified             |
+| Login                  | validation or secure write fails                           | unchanged | unchanged       | error returned          |
+| Logout                 | n/a                                                        | revoked   | reset/unlocked  | all user data purged    |
 
 Connectivity changes are request-driven. No browser or operating-system online
 event may bypass this state machine. Superseded validation runs are aborted and

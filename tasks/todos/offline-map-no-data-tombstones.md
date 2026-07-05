@@ -3,21 +3,21 @@
 ## Implementation gates
 
 - [x] Represent a forbidden-hash response as a durable, zero-byte no-data
-  tombstone without storing the provider payload.
+      tombstone without storing the provider payload.
 - [x] Commit the tombstone and pending layer-generation membership atomically,
-  then count that coordinate as completed synchronization work.
+      then count that coordinate as completed synchronization work.
 - [x] Serve fresh tombstones offline as an immediate missing tile and refresh
-  stale tombstones without delaying the missing-tile response.
+      stale tombstones without delaying the missing-tile response.
 - [x] Keep HTTP errors, invalid responses, and transport failures on the failure
-  path; in particular, a 404 must never become a tombstone.
+      path; in particular, a 404 must never become a tombstone.
 - [x] Preserve cache statistics, ownership release, replacement, cancellation,
-  and layer eviction semantics for tombstones.
+      and layer eviction semantics for tombstones.
 - [x] Update tile-cache and map-layer documentation.
 
 ## Verification gates
 
 - [x] Add authoritative repository, downloader, protocol, and engine regression
-  tests.
+      tests.
 - [x] Run focused tile repository/service/runtime/engine suites.
 - [x] Run lint, typecheck, production build, and the complete CI suite.
 
@@ -26,13 +26,13 @@
 Forbidden-hash responses now commit a `TileMetadataRecord.isNoData` tombstone
 with `sizeBytes: 0`; the provider raster bytes are deleted/not retained. For an
 offline-map download, the tombstone and generation membership share one
-transaction that revalidates the pending generation and cancellation signal.
-The downloader returns success only after that commit, so the engine advances
+transaction that revalidates the pending generation and cancellation signal. The
+downloader returns success only after that commit, so the engine advances
 `completedTiles`. HTTP errors never enter this path.
 
-Fresh tombstones are cache hits and produce an immediate `MissingTileError`
-with zero network traffic, including offline. Stale tombstones keep returning
-the null answer while refreshing in the background. Normal payload writes can
+Fresh tombstones are cache hits and produce an immediate `MissingTileError` with
+zero network traffic, including offline. Stale tombstones keep returning the
+null answer while refreshing in the background. Normal payload writes can
 replace tombstones atomically, and generation release retains the unowned
 tombstone as an ordinary freshness-aware cache entry.
 

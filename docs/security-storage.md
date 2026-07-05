@@ -11,15 +11,15 @@ Authentication tokens belong only in the first-party native credential store:
 - Android encrypts the token with randomized AES-256-GCM. The non-exportable key
   is held by Android Keystore and the ciphertext plus initialization vector are
   committed together to app-private preferences. Associated data binds the
-  ciphertext to the SpeleoDB credential schema. That preference file is
-  excluded from cloud backup and device transfer because its Keystore key is
-  deliberately non-exportable.
+  ciphertext to the SpeleoDB credential schema. That preference file is excluded
+  from cloud backup and device transfer because its Keystore key is deliberately
+  non-exportable.
 
 The JavaScript `CredentialStore` contract is deliberately limited to one fixed
-authentication token. It does not expose arbitrary key/value storage, and it
-has no browser or `localStorage` fallback. Values must contain between 1 and
-16,384 UTF-8 bytes. Reads fail closed when ciphertext, Keychain data, or the
-native response is malformed.
+authentication token. It does not expose arbitrary key/value storage, and it has
+no browser or `localStorage` fallback. Values must contain between 1 and 16,384
+UTF-8 bytes. Reads fail closed when ciphertext, Keychain data, or the native
+response is malformed.
 
 ## Transport and redirect boundary
 
@@ -32,8 +32,8 @@ Security loads.
 
 Authenticated requests and every body-bearing request use manual/no-redirect
 mode on both web fetch and CapacitorHttp. A `3xx` is returned to the caller as a
-normal response, so an authorization header, password body, landmark payload,
-or GPX document is never replayed automatically to a redirect target.
+normal response, so an authorization header, password body, landmark payload, or
+GPX document is never replayed automatically to a redirect target.
 
 Capacitor native logging is disabled because bridge debug logs include plugin
 arguments. Native store failures return stable error codes and never include
@@ -57,9 +57,9 @@ snapshot. Preferences contain `instance`, optional `email`, and
 `hasStoredSession`, never a newly written token.
 
 Non-native browser development uses a separate volatile instance of the same
-coordinator. Its credential and metadata adapters exist only in memory, so
-login remains testable without weakening the native persistence boundary and
-reload always returns to an unauthenticated state.
+coordinator. Its credential and metadata adapters exist only in memory, so login
+remains testable without weakening the native persistence boundary and reload
+always returns to an unauthenticated state.
 
 SpeleoDB passwords are never persisted. Bootstrap deletes the obsolete
 `speleo_users_db` plaintext record before restoring any session, and the
@@ -70,8 +70,8 @@ continues only from a token already restored through the secure-session store.
 
 Android disables application backup and cleartext traffic in the manifest. Its
 legacy and Android 12+ backup rule files also exclude every root, file,
-database, shared-preference, external, and device-protected domain as defense
-in depth. Offline project data, map tiles, GPS tracks, pending mutations, and
+database, shared-preference, external, and device-protected domain as defense in
+depth. Offline project data, map tiles, GPS tracks, pending mutations, and
 WebView storage therefore do not enter cloud backup or device transfer.
 
 iOS applies `NSFileProtectionCompleteUntilFirstUserAuthentication` by default,
@@ -82,10 +82,10 @@ from backup; launch fails closed if that policy cannot be applied.
 `installDiagnosticRedaction()` wraps every console method before monitoring or
 React starts. It bounds diagnostic size and redacts authorization values,
 tokens, passwords, cookies, emails, identifiers, project/track names,
-coordinates, geometry, headers, request bodies, and payload fields. Sentry
-drops HTTP breadcrumbs, request/user/context/extra data, and captures a newly
-created sanitized error rather than the original error object. Deep-link URLs
-are never logged.
+coordinates, geometry, headers, request bodies, and payload fields. Sentry drops
+HTTP breadcrumbs, request/user/context/extra data, and captures a newly created
+sanitized error rather than the original error object. Deep-link URLs are never
+logged.
 
 Legacy upgrades are transactional:
 
@@ -113,13 +113,12 @@ account replacement use the same secure-first ordering and rollback contract.
   encryption, authentication-tag failure, missing keys, replacement, clearing,
   and token bounds.
 - Signed iOS Keychain tests exercise empty reads, replacement, clearing, byte
-  limits, and malformed stored data on a simulator Keychain. Do not disable
-  code signing for these tests; an unsigned test host cannot prove Keychain
-  behavior.
-- An iOS bridge integration test loads the production
-  `AppBridgeViewController` and requires its live bridge to resolve
-  `CredentialStore` to `CredentialStorePlugin`. This guards the native
-  registration seam separately from Keychain CRUD behavior.
+  limits, and malformed stored data on a simulator Keychain. Do not disable code
+  signing for these tests; an unsigned test host cannot prove Keychain behavior.
+- An iOS bridge integration test loads the production `AppBridgeViewController`
+  and requires its live bridge to resolve `CredentialStore` to
+  `CredentialStorePlugin`. This guards the native registration seam separately
+  from Keychain CRUD behavior.
 - iOS storage-policy tests exercise backup exclusion on existing, missing, and
   duplicate directories; Android lint validates both backup rule schemas.
 - Every native change requires Android unit/release compilation and an iOS

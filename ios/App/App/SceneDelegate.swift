@@ -28,4 +28,12 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             _ = ApplicationDelegateProxy.shared.application(UIApplication.shared, open: url)
         }
     }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        UIApplication.shared.isIdleTimerDisabled = true
+    }
+
+    func sceneWillResignActive(_ scene: UIScene) {
+        UIApplication.shared.isIdleTimerDisabled = false
+    }
 }

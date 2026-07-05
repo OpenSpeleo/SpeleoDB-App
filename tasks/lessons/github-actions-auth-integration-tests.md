@@ -1,9 +1,9 @@
 # GitHub Actions Auth Integration Tests
 
-When SpeleoDB integration tests run on GitHub-hosted runners, the
-password-login endpoint can return `403` even with credentials that work
-locally. Do not diagnose that as a secret mismatch until the token-validation
-path is checked separately.
+When SpeleoDB integration tests run on GitHub-hosted runners, the password-login
+endpoint can return `403` even with credentials that work locally. Do not
+diagnose that as a secret mismatch until the token-validation path is checked
+separately.
 
 Rules:
 

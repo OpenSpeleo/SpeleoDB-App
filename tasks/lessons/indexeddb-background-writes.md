@@ -10,11 +10,11 @@ durable effect owned by the transaction.
 
 The tile cache writes payload, metadata, and aggregate statistics in one
 read/write transaction. A test waited only until the payload was readable, then
-ended while metadata and statistics were still pending. The remaining work
-could overlap later test setup. A worker-level fake IndexedDB singleton also
-allowed databases and open connections to survive across serialized test files.
-Together these leaks made identical coverage runs report different branches
-depending on execution order and network timing.
+ended while metadata and statistics were still pending. The remaining work could
+overlap later test setup. A worker-level fake IndexedDB singleton also allowed
+databases and open connections to survive across serialized test files. Together
+these leaks made identical coverage runs report different branches depending on
+execution order and network timing.
 
 ## Rule
 

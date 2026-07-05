@@ -32,24 +32,27 @@ and server GPS tracks.
       must never render as 100% or `Map ready`.
 - [x] Disable raster fade and automatic initial-fit animation while preserving
       user-triggered map animations.
-- [x] Update tile/offline/map/settings/GPS documentation and capture the reusable
-      cache-hit latency lesson.
+- [x] Update tile/offline/map/settings/GPS documentation and capture the
+      reusable cache-hit latency lesson.
 
 ## Verification gates
 
-- [x] Authoritative MapLibre protocol tests cover fresh, stale, missing, offline,
-      invalid, cancelled, deduplicated, and durable replacement paths.
-- [x] Real fake-IndexedDB tests cover v4/v5-to-v6 migration, ownership, promotion,
-      release, shared tiles, capacity concurrency, statistics, and recovery.
+- [x] Authoritative MapLibre protocol tests cover fresh, stale, missing,
+      offline, invalid, cancelled, deduplicated, and durable replacement paths.
+- [x] Real fake-IndexedDB tests cover v4/v5-to-v6 migration, ownership,
+      promotion, release, shared tiles, capacity concurrency, statistics, and
+      recovery.
 - [x] Prefetch tests cover typed targets, freshness, forced refresh, retry
-      classification, queue progress, cancellation, and ownership reconciliation.
+      classification, queue progress, cancellation, and ownership
+      reconciliation.
 - [x] Planner/worker tests cover projects, point overlays, GPS paths, dateline
       handling, batching, dedupe, and cancellation.
 - [x] Controller/component tests cover all target sources, the Settings refresh
       confirmation/gates, truthful percentages, and logout cancellation.
 - [x] Focused suites pass.
 - [x] `make ci` passes.
-- [x] Capacitor Android/iOS sync output is inspected and native compile/tests pass.
+- [x] Capacitor Android/iOS sync output is inspected and native compile/tests
+      pass.
 - [ ] Physical Android and iOS slow-network/offline evidence is recorded, or the
       missing device evidence is explicitly listed as a release limitation.
 
@@ -76,16 +79,16 @@ and server GPS tracks.
 
 ### Verification evidence
 
-- Baseline before implementation: focused tile/controller/Settings run,
-  7 files / 296 tests passed.
+- Baseline before implementation: focused tile/controller/Settings run, 7 files
+  / 296 tests passed.
 - `npm run lint`: passed.
 - `npm run typecheck`: passed.
 - Focused repository/prefetch/planner/worker/coordinator gate: 5 files / 79
   tests passed. The authoritative controller/coordinator gate passed 2 files /
   188 tests.
 - `make ci`: passed after the follow-up; 105 files / 1,791 tests, 89.23%
-  statements, 81.41% branches, 92.33% functions, 91.51% lines; production
-  Vite build passed.
+  statements, 81.41% branches, 92.33% functions, 91.51% lines; production Vite
+  build passed.
 - `npx cap sync`: passed for Android and iOS; inspection found zero tracked
   native diffs.
 - `./gradlew testDebugUnitTest assembleDebug`: passed (492 tasks; debug APK and
@@ -137,7 +140,7 @@ only as private migration input.
 The original 10-second transport deadline stopped at headers and the global hash
 list incorrectly applied a satellite fingerprint to hillshade. The corrected
 deadline includes body/content validation and hashing, and hashes are owned by
-each layer. Cache clear/logout now aborts refreshes with an epoch guard. Previous
-automated/native command results remain historical; the corrected tree's exact
-results and unproven physical-device p95/slow-network matrix are in the
-adversarial review task.
+each layer. Cache clear/logout now aborts refreshes with an epoch guard.
+Previous automated/native command results remain historical; the corrected
+tree's exact results and unproven physical-device p95/slow-network matrix are in
+the adversarial review task.

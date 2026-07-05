@@ -2,15 +2,16 @@ import { useCallback, useEffect, useState } from 'react';
 import type { RefObject } from 'react';
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
 import type { Map as MaplibreMap } from 'maplibre-gl';
-import { Geolocation } from '@capacitor/geolocation';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { DEFAULT_MAP_LAYER_ID, MAP, MAP_LAYERS } from '../../constants';
+import { useLiveUserLocation } from '../../hooks/useLiveUserLocation';
+import { GeolocationWatcher, type LocationWatcher } from '../../services/GeolocationWatcher';
 import { getCachedLayerStyle } from '../../services/TileCacheService';
 import {
   setSelectedMapLayerId as persistSelectedMapLayerId,
 } from '../../services/PreferencesService';
 import type { MapLayerId } from '../../types/mapLayer';
-import { PERMISSION_DENIED_SENTINEL } from '../../utils/geolocationError';
+import type { UserMapLocation } from '../../types/userLocation';
 import {
   DEFAULT_OVERLAY_ICON_AVAILABILITY,
   OVERLAY_ICON_SOURCES,
@@ -21,15 +22,10 @@ import {
   type OverlayImageMap,
 } from './dashboardMapUtils';
 
-interface LocationPosition {
-  coords: { longitude: number; latitude: number };
-}
-
 export interface DashboardMapShellDependencies {
   getLayerStyle: (layerId: MapLayerId) => Promise<Record<string, unknown>>;
   persistLayerId: (layerId: MapLayerId) => void;
-  requestLocationPermission: () => Promise<string | undefined>;
-  getCurrentLocation: () => Promise<LocationPosition>;
+  locationWatcher: LocationWatcher;
   impact: () => Promise<void>;
   loadIcons: (map: OverlayImageMap) => Promise<OverlayIconAvailability>;
   lockOrientation: (mapRef: MapRef | null) => void;
@@ -48,13 +44,7 @@ async function loadOverlayIcons(map: OverlayImageMap): Promise<OverlayIconAvaila
 const DEFAULT_DEPENDENCIES: DashboardMapShellDependencies = {
   getLayerStyle: getCachedLayerStyle,
   persistLayerId: persistSelectedMapLayerId,
-  requestLocationPermission: async () => (
-    await Geolocation.requestPermissions({ permissions: ['location'] })
-  ).location,
-  getCurrentLocation: () => Geolocation.getCurrentPosition({
-    enableHighAccuracy: true,
-    timeout: 10_000,
-  }),
+  locationWatcher: new GeolocationWatcher(),
   impact: () => Haptics.impact({ style: ImpactStyle.Light }),
   loadIcons: loadOverlayIcons,
   lockOrientation: lockMapOrientation,
@@ -65,6 +55,7 @@ export interface DashboardMapShellOptions {
   mapRef: RefObject<MapRef | null>;
   selectedMapLayerId: MapLayerId;
   onSelectedMapLayerIdChange: (layerId: MapLayerId) => void;
+  runtimeActive?: boolean;
   dependencies?: DashboardMapShellDependencies;
 }
 
@@ -106,39 +97,26 @@ function useMapIcons(
 
 function useMapLocation(
   mapRef: RefObject<MapRef | null>,
+  runtimeActive: boolean,
   dependencies: DashboardMapShellDependencies,
 ) {
-  const [isLocating, setIsLocating] = useState(false);
-  const [userLocation, setUserLocation] = useState<{ lng: number; lat: number } | null>(null);
-  const [geoError, setGeoError] = useState<unknown>(null);
-  const goToMyLocation = useCallback(async () => {
-    setIsLocating(true);
-    try {
-      if (await dependencies.requestLocationPermission() !== 'granted') {
-        setGeoError(PERMISSION_DENIED_SENTINEL);
-        return;
-      }
-      const position = await dependencies.getCurrentLocation();
-      const lng = position.coords.longitude;
-      const lat = position.coords.latitude;
-      setUserLocation({ lng, lat });
-      const map = mapRef.current?.getMap() as MaplibreMap | undefined;
-      map?.flyTo({ center: [lng, lat], zoom: 15, duration: 1200 });
-      dependencies.impact().catch(() => {});
-    } catch (error: unknown) {
-      setGeoError(error);
-    } finally {
-      setIsLocating(false);
-    }
+  const handleFirstFix = useCallback((location: UserMapLocation) => {
+    const map = mapRef.current?.getMap() as MaplibreMap | undefined;
+    map?.flyTo({ center: [location.lng, location.lat], zoom: 15, duration: 1200 });
+    dependencies.impact().catch(() => {});
   }, [dependencies, mapRef]);
-  const dismissGeoError = useCallback(() => setGeoError(null), []);
-  return { isLocating, userLocation, geoError, goToMyLocation, dismissGeoError };
+  return useLiveUserLocation({
+    runtimeActive,
+    watcher: dependencies.locationWatcher,
+    onFirstFix: handleFirstFix,
+  });
 }
 
 export function useDashboardMapShell({
   mapRef,
   selectedMapLayerId,
   onSelectedMapLayerIdChange,
+  runtimeActive = true,
   dependencies = DEFAULT_DEPENDENCIES,
 }: DashboardMapShellOptions) {
   const [mapViewMetrics, setMapViewMetrics] = useState<{ zoom: number; latitude: number }>(() => ({
@@ -147,7 +125,7 @@ export function useDashboardMapShell({
   }));
   const mapStyle = useMapStyle(selectedMapLayerId, dependencies);
   const icons = useMapIcons(mapRef, dependencies);
-  const location = useMapLocation(mapRef, dependencies);
+  const location = useMapLocation(mapRef, runtimeActive, dependencies);
 
   const selectMapLayer = useCallback((layerId: string) => {
     const nextLayerId = (MAP_LAYERS.find((layer) => layer.id === layerId)?.id
@@ -172,12 +150,13 @@ export function useDashboardMapShell({
     overlayIconAvailability: icons.availability,
     overlayIconsLoaded: icons.loaded,
     isLocating: location.isLocating,
-    userLocation: location.userLocation,
-    geoError: location.geoError,
+    locationModeActive: location.locationModeActive,
+    userLocation: location.location,
+    geoError: location.error,
     selectMapLayer,
     handleMapLoad: icons.handleMapLoad,
     handleMapMove,
-    goToMyLocation: location.goToMyLocation,
-    dismissGeoError: location.dismissGeoError,
+    toggleLocationMode: location.toggleLocationMode,
+    dismissGeoError: location.dismissError,
   };
 }

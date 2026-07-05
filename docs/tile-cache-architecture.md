@@ -45,9 +45,10 @@ established by jsdom, fake IndexedDB, simulator builds, or fake timers.
 
 A replacement plan is all-or-nothing. Validated current-commit project records,
 valid empty overlays, and matching current quarantines are resolved inputs.
-Transient storage reads, missing current project commits, invalid/missing overlay
-records, unavailable SHA-256, or server GPS geometry that cannot be matched to
-the current server SHA abort planning. The active generations remain untouched.
+Transient storage reads, missing current project commits, invalid/missing
+overlay records, unavailable SHA-256, or server GPS geometry that cannot be
+matched to the current server SHA abort planning. The active generations remain
+untouched.
 
 Ordinary map display may use legacy cached GPS geometry. Planning may not: stale
 server geometry is refreshed with three-way bounded concurrency, and a missing
@@ -65,9 +66,8 @@ time. It waits for explicit consumer acknowledgement before producing the next
 chunk. Requests and acknowledgements use discriminated `plan` and `ack`
 messages; the production-worker protocol is tested directly rather than only
 through the test-only main-thread fallback. The consumer stores raw rows in
-`offline_map_plan_coordinates`, keyed by
-`[buildId,z,x,y]`; IndexedDB key uniqueness owns global deduplication without a
-lifetime JavaScript `Set`.
+`offline_map_plan_coordinates`, keyed by `[buildId,z,x,y]`; IndexedDB key
+uniqueness owns global deduplication without a lifetime JavaScript `Set`.
 
 After enumeration, the repository counts unique staged rows to lock `N`, reads
 them in sorted pages of at most 2,048, and writes compact `Uint32Array` plan
@@ -75,24 +75,24 @@ chunks. The immutable manifest is committed last. Therefore:
 
 `expected tiles = unique coordinates (N) * enabled layers (M)`
 
-Builders have unique IDs. The unique source-revision index chooses one winner;
-a loser reuses that winner and discards its own staging/chunks. Startup deletes
+Builders have unique IDs. The unique source-revision index chooses one winner; a
+loser reuses that winner and discards its own staging/chunks. Startup deletes
 crashed staging and chunk-only builds. Structurally corrupt manifests are
 deleted and rebuilt. Old unreferenced manifests and chunks are collected in
 bounded batches after a grace period.
 
 ## IndexedDB v8 and migration
 
-`speleo_tiles` v8 is additive to v7 payload, metadata, generation, and membership
-data:
+`speleo_tiles` v8 is additive to v7 payload, metadata, generation, and
+membership data:
 
-| Store | Purpose |
-|---|---|
-| `offline_map_plans` | immutable manifest and unique cryptographic revision |
-| `offline_map_plan_chunks` | sorted compact coordinate chunks |
-| `offline_map_plan_coordinates` | temporary unique build staging |
-| `offline_map_generations` | pending/active/failed/releasing layer state |
-| `offline_map_memberships` | generation claim per provider URL |
+| Store                          | Purpose                                              |
+| ------------------------------ | ---------------------------------------------------- |
+| `offline_map_plans`            | immutable manifest and unique cryptographic revision |
+| `offline_map_plan_chunks`      | sorted compact coordinate chunks                     |
+| `offline_map_plan_coordinates` | temporary unique build staging                       |
+| `offline_map_generations`      | pending/active/failed/releasing layer state          |
+| `offline_map_memberships`      | generation claim per provider URL                    |
 
 The resumable v6 ownership migration remains private repository machinery. It
 runs in 250-record transactions, never rewrites/deletes tile payloads, preserves
@@ -141,9 +141,9 @@ durable checkpoints. Checkpoints serialize at most once per second and at phase
 transitions; worker dispatch never awaits them.
 
 `OfflineMapSyncStore` is safe with synchronous, delayed, or frozen animation
-frames and has a 50 ms fallback. It snapshots listeners, honors removals,
-defers additions to the next event, isolates observer exceptions, and cancels
-scheduled work on disposal.
+frames and has a 50 ms fallback. It snapshots listeners, honors removals, defers
+additions to the next event, isolates observer exceptions, and cancels scheduled
+work on disposal.
 
 Settings uses `useSyncExternalStore`; tile progress never enters the app-wide
 context. **Tiles synced** is the only overall counter. Initial migration shows
@@ -154,16 +154,16 @@ completion.
 
 ## Verification and release evidence
 
-Authoritative automated seams include planner acknowledgement/chunk bounds,
-v8 staging/recovery/GC, real fake-IndexedDB aborts, payload/tombstone statistics,
+Authoritative automated seams include planner acknowledgement/chunk bounds, v8
+staging/recovery/GC, real fake-IndexedDB aborts, payload/tombstone statistics,
 six-way concurrency and queue high-water marks, retry classes, deadline phases,
 late refresh/logout races, request supersession, paint scheduler hostility,
 context isolation, and Settings failure presentation.
 
 Deterministic fake-time evidence establishes six active workers, dispatch gaps
 no greater than 100 ms under controlled 100 ms latency, completion faster than
-four times the serial baseline, a 64-coordinate outstanding high-water mark,
-and progress notification within 50 ms when RAF is frozen. The fresh-plan path
+four times the serial baseline, a 64-coordinate outstanding high-water mark, and
+progress notification within 50 ms when RAF is frozen. The fresh-plan path
 proves one manifest lookup and zero audit, write, or network work.
 
 Physical Android/iOS p95 timings plus slow-network, airplane-mode, restart,

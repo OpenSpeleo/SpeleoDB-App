@@ -16,18 +16,19 @@ Feature docs: `docs/gps-tracks.md`, `docs/offline-op-queue.md`.
 - [x] `SpeleoDBService`: `getGpsTracks` / `updateGpsTrack` / `deleteGpsTrack`.
 - [x] `ProjectCacheService`: `gps-tracks` list cache + `gps-track:<id>` geojson
       cache (reuse `projects`/`geojson` stores — no IndexedDB bump).
-- [x] Generalize the offline op queue to be entity-aware (`landmark | gpsTrack`):
-      `CreateGpsTrackOp` / `UpdateGpsTrackOp` / `DeleteGpsTrackOp`,
-      `gpsTrackSnapshot.ts`, `foldGpsTracks`, `gpsPendingBySubject`, GPS replay
-      port, generic conflict modal (`entityLabel`). Reused landmark machinery.
+- [x] Generalize the offline op queue to be entity-aware
+      (`landmark | gpsTrack`): `CreateGpsTrackOp` / `UpdateGpsTrackOp` /
+      `DeleteGpsTrackOp`, `gpsTrackSnapshot.ts`, `foldGpsTracks`,
+      `gpsPendingBySubject`, GPS replay port, generic conflict modal
+      (`entityLabel`). Reused landmark machinery.
 - [x] Controller: unified `gpsTracks` fold, route upload(create)/edit/delete
       through the queue, `syncGpsTracks` + `syncGpsTracksPhase`,
       `getGpsTrackGeoJSON`/`getGpsTrackPoints`, delete-local-then-resync on
       confirmed upload; remove the old `uploadStatus` drain.
 - [x] `PreferencesService`: `gpsTrackVisibility` map (default OFF).
-- [x] Dashboard: per-track visibility toggle + lazy remote geometry load,
-      shared dotted `gps-tracks-line` (data-driven color), Edit (name+color)
-      modal, Delete confirmation; keep the live recording line.
+- [x] Dashboard: per-track visibility toggle + lazy remote geometry load, shared
+      dotted `gps-tracks-line` (data-driven color), Edit (name+color) modal,
+      Delete confirmation; keep the live recording line.
 - [x] `GpsPanel`: unified rows (local/remote badge, visibility toggle, derived
       pending chip, Share/Upload/Edit/Delete; solid button variants).
 - [x] Tests across queue, gps ops, snapshot, service, cache, preferences,

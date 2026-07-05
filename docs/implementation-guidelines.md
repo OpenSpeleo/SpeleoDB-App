@@ -1,6 +1,7 @@
 # Implementation Guidelines
 
-This document defines high-level architecture boundaries and coding expectations for feature work in this repository.
+This document defines high-level architecture boundaries and coding expectations
+for feature work in this repository.
 
 ## Goal
 
@@ -10,11 +11,18 @@ This document defines high-level architecture boundaries and coding expectations
 
 ## Architecture boundaries
 
-- `src/context/` is the React bridge layer. Providers subscribe to controller state and expose it to components. Startup/offline/onboarding presentation orchestration belongs in dedicated UI coordinators/hooks (for example `src/context/useStartupUiCoordinator.ts`), not inline inside a large provider body.
+- `src/context/` is the React bridge layer. Providers subscribe to controller
+  state and expose it to components. Startup/offline/onboarding presentation
+  orchestration belongs in dedicated UI coordinators/hooks (for example
+  `src/context/useStartupUiCoordinator.ts`), not inline inside a large provider
+  body.
 - `src/controllers/` owns app state transitions and business decisions.
-- `src/services/` performs side effects (HTTP, cache persistence, map tile operations).
-- `src/pages/` and `src/components/` render UI and trigger controller actions. They should not duplicate controller business logic.
-- `src/services/tileCache/` contains lower-level storage/maintenance primitives used by higher services.
+- `src/services/` performs side effects (HTTP, cache persistence, map tile
+  operations).
+- `src/pages/` and `src/components/` render UI and trigger controller actions.
+  They should not duplicate controller business logic.
+- `src/services/tileCache/` contains lower-level storage/maintenance primitives
+  used by higher services.
 
 ## State ownership
 
@@ -22,40 +30,51 @@ This document defines high-level architecture boundaries and coding expectations
   state, and `ProjectSyncCoordinator` as the source of truth for project-list,
   sync-status, last-sync, cancellation, and map-data revision state. Both remain
   exposed through the stable `SpeleoDBController` façade.
-- Treat coordinator revision fields as stable publication boundaries. For project
-  maps, `mapDataRevision` tells mounted consumers to reread atomic
+- Treat coordinator revision fields as stable publication boundaries. For
+  project maps, `mapDataRevision` tells mounted consumers to reread atomic
   `{ commitId, featureCollection, bounds }` records; UI code must still require
   the commit to match `latest_commit.id` and ignore stale async completions.
 - Avoid parallel state machines across UI and services for the same behavior.
-- UI local state is acceptable for presentation-only concerns (modal visibility, form state, layout state).
-- UI coordinators may use reducer-backed local state for startup/offline/onboarding flows, but they must translate controller snapshots into presentation state rather than owning auth/offline truth themselves.
-- Default SpeleoDB instance prefill is a login-form concern only. Services, controller, and persisted preferences must not auto-inject a fallback instance.
+- UI local state is acceptable for presentation-only concerns (modal visibility,
+  form state, layout state).
+- UI coordinators may use reducer-backed local state for
+  startup/offline/onboarding flows, but they must translate controller snapshots
+  into presentation state rather than owning auth/offline truth themselves.
+- Default SpeleoDB instance prefill is a login-form concern only. Services,
+  controller, and persisted preferences must not auto-inject a fallback
+  instance.
 
 ## Networking and offline rules
 
-- Do not add passive `window` `online`/`offline` listeners for reconnect orchestration.
+- Do not add passive `window` `online`/`offline` listeners for reconnect
+  orchestration.
 - Explicit reconnect paths are limited to app relaunch startup validation,
   Settings **Go Online**, and Pending Changes **Try Reconnect**.
 - Timeout, transport, redirect, `5xx`, and inconclusive `4xx` auth-validation
   failures must preserve the stored session and local cache.
-- Only explicit stored-session authorization denial (`401`/`403`) should
-  trigger logout and local data purge.
-- When offline lock is active, normal data/map flows should avoid outbound network calls.
+- Only explicit stored-session authorization denial (`401`/`403`) should trigger
+  logout and local data purge.
+- When offline lock is active, normal data/map flows should avoid outbound
+  network calls.
 
 ## Service layer expectations
 
-- Services should be deterministic and prefer dependency injection for external concerns (time, network gates, storage).
-- Prefer narrow interfaces and explicit return types for side-effecting functions.
-- Keep cache fallbacks and network retries inside service/controller orchestration, not in UI components.
-- Long-running IO paths should accept `AbortSignal` when they participate in startup validation, sync, or logout-sensitive flows.
+- Services should be deterministic and prefer dependency injection for external
+  concerns (time, network gates, storage).
+- Prefer narrow interfaces and explicit return types for side-effecting
+  functions.
+- Keep cache fallbacks and network retries inside service/controller
+  orchestration, not in UI components.
+- Long-running IO paths should accept `AbortSignal` when they participate in
+  startup validation, sync, or logout-sensitive flows.
 - Project GeoJSON is untrusted input. It must cross the worker-backed,
   per-commit validation/cache boundary documented in
   `project-geojson-validation.md` before Dashboard or tile-prefetch code can
   consume it. Downstream consumers use persisted bounds and must not recompute
   project bboxes.
 - Durable GeoJSON quarantine APIs accept file-scoped reasons only.
-  `validation_unavailable` is an infrastructure/session disposition and must
-  not be persisted as blame against a commit. Cache metadata is schema-versioned
+  `validation_unavailable` is an infrastructure/session disposition and must not
+  be persisted as blame against a commit. Cache metadata is schema-versioned
   independently from the IndexedDB database version and must be parsed strictly.
 - Cache writes participating in sync accept `AbortSignal`. Conditional changes
   such as warning acknowledgement belong in one read/write transaction, with
@@ -65,19 +84,21 @@ This document defines high-level architecture boundaries and coding expectations
   succeeds; keep retry waits outside workers and live progress outside durable
   checkpoint persistence.
 - Circular longitude logic is centralized. Consumers merge complete directed
-  intervals and clamp display/tile latitude to Web Mercator; do not independently
-  min/max interval endpoints.
+  intervals and clamp display/tile latitude to Web Mercator; do not
+  independently min/max interval endpoints.
 
 ## TypeScript and code style
 
 - Prefer explicit types for public APIs and cross-layer contracts.
-- Keep naming consistent with responsibility (`*Controller`, `*Service`, `*Provider`).
+- Keep naming consistent with responsibility (`*Controller`, `*Service`,
+  `*Provider`).
 - Avoid hidden global coupling; pass dependencies where practical.
 - Add small comments only for non-obvious behavior or invariants.
 
 ## Error handling
 
-- Fail safely for user-facing flows: preserve usable local state when remote calls fail.
+- Fail safely for user-facing flows: preserve usable local state when remote
+  calls fail.
 - Use best-effort writes for non-critical caches when appropriate.
 - Do not swallow errors that determine auth/offline correctness.
 - Cancellation is not an error fallback. Once a coordinator-owned run is
@@ -88,10 +109,13 @@ This document defines high-level architecture boundaries and coding expectations
 
 ## Testing expectations
 
-- Add or update tests for every behavior change in controller/service orchestration.
+- Add or update tests for every behavior change in controller/service
+  orchestration.
 - Prefer focused unit tests around controller decisions and service fallbacks.
-- Keep provider/dashboard tests for user-visible contracts (offline modal, Settings sync).
-- Include regression coverage when fixing edge cases (timeouts, retries, offline lock transitions).
+- Keep provider/dashboard tests for user-visible contracts (offline modal,
+  Settings sync).
+- Include regression coverage when fixing edge cases (timeouts, retries, offline
+  lock transitions).
 - Exercise the authoritative production seam. Persistence invariants require a
   real fake-IndexedDB transaction test; concurrency invariants require deferred
   dependencies at the actual awaited cache/fetch/sleep/write boundary; UI reload

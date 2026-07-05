@@ -3,9 +3,9 @@
 ## Intent
 
 `DashboardMapCanvas.tsx` is the focused MapLibre composition root, but it must
-not also own every deterministic map policy. `dashboardMapUtils.ts` isolates
-the policy that can be evaluated without mounting the shell. This separation
-does not change map behavior or the public UI contract.
+not also own every deterministic map policy. `dashboardMapUtils.ts` isolates the
+policy that can be evaluated without mounting the shell. This separation does
+not change map behavior or the public UI contract.
 
 ## Ownership boundary
 
@@ -21,10 +21,9 @@ The utility module owns:
 Dashboard still owns domain orchestration and typed presentation wiring.
 `DashboardMapCanvas` and its focused child components own MapLibre composition,
 and `useDashboardMapInteractions` owns pointer state, timers, and marker
-selection;
-see `docs/dashboard-map-shell.md`, `docs/dashboard-map-layers.md`, and
-`docs/dashboard-map-interactions.md`.
-Service and cache ownership remains outside these presentation modules.
+selection; see `docs/dashboard-map-shell.md`, `docs/dashboard-map-layers.md`,
+and `docs/dashboard-map-interactions.md`. Service and cache ownership remains
+outside these presentation modules.
 
 ## Invariants
 

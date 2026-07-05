@@ -8,12 +8,12 @@ must wait for that transaction to settle before purge.
 
 ## Failure pattern
 
-An older login can receive a valid token and begin a Keychain/Keystore write.
-If a newer login or logout wins while that native write is in progress, merely
-checking the cancellation signal afterward prevents state publication but
-leaves the stale token durable. If the newer login then fails, the next startup
-can restore credentials the UI never accepted. Purging concurrently is also
-unsafe because the late write can repopulate storage after logout.
+An older login can receive a valid token and begin a Keychain/Keystore write. If
+a newer login or logout wins while that native write is in progress, merely
+checking the cancellation signal afterward prevents state publication but leaves
+the stale token durable. If the newer login then fails, the next startup can
+restore credentials the UI never accepted. Purging concurrently is also unsafe
+because the late write can repopulate storage after logout.
 
 ## Rule
 

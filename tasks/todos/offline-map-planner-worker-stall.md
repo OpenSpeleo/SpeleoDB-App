@@ -31,8 +31,8 @@ wire-protocol mismatch.
 The caller now posts `{id,type:'plan',input}`. A direct production-branch test
 installs a protocol worker, requires the `plan` request before returning a
 chunk, verifies the consumer receives that chunk, requires the matching `ack`,
-then returns `done` and verifies termination. The architecture documentation
-and streaming-plan lesson now make this protocol evidence explicit.
+then returns `done` and verifies termination. The architecture documentation and
+streaming-plan lesson now make this protocol evidence explicit.
 
 ### Verification
 
@@ -43,8 +43,8 @@ and streaming-plan lesson now make this protocol evidence explicit.
   pre-existing blank EOF line in `tasks/lessons/online-cache-hits.md`.
 - Built output contains the minified equivalent of
   `postMessage({id:1,type:'plan',input})`.
-- `make ci` passed 106 files / 1,820 tests. Coverage: 90.01% statements,
-  82.05% branches, 92.83% functions, and 92.00% lines.
+- `make ci` passed 106 files / 1,820 tests. Coverage: 90.01% statements, 82.05%
+  branches, 92.83% functions, and 92.00% lines.
 - `npx cap sync` passed for Android and iOS; tracked native diff remained empty.
 
 The protocol is proven in the production JavaScript branch and compiled bundle.

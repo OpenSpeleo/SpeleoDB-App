@@ -32,6 +32,7 @@ storage, concurrency, or UI path remains unsafe.
 
 ## Review question
 
-Before accepting a regression test, ask: “If the production transaction,
-await ordering, or mounted consumer were broken while this mock/helper stayed
-unchanged, would the test fail?” If not, move the test to the authoritative seam.
+Before accepting a regression test, ask: “If the production transaction, await
+ordering, or mounted consumer were broken while this mock/helper stayed
+unchanged, would the test fail?” If not, move the test to the authoritative
+seam.

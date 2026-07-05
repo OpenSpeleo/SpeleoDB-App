@@ -114,8 +114,8 @@ const Login: React.FC = () => {
     <div className="font-sans antialiased bg-slate-900 text-slate-100 tracking-tight min-h-screen flex flex-col justify-center">
       <section className="relative w-full">
         {/* Illustration */}
-        <div 
-          className="absolute left-1/2 -translate-x-1/2 -mt-36 blur-2xl opacity-70 pointer-events-none -z-10" 
+        <div
+          className="absolute left-1/2 -translate-x-1/2 -mt-36 blur-2xl opacity-70 pointer-events-none -z-10"
           aria-hidden="true"
         >
           <img src={authIllustrationSvg} className="max-w-none" width="1440" height="450" alt="" />
@@ -143,7 +143,7 @@ const Login: React.FC = () => {
                   {error}
                 </div>
               )}
-              
+
               {/* Success message */}
               {success && (
                 <div className="mb-4 p-3 rounded-2xl border-2 border-green-500 text-center text-sm text-slate-300 font-medium">

@@ -2,10 +2,10 @@
 
 ## Intent
 
-Dashboard GPS dialogs and full-screen activity composition are isolated from
-map rendering and GPS orchestration. This keeps visual policy reviewable while
-the Dashboard remains the temporary owner of track, recording, and averaging
-state during the staged decomposition.
+Dashboard GPS dialogs and full-screen activity composition are isolated from map
+rendering and GPS orchestration. This keeps visual policy reviewable while the
+Dashboard remains the temporary owner of track, recording, and averaging state
+during the staged decomposition.
 
 ## Ownership boundary
 
@@ -28,10 +28,9 @@ inline JSX, including the edit dialog's busy-state protection.
 
 `DashboardGpsPresentation.test.tsx` exercises the local and remote deletion
 copy, busy edit behavior, and edit-field/color callbacks. The Dashboard
-characterization suite verifies the complete recording, averaging, upload,
-edit, and delete journeys across the extraction boundary. Together they cover
-both production wrappers at 100% statement, branch, function, and line
-coverage.
+characterization suite verifies the complete recording, averaging, upload, edit,
+and delete journeys across the extraction boundary. Together they cover both
+production wrappers at 100% statement, branch, function, and line coverage.
 
 ## Performance implications
 

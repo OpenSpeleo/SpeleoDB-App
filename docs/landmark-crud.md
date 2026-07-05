@@ -49,8 +49,8 @@ the mutable surface (create/edit/delete) reachable from the map.
 
 - **Why full collection-picker parity?** The web viewer lets the user choose any
   collection they can write to and defaults to their personal collection. The
-  app fetches the writable set from `/api/v2/landmark-collections/` and caches it
-  so the picker is populated and the default is correct.
+  app fetches the writable set from `/api/v2/landmark-collections/` and caches
+  it so the picker is populated and the default is correct.
 
 - **No drag-to-move (deferred).** The web viewer supports dragging a marker to
   move it; mobile uses editable latitude/longitude fields instead. Drag-to-move
@@ -61,12 +61,12 @@ the mutable surface (create/edit/delete) reachable from the map.
 All requests use `Authorization: Token <token>` (the same scheme the app uses
 for every other authenticated GET). Base URL is the user's instance.
 
-| Operation | Method + URL | Body | Success |
-|---|---|---|---|
-| Create | `POST /api/v2/landmarks/` | `{ name, description?, latitude, longitude, collection? }` | `201 { landmark: {...} }` |
-| Update | `PATCH /api/v2/landmarks/<id>/` | any subset of writable fields | `200 { landmark: {...} }` |
-| Delete | `DELETE /api/v2/landmarks/<id>/` | none | `200 { message }` |
-| Collections | `GET /api/v2/landmark-collections/` | none | list of collections |
+| Operation   | Method + URL                        | Body                                                       | Success                   |
+| ----------- | ----------------------------------- | ---------------------------------------------------------- | ------------------------- |
+| Create      | `POST /api/v2/landmarks/`           | `{ name, description?, latitude, longitude, collection? }` | `201 { landmark: {...} }` |
+| Update      | `PATCH /api/v2/landmarks/<id>/`     | any subset of writable fields                              | `200 { landmark: {...} }` |
+| Delete      | `DELETE /api/v2/landmarks/<id>/`    | none                                                       | `200 { message }`         |
+| Collections | `GET /api/v2/landmark-collections/` | none                                                       | list of collections       |
 
 Notes:
 
@@ -74,7 +74,8 @@ Notes:
   backend assign the user's auto-created "Personal Landmarks" collection.
 - Assigning a collection requires `READ_AND_WRITE` (level >= 2) on it.
 - Editing/deleting a landmark requires `READ_AND_WRITE` on the landmark's
-  collection. The UI gates the Edit/Delete actions on `can_write` / `can_delete`.
+  collection. The UI gates the Edit/Delete actions on `can_write` /
+  `can_delete`.
 
 Landmark fields: `id` (uuid, read-only), `name` (required, <= 100 chars),
 `description` (optional), `latitude` (-90..90), `longitude` (-180..180),
@@ -84,8 +85,8 @@ Landmark fields: `id` (uuid, read-only), `name` (required, <= 100 chars),
 
 Errors:
 
-- Duplicate `(collection, latitude, longitude)` -> `400 { error: "...already
-  exists..." }`.
+- Duplicate `(collection, latitude, longitude)` ->
+  `400 { error: "...already exists..." }`.
 - Field validation -> `400 { errors: { <field>: [..] } }`.
 - Insufficient permission -> `403`.
 
@@ -119,8 +120,8 @@ Single seam: `createLandmark` / `updateLandmark` / `deleteLandmark` in
 `SpeleoDBController` are the only place that (1) call the service, (2) apply a
 pure mutation to the cached `overlay:landmarks` `FeatureCollection`, (3) bump
 `landmarksRevision`, and (4) `notify()`. The offline queue wraps step (1) with
-an enqueue + later replay (see `docs/offline-op-queue.md`); steps (2)-(4)
-are unchanged, and `getOverlayGeoJSON('landmarks')` folds pending ops over the
+an enqueue + later replay (see `docs/offline-op-queue.md`); steps (2)-(4) are
+unchanged, and `getOverlayGeoJSON('landmarks')` folds pending ops over the
 cached collection so the optimistic view needs no extra UI wiring.
 
 ## Key APIs / concepts
@@ -133,8 +134,9 @@ cached collection so the optimistic view needs no extra UI wiring.
 - **Service:** `createLandmark`, `updateLandmark`, `deleteLandmark`,
   `getLandmarkCollections` on top of a generalized private `authorizedRequest`
   (`src/services/SpeleoDBService.ts`).
-- **Pure mutation util:** `validateLandmarkInput`, `buildLandmarkFeatureFromApi`,
-  `upsertLandmarkFeature`, `removeLandmarkFeature`, `parseLandmarkMutationError`
+- **Pure mutation util:** `validateLandmarkInput`,
+  `buildLandmarkFeatureFromApi`, `upsertLandmarkFeature`,
+  `removeLandmarkFeature`, `parseLandmarkMutationError`
   (`src/utils/landmarkMutations.ts`).
 - **Controller:** `createLandmark`, `updateLandmark`, `deleteLandmark`,
   `getLandmarkCollections`, `landmarksRevision` (`SpeleoDBController.ts`).
@@ -164,13 +166,12 @@ opens. The ring is purely presentational and reuses the long-press timers in
 The ring only appears when a landmark could actually be created: the press is
 armed only at/above `MAP.MARKER_INTERACTION_MIN_ZOOM` (`isMarkerInteractionZoom`
 in `useDashboardMapInteractions`), so at low zoom ("high altitude") no ring
-shows at all. The
-empty-spot requirement is enforced before the ring reveal and again when the
-timer fires (`isEmptyMapSpotAtClientPoint`), so a long-press on an existing
-landmark/overlay marker shows no ring and does not open Map Point. Project
-survey lines/fills and the user's GPS location dot are intentionally allowed so
-users can still create landmarks on mapped cave lines or at their current
-position.
+shows at all. The empty-spot requirement is enforced before the ring reveal and
+again when the timer fires (`isEmptyMapSpotAtClientPoint`), so a long-press on
+an existing landmark/overlay marker shows no ring and does not open Map Point.
+Project survey lines/fills and the user's GPS location dot are intentionally
+allowed so users can still create landmarks on mapped cave lines or at their
+current position.
 
 ## Landmark feature id (important)
 
@@ -192,36 +193,36 @@ created/edited landmarks.
   (transport error / timeout / 5xx) -- the CRUD controller methods enqueue a
   persistent `OfflineOp` instead of rejecting, reflect it optimistically by
   folding it over the cached overlay, and replay it on the next sync. Definitive
-  failures (4xx) still throw the typed `LandmarkMutationError`. The old
-  "not available offline yet" rejection is gone. See
-  `docs/offline-op-queue.md` for the queue, replay, and conflict design.
+  failures (4xx) still throw the typed `LandmarkMutationError`. The old "not
+  available offline yet" rejection is gone. See `docs/offline-op-queue.md` for
+  the queue, replay, and conflict design.
 - The cached landmarks GeoJSON, the writable-collections list (now cached during
   sync so the offline create picker works), and the pending offline queue are
   all cleared with the rest of the caches on logout.
-- **Cache-write concurrency.** `applyLandmarkUpsert` /
-  `applyLandmarkRemoval` read-modify-write the cached `overlay:landmarks`
-  collection. The UI serializes user mutations through per-flow `busy` flags
-  (no two create/edit/delete run at once), so the only race window is a CRUD
-  write overlapping a background project resync, whose `syncMapOverlaysPhase`
-  full-overwrites the same cache from the server. That is last-writer-wins: a
-  just-created landmark can be momentarily dropped from the cache if the server
-  hasn't indexed it yet, and reappears on the next sync. This matches the web
-  viewer's eventual-consistency model and is acceptable while online. Offline
-  mutations are different: while queued ops exist or are actively replaying,
-  project sync skips the landmarks overlay full-refresh so it cannot clobber the
-  ground-truth layer underneath the optimistic fold. Other overlays still sync.
+- **Cache-write concurrency.** `applyLandmarkUpsert` / `applyLandmarkRemoval`
+  read-modify-write the cached `overlay:landmarks` collection. The UI serializes
+  user mutations through per-flow `busy` flags (no two create/edit/delete run at
+  once), so the only race window is a CRUD write overlapping a background
+  project resync, whose `syncMapOverlaysPhase` full-overwrites the same cache
+  from the server. That is last-writer-wins: a just-created landmark can be
+  momentarily dropped from the cache if the server hasn't indexed it yet, and
+  reappears on the next sync. This matches the web viewer's eventual-consistency
+  model and is acceptable while online. Offline mutations are different: while
+  queued ops exist or are actively replaying, project sync skips the landmarks
+  overlay full-refresh so it cannot clobber the ground-truth layer underneath
+  the optimistic fold. Other overlays still sync.
 
 ## Collection picker (async load)
 
 The writable collection list is fetched (`controller.getLandmarkCollections`)
-*after* the form opens, so the form initially renders with an empty list and
-only the synthetic "Personal Landmarks" fallback (value `''` -> `collection:
-null`). When the real list arrives, `LandmarkFormModal` re-seeds the picker's
-default to the personal collection **unless the user already changed it**. This
-keeps the shown selection consistent with the value that is submitted; without
-it the controlled `<select>` would hold a stale value that no longer matches any
-rendered option, and the form could create the landmark in a different
-collection than the one displayed.
+_after_ the form opens, so the form initially renders with an empty list and
+only the synthetic "Personal Landmarks" fallback (value `''` ->
+`collection: null`). When the real list arrives, `LandmarkFormModal` re-seeds
+the picker's default to the personal collection **unless the user already
+changed it**. This keeps the shown selection consistent with the value that is
+submitted; without it the controlled `<select>` would hold a stale value that no
+longer matches any rendered option, and the form could create the landmark in a
+different collection than the one displayed.
 
 ## Tests
 

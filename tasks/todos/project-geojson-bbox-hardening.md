@@ -30,7 +30,8 @@ warn the user, and automatically retry only when the project commit changes.
 
 - A file is faulty when either unpadded bbox dimension is strictly greater than
   100 km; exactly 100 km is accepted.
-- Analysis runs in a dedicated worker and must finish before the 500 ms deadline.
+- Analysis runs in a dedicated worker and must finish before the 500 ms
+  deadline.
 - `latest_commit.id` identifies the file version. A newer commit is eligible for
   validation and automatic recovery.
 - Diagnostics remain on the device console and are not sent to Sentry.
@@ -63,9 +64,8 @@ response receipt. Every response is runtime-validated, terminal paths suppress
 global worker errors and release all resources, and failures retain whatever
 diagnostics were actually measured. Circular-longitude math is shared by the
 analyzer, Dashboard, and tile planner. Raw haversine dimensions retain strict
-`> 100 km` rejection while the 100.12 km projected-footprint limit rejects
-polar Web-Mercator amplification without rejecting an exact equatorial 100 km
-fixture.
+`> 100 km` rejection while the 100.12 km projected-footprint limit rejects polar
+Web-Mercator amplification without rejecting an exact equatorial 100 km fixture.
 
 Persistence writes are abort-aware, warning acknowledgement is one
 commit-conditional transaction, project-record read failure is no longer
@@ -78,8 +78,8 @@ project/commit state. Counter overlap is documented and directly tested.
 Tile target removal now uses monotonic generations, generation-bound ownership,
 serialized persistence, abortable retry waits, and target-wide cross-layer
 deletion. Shared queued/in-flight URLs retain their other owners; solely-owned
-active requests abort; cached tile payloads remain. During verification, the
-new planner tests found and fixed an additional floating-point defect where a
+active requests abort; cached tile payloads remain. During verification, the new
+planner tests found and fixed an additional floating-point defect where a
 negative-longitude point could be interpreted as a 359.999-degree interval and
 schedule a whole tile row.
 
@@ -95,9 +95,8 @@ back/escape, gesture, and uncontrolled dismissal.
 
 - `npm run test.unit -- --run --reporter=verbose --coverage --no-file-parallelism`
   passed: 80 files and 1,443 tests.
-- Coverage: 84.44% statements (7,005/8,295), 76.54% branches
-  (4,206/5,495), 87.87% functions (1,572/1,789), and 87.50% lines
-  (6,546/7,481).
+- Coverage: 84.44% statements (7,005/8,295), 76.54% branches (4,206/5,495),
+  87.87% functions (1,572/1,789), and 87.50% lines (6,546/7,481).
 - `npm run lint` passed.
 - `npm run build` passed: 569 modules transformed and the standalone
   `projectGeoJSONBounds.worker-*.js` asset emitted at 8.28 kB.
@@ -113,12 +112,11 @@ back/escape, gesture, and uncontrolled dismissal.
 - `git diff --check` and `git diff --cached --check` passed.
 - `rg -n 'app-btn[^\"]*bg-' src --glob '*.tsx'` returned no matches.
 
-The authoritative regression coverage includes real fake-IndexedDB
-transactions, restart/recovery lifecycle, worker timing and cleanup races,
-shared-owner tile queue/removal seams, three-project controller concurrency,
-cancellation/counter outcomes,
-commit-gated Dashboard transitions, modal priority/dismissal, and acknowledgement
-persistence failure. The reusable testing rule is recorded in
+The authoritative regression coverage includes real fake-IndexedDB transactions,
+restart/recovery lifecycle, worker timing and cleanup races, shared-owner tile
+queue/removal seams, three-project controller concurrency, cancellation/counter
+outcomes, commit-gated Dashboard transitions, modal priority/dismissal, and
+acknowledgement persistence failure. The reusable testing rule is recorded in
 `tasks/lessons/authoritative-seam-tests.md`.
 
 ### Residual risk and physical-device verification

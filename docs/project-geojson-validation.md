@@ -25,8 +25,8 @@ survey bytes:
   the Dashboard unresponsive.
 
 It does not validate server project metadata or global overlay feeds, and it
-does not attempt to repair questionable coordinates. Rejecting the complete
-file is intentional: silently omitting one dangerous geometry would make the
+does not attempt to repair questionable coordinates. Rejecting the complete file
+is intentional: silently omitting one dangerous geometry would make the
 displayed survey differ from its source without telling the user.
 
 ## Policy
@@ -42,9 +42,9 @@ The source of truth is `PROJECT_GEOJSON_VALIDATION` in `src/constants.ts`:
 
 Exceeding either size limit quarantines the file. Exactly 100 km is accepted.
 Dimensions use haversine distances over the shortest longitude interval, so a
-small survey crossing the antimeridian is not interpreted as nearly global.
-Tile padding and Dashboard fit padding are applied only after validation and do
-not affect the threshold.
+small survey crossing the antimeridian is not interpreted as nearly global. Tile
+padding and Dashboard fit padding are applied only after validation and do not
+affect the threshold.
 
 The projected-footprint check is a second consumer-safety boundary. A compact
 raw bbox near a pole can become enormous after Web-Mercator projection even
@@ -58,10 +58,10 @@ longitudes on a circle. Shared directed-interval utilities preserve complete
 arcs (including antimeridian arcs) when Dashboard combines bounds and when tile
 planning adds padding; they do not merge only the two endpoints. Width is the
 haversine distance from west to east at `(south + north) / 2`; height is the
-haversine distance from south to north at a constant longitude. Machine
-roundoff immediately at the 100 km boundary is snapped to the limit so the
-policy remains strict `> 100 km`. The analyzer reads the first two ordinates of
-a position, so altitude and later ordinates do not affect the bbox.
+haversine distance from south to north at a constant longitude. Machine roundoff
+immediately at the 100 km boundary is snapped to the limit so the policy remains
+strict `> 100 km`. The analyzer reads the first two ordinates of a position, so
+altitude and later ordinates do not affect the bbox.
 
 ## Worker boundary
 
@@ -82,10 +82,10 @@ the file rather than silently dropping the coordinate.
 
 A computation error caused by the file is quarantined. Worker responses are
 runtime-validated; deadlines, malformed or foreign responses, worker asset
-failures, and platform/bootstrap failures are infrastructure failures classified as
-`validation_unavailable`. Infrastructure failures hide the file and cancel its
-prefetch work for the current process, but are never written through the durable
-quarantine API or permanently attributed to the file commit.
+failures, and platform/bootstrap failures are infrastructure failures classified
+as `validation_unavailable`. Infrastructure failures hide the file and cancel
+its prefetch work for the current process, but are never written through the
+durable quarantine API or permanently attributed to the file commit.
 
 Failure diagnostics are explicitly partial: bounds, width, and height are null
 until actually measured, while a safe elapsed duration is retained when one is
@@ -107,8 +107,8 @@ version 2 distinguishes:
 
 Every metadata field is validated before a record becomes active: state,
 non-empty commit ID, schema version, finite/ranged directed bounds, raw and
-projected limits, duration, reason, diagnostics, and acknowledgement. Corrupt
-or incomplete metadata is treated as legacy, never active.
+projected limits, duration, reason, diagnostics, and acknowledgement. Corrupt or
+incomplete metadata is treated as legacy, never active.
 
 A legacy entry carrying a commit ID that matches `latest_commit.id` is audited
 from its cached bytes and rewritten, including during offline startup or when a
@@ -129,39 +129,38 @@ If IndexedDB cannot persist quarantine, the controller retains a session-only
 typed per-commit disposition. Read failures and validation-infrastructure
 failures use the same session boundary. It prevents display, prefetch, repeated
 download, and repeated analysis in the current process while retaining the
-reason and available diagnostics for consistent logging/warnings. A later
-launch may retry because durable suppression cannot be guaranteed without
-storage.
+reason and available diagnostics for consistent logging/warnings. A later launch
+may retry because durable suppression cannot be guaranteed without storage.
 
 ### Per-commit transitions
 
-| Current record | Observed commit | Action | Result |
-| --- | --- | --- | --- |
-| Active | Same | Log stored analysis; no download or analysis | Active |
-| Quarantined content failure | Same | Remove prefetch target; no download or analysis | Quarantined |
-| Historical timeout quarantine | Same, online | Download and validate again | Active, content-quarantined, or session-disabled |
-| Historical timeout quarantine | Same, offline | Retain warning; do not download | Quarantined |
-| Legacy with matching commit | Same | Analyze cached bytes, online or offline | Active or quarantined |
-| Unversioned legacy | Offline | Hide; do not assign bytes to current commit | Session-disabled |
-| Unversioned legacy | Online | Download canonical current commit; do not audit ambiguous bytes | Active or quarantined |
-| Missing/stale | New, online | Download, normalize, then analyze | Active or quarantined |
-| Missing/stale | New, offline | Do not infer a file failure from network absence | Unchanged |
-| Any | New valid commit | Atomically write active data and clear stale warning | Active |
+| Current record                | Observed commit  | Action                                                          | Result                                           |
+| ----------------------------- | ---------------- | --------------------------------------------------------------- | ------------------------------------------------ |
+| Active                        | Same             | Log stored analysis; no download or analysis                    | Active                                           |
+| Quarantined content failure   | Same             | Remove prefetch target; no download or analysis                 | Quarantined                                      |
+| Historical timeout quarantine | Same, online     | Download and validate again                                     | Active, content-quarantined, or session-disabled |
+| Historical timeout quarantine | Same, offline    | Retain warning; do not download                                 | Quarantined                                      |
+| Legacy with matching commit   | Same             | Analyze cached bytes, online or offline                         | Active or quarantined                            |
+| Unversioned legacy            | Offline          | Hide; do not assign bytes to current commit                     | Session-disabled                                 |
+| Unversioned legacy            | Online           | Download canonical current commit; do not audit ambiguous bytes | Active or quarantined                            |
+| Missing/stale                 | New, online      | Download, normalize, then analyze                               | Active or quarantined                            |
+| Missing/stale                 | New, offline     | Do not infer a file failure from network absence                | Unchanged                                        |
+| Any                           | New valid commit | Atomically write active data and clear stale warning            | Active                                           |
 
 ### Failure matrix
 
-| Failure | File scoped | Durable quarantine | Warning | Retry |
-| --- | --- | --- | --- | --- |
-| Width or height over 100 km | Yes | Yes | Measured dimensions | New commit only |
-| 10-second validation deadline | No | No | Available duration/measurement | Later process |
-| Historical persisted timeout | No longer trusted | Existing record retained until retry | Available duration/measurement | Same commit when online |
-| Invalid geometry/position | Yes | Yes | Safe-computation summary | New commit only |
-| No usable coordinates | Yes | Yes | Safe-computation summary | New commit only |
-| Analyzer computation throw | Yes | Yes | Safe-computation summary | New commit only |
-| Worker asset/bootstrap/malformed-message failure | No | No | Available duration | Later process |
-| Project cache read failure | No | No | Session-disabled summary | Later process |
-| Quarantine cache write failure | Undetermined durably | No | Session-disabled summary | Later process |
-| HTTP/transport failure or abort | No | No | No GeoJSON warning | Normal sync retry |
+| Failure                                          | File scoped          | Durable quarantine                   | Warning                        | Retry                   |
+| ------------------------------------------------ | -------------------- | ------------------------------------ | ------------------------------ | ----------------------- |
+| Width or height over 100 km                      | Yes                  | Yes                                  | Measured dimensions            | New commit only         |
+| 10-second validation deadline                    | No                   | No                                   | Available duration/measurement | Later process           |
+| Historical persisted timeout                     | No longer trusted    | Existing record retained until retry | Available duration/measurement | Same commit when online |
+| Invalid geometry/position                        | Yes                  | Yes                                  | Safe-computation summary       | New commit only         |
+| No usable coordinates                            | Yes                  | Yes                                  | Safe-computation summary       | New commit only         |
+| Analyzer computation throw                       | Yes                  | Yes                                  | Safe-computation summary       | New commit only         |
+| Worker asset/bootstrap/malformed-message failure | No                   | No                                   | Available duration             | Later process           |
+| Project cache read failure                       | No                   | No                                   | Session-disabled summary       | Later process           |
+| Quarantine cache write failure                   | Undetermined durably | No                                   | Session-disabled summary       | Later process           |
+| HTTP/transport failure or abort                  | No                   | No                                   | No GeoJSON warning             | Normal sync retry       |
 
 ## Sync counters
 
@@ -179,8 +178,8 @@ GeoJSON phase counters describe different axes and intentionally overlap:
   existing disposition was reused or offline policy prevented work; and
 - `failedProjectCount`: the project did not finish usable in that run.
 
-A reused quarantine/session block therefore increments quarantined, skipped,
-and failed. A newly rejected download increments downloaded, quarantined, and
+A reused quarantine/session block therefore increments quarantined, skipped, and
+failed. A newly rejected download increments downloaded, quarantined, and
 failed. This overlap is deliberate; the values must not be treated as a
 partition of eligible projects.
 
@@ -191,11 +190,10 @@ list refresh or prevent unrelated overlay synchronization.
 ## Consumer boundary
 
 `ProjectGeoJSONCoordinator` exposes active map data through the controller
-façade atomically as
-`{ commitId, featureCollection, bounds }`. It returns null for legacy,
-quarantined, session-disabled, missing, or non-current commits. A stable
-`mapDataRevision` is published after map-data sync attempts reach a terminal
-state, including initial/offline and Settings-triggered sync paths.
+façade atomically as `{ commitId, featureCollection, bounds }`. It returns null
+for legacy, quarantined, session-disabled, missing, or non-current commits. A
+stable `mapDataRevision` is published after map-data sync attempts reach a
+terminal state, including initial/offline and Settings-triggered sync paths.
 `useDashboardMapData` reloads on that revision, atomically swaps its project
 map-data record, and requires each loaded `commitId` to equal the project's
 `latest_commit.id`. It immediately filters an old commit when the project list
@@ -226,12 +224,12 @@ because a URL can be shared by another project.
 ## Diagnostics and warning UX
 
 When an eligible project reaches an active, quarantined, or session-disabled
-disposition, `ProjectGeoJSONCoordinator` emits a structured device-console record under
-`[project-geojson:bbox]`, including name, ID, commit, cache/computed source,
-available dimensions/duration, status, and failure reason. A transport failure
-before validation has no bbox disposition and uses the ordinary sync warning.
-Active records use `console.info`; disabled records use `console.warn`. These
-diagnostics are not sent to Sentry.
+disposition, `ProjectGeoJSONCoordinator` emits a structured device-console
+record under `[project-geojson:bbox]`, including name, ID, commit,
+cache/computed source, available dimensions/duration, status, and failure
+reason. A transport failure before validation has no bbox disposition and uses
+the ordinary sync warning. Active records use `console.info`; disabled records
+use `console.warn`. These diagnostics are not sent to Sentry.
 
 The structured payload is:
 
@@ -259,9 +257,9 @@ Acknowledgement uses a single IndexedDB read/write transaction and replaces the
 record only if its commit and complete v2 quarantine metadata still match. An
 old modal therefore cannot acknowledge a newer commit. The controller returns
 explicit acknowledged/failed counts; the button shows a busy state and any
-persistence failure remains visible while the failed warning stays open.
-Warning snapshots are deduplicated by project and commit; re-publishing the same
-state does not churn React snapshot identity. When a project advances to another
+persistence failure remains visible while the failed warning stays open. Warning
+snapshots are deduplicated by project and commit; re-publishing the same state
+does not churn React snapshot identity. When a project advances to another
 faulty commit, the current warning replaces the stale one. A valid newer commit
 removes it.
 
@@ -283,22 +281,22 @@ removes it.
 Final command results and counts belong in the task review, not this design
 document. Required automated coverage is:
 
-- Pure geometry tests for all geometry shapes, antimeridian behavior,
-  invalid positions, no-coordinate input, threshold boundaries, and the 8,000
-  km regression.
+- Pure geometry tests for all geometry shapes, antimeridian behavior, invalid
+  positions, no-coordinate input, threshold boundaries, and the 8,000 km
+  regression.
 - Worker tests for success, timeout, abort, cleanup, typed file errors, and
   infrastructure failure.
-- Persistence tests using fake IndexedDB at the transaction boundary for strict v2
-  parsing, abort-aware writes, commit-conditional acknowledgement, and restart
-  behavior; higher-level mocks alone are insufficient evidence.
+- Persistence tests using fake IndexedDB at the transaction boundary for strict
+  v2 parsing, abort-aware writes, commit-conditional acknowledgement, and
+  restart behavior; higher-level mocks alone are insufficient evidence.
 - Cache/controller tests for matching-commit legacy audit, unversioned
   fail-closed behavior, durable/session dispositions, same-commit suppression,
   newer-commit recovery, cancellation ordering, and exact counter overlap.
 - Tile tests for bounds-only planning, padding/deduplication, antimeridian and
   polar cases, plus cross-layer target-removal races around cache checks,
   persistence, retry sleep, and shared/sole active requests.
-- React tests for modal priority/content and the absence of quarantined map
-  and panel data.
+- React tests for modal priority/content and the absence of quarantined map and
+  panel data.
 - Web and native compilation verify packaging feasibility. They do not prove
   WebView responsiveness, device-console behavior, persistence across a real
   force-quit, or network cancellation; those remain device checks below.
@@ -315,8 +313,8 @@ Before release, verify on both an Android device and an iOS device:
    initial fit, row zoom, and project-linked overlays.
 4. Network diagnostics show no satellite or optional-layer tile requests owned
    by the faulty project.
-5. An intentionally hung worker times out near 10 seconds without freezing
-   map interaction.
+5. An intentionally hung worker times out near 10 seconds without freezing map
+   interaction.
 6. Force-quit and relaunch, including offline launch: the same quarantined
    commit is not downloaded or analyzed and an unacknowledged warning returns.
 7. Acknowledge, force-quit, and relaunch: the same warning does not return.

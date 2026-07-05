@@ -32,8 +32,8 @@ controller façade.
 The direct hook suite covers restored visibility, cached and failed geometry,
 unmount races, valid/invalid map bounds, GPX preparation and sharing, online and
 offline upload feedback, busy guards, edit normalization, deletion cleanup, and
-all error paths. It has 100% statement, branch, function, and line coverage.
-The Dashboard characterization suite continues to verify the user-visible panel,
+all error paths. It has 100% statement, branch, function, and line coverage. The
+Dashboard characterization suite continues to verify the user-visible panel,
 map, upload, edit, and legacy-color flows across the extracted boundary.
 
 ## Performance implications

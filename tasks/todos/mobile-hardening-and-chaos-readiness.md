@@ -44,43 +44,43 @@ regression test, verification commands, commit, and final disposition.
 
 ## Confirmed starting findings
 
-| ID | Severity | Finding | Required disposition |
-| --- | --- | --- | --- |
-| MH-001 | P0 | Tokens are persisted in WebView `localStorage`. | Migrate atomically to native secure storage. |
-| MH-002 | P0 | The documented offline-password path reads a plaintext-password database that is never populated. | Remove it; offline access requires a prior validated session. |
-| MH-003 | P0 | Tag CI can publish temporary-signed artifacts as releases. | Separate compile smoke from trusted signed release output. |
-| MH-004 | P1 | Native verification is placeholder-only on Android and absent on iOS. | Add real native test targets and device evidence. |
-| MH-005 | P1 | There is no cross-platform mobile E2E suite. | Add Appium/WebdriverIO coverage. |
-| MH-006 | P1 | Hidden Settings/Pending pages remain mounted and can retain effects such as polling. | Closed: keep only Dashboard mounted and unmount inactive non-map pages. |
-| MH-007 | P2 | Controller and Dashboard exceed safe review/modularity limits. | Extract behavior-owned modules behind stable contracts. |
-| MH-008 | P2 | Coverage has no threshold and branch coverage is 76.54%. | Reach and enforce justified per-file 100% runtime coverage. |
-| MH-009 | P2 | README, Make, CI, simulator, PWA, and feature documentation contain stale claims. | Reconcile every document with implementation. |
-| MH-010 | P2 | Asset-generation development dependencies contain known advisories. | Remove the vulnerable routine toolchain. |
-| MH-011 | P0 | Offline/WebView data is eligible for platform backup and device transfer. | Disable Android backup and exclude protected iOS data directories. |
-| MH-012 | P0 | Raw errors, deep links, identifiers, coordinates, and payload-shaped data can reach console/Sentry diagnostics. | Enforce one redacted diagnostic boundary. |
-| MH-013 | P0 | Remote cleartext instances and automatic redirects can expose credentials or request bodies. | Require release HTTPS and disable redirects for sensitive requests. |
-| MH-014 | P1 | iOS declares background fetch and processing modes without scheduling either kind of work. | Restrict the compiled app configuration to recording-owned background location. |
-| MH-015 | P2 | Repeated one-shot coverage runs on the same tree can differ by three covered `TileCacheRepository` branches. | Closed: isolate fake IndexedDB, await complete background transactions, and own the overwrite path directly. |
-| MH-016 | P0 | Concurrent login/logout can publish stale auth state or leave a superseded token durable after an uncancellable native vault write. | Closed: latest-attempt cancellation, transactional secure-store rollback, and logout admission/wait ordering. |
-| MH-017 | P1 | Native HTTP can launch a request after cancellation wins during asynchronous User-Agent assembly. | Closed: re-check cancellation immediately before invoking CapacitorHttp. |
-| MH-018 | P1 | An unreadable session snapshot or unexpected startup-validation rejection can escape as an unhandled promise and leave ambiguous auth routing. | Closed: fail closed in the coordinator and mounted startup boundary. |
-| MH-019 | P0 | Inconclusive stored-session `4xx` responses such as `408` or `429` trigger destructive logout and wipe offline data. | Closed: purge only on explicit `401`/`403` authorization denial. |
-| MH-020 | P1 | Concurrent manual reconnects can supersede each other and let a stale `ok` result launch sync while the authoritative probe remains offline. | Closed: coalesce reconnect ownership and gate sync on authoritative validation. |
-| MH-021 | P0 | A GPS/persistence cleanup failure can interrupt logout before credential/cache purge, and failed vault deletion retains a marker that can restore the old session on restart. | Closed: revoke first, attempt all cleanup, and clear session metadata independently. |
-| MH-022 | P1 | Same-turn login submissions can supersede each other, successful login re-enables before redirect, and its timer can navigate after unmount. | Closed: synchronous single-flight admission and unmount-owned publication/timer cleanup. |
-| MH-023 | P1 | Web body parsing can swallow cancellation as an empty success, while native preparation is outside the request timeout and can poison the metadata cache permanently. | Closed: one deadline signal owns preparation, transport, parsing, publication, and cache recovery. |
-| MH-024 | P1 | Instance input accepts paths/queries/fragments even though services append fixed API paths, producing malformed authenticated targets and misleading network errors. | Closed: enforce and persist a canonical origin before transport. |
-| MH-025 | P2 | Signed JSON downloads accept a custom timeout but silently drop it before the transport boundary. | Closed: forward complete request ownership options. |
-| MH-026 | P0 | Untrusted authentication error bodies can reflect submitted token/password/email bytes directly into the login UI. | Closed initially by bounded exact redaction; superseded by the body-opaque fixed-message boundary in MH-028. |
-| MH-027 | P0 | Persisted pre-origin-policy sessions can retain unsafe instance paths forever as an offline session and leave local user data behind an unusable identity. | Closed: canonical upgrade before I/O; destructive purge for malformed or uncommittable identity metadata. |
-| MH-028 | P0 | Finite exact-value filtering cannot guarantee that transformed credentials are absent from arbitrary authentication server prose. | Closed: authentication failures publish only fixed local messages and ignore response-body text. |
-| MH-029 | P0 | Logout leaves the coordinator's authenticated snapshot published while it waits for secure-write rollback, and cancelled validation can report stale `ok`. | Closed: revoke at logout admission with best-effort notification; return `unauthorized` for logout-owned cancellation. |
-| MH-030 | P0 | Hook exceptions around durable session commit can either report failure after accepted credentials or let required old-account invalidation fail open. | Closed: require invalidation before commit; isolate only post-commit publication observers. |
-| MH-031 | P1 | Startup runtime-adapter failure can crash session restoration, while reconnect-sync launch failure can reject an already successful online transition. | Closed: treat startup/runtime and post-reconnect launch as best-effort observers. |
-| MH-032 | P0 | Session restoration passes arbitrary native storage error prose into diagnostics, where finite pattern redaction cannot guarantee credential absence. | Closed: emit a fixed restoration diagnostic and omit the thrown object. |
-| MH-033 | P1 | Dashboard suppresses validated GeoJSON until a full sync publishes a non-zero revision and can miss initial bounds when data precedes MapLibre readiness, leaving a permanently blank project map after an interrupted startup sync. | Closed: read through the controller validation seam immediately and retry initial fit at map readiness. |
-| MH-034 | P1 | The map-layer extraction placed project and subsurface icon layers behind components that discarded `react-map-gl` source injection, leaving MapLibre layers unbound while GPS tracks still rendered. | Closed: restore direct `Layer` children and enforce the production child-injection contract in tests and coding rules. |
-| MH-035 | P1 | A 500 ms validation deadline permanently quarantines valid project files on slower devices, and raising the limit alone would make historical timeout markers unreadable rather than recoverable. | Closed: use a realistic 10-second off-thread deadline, classify expiry as transient, reject new timeout quarantines, and retry historical timeout markers online. |
+| ID     | Severity | Finding                                                                                                                                                                                                                              | Required disposition                                                                                                                                              |
+| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MH-001 | P0       | Tokens are persisted in WebView `localStorage`.                                                                                                                                                                                      | Migrate atomically to native secure storage.                                                                                                                      |
+| MH-002 | P0       | The documented offline-password path reads a plaintext-password database that is never populated.                                                                                                                                    | Remove it; offline access requires a prior validated session.                                                                                                     |
+| MH-003 | P0       | Tag CI can publish temporary-signed artifacts as releases.                                                                                                                                                                           | Separate compile smoke from trusted signed release output.                                                                                                        |
+| MH-004 | P1       | Native verification is placeholder-only on Android and absent on iOS.                                                                                                                                                                | Add real native test targets and device evidence.                                                                                                                 |
+| MH-005 | P1       | There is no cross-platform mobile E2E suite.                                                                                                                                                                                         | Add Appium/WebdriverIO coverage.                                                                                                                                  |
+| MH-006 | P1       | Hidden Settings/Pending pages remain mounted and can retain effects such as polling.                                                                                                                                                 | Closed: keep only Dashboard mounted and unmount inactive non-map pages.                                                                                           |
+| MH-007 | P2       | Controller and Dashboard exceed safe review/modularity limits.                                                                                                                                                                       | Extract behavior-owned modules behind stable contracts.                                                                                                           |
+| MH-008 | P2       | Coverage has no threshold and branch coverage is 76.54%.                                                                                                                                                                             | Reach and enforce justified per-file 100% runtime coverage.                                                                                                       |
+| MH-009 | P2       | README, Make, CI, simulator, PWA, and feature documentation contain stale claims.                                                                                                                                                    | Reconcile every document with implementation.                                                                                                                     |
+| MH-010 | P2       | Asset-generation development dependencies contain known advisories.                                                                                                                                                                  | Remove the vulnerable routine toolchain.                                                                                                                          |
+| MH-011 | P0       | Offline/WebView data is eligible for platform backup and device transfer.                                                                                                                                                            | Disable Android backup and exclude protected iOS data directories.                                                                                                |
+| MH-012 | P0       | Raw errors, deep links, identifiers, coordinates, and payload-shaped data can reach console/Sentry diagnostics.                                                                                                                      | Enforce one redacted diagnostic boundary.                                                                                                                         |
+| MH-013 | P0       | Remote cleartext instances and automatic redirects can expose credentials or request bodies.                                                                                                                                         | Require release HTTPS and disable redirects for sensitive requests.                                                                                               |
+| MH-014 | P1       | iOS declares background fetch and processing modes without scheduling either kind of work.                                                                                                                                           | Restrict the compiled app configuration to recording-owned background location.                                                                                   |
+| MH-015 | P2       | Repeated one-shot coverage runs on the same tree can differ by three covered `TileCacheRepository` branches.                                                                                                                         | Closed: isolate fake IndexedDB, await complete background transactions, and own the overwrite path directly.                                                      |
+| MH-016 | P0       | Concurrent login/logout can publish stale auth state or leave a superseded token durable after an uncancellable native vault write.                                                                                                  | Closed: latest-attempt cancellation, transactional secure-store rollback, and logout admission/wait ordering.                                                     |
+| MH-017 | P1       | Native HTTP can launch a request after cancellation wins during asynchronous User-Agent assembly.                                                                                                                                    | Closed: re-check cancellation immediately before invoking CapacitorHttp.                                                                                          |
+| MH-018 | P1       | An unreadable session snapshot or unexpected startup-validation rejection can escape as an unhandled promise and leave ambiguous auth routing.                                                                                       | Closed: fail closed in the coordinator and mounted startup boundary.                                                                                              |
+| MH-019 | P0       | Inconclusive stored-session `4xx` responses such as `408` or `429` trigger destructive logout and wipe offline data.                                                                                                                 | Closed: purge only on explicit `401`/`403` authorization denial.                                                                                                  |
+| MH-020 | P1       | Concurrent manual reconnects can supersede each other and let a stale `ok` result launch sync while the authoritative probe remains offline.                                                                                         | Closed: coalesce reconnect ownership and gate sync on authoritative validation.                                                                                   |
+| MH-021 | P0       | A GPS/persistence cleanup failure can interrupt logout before credential/cache purge, and failed vault deletion retains a marker that can restore the old session on restart.                                                        | Closed: revoke first, attempt all cleanup, and clear session metadata independently.                                                                              |
+| MH-022 | P1       | Same-turn login submissions can supersede each other, successful login re-enables before redirect, and its timer can navigate after unmount.                                                                                         | Closed: synchronous single-flight admission and unmount-owned publication/timer cleanup.                                                                          |
+| MH-023 | P1       | Web body parsing can swallow cancellation as an empty success, while native preparation is outside the request timeout and can poison the metadata cache permanently.                                                                | Closed: one deadline signal owns preparation, transport, parsing, publication, and cache recovery.                                                                |
+| MH-024 | P1       | Instance input accepts paths/queries/fragments even though services append fixed API paths, producing malformed authenticated targets and misleading network errors.                                                                 | Closed: enforce and persist a canonical origin before transport.                                                                                                  |
+| MH-025 | P2       | Signed JSON downloads accept a custom timeout but silently drop it before the transport boundary.                                                                                                                                    | Closed: forward complete request ownership options.                                                                                                               |
+| MH-026 | P0       | Untrusted authentication error bodies can reflect submitted token/password/email bytes directly into the login UI.                                                                                                                   | Closed initially by bounded exact redaction; superseded by the body-opaque fixed-message boundary in MH-028.                                                      |
+| MH-027 | P0       | Persisted pre-origin-policy sessions can retain unsafe instance paths forever as an offline session and leave local user data behind an unusable identity.                                                                           | Closed: canonical upgrade before I/O; destructive purge for malformed or uncommittable identity metadata.                                                         |
+| MH-028 | P0       | Finite exact-value filtering cannot guarantee that transformed credentials are absent from arbitrary authentication server prose.                                                                                                    | Closed: authentication failures publish only fixed local messages and ignore response-body text.                                                                  |
+| MH-029 | P0       | Logout leaves the coordinator's authenticated snapshot published while it waits for secure-write rollback, and cancelled validation can report stale `ok`.                                                                           | Closed: revoke at logout admission with best-effort notification; return `unauthorized` for logout-owned cancellation.                                            |
+| MH-030 | P0       | Hook exceptions around durable session commit can either report failure after accepted credentials or let required old-account invalidation fail open.                                                                               | Closed: require invalidation before commit; isolate only post-commit publication observers.                                                                       |
+| MH-031 | P1       | Startup runtime-adapter failure can crash session restoration, while reconnect-sync launch failure can reject an already successful online transition.                                                                               | Closed: treat startup/runtime and post-reconnect launch as best-effort observers.                                                                                 |
+| MH-032 | P0       | Session restoration passes arbitrary native storage error prose into diagnostics, where finite pattern redaction cannot guarantee credential absence.                                                                                | Closed: emit a fixed restoration diagnostic and omit the thrown object.                                                                                           |
+| MH-033 | P1       | Dashboard suppresses validated GeoJSON until a full sync publishes a non-zero revision and can miss initial bounds when data precedes MapLibre readiness, leaving a permanently blank project map after an interrupted startup sync. | Closed: read through the controller validation seam immediately and retry initial fit at map readiness.                                                           |
+| MH-034 | P1       | The map-layer extraction placed project and subsurface icon layers behind components that discarded `react-map-gl` source injection, leaving MapLibre layers unbound while GPS tracks still rendered.                                | Closed: restore direct `Layer` children and enforce the production child-injection contract in tests and coding rules.                                            |
+| MH-035 | P1       | A 500 ms validation deadline permanently quarantines valid project files on slower devices, and raising the limit alone would make historical timeout markers unreadable rather than recoverable.                                    | Closed: use a realistic 10-second off-thread deadline, classify expiry as transient, reject new timeout quarantines, and retry historical timeout markers online. |
 
 ## Commit checklist
 
@@ -167,11 +167,14 @@ Before every commit:
 
 - [ ] Every tracked file is classified by `quality/file-classification.json`.
 - [ ] No unresolved P0-P2 findings remain.
-- [ ] Runtime TypeScript coverage is 100% per file with reviewed non-runtime exclusions only.
+- [ ] Runtime TypeScript coverage is 100% per file with reviewed non-runtime
+      exclusions only.
 - [ ] Custom Android/iOS code has native unit and integration coverage.
 - [ ] Critical state machines have no unexplained surviving mutants.
-- [ ] No skipped, focused, flaky, retry-dependent, or console-noisy tests remain.
-- [ ] No dependency cycles or production clone blocks of 50 tokens/10 lines remain.
+- [ ] No skipped, focused, flaky, retry-dependent, or console-noisy tests
+      remain.
+- [ ] No dependency cycles or production clone blocks of 50 tokens/10 lines
+      remain.
 - [ ] Production modules/functions meet documented size and complexity budgets.
 - [ ] Android API 24/33/36 and current iPhone/iPad automation pass.
 - [ ] Physical Android, iOS 15, and latest-iOS evidence is recorded.
@@ -179,26 +182,31 @@ Before every commit:
 
 ## Review
 
-Not complete. For each commit, append the hash, objective, commands run, results,
-coverage/performance changes, and finding IDs closed. Final review must include
-the full CI result, dependency status, mutation report, bundle/runtime metrics,
-and physical-device evidence.
+Not complete. For each commit, append the hash, objective, commands run,
+results, coverage/performance changes, and finding IDs closed. Final review must
+include the full CI result, dependency status, mutation report, bundle/runtime
+metrics, and physical-device evidence.
 
 ### Establish the audit ledger
 
 - Commit: `88a86f3` (`[Chore] Establish the mobile hardening audit ledger`).
 - Verification: `npm run quality:inventory`, `npm run lint`,
-  `npm run test.unit -- --run --coverage --no-file-parallelism`, `npm run build`.
-- Result: all checks pass; 1,443 tests pass and the baseline coverage is unchanged.
+  `npm run test.unit -- --run --coverage --no-file-parallelism`,
+  `npm run build`.
+- Result: all checks pass; 1,443 tests pass and the baseline coverage is
+  unchanged.
 - Findings closed: none; this commit establishes classification and tracking.
 
 ### Tighten repository engineering instructions
 
 - Commit: `e889854` (`[Docs] Tighten repository engineering instructions`).
 - Verification: `npm run quality:inventory`, `npm run lint`,
-  `npm run test.unit -- --run --coverage --no-file-parallelism`, `npm run build`.
-- Result: all checks pass; 1,443 tests pass and coverage remains at the baseline.
-- Findings closed: none; this commit strengthens repository-wide prevention rules.
+  `npm run test.unit -- --run --coverage --no-file-parallelism`,
+  `npm run build`.
+- Result: all checks pass; 1,443 tests pass and coverage remains at the
+  baseline.
+- Findings closed: none; this commit strengthens repository-wide prevention
+  rules.
 
 ### Align local development commands with CI
 
@@ -207,39 +215,46 @@ and physical-device evidence.
   resolver against CoreSimulator, and Make dry-run/help inspection.
 - Result: all checks pass; 1,443 tests pass and both-platform sync resolves to
   `npx cap sync` without a platform restriction.
-- Findings closed: stale Node, sync, simulator, Cypress, and dependency-update contracts.
+- Findings closed: stale Node, sync, simulator, Cypress, and dependency-update
+  contracts.
 
 ### Separate compile smoke artifacts from trusted releases
 
-- Commit: `bc93f7f` (`[Security] Separate compile smoke artifacts from trusted releases`).
+- Commit: `bc93f7f`
+  (`[Security] Separate compile smoke artifacts from trusted releases`).
 - Verification: workflow YAML parse, `make ci` under Node 22.22.2, Android
   `assembleRelease bundleRelease`, and iOS Release simulator build.
 - Result: all web and native compile gates pass; 1,443 tests pass.
-- Findings closed: MH-003; disposable credentials can no longer publish a GitHub release.
+- Findings closed: MH-003; disposable credentials can no longer publish a GitHub
+  release.
 
 ### Remove the vulnerable asset generation toolchain
 
-- Commit: `bfe2a44` (`[Security] Remove the vulnerable asset generation toolchain`).
+- Commit: `bfe2a44`
+  (`[Security] Remove the vulnerable asset generation toolchain`).
 - Verification: clean Node 22 install, production/full npm audits, `make ci`,
   Android release compilation, and iOS Release build.
-- Result: clean Node 22 install and both audits report zero vulnerabilities;
-  all 1,443 tests and web/native release builds pass.
-- Findings closed: MH-010; the dependency and self-installing target are removed.
+- Result: clean Node 22 install and both audits report zero vulnerabilities; all
+  1,443 tests and web/native release builds pass.
+- Findings closed: MH-010; the dependency and self-installing target are
+  removed.
 
 ### Add native secure credential storage
 
 - Commit: `071de85` (`[Feature] Add native secure credential storage`).
 - Verification: `make ci` under Node 22.22.2; Android `lintDebug`,
   `testDebugUnitTest`, `assembleRelease`, and `bundleRelease`; five hosted
-  Keychain XCTests on iPhone 17 Pro/iOS 26.5; and an iOS Release simulator build.
+  Keychain XCTests on iPhone 17 Pro/iOS 26.5; and an iOS Release simulator
+  build.
 - Result: all web and native gates pass. The new Android suite passes 9/9 and
   the new iOS suite passes 5/5 with no skips or retries.
-- Findings closed: none. This establishes the secure native boundary required
-  to close MH-001; session migration remains the next objective.
+- Findings closed: none. This establishes the secure native boundary required to
+  close MH-001; session migration remains the next objective.
 
 ### Migrate authenticated sessions to secure storage
 
-- Commit: `b083ebb` (`[Security] Migrate authenticated sessions to secure storage`).
+- Commit: `b083ebb`
+  (`[Security] Migrate authenticated sessions to secure storage`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android `lintDebug`/`testDebugUnitTest`/release APK/AAB, five hosted
@@ -255,16 +270,17 @@ and physical-device evidence.
 
 ### Remove plaintext offline password authentication
 
-- Commit: `ea4916a` (`[Security] Remove plaintext offline password authentication`).
+- Commit: `ea4916a`
+  (`[Security] Remove plaintext offline password authentication`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS Keychain XCTests, and iOS
   Release compilation.
 - Result: all gates pass. Vitest passes 1,494/1,494 tests across 84 files;
   Android passes 9/9 native tests and iOS passes 5/5 native tests.
-- Findings closed: MH-002. No production path reads or compares a local
-  password or creates a synthetic offline token; bootstrap removes legacy
-  plaintext residue and offline continuity requires a restored secure session.
+- Findings closed: MH-002. No production path reads or compares a local password
+  or creates a synthetic offline token; bootstrap removes legacy plaintext
+  residue and offline continuity requires a restored secure session.
 
 ### Harden URLs backups and diagnostics
 
@@ -300,7 +316,8 @@ and physical-device evidence.
 
 ### Extract project synchronization coordination
 
-- Commit: `66e5281` (`[Refactoring] Extract project synchronization coordination`).
+- Commit: `66e5281`
+  (`[Refactoring] Extract project synchronization coordination`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -308,16 +325,17 @@ and physical-device evidence.
 - Result: all gates pass. Vitest passes 1,546/1,546 tests across 87 files;
   aggregate coverage is 85.28% statements, 77.36% branches, 88.72% functions,
   and 88.32% lines. Android passes 9/9 native tests and iOS passes 7/7 native
-  tests. Project-list state, cancellation, phase ordering, terminal
-  publication, GeoJSON validation/quarantine, and overlay refresh now have
-  focused owners behind the unchanged controller façade. Each new module is
-  below 600 lines; the controller shrinks from 3,567 to 2,468 lines.
+  tests. Project-list state, cancellation, phase ordering, terminal publication,
+  GeoJSON validation/quarantine, and overlay refresh now have focused owners
+  behind the unchanged controller façade. Each new module is below 600 lines;
+  the controller shrinks from 3,567 to 2,468 lines.
 - Findings closed: the project synchronization and GeoJSON/overlay ownership
   slice of MH-007. Tile/offline and GPS ownership remain next.
 
 ### Extract offline mutation and tile coordination
 
-- Commit: `0c04f62` (`[Refactoring] Extract offline mutation and tile coordination`).
+- Commit: `0c04f62`
+  (`[Refactoring] Extract offline mutation and tile coordination`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -326,10 +344,9 @@ and physical-device evidence.
   aggregate coverage is 85.25% statements, 77.32% branches, 88.68% functions,
   and 88.32% lines. Android passes 9/9 native tests and iOS passes 7/7 native
   tests. Offline queue lifecycle/revision/replay delegation and tile
-  service/consent/layer/scheduling ownership now sit behind focused
-  coordinators without changing persisted operation or tile formats. Both new
-  modules remain below 600 lines; the controller shrinks from 2,468 to 2,017
-  lines.
+  service/consent/layer/scheduling ownership now sit behind focused coordinators
+  without changing persisted operation or tile formats. Both new modules remain
+  below 600 lines; the controller shrinks from 2,468 to 2,017 lines.
 - Findings closed: the offline mutation and tile ownership slice of MH-007. GPS
   and dashboard ownership remain scheduled next.
 
@@ -358,14 +375,15 @@ and physical-device evidence.
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
   compilation.
-- Result: local/remote state, persistence serialization, geometry/GPX, optimistic
-  snapshots, upload/edit/delete policy, and abort-aware server synchronization
-  now live in two focused coordinators behind the unchanged controller façade.
-  All gates pass: Vitest passes 1,584/1,584 tests across 90 files with aggregate
-  coverage of 86.32% statements, 78.89% branches, 89.47% functions, and 89.00%
-  lines; Android passes 9/9 native tests and iOS passes 7/7. Both direct suites
-  have 100% statement, branch, function, and line coverage. Production modules
-  are 341 and 269 lines; the controller shrinks from 1,706 to 1,237 lines.
+- Result: local/remote state, persistence serialization, geometry/GPX,
+  optimistic snapshots, upload/edit/delete policy, and abort-aware server
+  synchronization now live in two focused coordinators behind the unchanged
+  controller façade. All gates pass: Vitest passes 1,584/1,584 tests across 90
+  files with aggregate coverage of 86.32% statements, 78.89% branches, 89.47%
+  functions, and 89.00% lines; Android passes 9/9 native tests and iOS passes
+  7/7. Both direct suites have 100% statement, branch, function, and line
+  coverage. Production modules are 341 and 269 lines; the controller shrinks
+  from 1,706 to 1,237 lines.
 - Findings closed: the remaining GPS ownership slice of MH-007. Dashboard
   rendering and interaction ownership is next.
 
@@ -380,16 +398,15 @@ and physical-device evidence.
   icon loading, geographic bounds, touch thresholds, and map orientation now
   live in a focused module. Its direct suite has 100% statement, branch,
   function, and line coverage, while the existing Dashboard suite remains the
-  rendering characterization boundary. All gates pass: Vitest passes
-  1,598/1,598 tests across 91 files with aggregate coverage of 86.64%
-  statements, 79.26% branches, 89.62% functions, and 89.23% lines; Android
-  passes 9/9 native tests plus lint/APK/AAB builds, and iOS passes 7/7 native
-  tests plus Release compilation. Capacitor sync introduces no tracked native
-  drift. Dashboard shrinks from 2,967 to 2,665 lines; the production utility is
-  299 lines.
-- Findings closed: the deterministic map-policy slice of MH-007. Dashboard
-  layer rendering, interaction state, GPS presentation, modals, and chrome
-  remain scheduled as independently reviewable splits.
+  rendering characterization boundary. All gates pass: Vitest passes 1,598/1,598
+  tests across 91 files with aggregate coverage of 86.64% statements, 79.26%
+  branches, 89.62% functions, and 89.23% lines; Android passes 9/9 native tests
+  plus lint/APK/AAB builds, and iOS passes 7/7 native tests plus Release
+  compilation. Capacitor sync introduces no tracked native drift. Dashboard
+  shrinks from 2,967 to 2,665 lines; the production utility is 299 lines.
+- Findings closed: the deterministic map-policy slice of MH-007. Dashboard layer
+  rendering, interaction state, GPS presentation, modals, and chrome remain
+  scheduled as independently reviewable splits.
 
 ### Extract dashboard map layers
 
@@ -401,13 +418,12 @@ and physical-device evidence.
 - Result: project, overlay, saved-track, active-recording, and user-location
   MapLibre declarations now live in three data-in/render-out modules. Their
   combined direct and characterization coverage is 100% for statements,
-  branches, functions, and lines. All web gates pass: Vitest passes
-  1,601/1,601 tests across 92 files with aggregate coverage of 86.70%
-  statements, 79.33% branches, 89.71% functions, and 89.28% lines. Dashboard
-  shrinks from 2,665 to 2,166 lines; the production modules are 169, 414, and
-  103 lines. Capacitor sync introduces no tracked native drift; Android passes
-  9/9 native tests plus lint/APK/AAB builds, and iOS passes 7/7 native tests
-  plus Release compilation.
+  branches, functions, and lines. All web gates pass: Vitest passes 1,601/1,601
+  tests across 92 files with aggregate coverage of 86.70% statements, 79.33%
+  branches, 89.71% functions, and 89.28% lines. Dashboard shrinks from 2,665 to
+  2,166 lines; the production modules are 169, 414, and 103 lines. Capacitor
+  sync introduces no tracked native drift; Android passes 9/9 native tests plus
+  lint/APK/AAB builds, and iOS passes 7/7 native tests plus Release compilation.
 - Findings closed: the declarative map-layer slice of MH-007. Interaction
   orchestration, GPS presentation, modals, chrome, and panel-state unification
   remain scheduled as independently reviewable splits.
@@ -425,10 +441,9 @@ and physical-device evidence.
   statements, branches, functions, and lines. All web gates pass: Vitest passes
   1,608/1,608 tests across 93 files with aggregate coverage of 86.90%
   statements, 79.67% branches, 89.75% functions, and 89.47% lines. Dashboard
-  shrinks from 2,166 to 1,860 lines; the production hook is 295 lines.
-  Capacitor sync introduces no tracked native drift; Android passes 9/9 native
-  tests plus lint/APK/AAB builds, and iOS passes 7/7 native tests plus Release
-  compilation.
+  shrinks from 2,166 to 1,860 lines; the production hook is 295 lines. Capacitor
+  sync introduces no tracked native drift; Android passes 9/9 native tests plus
+  lint/APK/AAB builds, and iOS passes 7/7 native tests plus Release compilation.
 - Findings closed: the map-interaction slice of MH-007. GPS presentation,
   modals, chrome, and panel-state unification remain scheduled as independently
   reviewable splits.
@@ -446,26 +461,26 @@ and physical-device evidence.
   characterization coverage is 100% for statements, branches, functions, and
   lines. All web gates pass: Vitest passes 1,610/1,610 tests across 94 files
   with aggregate coverage of 86.95% statements, 79.75% branches, 89.88%
-  functions, and 89.51% lines. Dashboard shrinks from 1,860 to 1,709 lines;
-  the production modules are 56 and 233 lines. Capacitor sync introduces no
-  tracked native drift; Android passes 9/9 native tests plus lint/APK/AAB
-  builds, and iOS passes 7/7 native tests plus Release compilation.
+  functions, and 89.51% lines. Dashboard shrinks from 1,860 to 1,709 lines; the
+  production modules are 56 and 233 lines. Capacitor sync introduces no tracked
+  native drift; Android passes 9/9 native tests plus lint/APK/AAB builds, and
+  iOS passes 7/7 native tests plus Release compilation.
 - Findings closed: the GPS presentation slice of MH-007. GPS action state,
   landmark presentation/state, chrome, and panel-state unification remain
   scheduled as independently reviewable splits.
 
 ### Register iOS credential storage with Capacitor 8
 
-- Commit: `e0551b8` (`[Fix] Credentials Secure Storage Interacting with
-  Capacitor 8`).
+- Commit: `e0551b8`
+  (`[Fix] Credentials Secure Storage Interacting with Capacitor 8`).
 - Verification: full Node 22 web gates, signed iOS XCTest on an iPhone 17 Pro
   simulator, and iOS Debug/Release simulator compilation.
-- Result: the first-party `CredentialStore` is registered through Capacitor
-  8's live instance-registration path and a bridge integration test proves the
+- Result: the first-party `CredentialStore` is registered through Capacitor 8's
+  live instance-registration path and a bridge integration test proves the
   JavaScript-visible plugin exists. Signed iOS tests pass 8/8. Physical-device
   login remains part of the final device matrix.
-- Follow-up: review found unrelated background `fetch` and `processing` modes
-  in the same commit; MH-014 is closed by the next isolated objective.
+- Follow-up: review found unrelated background `fetch` and `processing` modes in
+  the same commit; MH-014 is closed by the next isolated objective.
 
 ### Restrict iOS background execution to recording
 
@@ -474,14 +489,14 @@ and physical-device evidence.
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
   compilation.
-- Result: the compiled iOS app now declares only the `location` background
-  mode, matching the sole runtime owner, and a hosted XCTest prevents hidden
-  `fetch` or `processing` declarations from returning. All web gates pass:
-  Vitest passes 1,610/1,610 tests across 94 files with aggregate coverage of
-  86.95% statements, 79.70% branches, 89.88% functions, and 89.51% lines.
-  Capacitor sync introduces no tracked native drift; Android passes 9/9 native
-  tests plus lint/APK/AAB builds, and iOS passes 9/9 signed native tests plus
-  Release compilation.
+- Result: the compiled iOS app now declares only the `location` background mode,
+  matching the sole runtime owner, and a hosted XCTest prevents hidden `fetch`
+  or `processing` declarations from returning. All web gates pass: Vitest passes
+  1,610/1,610 tests across 94 files with aggregate coverage of 86.95%
+  statements, 79.70% branches, 89.88% functions, and 89.51% lines. Capacitor
+  sync introduces no tracked native drift; Android passes 9/9 native tests plus
+  lint/APK/AAB builds, and iOS passes 9/9 signed native tests plus Release
+  compilation.
 - Findings closed: MH-014.
 
 ### Extract dashboard GPS track actions
@@ -496,17 +511,16 @@ and physical-device evidence.
   behind narrow injected ports. Its direct suite has 100% statement, branch,
   function, and line coverage, and Dashboard's 106 characterization tests stay
   green. Dashboard shrinks from 1,709 to 1,449 lines; the production module is
-  428 lines and every function remains below 80 lines. Vitest passes
-  1,624/1,624 tests across 95 files with aggregate coverage of 87.86%
-  statements, 80.69% branches, 90.67% functions, and 90.32% lines. The
-  Dashboard lazy chunk is 150.44 KiB (47.90 KiB gzip), 1.40 KiB larger than the
-  prior modular boundary but still far below the starting bundle baseline.
-  Capacitor sync introduces no tracked native drift; Android passes 9/9 native
-  tests plus lint/APK/AAB builds, and iOS passes 9/9 signed native tests plus
-  Release compilation.
+  428 lines and every function remains below 80 lines. Vitest passes 1,624/1,624
+  tests across 95 files with aggregate coverage of 87.86% statements, 80.69%
+  branches, 90.67% functions, and 90.32% lines. The Dashboard lazy chunk is
+  150.44 KiB (47.90 KiB gzip), 1.40 KiB larger than the prior modular boundary
+  but still far below the starting bundle baseline. Capacitor sync introduces no
+  tracked native drift; Android passes 9/9 native tests plus lint/APK/AAB
+  builds, and iOS passes 9/9 signed native tests plus Release compilation.
 - Findings closed: the GPS track-action slice of MH-007. Recording/averaging
-  action state, landmark presentation/state, chrome, and panel-state
-  unification remain scheduled as independently reviewable splits.
+  action state, landmark presentation/state, chrome, and panel-state unification
+  remain scheduled as independently reviewable splits.
 
 ### Extract dashboard GPS recording and averaging actions
 
@@ -554,13 +568,14 @@ and physical-device evidence.
   Capacitor sync introduces no tracked native drift; Android passes 9/9
   first-party native tests plus lint/APK/AAB builds, and iOS passes 9/9 signed
   native tests plus Release compilation.
-- Findings closed: the landmark action slice of MH-007. Map-shell state,
-  chrome, and panel-state unification remain scheduled as independently
-  reviewable splits.
+- Findings closed: the landmark action slice of MH-007. Map-shell state, chrome,
+  and panel-state unification remain scheduled as independently reviewable
+  splits.
 
 ### Extract dashboard project visibility actions
 
-- Commit: `284c83a` (`[Refactoring] Extract dashboard project visibility actions`).
+- Commit: `284c83a`
+  (`[Refactoring] Extract dashboard project visibility actions`).
 - Verification: Node 22 inventory, lint, typecheck, full one-shot Vitest with
   coverage and live API contracts, production build, both-platform Capacitor
   sync, Android lint/unit/release builds, signed iOS XCTest, and iOS Release
@@ -574,10 +589,10 @@ and physical-device evidence.
   is 61 lines. Vitest passes 1,664/1,664 tests across 98 files with aggregate
   coverage of 89.02% statements, 81.95% branches, 92.31% functions, and 91.18%
   lines. The Dashboard lazy chunk is 156.29 KiB (50.02 KiB gzip), 2.06 KiB
-  larger than the prior modular boundary but still far below the starting
-  bundle baseline. Capacitor sync introduces no tracked native drift; Android
-  passes 9/9 first-party native tests plus lint/APK/AAB builds, and iOS passes
-  9/9 signed native tests on iPhone 17 Pro/iOS 26.5 plus Release compilation.
+  larger than the prior modular boundary but still far below the starting bundle
+  baseline. Capacitor sync introduces no tracked native drift; Android passes
+  9/9 first-party native tests plus lint/APK/AAB builds, and iOS passes 9/9
+  signed native tests on iPhone 17 Pro/iOS 26.5 plus Release compilation.
 - Findings closed: the project-visibility slice of MH-007. Map-shell state,
   chrome, and panel-state unification remain scheduled as independently
   reviewable splits.
@@ -595,14 +610,14 @@ and physical-device evidence.
   hook behind a two-method data-source port. Its direct 9-test suite has 100%
   statement, branch, function, and line coverage, and Dashboard's 106
   characterization tests stay green. Dashboard shrinks from 934 to 801 lines;
-  the production hook is 221 lines and its largest function is 58 lines.
-  Vitest passes 1,673/1,673 tests across 99 files with aggregate coverage of
-  89.15% statements, 82.04% branches, 92.35% functions, and 91.22% lines. The
-  Dashboard lazy chunk is 157.15 KiB (50.48 KiB gzip), 0.86 KiB larger than the
-  prior modular boundary but still far below the starting bundle baseline.
-  Capacitor sync introduces no tracked native drift; Android passes 9/9
-  first-party native tests plus lint, APK, and AAB builds, and iOS passes 9/9
-  signed native tests on iPhone 17 Pro/iOS 26.5 plus Release compilation.
+  the production hook is 221 lines and its largest function is 58 lines. Vitest
+  passes 1,673/1,673 tests across 99 files with aggregate coverage of 89.15%
+  statements, 82.04% branches, 92.35% functions, and 91.22% lines. The Dashboard
+  lazy chunk is 157.15 KiB (50.48 KiB gzip), 0.86 KiB larger than the prior
+  modular boundary but still far below the starting bundle baseline. Capacitor
+  sync introduces no tracked native drift; Android passes 9/9 first-party native
+  tests plus lint, APK, and AAB builds, and iOS passes 9/9 signed native tests
+  on iPhone 17 Pro/iOS 26.5 plus Release compilation.
 - Findings closed: the map-data lifecycle slice of MH-007. Map-shell state,
   chrome, and panel-state unification remain scheduled as independently
   reviewable splits.
@@ -623,13 +638,12 @@ and physical-device evidence.
   shrinks from 801 to 584 lines, the canvas is 248 lines, the hook is 183 lines,
   and every production function remains below 80 lines. Vitest passes
   1,681/1,681 tests across 100 files with aggregate coverage of 89.27%
-  statements, 82.25% branches, 92.58% functions, and 91.34% lines. The
-  Dashboard lazy chunk is 159.65 KiB (51.45 KiB gzip), 2.50 KiB (0.97 KiB
-  gzip) above the prior modular boundary but still far below the starting
-  bundle baseline. Capacitor sync introduces no tracked native drift; Android
-  passes 9/9 first-party native tests plus lint, APK, and AAB builds, and iOS
-  passes 9/9 signed native tests on iPhone 17 Pro/iOS 26.5 plus Release
-  compilation.
+  statements, 82.25% branches, 92.58% functions, and 91.34% lines. The Dashboard
+  lazy chunk is 159.65 KiB (51.45 KiB gzip), 2.50 KiB (0.97 KiB gzip) above the
+  prior modular boundary but still far below the starting bundle baseline.
+  Capacitor sync introduces no tracked native drift; Android passes 9/9
+  first-party native tests plus lint, APK, and AAB builds, and iOS passes 9/9
+  signed native tests on iPhone 17 Pro/iOS 26.5 plus Release compilation.
 - Findings closed: the map-shell and page-size slices of MH-007. Dashboard is
   now within the 600-line production-module budget; modal composition and
   panel-state unification remain scheduled as independently reviewable splits.
@@ -639,9 +653,9 @@ and physical-device evidence.
 - Commit: `7605d4a` (`[Refactoring] Unify dashboard panel state`).
 - Verification: Node 22 inventory, lint, typecheck, focused authenticated-shell,
   tab-bar, shared-state, Dashboard, Settings, and Pending tests, full one-shot
-  Vitest with coverage and live API contracts, production build,
-  both-platform Capacitor sync, Android lint/unit/release builds, signed iOS
-  XCTest, and iOS Release compilation.
+  Vitest with coverage and live API contracts, production build, both-platform
+  Capacitor sync, Android lint/unit/release builds, signed iOS XCTest, and iOS
+  Release compilation.
 - Result: three independent panel booleans and three coupled setters are
   replaced by one `DashboardPanel` union and one transition callback across all
   authenticated routes. Impossible multi-panel states are no longer
@@ -649,14 +663,13 @@ and physical-device evidence.
   authoritative hidden-route test proves the complete none-to-projects-to-
   landmarks-to-GPS-to-none sequence; 191 focused shell/page tests pass.
   Dashboard shrinks from 584 to 576 lines and remains within the
-  production-module budget. Vitest passes
-  1,684/1,684 tests across 100 files with aggregate coverage of 89.34%
-  statements, 82.28% branches, 92.78% functions, and 91.43% lines. The
-  Dashboard lazy chunk drops to 159.50 KiB (51.42 KiB gzip), 0.15 KiB (0.03
-  KiB gzip) below the prior modular boundary. Capacitor sync introduces no
-  tracked native drift; Android passes 9/9 first-party native tests plus lint,
-  APK, and AAB builds, and iOS passes 9/9 signed native tests on iPhone 17
-  Pro/iOS 26.5 plus Release compilation.
+  production-module budget. Vitest passes 1,684/1,684 tests across 100 files
+  with aggregate coverage of 89.34% statements, 82.28% branches, 92.78%
+  functions, and 91.43% lines. The Dashboard lazy chunk drops to 159.50 KiB
+  (51.42 KiB gzip), 0.15 KiB (0.03 KiB gzip) below the prior modular boundary.
+  Capacitor sync introduces no tracked native drift; Android passes 9/9
+  first-party native tests plus lint, APK, and AAB builds, and iOS passes 9/9
+  signed native tests on iPhone 17 Pro/iOS 26.5 plus Release compilation.
 - Findings closed: the panel-state slice of MH-007. Modal composition remains
   scheduled as the final independently reviewable Dashboard split.
 
@@ -674,28 +687,27 @@ and physical-device evidence.
   GPS-dialog stacking order. The direct 3-test suite and Dashboard's 106
   characterization tests pass; the presentation module has 100% statement,
   branch, function, and line coverage. Dashboard shrinks from 576 to 535 lines,
-  the presentation module is 144 lines, and every new function remains below
-  80 lines. Vitest passes 1,687/1,687 tests across 101 files with aggregate
-  coverage of 89.35% statements, at least 82.28% branches, 92.79% functions,
-  and 91.44% lines. Repeated exact-tree runs report 82.28-82.33% branches;
-  MH-015 tracks that evidence variance before thresholds are enabled. The
-  Dashboard lazy chunk is 160.23 KiB (51.08 KiB gzip): 0.73 KiB
-  larger uncompressed but 0.34 KiB smaller compressed than the prior modular
-  boundary, and still far below the starting bundle baseline. Capacitor sync
-  introduces no tracked native drift; Android passes 9/9 first-party native
-  tests plus lint, APK, and AAB builds, and iOS passes 9/9 signed native tests
-  on iPhone 17 Pro/iOS 26.5 plus Release compilation.
+  the presentation module is 144 lines, and every new function remains below 80
+  lines. Vitest passes 1,687/1,687 tests across 101 files with aggregate
+  coverage of 89.35% statements, at least 82.28% branches, 92.79% functions, and
+  91.44% lines. Repeated exact-tree runs report 82.28-82.33% branches; MH-015
+  tracks that evidence variance before thresholds are enabled. The Dashboard
+  lazy chunk is 160.23 KiB (51.08 KiB gzip): 0.73 KiB larger uncompressed but
+  0.34 KiB smaller compressed than the prior modular boundary, and still far
+  below the starting bundle baseline. Capacitor sync introduces no tracked
+  native drift; Android passes 9/9 first-party native tests plus lint, APK, and
+  AAB builds, and iOS passes 9/9 signed native tests on iPhone 17 Pro/iOS 26.5
+  plus Release compilation.
 - Findings closed: the final Dashboard presentation slice of MH-007 and the
   planned Dashboard rendering/interaction decomposition. Domain actions, map
-  data, visibility, interactions, layers, map shell, GPS presentation,
-  landmark presentation, and mutually exclusive panel state now have focused
-  owners.
+  data, visibility, interactions, layers, map shell, GPS presentation, landmark
+  presentation, and mutually exclusive panel state now have focused owners.
 
 ### Stabilize deterministic coverage reporting
 
 - Commit: `70ac87f` (`[Testing] Stabilize deterministic coverage reporting`).
-- Reproduction: repeated serial coverage on the same tree reported either
-  90/105 or 93/105 covered branches in `TileCacheRepository`; shuffled seed 1
+- Reproduction: repeated serial coverage on the same tree reported either 90/105
+  or 93/105 covered branches in `TileCacheRepository`; shuffled seed 1
   reproduced an intermediate 92/105 result. The varying branches were the
   existing-tile paths in `upsertTile`, reached only when an earlier test's
   background write continued into a later test.
@@ -703,8 +715,8 @@ and physical-device evidence.
   test and was reached only incidentally when background tile work happened to
   overwrite a cached value before coverage collection. Runtime tile/style tests
   also returned after the payload became readable even though metadata and
-  cache-stat writes in the same transaction were still pending. Finally,
-  fake IndexedDB's auto-installed module singleton did not provide an explicit
+  cache-stat writes in the same transaction were still pending. Finally, fake
+  IndexedDB's auto-installed module singleton did not provide an explicit
   per-file database boundary for serialized workers.
 - Correction: service tests now wait for the metadata record and stats update,
   the offline cache-hit test waits for the asynchronous access-time write, and
@@ -715,13 +727,13 @@ and physical-device evidence.
   isolation boundary owned by the production transaction tests, and the
   previously incidental overwrite branches are now exercised intentionally.
 - Verification: the repository regression passes 9/9 tests. The focused
-  tile-cache/controller suites pass 215/215 tests under shuffled seeds 1 and
-  42; both report exactly 93/105 covered `TileCacheRepository` branches despite
-  different test orders. Two consecutive complete one-shot runs pass
-  1,688/1,688 tests and report the identical 4,620/5,611 aggregate branches
-  (82.33%), including the same 93/105 repository branches. Static/build and
-  exact staged evidence are recorded before commit; no native gate applies to
-  this test-only/documentation objective.
+  tile-cache/controller suites pass 215/215 tests under shuffled seeds 1 and 42;
+  both report exactly 93/105 covered `TileCacheRepository` branches despite
+  different test orders. Two consecutive complete one-shot runs pass 1,688/1,688
+  tests and report the identical 4,620/5,611 aggregate branches (82.33%),
+  including the same 93/105 repository branches. Static/build and exact staged
+  evidence are recorded before commit; no native gate applies to this
+  test-only/documentation objective.
 - Findings closed: MH-015.
 
 ### Stop inactive page effects and polling
@@ -738,13 +750,13 @@ and physical-device evidence.
   routes, Settings and Pending each unmount when inactive, and the shell module
   has 100% branch and line coverage. Settings' authoritative timer test proves
   immediate refresh, one three-second poll, and no calls after unmount. The full
-  suite passes 1,689/1,689 tests with 89.35% statements, 82.35% branches,
-  92.79% functions, and 91.43% lines. Dashboard remains 160.23 KiB (51.08 KiB
-  gzip); the authenticated shell drops from 2.47 KiB to 2.35 KiB while Settings
-  drops from 12.11 KiB to 12.05 KiB. Capacitor sync produces no tracked native
-  drift; Android passes 9/9 first-party tests plus lint, APK, and AAB builds,
-  and iOS passes 9/9 signed tests on iPhone 17 Pro/iOS 26.5 plus Release
-  compilation. Exact staged evidence is recorded before commit.
+  suite passes 1,689/1,689 tests with 89.35% statements, 82.35% branches, 92.79%
+  functions, and 91.43% lines. Dashboard remains 160.23 KiB (51.08 KiB gzip);
+  the authenticated shell drops from 2.47 KiB to 2.35 KiB while Settings drops
+  from 12.11 KiB to 12.05 KiB. Capacitor sync produces no tracked native drift;
+  Android passes 9/9 first-party tests plus lint, APK, and AAB builds, and iOS
+  passes 9/9 signed tests on iPhone 17 Pro/iOS 26.5 plus Release compilation.
+  Exact staged evidence is recorded before commit.
 - Findings closed: MH-006.
 
 ### Serialize authentication and logout transitions
@@ -772,14 +784,14 @@ and physical-device evidence.
   changed `SessionCoordinator`, `SecureSessionStore`, and `SpeleoDBService`
   files report 100% statement, branch, function, and line coverage. The full
   Node 22 CI gate passes 1,703/1,703 tests across 101 files with 89.44%
-  statements, 82.47% branches, 92.85% functions, and 91.51% lines, followed by
-  a production build. Capacitor sync produces no tracked native drift. Android
+  statements, 82.47% branches, 92.85% functions, and 91.51% lines, followed by a
+  production build. Capacitor sync produces no tracked native drift. Android
   passes its 9 first-party tests plus lint, release APK, and release AAB gates.
   Signed iOS XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned
   simulator Release compilation succeeds. Exact staged pre-commit and CI
   evidence is recorded immediately before commit.
-- Findings closed: MH-016. The broader authentication/network audit remains
-  open for additional finding-specific commits.
+- Findings closed: MH-016. The broader authentication/network audit remains open
+  for additional finding-specific commits.
 
 ### Prevent cancelled native request launch
 
@@ -787,11 +799,11 @@ and physical-device evidence.
 - Reproduction: `HttpClient.nativeRequest()` checked the caller signal before
   building app/device User-Agent metadata, then invoked `CapacitorHttp.request`
   before `awaitWithAbort()` checked the signal again. Cancellation during that
-  asynchronous metadata lookup therefore rejected the caller but still
-  launched the native request, including an authenticated or body-bearing
-  request that logout had already superseded.
-- Correction: native request preparation now checks the signal immediately
-  after header assembly and before transport invocation. Post-launch native
+  asynchronous metadata lookup therefore rejected the caller but still launched
+  the native request, including an authenticated or body-bearing request that
+  logout had already superseded.
+- Correction: native request preparation now checks the signal immediately after
+  header assembly and before transport invocation. Post-launch native
   cancellation remains best-effort, while publication stays cancellation-safe.
 - Verification: the regression defers the production User-Agent loader seam,
   aborts there, resolves preparation, and proves an `AbortError` with zero
@@ -801,8 +813,7 @@ and physical-device evidence.
   tracked native drift. Android passes its 9 first-party tests plus lint,
   release APK, and release AAB gates. Signed iOS XCTest passes 9/9 tests on
   iPhone 17 Pro/iOS 26.5, and unsigned simulator Release compilation succeeds.
-  Exact staged pre-commit and CI evidence is recorded immediately before
-  commit.
+  Exact staged pre-commit and CI evidence is recorded immediately before commit.
 - Findings closed: MH-017. The broader authentication/network audit remains
   open.
 
@@ -819,20 +830,21 @@ and physical-device evidence.
   `unauthorized` without transport even if cleanup reports a storage failure.
   The startup UI catches any unexpected validation rejection, routes to login,
   and retains its unconditional banner/timer/splash cleanup.
-- Verification: coordinator and mounted-provider regressions own the storage
-  and UI seams respectively. Node 22 CI passes 1,707/1,707 tests across 101
-  files with 89.44% statements, 82.46% branches, 92.85% functions, and 91.52%
-  lines. Capacitor synchronization produces no tracked native drift. Android
-  passes its 9 first-party tests plus lint, release APK, and release AAB gates.
-  Signed iOS XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned
-  simulator Release compilation succeeds. Exact staged pre-commit and CI
-  evidence is recorded immediately before commit.
+- Verification: coordinator and mounted-provider regressions own the storage and
+  UI seams respectively. Node 22 CI passes 1,707/1,707 tests across 101 files
+  with 89.44% statements, 82.46% branches, 92.85% functions, and 91.52% lines.
+  Capacitor synchronization produces no tracked native drift. Android passes its
+  9 first-party tests plus lint, release APK, and release AAB gates. Signed iOS
+  XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned simulator
+  Release compilation succeeds. Exact staged pre-commit and CI evidence is
+  recorded immediately before commit.
 - Findings closed: MH-018. The broader authentication/network audit remains
   open.
 
 ### Preserve sessions on inconclusive validation responses
 
-- Commit: `4a4fb9c` (`[Fix] Preserve sessions on inconclusive validation responses`).
+- Commit: `4a4fb9c`
+  (`[Fix] Preserve sessions on inconclusive validation responses`).
 - Reproduction: stored-session validation classified every `4xx` response as
   definitive invalid credentials. Rate limiting (`429`), request timeout
   (`408`), deployment mismatch (`404`), and other inconclusive client statuses
@@ -842,16 +854,16 @@ and physical-device evidence.
   unauthorized purge path. Every other non-success response preserves the
   session and cache under offline lock; pre-login token validation remains
   non-destructive for every failure.
-- Verification: the coordinator status matrix proves both denied statuses
-  purge and representative inconclusive statuses (`400`, `404`, `408`, `409`,
-  `425`, `429`) preserve authentication, enter offline lock, and never invoke
-  purge. Node 22 CI passes 1,714/1,714 tests across 101 files with 89.44%
-  statements, 82.47% branches, 92.85% functions, and 91.52% lines. Capacitor
-  synchronization produces no tracked native drift. Android passes its 9
-  first-party tests plus lint, release APK, and release AAB gates. Signed iOS
-  XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned simulator
-  Release compilation succeeds. Exact staged pre-commit and CI evidence is
-  recorded immediately before commit.
+- Verification: the coordinator status matrix proves both denied statuses purge
+  and representative inconclusive statuses (`400`, `404`, `408`, `409`, `425`,
+  `429`) preserve authentication, enter offline lock, and never invoke purge.
+  Node 22 CI passes 1,714/1,714 tests across 101 files with 89.44% statements,
+  82.47% branches, 92.85% functions, and 91.52% lines. Capacitor synchronization
+  produces no tracked native drift. Android passes its 9 first-party tests plus
+  lint, release APK, and release AAB gates. Signed iOS XCTest passes 9/9 tests
+  on iPhone 17 Pro/iOS 26.5, and unsigned simulator Release compilation
+  succeeds. Exact staged pre-commit and CI evidence is recorded immediately
+  before commit.
 - Findings closed: MH-019. The broader authentication/network audit remains
   open.
 
@@ -869,25 +881,26 @@ and physical-device evidence.
   remain unable to publish follow-up work after login, logout, or replacement.
 - Verification: coordinator regressions prove concurrent callers share one
   transport request/result and exactly one sync, and prove a logout-superseded
-  reconnect cannot start sync even when its caller-facing stale result is
-  `ok`. Node 22 CI passes 1,716/1,716 tests across 101 files with 89.45%
-  statements, 82.48% branches, 92.86% functions, and 91.53% lines. Capacitor
-  synchronization produces no tracked native drift. Android passes its 9
-  first-party tests plus lint, release APK, and release AAB gates. Signed iOS
-  XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned simulator
-  Release compilation succeeds. Exact staged pre-commit and CI evidence is
-  recorded immediately before commit.
+  reconnect cannot start sync even when its caller-facing stale result is `ok`.
+  Node 22 CI passes 1,716/1,716 tests across 101 files with 89.45% statements,
+  82.48% branches, 92.86% functions, and 91.53% lines. Capacitor synchronization
+  produces no tracked native drift. Android passes its 9 first-party tests plus
+  lint, release APK, and release AAB gates. Signed iOS XCTest passes 9/9 tests
+  on iPhone 17 Pro/iOS 26.5, and unsigned simulator Release compilation
+  succeeds. Exact staged pre-commit and CI evidence is recorded immediately
+  before commit.
 - Findings closed: MH-020. The broader authentication/network audit remains
   open.
 
 ### Complete destructive logout after cleanup failures
 
-- Commit: `bcfcae1` (`[Fix] Complete destructive logout after cleanup failures`).
+- Commit: `bcfcae1`
+  (`[Fix] Complete destructive logout after cleanup failures`).
 - Reproduction: controller logout awaited GPS teardown before revoking auth or
   clearing credentials, and a rejected pending GPS persistence wait skipped
   cache/tile cleanup. Separately, `SecureSessionStore.clear()` retained the
-  non-secret session marker when native token deletion failed, allowing a
-  later startup to restore the retained token as a valid session.
+  non-secret session marker when native token deletion failed, allowing a later
+  startup to restore the retained token as a valid session.
 - Correction: published user state is revoked before fallible teardown;
   independent watcher, tile, persistence, storage, cache, and runtime cleanup
   steps are all attempted and incomplete cleanup is reported afterward.
@@ -898,14 +911,13 @@ and physical-device evidence.
   throwing-subscriber failures cannot skip credential revocation, other cache
   cleanup, or browser storage clearing. Secure-store regressions prove failed
   vault deletion still removes metadata and cannot restore on a fresh store,
-  including aggregate vault-plus-metadata failure. Node 22 CI passes
-  1,720/1,720 tests across 101 files with 89.44% statements, 82.51% branches,
-  92.83% functions, and 91.5% lines. Capacitor synchronization produces no
-  tracked native drift. Android passes its 9 first-party tests plus lint,
-  release APK, and release AAB gates.
-  Signed iOS XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and unsigned
-  simulator Release compilation succeeds. Exact staged pre-commit and CI
-  evidence is recorded immediately before commit.
+  including aggregate vault-plus-metadata failure. Node 22 CI passes 1,720/1,720
+  tests across 101 files with 89.44% statements, 82.51% branches, 92.83%
+  functions, and 91.5% lines. Capacitor synchronization produces no tracked
+  native drift. Android passes its 9 first-party tests plus lint, release APK,
+  and release AAB gates. Signed iOS XCTest passes 9/9 tests on iPhone 17 Pro/iOS
+  26.5, and unsigned simulator Release compilation succeeds. Exact staged
+  pre-commit and CI evidence is recorded immediately before commit.
 - Findings closed: MH-021. The broader authentication/network audit remains
   open.
 
@@ -924,25 +936,25 @@ and physical-device evidence.
   `tasks/lessons/react-async-action-ownership.md`.
 - Verification: component regressions issue duplicate form submissions at the
   production handler seam, prove exactly one controller call, prove the form
-  remains disabled after success, and prove unmount cancels delayed
-  navigation. The focused component suite passes 25/25 tests. Node 22 CI passes
-  1,724/1,724 tests across 101 files with 89.47% statements, 82.52% branches,
-  92.83% functions, and 91.53% lines. Capacitor synchronization produces no
-  tracked native drift. Android passes its 9 first-party tests plus lint,
-  release APK, and release AAB gates. Signed iOS XCTest passes 9/9 tests on
-  iPhone 17 Pro/iOS 26.5, and unsigned simulator Release compilation succeeds.
-  Exact staged pre-commit and CI evidence is recorded immediately before
-  commit.
+  remains disabled after success, and prove unmount cancels delayed navigation.
+  The focused component suite passes 25/25 tests. Node 22 CI passes 1,724/1,724
+  tests across 101 files with 89.47% statements, 82.52% branches, 92.83%
+  functions, and 91.53% lines. Capacitor synchronization produces no tracked
+  native drift. Android passes its 9 first-party tests plus lint, release APK,
+  and release AAB gates. Signed iOS XCTest passes 9/9 tests on iPhone 17 Pro/iOS
+  26.5, and unsigned simulator Release compilation succeeds. Exact staged
+  pre-commit and CI evidence is recorded immediately before commit.
 - Findings closed: MH-022. The broader authentication/network audit remains
   open.
 
 ### Enforce request deadlines through response publication
 
-- Commit: `4ae9740` (`[Fix] Enforce request deadlines through response publication`).
+- Commit: `4ae9740`
+  (`[Fix] Enforce request deadlines through response publication`).
 - Reproduction: after web response headers arrived, cancellation during
   `response.json()` entered the generic parse-error catch and returned the
-  response status with `{}` instead of rejecting. Native timeout options did
-  not start until `CapacitorHttp.request()`, so a hung app/device metadata call
+  response status with `{}` instead of rejecting. Native timeout options did not
+  start until `CapacitorHttp.request()`, so a hung app/device metadata call
   could exceed the deadline, launch late, and leave a permanently pending
   User-Agent promise cached for every later request.
 - Correction: both transports now derive one bounded abort context from caller
@@ -962,8 +974,7 @@ and physical-device evidence.
   tracked native drift. Android passes its 9 first-party tests plus lint,
   release APK, and release AAB gates. Signed iOS XCTest passes 9/9 tests on
   iPhone 17 Pro/iOS 26.5, and unsigned simulator Release compilation succeeds.
-  Exact staged pre-commit and CI evidence is recorded immediately before
-  commit.
+  Exact staged pre-commit and CI evidence is recorded immediately before commit.
 - Findings closed: MH-023. The broader authentication/network audit remains
   open.
 
@@ -982,8 +993,8 @@ and physical-device evidence.
   session/service/transport layers do not import a Capacitor UI plugin. The
   reusable rule is in `tasks/lessons/origin-only-api-bases.md`.
 - Verification: URL tests cover ports, trailing slashes, paths, queries,
-  fragments, schemes, credentials, and HTTP policy. Coordinator tests prove
-  both login methods make zero transport calls for non-origin input and use the
+  fragments, schemes, credentials, and HTTP policy. Coordinator tests prove both
+  login methods make zero transport calls for non-origin input and use the
   canonical HTTPS origin for transport/storage. The service test proves invalid
   input cannot send a password. The focused unit/controller/API suites pass
   340/340 tests. Node 22 CI passes 1,743/1,743 tests across 103 files with 89.6%
@@ -1008,8 +1019,8 @@ and physical-device evidence.
 - Verification: the service regression invokes the production wrapper with a
   distinct deadline and signal and proves both reach the injected HTTP request.
   The focused suite passes 39/39 tests. Node 22 CI passes 1,744/1,744 tests
-  across 103 files with 89.6% statements, 82.55% branches, 93.03% functions,
-  and 91.67% lines. Capacitor synchronization produces no tracked native drift.
+  across 103 files with 89.6% statements, 82.55% branches, 93.03% functions, and
+  91.67% lines. Capacitor synchronization produces no tracked native drift.
   Android passes its 9 first-party tests plus lint, release APK, and release AAB
   gates. Signed iOS XCTest passes 9/9 tests on iPhone 17 Pro/iOS 26.5, and
   unsigned simulator Release compilation succeeds. Exact staged pre-commit and
@@ -1019,16 +1030,16 @@ and physical-device evidence.
 
 ### Redact reflected credentials from auth errors
 
-- Commit: `3ecf1ed` (`[Security] Redact reflected credentials from auth errors`).
+- Commit: `3ecf1ed`
+  (`[Security] Redact reflected credentials from auth errors`).
 - Reproduction: password and OAuth-token login returned backend `detail`,
   `message`, or `errors.non_field_errors` text directly to the Login component.
   A server/proxy response containing the submitted credential therefore placed
   secret bytes in the rendered UI, violating the documented auth boundary.
 - Correction: the session coordinator treats server error text as untrusted,
   replaces exact raw/trimmed/URL-encoded submitted values, neutralizes control
-  characters, and caps the published message while preserving generic
-  fallbacks. The reusable rule is in
-  `tasks/lessons/untrusted-error-reflection.md`.
+  characters, and caps the published message while preserving generic fallbacks.
+  The reusable rule is in `tasks/lessons/untrusted-error-reflection.md`.
 - Verification: coordinator regressions prove reflected email/password values
   are absent after control-character normalization, reflected raw and encoded
   OAuth tokens are absent, messages are bounded, and normal response-shape
@@ -1046,11 +1057,11 @@ and physical-device evidence.
 ### Purge malformed persisted sessions
 
 - Commit: `b596816` (`[Fix] Purge malformed persisted sessions`).
-- Reproduction: the current login flow accepted only canonical instance
-  origins, but a session written by an older version could still restore an
-  instance path/query/fragment. URL construction then failed before transport,
-  validation classified the failure as a network outage, and the unusable
-  credential remained authenticated and offline-locked indefinitely.
+- Reproduction: the current login flow accepted only canonical instance origins,
+  but a session written by an older version could still restore an instance
+  path/query/fragment. URL construction then failed before transport, validation
+  classified the failure as a network outage, and the unusable credential
+  remained authenticated and offline-locked indefinitely.
 - Correction: new secure-session writes enforce the shared origin parser.
   Session restoration no longer publishes malformed metadata. Validation
   revalidates all persisted identity fields, atomically re-persists recoverable
@@ -1066,11 +1077,11 @@ and physical-device evidence.
   transport failure after successful canonicalization remains a non-destructive
   offline transition. Node 22 CI passes 1,755/1,755 tests across 103 files with
   89.66% statements, 82.57% branches, 93.08% functions, and 91.73% lines.
-  Capacitor synchronization produces no tracked native drift.
-  Android lint, 9 first-party unit tests, release APK assembly, and release AAB
-  bundling pass. All 9 iOS XCTest cases pass on an iPhone 17 Pro simulator
-  running iOS 26.5, and unsigned simulator Release compilation succeeds. Exact
-  staged pre-commit and CI evidence is recorded immediately before commit.
+  Capacitor synchronization produces no tracked native drift. Android lint, 9
+  first-party unit tests, release APK assembly, and release AAB bundling pass.
+  All 9 iOS XCTest cases pass on an iPhone 17 Pro simulator running iOS 26.5,
+  and unsigned simulator Release compilation succeeds. Exact staged pre-commit
+  and CI evidence is recorded immediately before commit.
 - Findings closed: MH-027. The broader authentication/network audit remains
   open.
 
@@ -1080,10 +1091,10 @@ and physical-device evidence.
 - Reproduction: exact raw/encoded credential replacement still admitted
   transformed representations such as mixed-case percent escapes, and a
   credential matching text inside the replacement marker defeated the claimed
-  absence invariant. Arbitrary server prose cannot be made credential-free by
-  a finite replacement list.
-- Correction: password and token authentication now ignore error response
-  bodies completely and publish fixed local messages selected only from trusted
+  absence invariant. Arbitrary server prose cannot be made credential-free by a
+  finite replacement list.
+- Correction: password and token authentication now ignore error response bodies
+  completely and publish fixed local messages selected only from trusted
   status/transport classes. The durable lesson now forbids finite exact-value
   filtering as an arbitrary secret-disclosure boundary.
 - Verification: 254/254 focused coordinator and controller-façade tests pass.
@@ -1112,8 +1123,8 @@ and physical-device evidence.
   admission, before awaiting rollback or purge. Runtime-offline adapters and
   subscribers are best-effort during destructive reset, so their exceptions
   cannot preserve access or interrupt cleanup. Logout-owned stale validation
-  always resolves `unauthorized`; newer successful login ownership still
-  reports its current authenticated state.
+  always resolves `unauthorized`; newer successful login ownership still reports
+  its current authenticated state.
 - Verification: 69/69 focused coordinator tests pass. Regressions prove
   immediate revocation while a secure write remains pending, unauthorized
   startup/reconnect completion after logout, no reconnect sync launch, and
@@ -1130,13 +1141,14 @@ and physical-device evidence.
 
 ### Isolate session publication from observer failures
 
-- Commit: `2719c58` (`[Fix] Isolate session publication from observer failures`).
+- Commit: `2719c58`
+  (`[Fix] Isolate session publication from observer failures`).
 - Reproduction: session establishment durably committed the token, then invoked
-  application invalidation and connectivity/subscriber hooks on the same
-  awaited command path. If a hook threw, login returned the secure-storage
-  failure message even though credentials and possibly authenticated state were
-  already committed. Successful validation could similarly fall through into
-  an offline result.
+  application invalidation and connectivity/subscriber hooks on the same awaited
+  command path. If a hook threw, login returned the secure-storage failure
+  message even though credentials and possibly authenticated state were already
+  committed. Successful validation could similarly fall through into an offline
+  result.
 - Correction: required controller-wide invalidation now completes before secure
   credential commit and fails closed without a write. After commit,
   authoritative auth/connectivity fields are independent of best-effort
@@ -1146,9 +1158,9 @@ and physical-device evidence.
 - Verification: 258/258 focused coordinator and controller-façade tests pass.
   Regressions prove invalidation failure writes no session, while failures from
   both post-commit publication observers leave durable login successful with
-  authenticated/online state and restored-session validation remains `ok`.
-  Node 22 CI passes 1,759/1,759 tests across 103 files with 89.64% statements,
-  82.54% branches, 93.07% functions, and 91.70% lines. Capacitor synchronization
+  authenticated/online state and restored-session validation remains `ok`. Node
+  22 CI passes 1,759/1,759 tests across 103 files with 89.64% statements, 82.54%
+  branches, 93.07% functions, and 91.70% lines. Capacitor synchronization
   produces no tracked native drift. Android lint, 9 first-party unit tests,
   release APK assembly, and release AAB bundling pass. All 9 iOS XCTest cases
   pass on an iPhone 17 Pro simulator running iOS 26.5, and unsigned simulator
@@ -1159,7 +1171,8 @@ and physical-device evidence.
 
 ### Preserve session results across follow-up failures
 
-- Commit: `83b5c65` (`[Fix] Preserve session results across follow-up failures`).
+- Commit: `83b5c65`
+  (`[Fix] Preserve session results across follow-up failures`).
 - Reproduction: `SessionCoordinator` called the offline-runtime adapter directly
   during construction, so an adapter exception could abort controller startup
   after a secure session had been restored. After successful reconnect, a
@@ -1171,9 +1184,9 @@ and physical-device evidence.
   remains best-effort.
 - Verification: 74/74 focused coordinator tests pass. Regressions prove a
   throwing startup adapter cannot prevent secure-session restoration and a
-  throwing reconnect-sync launcher cannot reject or roll back online state.
-  Node 22 CI passes 1,761/1,761 tests across 103 files with 89.64% statements,
-  82.54% branches, 93.07% functions, and 91.70% lines. Capacitor synchronization
+  throwing reconnect-sync launcher cannot reject or roll back online state. Node
+  22 CI passes 1,761/1,761 tests across 103 files with 89.64% statements, 82.54%
+  branches, 93.07% functions, and 91.70% lines. Capacitor synchronization
   produces no tracked native drift. Android lint, 9 first-party unit tests,
   release APK assembly, and release AAB bundling pass. All 9 iOS XCTest cases
   pass on an iPhone 17 Pro simulator running iOS 26.5, and unsigned simulator
@@ -1186,9 +1199,9 @@ and physical-device evidence.
 
 - Commit: recorded after this objective is committed.
 - Reproduction: the synchronous restoration catch passed the arbitrary thrown
-  storage error to `console.error`. Even with process-wide pattern redaction,
-  an unlabeled credential embedded in native error prose could not be proven
-  absent from diagnostics.
+  storage error to `console.error`. Even with process-wide pattern redaction, an
+  unlabeled credential embedded in native error prose could not be proven absent
+  from diagnostics.
 - Correction: restoration now emits only a fixed operation label and never
   forwards the thrown value. The durable untrusted-error lesson now applies the
   same body-opaque rule to credential-adjacent native/storage exceptions.
@@ -1224,14 +1237,14 @@ and physical-device evidence.
   validated cache publication, and proves that project layer declarations are
   published and bounds fit when MapLibre becomes ready. It does not exercise
   `react-map-gl` source injection; MH-034 owns that separate integration
-  contract. Node 22 CI passes 1,762/1,762
-  tests across 103 files with 89.64% statements, 82.54% branches, 93.07%
-  functions, and 91.71% lines. The production Dashboard chunk is 160.25 KiB
-  (51.13 KiB gzip), below the program baseline. Capacitor synchronization
-  produces no tracked native drift. Android app lint, 9 first-party unit tests,
-  release APK assembly, and release AAB bundling pass. All 9 signed iOS XCTest
-  cases pass on an iPhone 17 Pro simulator running iOS 26.5, and unsigned
-  simulator Release compilation succeeds.
+  contract. Node 22 CI passes 1,762/1,762 tests across 103 files with 89.64%
+  statements, 82.54% branches, 93.07% functions, and 91.71% lines. The
+  production Dashboard chunk is 160.25 KiB (51.13 KiB gzip), below the program
+  baseline. Capacitor synchronization produces no tracked native drift. Android
+  app lint, 9 first-party unit tests, release APK assembly, and release AAB
+  bundling pass. All 9 signed iOS XCTest cases pass on an iPhone 17 Pro
+  simulator running iOS 26.5, and unsigned simulator Release compilation
+  succeeds.
 - Findings closed: MH-033. Persistence/offline replay remains the next planned
   subsystem after this finding-specific correction.
 
@@ -1245,8 +1258,8 @@ and physical-device evidence.
   ID injected by their owning `Source`; the GPS recording line remained bound.
 - Correction: project fill/line/point declarations and configured subsurface
   icon declarations are direct `Source` children again. Layer IDs, filters,
-  paint/layout, zoom thresholds, ordering anchor, and extracted module
-  ownership are unchanged. Repository instructions now make this third-party
+  paint/layout, zoom thresholds, ordering anchor, and extracted module ownership
+  are unchanged. Repository instructions now make this third-party
   child-injection contract a hard rule.
 - Verification: focused red phase was 2 failures and 4 passes; focused green
   phase is 6/6, and the combined Dashboard suites pass 113/113. Node 22 CI
@@ -1256,8 +1269,8 @@ and physical-device evidence.
   native drift. Android lint, 9 first-party unit tests, release APK assembly,
   and release AAB bundling pass. All 9 signed iOS XCTest cases pass on an iPhone
   17 Pro simulator running iOS 26.5, and unsigned simulator Release compilation
-  succeeds. No physical device is connected, so real-device confirmation
-  remains pending rather than implied by compilation.
+  succeeds. No physical device is connected, so real-device confirmation remains
+  pending rather than implied by compilation.
 - Findings closed: MH-034. The separate validation-deadline correction follows.
 
 ### Treat GeoJSON validation deadlines as transient

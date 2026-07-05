@@ -18,17 +18,23 @@ Mapbox token).
 Layers are defined once in `MAP_LAYERS` (`src/constants.ts`), typed by
 `MapLayerDefinition` (`src/types/mapLayer.ts`):
 
-| id | label | max zoom | offline sync |
-|---|---|---|---|
-| `esri-satellite` | ESRI - Satellite | 18 | forced ON (default layer) |
-| `esri-world-hillshade` | ESRI - World Hillshade | 18 | opt-in |
-| `esri-world-hillshade-dark` | ESRI - World Hillshade Dark | 18 | opt-in |
+| id                          | label                       | max zoom | offline sync              |
+| --------------------------- | --------------------------- | -------- | ------------------------- |
+| `esri-satellite`            | ESRI - Satellite            | 18       | forced ON (default layer) |
+| `esri-world-hillshade`      | ESRI - World Hillshade      | 18       | opt-in                    |
+| `esri-world-hillshade-dark` | ESRI - World Hillshade Dark | 18       | opt-in                    |
 
-All layers use `maxZoom: 18` for **offline parity**. The ESRI World Hillshade cache exposes 24 LODs (0-23) and returns valid tiles above z16 (full-resolution only in select regions), so capping it lower than satellite left it heavily overzoomed and sparse around projects/landmarks when zoomed in. Matching satellite's z18 makes the prefetch depth, tile count, and display sharpness equal across layers.
+All layers use `maxZoom: 18` for **offline parity**. The ESRI World Hillshade
+cache exposes 24 LODs (0-23) and returns valid tiles above z16 (full-resolution
+only in select regions), so capping it lower than satellite left it heavily
+overzoomed and sparse around projects/landmarks when zoomed in. Matching
+satellite's z18 makes the prefetch depth, tile count, and display sharpness
+equal across layers.
 
 > **Caveat (intentional divergence from the website).** The website map viewer
 > caps both hillshade layers at `maxzoom: 16`. The app raises them to 18, which
 > has two consequences to keep in mind:
+>
 > 1. **Storage**: prefetch depth grows ~4x per extra zoom level, so an enabled
 >    hillshade layer pins roughly an order of magnitude more tiles than at z16.
 >    With satellite plus both hillshade layers enabled, three large layers
@@ -37,7 +43,7 @@ All layers use `maxZoom: 18` for **offline parity**. The ESRI World Hillshade ca
 > 2. **Coverage**: at z17/z18 the app requests hillshade tiles ESRI only renders
 >    full-resolution in some regions. Elsewhere ESRI may return a 404 (rendered
 >    blank, harmless) or a gray "no-data" placeholder. The magic-hash list only
->    contains the **satellite** no-data fingerprint, so a gray *hillshade*
+>    contains the **satellite** no-data fingerprint, so a gray _hillshade_
 >    placeholder is cached/drawn as if it were real terrain. This must be
 >    verified on device before shipping (see the device test plan).
 
@@ -76,10 +82,11 @@ FAB styling. Tapping opens a radio menu of layers. Selecting a layer persists
 `selectedMapLayerId` (`PreferencesService`) and updates shared shell state
 (`AuthenticatedAppShell`), which rebuilds the style.
 
-`isLayerSelectable(layer, isOfflineLocked, layerOfflineSync)` (in `MapLayersService`) gates selection:
-when offline-locked, only the forced satellite layer and opted-in (synced)
-layers are selectable; others are disabled with a "Not downloaded" hint, because
-their tiles are not cached and would render blank.
+`isLayerSelectable(layer, isOfflineLocked, layerOfflineSync)` (in
+`MapLayersService`) gates selection: when offline-locked, only the forced
+satellite layer and opted-in (synced) layers are selectable; others are disabled
+with a "Not downloaded" hint, because their tiles are not cached and would
+render blank.
 
 > Gating is based on the **opt-in toggle**, not on actual cache coverage. A
 > layer that was toggled on but only partially synced (or whose tiles were
@@ -89,13 +96,14 @@ their tiles are not cached and would render blank.
 
 ## Per-layer offline sync (Settings "Map Layers")
 
-The Settings "Map Layers" section lists every layer with an offline-sync toggle and
-a per-layer sync percentage:
+The Settings "Map Layers" section lists every layer with an offline-sync toggle
+and a per-layer sync percentage:
 
 - The satellite toggle is forced ON and disabled.
-- Extra-layer toggles are also disabled while the app is offline-locked: enabling
-  schedules a network prefetch and disabling reconciles cached tiles, neither of
-  which can run offline. The row subtitle reads "unavailable offline".
+- Extra-layer toggles are also disabled while the app is offline-locked:
+  enabling schedules a network prefetch and disabling reconciles cached tiles,
+  neither of which can run offline. The row subtitle reads "unavailable
+  offline".
 - Toggling enters through `SpeleoDBController.setLayerOfflineSync` and is owned
   by `TileCoordinator.setLayerOfflineSync(layerId, enabled)`:
   - persists the opt-in (`layerOfflineSync` in `PreferencesService`),
@@ -104,8 +112,8 @@ a per-layer sync percentage:
   - falls back to complete fail-closed planning only when no valid active plan
     exists,
   - when disabling, cancels the multi-layer run, releases the layer's
-    active/pending generations, evicts its URL prefix, refreshes statistics,
-    and resumes remaining layers from the active plan. Release failure prevents
+    active/pending generations, evicts its URL prefix, refreshes statistics, and
+    resumes remaining layers from the active plan. Release failure prevents
     eviction and rolls the toggle back.
 - Per-layer percentage comes directly from `OfflineMapSyncSnapshot.layers`.
   Runtime browsing tiles are excluded because they have no generation
@@ -122,9 +130,9 @@ consistent while mounted.
 - The worker streams at most 2,048 raw coordinates at a time and waits for
   storage acknowledgement. A temporary v8 compound-key store deduplicates and
   counts the unique rows before the stable `N*M` total is published.
-- **Priority**: coordinates expand satellite first, then enabled extra layers.
-  A six-worker queue downloads ready URLs while 16-coordinate auditing
-  continues. Outstanding coordinates are backpressured at 64.
+- **Priority**: coordinates expand satellite first, then enabled extra layers. A
+  six-worker queue downloads ready URLs while 16-coordinate auditing continues.
+  Outstanding coordinates are backpressured at 64.
 - Extra layers reuse the exact same coordinates; only the URL template differs.
   All current layers use zoom 0-18, making `N*M` an enforced invariant.
 - The planner accepts validated `ProjectGeoJSONBounds`, never raw project
@@ -154,13 +162,13 @@ independent provider evidence. In `TileCacheService`:
   layer, hashes the bytes only when that layer has configured fingerprints, and
   checks membership.
 - Runtime: a match stores only a zero-byte metadata tombstone and throws
-  `MissingTileError`, so MapLibre renders nothing. The provider payload is
-  never retained. A fresh tombstone resolves offline without a network call.
+  `MissingTileError`, so MapLibre renders nothing. The provider payload is never
+  retained. A fresh tombstone resolves offline without a network call.
 - Prefetch: the tombstone and pending layer-generation membership commit in one
   transaction. The coordinate counts as completed synchronization work because
   the HTTP response was valid and its no-data identity was verified.
-- HTTP errors remain failures. In particular, a 404 does not create a
-  tombstone and does not count as completed.
+- HTTP errors remain failures. In particular, a 404 does not create a tombstone
+  and does not count as completed.
 - Tombstones use the same 180-day fetch freshness as raster payloads. A stale
   tombstone still renders as missing immediately while it refreshes, and a
   forced refresh bypasses its freshness.
@@ -183,12 +191,13 @@ layers compete for the same pinned budget and honor the user's override.
 
 - IndexedDB `speleo_tiles` is v8. Payloads, v7 manifests, generations, and
   memberships are preserved; v8 additively introduces temporary compound-key
-  coordinate staging. The incremental, payload-preserving v6 migration is described in
-  `docs/tile-cache-architecture.md`.
+  coordinate staging. The incremental, payload-preserving v6 migration is
+  described in `docs/tile-cache-architecture.md`.
 
 ## Source code
 
-- Layer config: `src/constants.ts` (`MAP_LAYERS`, `MAP.MISSING_TILE_SHA256_HASHES`), `src/types/mapLayer.ts`
+- Layer config: `src/constants.ts` (`MAP_LAYERS`,
+  `MAP.MISSING_TILE_SHA256_HASHES`), `src/types/mapLayer.ts`
 - Layer accessors + style: `src/services/MapLayersService.ts`
 - Style cache wrapper + magic hash: `src/services/TileCacheService.ts`
 - Switcher UI/state: `src/components/map/MapLayerControl.tsx`,
@@ -203,7 +212,8 @@ layers compete for the same pinned budget and honor the user's override.
 
 ## Tests
 
-- `src/services/MapLayersService.test.ts`: layer config invariants, `buildLayerStyle`, `isLayerTileUrl`.
+- `src/services/MapLayersService.test.ts`: layer config invariants,
+  `buildLayerStyle`, `isLayerTileUrl`.
 - `src/services/TileCacheService.test.ts`: magic-hash tombstones, HTTP-error
   separation, hash-miss passthrough, empty-list bypass, and
   `getCachedLayerStyle` rewrite.
@@ -217,9 +227,12 @@ layers compete for the same pinned budget and honor the user's override.
 - `src/services/OfflineMapPlanner.test.ts`: canonical source union and chunks.
 - `src/services/tilePrefetchPlanner.test.ts`: meter padding, zoom ranges,
   dateline/root deduplication, zero-width bounds, and latitude clamping.
-- `src/services/PreferencesService.test.ts`: `selectedMapLayerId` + `layerOfflineSync` normalization, forced-layer semantics.
-- `src/controllers/SpeleoDBController.test.ts`: satellite-first ordering, `setLayerOfflineSync` enqueue/cleanup, offline skip.
-- `src/pages/Settings.test.tsx`: Layers toggles (satellite forced) + per-layer %.
+- `src/services/PreferencesService.test.ts`: `selectedMapLayerId` +
+  `layerOfflineSync` normalization, forced-layer semantics.
+- `src/controllers/SpeleoDBController.test.ts`: satellite-first ordering,
+  `setLayerOfflineSync` enqueue/cleanup, offline skip.
+- `src/pages/Settings.test.tsx`: Layers toggles (satellite forced) + per-layer
+  %.
 - `src/components/map/MapLayerControl.test.tsx`,
   `src/pages/dashboard/useDashboardMapShell.test.ts`, and
   `src/pages/Dashboard.test.tsx`: switcher, persistence, offline disable, style,
@@ -239,8 +252,8 @@ devices before shipping:
   `cached-https` protocol + magic-hash check still apply after the switch
   (react-map-gl re-adds the declarative sources on `setStyle`).
 - **`crypto.subtle`** must exist in the iOS/Android WebView for satellite
-  validation; absence is an explicit terminal validation failure, never a
-  silent cache bypass.
+  validation; absence is an explicit terminal validation failure, never a silent
+  cache bypass.
 - **Settings row centering** uses shadow-DOM `::part(native)`; verify rows are
   vertically centered (not top-heavy) on both platforms for single- and
   multi-line rows.
@@ -250,9 +263,13 @@ devices before shipping:
 
 ## Change checklist
 
-1. Keep `MAP_LAYERS` the single source of truth for layer ids, labels, URLs, zoom.
-2. Preserve satellite-first prefetch ordering and satellite-only project progress.
-3. Keep the magic-hash check guarded (raster tiles only) and off the cache-hit path.
-4. Route all tile requests through `cached-https` (offline + missing-tile check).
+1. Keep `MAP_LAYERS` the single source of truth for layer ids, labels, URLs,
+   zoom.
+2. Preserve satellite-first prefetch ordering and satellite-only project
+   progress.
+3. Keep the magic-hash check guarded (raster tiles only) and off the cache-hit
+   path.
+4. Route all tile requests through `cached-https` (offline + missing-tile
+   check).
 5. Run targeted vitest for touched paths + `npm run build`.
 6. Update this document if layer behavior changes.

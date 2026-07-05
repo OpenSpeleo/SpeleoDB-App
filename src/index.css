@@ -2,6 +2,26 @@
 
 @import 'tailwindcss';
 
+.user-location-heading-marker {
+  width: 112px;
+  height: 112px;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.user-location-heading-rotation {
+  transform-box: view-box;
+  transform-origin: 56px 56px;
+  transition: transform 120ms linear;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .user-location-heading-rotation {
+    transition: none;
+  }
+}
+
 /* Base styles */
 body {
   -webkit-font-smoothing: antialiased;

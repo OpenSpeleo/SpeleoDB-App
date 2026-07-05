@@ -60,26 +60,33 @@ Implementation notes:
   marker deletion still runs when vault deletion fails, so a retained orphan
   token cannot be restored on restart. Any failure still revokes in-process
   access and is reported after the remaining cleanup steps finish,
-- cache purge waits for already-started tracked sync work to settle before `clearAll()` / tile cleanup runs. Tile clear also advances a cache epoch and aborts every low-priority stale refresh, so ignored/late transport settlement cannot repopulate local data after logout completes,
+- cache purge waits for already-started tracked sync work to settle before
+  `clearAll()` / tile cleanup runs. Tile clear also advances a cache epoch and
+  aborts every low-priority stale refresh, so ignored/late transport settlement
+  cannot repopulate local data after logout completes,
 - GPS/tile teardown, pending GPS persistence, cache deletion, storage clearing,
   and tile-runtime restart are independent cleanup steps. A failure in one may
   not skip the others; logout rejects with a generic retryable error only after
   every step has been attempted,
-- service/cache layers must treat aborts as authoritative: once logout starts, no stale state mutation, cache write, or tile-prefetch scheduling may be published from the cancelled run.
+- service/cache layers must treat aborts as authoritative: once logout starts,
+  no stale state mutation, cache write, or tile-prefetch scheduling may be
+  published from the cancelled run.
 
 ## Offline mode interaction
 
 - Entering offline mode does not clear local data.
 - `Go Offline` acknowledges offline state and keeps cached content available.
 - Reconnect attempts are separate from logout and must not wipe data unless the
-  server returns `401`/`403`. In-process reconnect is explicit and user-initiated via
-  Settings or Pending Changes; passive connectivity events never reconnect.
+  server returns `401`/`403`. In-process reconnect is explicit and
+  user-initiated via Settings or Pending Changes; passive connectivity events
+  never reconnect.
 
 ## Source map
 
 - Controller logout implementation: `src/controllers/SpeleoDBController.ts`
 - Startup/session validation decisions: `src/controllers/SessionCoordinator.ts`
-- Offline modal behavior: `src/context/useStartupUiCoordinator.ts`, `src/context/SpeleoDBProvider.tsx`
+- Offline modal behavior: `src/context/useStartupUiCoordinator.ts`,
+  `src/context/SpeleoDBProvider.tsx`
 - Overlay details: `docs/dashboard-map-overlays.md`
 - Regression tests: `src/controllers/SessionCoordinator.test.ts`,
   `src/controllers/SpeleoDBController.test.ts`, and

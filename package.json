@@ -15,7 +15,7 @@
     "test:ci": "npm run test.unit -- --run --coverage --no-file-parallelism",
     "test.unit": "bash ./scripts/run-vitest.sh",
     "lint": "eslint",
-    "postinstall": "node scripts/patch-sentry-capacitor-package.mjs"
+    "postinstall": "node scripts/patch-sentry-capacitor-package.mjs && node scripts/patch-capgo-compass-package.mjs"
   },
   "dependencies": {
     "@capacitor-community/background-geolocation": "1.2.26",
@@ -33,6 +33,7 @@
     "@capacitor/splash-screen": "^8.0.1",
     "@capacitor/status-bar": "8.0.2",
     "@capawesome-team/capacitor-android-battery-optimization": "8.0.1",
+    "@capgo/capacitor-compass": "8.1.17",
     "@ionic/react": "^8.8.12",
     "@ionic/react-router": "^8.8.12",
     "@sentry/capacitor": "^4.2.0",

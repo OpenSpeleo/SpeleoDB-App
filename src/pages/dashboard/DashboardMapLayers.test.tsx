@@ -134,7 +134,6 @@ describe('Dashboard map layers', () => {
         savedTrackFeatureCollection={EMPTY_FEATURE_COLLECTION}
         currentTrackFeatureCollection={EMPTY_FEATURE_COLLECTION}
         recordingState="paused"
-        userLocation={null}
       />,
     );
 
@@ -147,7 +146,6 @@ describe('Dashboard map layers', () => {
         savedTrackFeatureCollection={EMPTY_FEATURE_COLLECTION}
         currentTrackFeatureCollection={POINT_FEATURE_COLLECTION}
         recordingState="recording"
-        userLocation={null}
       />,
     );
 

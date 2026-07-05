@@ -40,6 +40,13 @@ coordinator.
 - Callbacks delivered after logout are ignored because the session is already
   idle.
 
+The Dashboard may derive the latest accepted point for its shared location dot
+and may consume phone heading while state is `recording`. Those are ephemeral
+presentation concerns outside this coordinator: pause makes the recording-owned
+indicator dot-only, idle contributes no indicator, and neither path changes fix
+acceptance, storage, or the background watcher. See
+`docs/user-location-heading.md`.
+
 ## Platform boundary
 
 The coordinator depends only on the `LocationWatcher` contract. Native builds
@@ -54,8 +61,8 @@ not own sampling policy.
 line in the coordinator, including denied permission, no-op transitions,
 start/resume rollback, stale and throttled fixes, paused timing, empty stop,
 discard failure, transient/fatal watcher errors, data-preserving finalization,
-and logout races. `SpeleoDBController.test.ts` retains the public-façade and real
-IndexedDB characterization coverage.
+and logout races. `SpeleoDBController.test.ts` retains the public-façade and
+real IndexedDB characterization coverage.
 
 Recording performs no polling. Each accepted fix causes one serialized local
 write and one revision notification; fixes rejected by the shared gate cause

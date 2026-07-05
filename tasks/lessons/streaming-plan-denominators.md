@@ -10,11 +10,12 @@ count multiplied by enabled layer count. Let streamed jobs update completed work
 only; they must not redefine the final denominator while planning is active.
 
 Batching across a worker boundary is not permission to create a long downstream
-head-of-line delay. Use a small bounded handoff batch, publish in-memory progress
-on a short time bound, and keep durable persistence checkpointed separately.
-Do not start a storage-writing consumer from inside the storage audit loop: on
-real IndexedDB implementations that can starve both sides even when simple mocks
-pass. UI smoothness must not require per-item IndexedDB job writes.
+head-of-line delay. Use a small bounded handoff batch, publish in-memory
+progress on a short time bound, and keep durable persistence checkpointed
+separately. Do not start a storage-writing consumer from inside the storage
+audit loop: on real IndexedDB implementations that can starve both sides even
+when simple mocks pass. UI smoothness must not require per-item IndexedDB job
+writes.
 
 Rolling replacement jobs may reset internal counters even though old payloads
 remain valid. A coverage UI must model that retained availability: freeze its

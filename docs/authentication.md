@@ -16,10 +16,10 @@ This document defines how the app creates and restores SpeleoDB sessions.
 ## Login methods
 
 The login page exposes two keyboard-accessible tabs that share the selected
-SpeleoDB instance. An instance is an origin only (scheme, hostname, and
-optional port); paths, queries, fragments, embedded credentials, and non-HTTP
-schemes are rejected before either credential transport runs. The accepted
-origin is canonicalized before both transport and secure-session persistence.
+SpeleoDB instance. An instance is an origin only (scheme, hostname, and optional
+port); paths, queries, fragments, embedded credentials, and non-HTTP schemes are
+rejected before either credential transport runs. The accepted origin is
+canonicalized before both transport and secure-session persistence.
 
 ### Email and password
 
@@ -27,8 +27,8 @@ origin is canonicalized before both transport and secure-session persistence.
 `POST /api/v2/user/auth-token/`. A successful response supplies both the token
 and the email used for the in-memory `User` identity. Password-manager autofill
 and forgot-password links belong exclusively to this flow. Passwords are sent
-only to the selected SpeleoDB instance and are never stored by the app.
-Remote instances are normalized to HTTPS before the request. Cleartext HTTP is
+only to the selected SpeleoDB instance and are never stored by the app. Remote
+instances are normalized to HTTPS before the request. Cleartext HTTP is
 available only for a loopback development server and never in a release build.
 
 If the server cannot be reached, password login fails with an explicit message.
@@ -47,9 +47,9 @@ Authorization: Token <token>
 ```
 
 Any `2xx` response validates the token; the response body is opaque and may be
-empty. Because validation does not return identity data, the authenticated
-state deliberately uses `user: null`. Code must not invent an email address or
-derive identity from the token.
+empty. Because validation does not return identity data, the authenticated state
+deliberately uses `user: null`. Code must not invent an email address or derive
+identity from the token.
 
 Token login requires a live server response:
 
@@ -83,27 +83,27 @@ session-presence marker) to `PreferencesService`, and only then publishes the
 authenticated controller state. A storage failure leaves the caller
 unauthenticated and restores the previous secure token.
 
-Controller-wide application invalidation is a required cross-account safety
-gate and completes before the secure credential commit. If it fails, no new
-session is written or published. After durable commit,
-session/auth/connectivity state is authoritative: tile-runtime adapters and
-React subscribers observe that transition but cannot roll it back or convert a
-successful login/validation into failure if they throw. This preserves one
-result across the durable store, controller snapshot, and caller.
+Controller-wide application invalidation is a required cross-account safety gate
+and completes before the secure credential commit. If it fails, no new session
+is written or published. After durable commit, session/auth/connectivity state
+is authoritative: tile-runtime adapters and React subscribers observe that
+transition but cannot roll it back or convert a successful login/validation into
+failure if they throw. This preserves one result across the durable store,
+controller snapshot, and caller.
 
 The initial offline-runtime adapter is also best-effort: failure cannot crash
 controller construction or discard a securely restored session.
 
-Authentication attempts use latest-attempt ownership. Starting a valid
-password or token attempt cancels any older attempt and supersedes startup
-validation immediately. Network requests may overlap so a cancellation-aware
-new attempt is not blocked by stale transport work, but secure-session writes
-use one serialized mutation lane. The cancellation signal remains authoritative
-inside `SecureSessionStore`: if cancellation arrives during a native vault
-write or after metadata commit, both token and metadata are rolled back to the
-previous coherent session before the attempt returns. A superseded attempt can
-therefore neither publish nor leave durable credentials behind when the newer
-attempt fails.
+Authentication attempts use latest-attempt ownership. Starting a valid password
+or token attempt cancels any older attempt and supersedes startup validation
+immediately. Network requests may overlap so a cancellation-aware new attempt is
+not blocked by stale transport work, but secure-session writes use one
+serialized mutation lane. The cancellation signal remains authoritative inside
+`SecureSessionStore`: if cancellation arrives during a native vault write or
+after metadata commit, both token and metadata are rolled back to the previous
+coherent session before the attempt returns. A superseded attempt can therefore
+neither publish nor leave durable credentials behind when the newer attempt
+fails.
 
 Email/password login also stores the authenticated email. Token login omits the
 email so stale identity cannot leak from a previous session. Before React
@@ -125,32 +125,31 @@ continuity rules.
 
 `SecureSessionStore` serializes every establishment and clear operation. If
 logout wins while canonical migration is inside a native vault write, the
-aborted migration completes its rollback before credential deletion runs; a
-late rollback can never restore a token after destructive cleanup.
+aborted migration completes its rollback before credential deletion runs; a late
+rollback can never restore a token after destructive cleanup.
 
 If the in-process secure-session snapshot cannot be read, validation revokes
 authentication, invokes the destructive local-data purge, and returns
 `unauthorized` without making a request. Cleanup remains best-effort so a native
 deletion error cannot restore in-memory access or reject the validation result.
 Restoration failure emits only a fixed diagnostic string; the thrown native
-storage object is never passed to console/reporting boundaries.
-The startup UI also treats an unexpected validation rejection as unauthorized:
-it clears the pending banner, dismisses the splash, and routes to login instead
-of leaving an unhandled rejection or an ambiguous authenticated view.
+storage object is never passed to console/reporting boundaries. The startup UI
+also treats an unexpected validation rejection as unauthorized: it clears the
+pending banner, dismisses the splash, and routes to login instead of leaving an
+unhandled rejection or an ambiguous authenticated view.
 
-On iOS, `AppBridgeViewController` registers the first-party credential plugin
-as a concrete bridge instance. This registration path must coexist with
-Capacitor's automatic discovery for packaged plugins; type registration is not
-used because Capacitor 8 ignores it while automatic discovery is enabled. A
-missing plugin is treated as a storage failure, so even a successful server
-response leaves the app unauthenticated instead of retaining a token only in
-memory.
+On iOS, `AppBridgeViewController` registers the first-party credential plugin as
+a concrete bridge instance. This registration path must coexist with Capacitor's
+automatic discovery for packaged plugins; type registration is not used because
+Capacitor 8 ignores it while automatic discovery is enabled. A missing plugin is
+treated as a storage failure, so even a successful server response leaves the
+app unauthenticated instead of retaining a token only in memory.
 
 Upgrades migrate the legacy `localStorage` token in a strict order: read legacy
-metadata, write the native vault, then rewrite preferences without the token.
-If the final rewrite fails, the previous native value is restored and the
-legacy record remains intact for a later retry. Conflicting/orphaned state fails
-closed instead of inventing a session.
+metadata, write the native vault, then rewrite preferences without the token. If
+the final rewrite fails, the previous native value is restored and the legacy
+record remains intact for a later retry. Conflicting/orphaned state fails closed
+instead of inventing a session.
 
 The browser development preview has no native vault. It therefore uses a
 memory-only session that supports login for the lifetime of the page and is
@@ -159,15 +158,15 @@ token in browser storage. Durable session restoration is a native-app feature.
 
 Logout and invalid stored-session handling remain destructive operations as
 defined in `docs/logout-behavior.md`. A failed pre-login token attempt does not
-call logout or purge caches because it never created a session.
-Once logout begins, new login and validation probes are rejected until purge
-finishes. Logout cancels in-flight authentication and validation, waits for all
-authentication operations (including secure-store rollback) to settle, and
-only then enters the destructive purge boundary.
-Secure-session clear always revokes its in-process snapshot and attempts both
-vault-token and non-secret marker deletion. If the native vault refuses
-deletion, the marker is still removed; a later startup treats any surviving
-token as an orphan to delete, never as a restorable authenticated session.
+call logout or purge caches because it never created a session. Once logout
+begins, new login and validation probes are rejected until purge finishes.
+Logout cancels in-flight authentication and validation, waits for all
+authentication operations (including secure-store rollback) to settle, and only
+then enters the destructive purge boundary. Secure-session clear always revokes
+its in-process snapshot and attempts both vault-token and non-secret marker
+deletion. If the native vault refuses deletion, the marker is still removed; a
+later startup treats any surviving token as an orphan to delete, never as a
+restorable authenticated session.
 
 ## Architecture and performance
 
@@ -177,7 +176,8 @@ token as an orphan to delete, never as a restorable authenticated session.
 - `SessionCoordinator` owns login policy, restored auth state, online/offline
   transitions, validation cancellation, reconnect decisions, and session
   establishment. It does not depend on project, GPS, tile, or React modules.
-- `SecureSessionStore` owns migration, commit ordering, rollback, and revocation.
+- `SecureSessionStore` owns migration, commit ordering, rollback, and
+  revocation.
 - `instanceUrl.ts` owns pure instance-origin parsing and canonicalization; it
   has no Capacitor/browser dependency.
 - `PreferencesService` owns non-secret metadata and exposes legacy token bytes
@@ -196,10 +196,10 @@ are never logged or parsed.
 
 ## Verification strategy
 
-- Coordinator unit tests cover every branch of validation, trimming,
-  fail-closed persistence, latest-attempt cancellation, serialized secure
-  writes, logout exclusion, reconnect, fixed auth-error publication,
-  pre-commit invalidation, observer-failure isolation, and state publication.
+- Coordinator unit tests cover every branch of validation, trimming, fail-closed
+  persistence, latest-attempt cancellation, serialized secure writes, logout
+  exclusion, reconnect, fixed auth-error publication, pre-commit invalidation,
+  observer-failure isolation, and state publication.
 - Controller characterization tests cover the stable façade and its integration
   with destructive purge, project sync, and application-wide invalidation.
 - Together they cover identity-free restoration, every response class, and

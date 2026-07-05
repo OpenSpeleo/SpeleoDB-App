@@ -147,6 +147,17 @@ export const GPS = {
     timeout: 30000,
     maximumAge: 0,
   } as const,
+  // Foreground My Location is a live UI mode rather than a recorder. Android
+  // honors these interval hints; iOS delivers updates at its native cadence.
+  LIVE_LOCATION_WATCH_OPTIONS: {
+    enableHighAccuracy: true,
+    timeout: 10_000,
+    maximumAge: 0,
+    interval: 1_000,
+    minimumUpdateInterval: 1_000,
+  } as const,
+  HEADING_MIN_INTERVAL_MS: 100,
+  HEADING_MIN_CHANGE_DEGREES: 2,
   // GPS fix timestamps can lag the JavaScript wall clock by a small amount when
   // a watch starts. Allow a short grace while still dropping the much older
   // last-known-location replay that mobile OSes commonly emit first.

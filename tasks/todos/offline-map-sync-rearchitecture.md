@@ -3,8 +3,8 @@
 ## Goal
 
 Replace the serialized per-target tile-prefetch pipeline with one canonical
-offline-map plan, bounded parallel downloading, layer-generation ownership,
-and event-driven progress that never waits for durable checkpoints.
+offline-map plan, bounded parallel downloading, layer-generation ownership, and
+event-driven progress that never waits for durable checkpoints.
 
 ## Implementation gates
 
@@ -28,8 +28,8 @@ and event-driven progress that never waits for durable checkpoints.
       publish React snapshots at paint cadence through a dedicated store.
 - [x] Switch `TileCoordinator`, controller/context, and Settings to the new
       engine; remove the old per-target prefetch hot path.
-- [x] Preserve cache-first runtime reads, the 180-day freshness policy,
-      rolling force refresh, storage consent, cancellation, and logout cleanup.
+- [x] Preserve cache-first runtime reads, the 180-day freshness policy, rolling
+      force refresh, storage consent, cancellation, and logout cleanup.
 - [x] Update architecture, offline-mode, layer, Settings, sync, and index docs;
       capture the reusable serialized-hot-path lesson.
 
@@ -73,8 +73,8 @@ To be recorded before replacement and repeated after integration:
   serialized job persistence and ownership work around that single worker.
 - At deterministic 100 ms transport latency, the serial lower bound for 1,000
   tiles is 100 seconds. `OfflineMapSyncEngine.test.ts` proves the new engine
-  holds six active workers and completes the same 1,000 tiles in 167 waves,
-  or 16.7 simulated seconds: 5.99x the serial baseline before IndexedDB and UI
+  holds six active workers and completes the same 1,000 tiles in 167 waves, or
+  16.7 simulated seconds: 5.99x the serial baseline before IndexedDB and UI
   bookkeeping costs.
 - The fresh active-generation test proves the unchanged-plan path performs no
   URL audit, generation write, or network request. The repository integration
@@ -86,8 +86,8 @@ To be recorded before replacement and repeated after integration:
 ### Verification results
 
 - Focused authoritative suites: 14 files / 386 tests passed before final
-  cleanup; final engine/repository/controller subsets also passed, including
-  12 engine/storage integration tests and 186 controller tests.
+  cleanup; final engine/repository/controller subsets also passed, including 12
+  engine/storage integration tests and 186 controller tests.
 - `make ci` (with network access for live stage integration tests): 106 files,
   1,772 tests passed; statements 88.67%, branches 81.74%, functions 91.63%,
   lines 90.73%; quality inventory, ESLint, TypeScript, and production build all
@@ -106,8 +106,8 @@ No physical Android or iOS device is attached to this environment. Therefore
 warm MapLibre p95 latency, fully cached viewport p95, foreground publication
 p95, slow-network interruption, airplane-mode persistence, force-quit recovery,
 storage blocking, and layer switching still require the planned release-device
-matrix. Automated tests establish ordering, concurrency, durability, and the
-50 ms publication design invariant, but they are not a substitute for those
+matrix. Automated tests establish ordering, concurrency, durability, and the 50
+ms publication design invariant, but they are not a substitute for those
 physical-device measurements.
 
 No commit was created as part of this task, so there is no implementation commit

@@ -66,6 +66,7 @@ function AuthenticatedRoutes(): ReactNode {
       >
         <Suspense fallback={null}>
           <Dashboard
+            isActive={isDashboard}
             activeDashboardPanel={activeDashboardPanel}
             onDashboardPanelChange={setActiveDashboardPanel}
             showLandmarks={showLandmarks}

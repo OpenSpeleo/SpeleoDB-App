@@ -1,7 +1,7 @@
 # OAuth Token Login
 
-Add a second login method that validates a user-supplied OAuth token against
-the selected SpeleoDB instance before creating a persisted app session.
+Add a second login method that validates a user-supplied OAuth token against the
+selected SpeleoDB instance before creating a persisted app session.
 
 ## Plan checklist
 
@@ -16,8 +16,8 @@ the selected SpeleoDB instance before creating a persisted app session.
 
 - OAuth tokens use the existing `Authorization: Token <token>` API contract.
 - Token login requires successful online validation and has no offline fallback.
-- The validation payload is opaque, so token-authenticated sessions have no
-  user identity (`user: null`) unless a separate identity API is introduced.
+- The validation payload is opaque, so token-authenticated sessions have no user
+  identity (`user: null`) unless a separate identity API is introduced.
 - Email/password login and its offline fallback remain unchanged.
 
 ## Review

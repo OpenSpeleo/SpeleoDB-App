@@ -35,11 +35,12 @@ in `tasks/lessons/button-backgrounds.md`.
 
 ## MapLibre source ownership
 
-- Every `react-map-gl` `<Layer>` MUST be a direct child of its owning `<Source>`.
+- Every `react-map-gl` `<Layer>` MUST be a direct child of its owning
+  `<Source>`.
 - A wrapper between `Source` and `Layer` is allowed only when it explicitly
   forwards the injected `source` prop and has a contract test that models
   `Source` using `Children.map` and `cloneElement`.
-- A test mock that merely renders `Source.children` is not evidence that a
-  layer is bound to a MapLibre source.
+- A test mock that merely renders `Source.children` is not evidence that a layer
+  is bound to a MapLibre source.
 
 See `tasks/lessons/maplibre-source-children.md`.

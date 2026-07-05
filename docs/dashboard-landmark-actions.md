@@ -39,8 +39,8 @@ submission guards and failures, deletion guards and typed outcomes, and late
 mutation completions. The production hook has 100% statement, branch, function,
 and line coverage. Dashboard's characterization suite continues to verify the
 rendered long-press, marker, form, confirmation, panel, toast, and GPS handoff
-flows. The presentation module has its own 100% statement, branch, function,
-and line coverage.
+flows. The presentation module has its own 100% statement, branch, function, and
+line coverage.
 
 ## Performance implications
 

@@ -1,7 +1,7 @@
 # Origin-only API bases
 
-When services append fixed absolute endpoint paths, user-configurable base
-URLs must be validated as origins rather than arbitrary URLs. Accepting a path,
+When services append fixed absolute endpoint paths, user-configurable base URLs
+must be validated as origins rather than arbitrary URLs. Accepting a path,
 query, or fragment and then concatenating an endpoint produces a different
 request target than either the user or service intended.
 

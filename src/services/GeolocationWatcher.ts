@@ -32,6 +32,8 @@ export interface PluginPositionOptions {
   enableHighAccuracy?: boolean;
   timeout?: number;
   maximumAge?: number;
+  interval?: number;
+  minimumUpdateInterval?: number;
 }
 
 export interface GeolocationLike {

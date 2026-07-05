@@ -17,7 +17,8 @@ retain only the validated deadline and legacy-timeout recovery policy.
 - [x] Reintroduce transient validation deadlines without lazy/inline workers.
 - [x] Prove historical 500 ms timeout recovery and content-failure quarantine.
 - [x] Commit-ready independently green deadline correction
-  (`[Fix] Treat GeoJSON validation deadlines as transient`; hash recorded at handoff).
+      (`[Fix] Treat GeoJSON validation deadlines as transient`; hash recorded at
+      handoff).
 - [x] Verify rewritten ancestry and leave the worktree clean without pushing.
 
 ## Required gates per commit
@@ -70,5 +71,5 @@ retain only the validated deadline and legacy-timeout recovery policy.
   bundling pass. Signed iOS XCTest passes 9/9 cases on iPhone 17 Pro/iOS 26.5,
   and the unsigned generic-simulator Release build succeeds.
 - Limitation: no physical device with the user's real project payload was
-  available, so on-device rendering confirmation remains explicitly pending.
-  The configured contract tenant does not substitute for that payload.
+  available, so on-device rendering confirmation remains explicitly pending. The
+  configured contract tenant does not substitute for that payload.

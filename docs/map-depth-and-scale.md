@@ -1,10 +1,12 @@
 # Map Depth Mode and Distance Scale
 
-This document defines the dashboard map distance scale and depth-coloring mode, including the touch-first depth gauge behavior used on mobile devices.
+This document defines the dashboard map distance scale and depth-coloring mode,
+including the touch-first depth gauge behavior used on mobile devices.
 
 ## Goal
 
-- Port the website map-viewer concepts (distance scale + depth coloring/depth gauge) into the app.
+- Port the website map-viewer concepts (distance scale + depth coloring/depth
+  gauge) into the app.
 - Keep default coloring predictable (`project` mode).
 - Add a mobile-first interaction model for "hover depth" behavior.
 
@@ -19,7 +21,10 @@ This document defines the dashboard map distance scale and depth-coloring mode, 
 
 ## Parity note
 
-The Django `map_viewer.html` source is not in this repository. This implementation reproduces the same feature intent with app-native logic and keeps depth/scale internals isolated so parity tuning is straightforward if website source is later provided.
+The Django `map_viewer.html` source is not in this repository. This
+implementation reproduces the same feature intent with app-native logic and
+keeps depth/scale internals isolated so parity tuning is straightforward if
+website source is later provided.
 
 ## Settings contract
 
@@ -55,12 +60,14 @@ Depth values are normalized per feature in `src/utils/depthColoring.ts`.
 
 For each feature, depth is resolved in this order:
 
-1. Known numeric property keys (`_speleoDepth`, `depth`, `depth_m`, `z`, `elevation`, etc.).
+1. Known numeric property keys (`_speleoDepth`, `depth`, `depth_m`, `z`,
+   `elevation`, etc.).
 2. Geometry Z coordinates (`coordinates[*][2]`) when properties are missing.
 
 ### Geometry fallback rule
 
-- When geometry Z is used, depth is the mean of available Z coordinates for that feature.
+- When geometry Z is used, depth is the mean of available Z coordinates for that
+  feature.
 - If no numeric depth exists, the feature is treated as depthless.
 
 ### Normalized property
@@ -72,11 +79,23 @@ For each feature, depth is resolved in this order:
 
 All depth and distance values flow through a feet-based internal pipeline:
 
-- **Depth values**: raw numeric values extracted from GeoJSON properties or geometry Z coordinates are treated as feet internally. Property key names like `depth_m` or `elevation_m` are checked as candidate keys for compatibility with various GeoJSON producers, but the extracted numeric values are not converted -- they are used as-is and assumed to be in the same unit. If the upstream Django backend stores depths in a different unit, a conversion step would need to be added at extraction time.
-- **Distance scale**: `computeDistanceScaleMetrics` computes ground distance in feet from the Mercator projection. The `distanceFeet` output field is consumed by `formatDistanceValue` from `src/utils/measurementUnits.ts`.
-- **Display conversion**: `formatDepthValue` and `formatDistanceValue` in `src/utils/measurementUnits.ts` accept feet-based values. When the user selects `Meters` mode, these functions multiply by `FEET_TO_METERS` (0.3048) before display. When `Feet` mode is selected, the raw value is shown directly.
+- **Depth values**: raw numeric values extracted from GeoJSON properties or
+  geometry Z coordinates are treated as feet internally. Property key names like
+  `depth_m` or `elevation_m` are checked as candidate keys for compatibility
+  with various GeoJSON producers, but the extracted numeric values are not
+  converted -- they are used as-is and assumed to be in the same unit. If the
+  upstream Django backend stores depths in a different unit, a conversion step
+  would need to be added at extraction time.
+- **Distance scale**: `computeDistanceScaleMetrics` computes ground distance in
+  feet from the Mercator projection. The `distanceFeet` output field is consumed
+  by `formatDistanceValue` from `src/utils/measurementUnits.ts`.
+- **Display conversion**: `formatDepthValue` and `formatDistanceValue` in
+  `src/utils/measurementUnits.ts` accept feet-based values. When the user
+  selects `Meters` mode, these functions multiply by `FEET_TO_METERS` (0.3048)
+  before display. When `Feet` mode is selected, the raw value is shown directly.
 
-This convention keeps the measurement pipeline unidirectional: raw feet in, display-unit-formatted string out.
+This convention keeps the measurement pipeline unidirectional: raw feet in,
+display-unit-formatted string out.
 
 ## Project layer coloring
 
@@ -88,12 +107,21 @@ Project line/fill layers support two modes:
   - maplibre expression uses `_speleoDepth`,
   - depth color scale is 0-limited (`depth < 0` is clamped to `0`),
   - color ramp:
-    - uses a richer multi-stop sequence from deep blue -> blue -> cyan -> green -> yellow -> orange -> red,
-    - applies non-linear emphasis (`sqrt`) so low/mid ranges separate more clearly instead of looking flat,
-    - keeps gauge depth position linear while color distribution remains non-linear.
+    - uses a richer multi-stop sequence from deep blue -> blue -> cyan -> green
+      -> yellow -> orange -> red,
+    - applies non-linear emphasis (`sqrt`) so low/mid ranges separate more
+      clearly instead of looking flat,
+    - keeps gauge depth position linear while color distribution remains
+      non-linear.
   - fallback to project color when feature depth is missing.
 
-Depth domain (`min`, `max`) is computed from active (visible) project feature collections only. When a project is shown or hidden via the project panel, the depth domain is recomputed automatically. Per-project depth domains are cached at GeoJSON load time and merged in O(projects) on visibility change, so toggling is instant regardless of feature count. The depth gauge min/max labels and all visible project layer color expressions update immediately to reflect the new domain.
+Depth domain (`min`, `max`) is computed from active (visible) project feature
+collections only. When a project is shown or hidden via the project panel, the
+depth domain is recomputed automatically. Per-project depth domains are cached
+at GeoJSON load time and merged in O(projects) on visibility change, so toggling
+is instant regardless of feature count. The depth gauge min/max labels and all
+visible project layer color expressions update immediately to reflect the new
+domain.
 
 ## Distance scale behavior
 
@@ -102,7 +130,8 @@ Depth domain (`min`, `max`) is computed from active (visible) project feature co
 - Distances are chosen using readable 1/2/5 progression.
 - Label formats in meters/kilometers by default.
 - When user selects feet, labels are displayed in feet/miles.
-- Overlay is non-interactive (`pointer-events: none`) and safe-area compatible with existing dashboard layout.
+- Overlay is non-interactive (`pointer-events: none`) and safe-area compatible
+  with existing dashboard layout.
 
 Implementation:
 
@@ -117,7 +146,8 @@ The gauge is visible only when `colorMode === 'depth'`.
 - Shows min/max depth domain values.
 - Displays a marker along the depth gradient.
 - Keeps max/min labels anchored to the exact top/bottom bounds of the gauge bar.
-- Marker position is linear against depth (`min`..`max`), while gauge colors remain non-linearly distributed to match map coloring emphasis.
+- Marker position is linear against depth (`min`..`max`), while gauge colors
+  remain non-linearly distributed to match map coloring emphasis.
 - Current depth label is empty when no sample is active.
 - Min/max labels show `N/A` when the depth domain is unavailable.
 - Values display in meters by default and can switch to feet.
@@ -147,13 +177,16 @@ Existing marker interactions are preserved:
 - long-press GPS modal (empty-map spot only, minimum zoom gate applies),
 - drag/pinch still treated as map gestures.
 
-All marker interactions that open a modal (taps and long-press GPS) share the same minimum zoom gate: `MAP.MARKER_INTERACTION_MIN_ZOOM` (`15`).
+All marker interactions that open a modal (taps and long-press GPS) share the
+same minimum zoom gate: `MAP.MARKER_INTERACTION_MIN_ZOOM` (`15`).
 
 Long-press map-point constraints:
 
 - Requires zoom `>= MAP.MARKER_INTERACTION_MIN_ZOOM` (`15`).
-- Uses a bbox hit-test around the press location (`MAP.LONG_PRESS_EMPTY_SPOT_RADIUS_PX = 18`).
-- If the bbox intersects rendered overlay/project features, the map-point modal does not open.
+- Uses a bbox hit-test around the press location
+  (`MAP.LONG_PRESS_EMPTY_SPOT_RADIUS_PX = 18`).
+- If the bbox intersects rendered overlay/project features, the map-point modal
+  does not open.
 
 ## Testing plan and coverage
 
@@ -171,7 +204,8 @@ Integration/component:
 
 E2E:
 
-- `cypress/e2e/test.cy.ts` includes map color mode persistence + dashboard overlay visibility checks.
+- `cypress/e2e/test.cy.ts` includes map color mode persistence + dashboard
+  overlay visibility checks.
 
 ## Change checklist
 

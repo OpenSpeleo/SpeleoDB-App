@@ -2,8 +2,8 @@
 
 ## Lesson
 
-Do not hard-code experimental Node flags in test wrappers without probing support
-from the active Node binary first.
+Do not hard-code experimental Node flags in test wrappers without probing
+support from the active Node binary first.
 
 ## Pattern
 

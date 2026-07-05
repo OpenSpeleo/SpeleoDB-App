@@ -10,9 +10,9 @@ connectivity returns.
 > Design rule: do **not** invent a second offline mechanism for a new entity.
 > Add a new `OfflineEntityType`, subclass `OfflineOp`, extend the
 > `OfflineReplayPort`, and route the controller mutation through
-> `OfflineMutationCoordinator`.
-> Everything (persistence, ordering, coalescing, conflict UI, the Pending page,
-> the `pendingOpsCount` badge) is then inherited for free.
+> `OfflineMutationCoordinator`. Everything (persistence, ordering, coalescing,
+> conflict UI, the Pending page, the `pendingOpsCount` badge) is then inherited
+> for free.
 
 Entities today:
 
@@ -33,8 +33,8 @@ Entities today:
 - Replay is **user-initiated** from the Pending page (`Sync Now` / per-row
   `Sync`). Reconnect (`attemptReconnect` / successful startup validation) clears
   the offline lock and refreshes server data, but does **not** auto-drain the
-  queue. This is uniform across **all** entities (GPS tracks included -- there is
-  no separate auto-drain for uploads).
+  queue. This is uniform across **all** entities (GPS tracks included -- there
+  is no separate auto-drain for uploads).
 
 ## The core decision: ground truth + fold
 
@@ -47,8 +47,8 @@ Two layers, per entity:
     `ProjectCacheService`.
   - gps tracks: the `gps-tracks` metadata list in `ProjectCacheService`
     (`RemoteGpsTrack[]`); local recordings live in the `gps_tracks` store.
-- **Pending ops**: one ordered, persistent queue of `OfflineOp`s
-  (`offline_ops` IndexedDB store), shared by all entities.
+- **Pending ops**: one ordered, persistent queue of `OfflineOp`s (`offline_ops`
+  IndexedDB store), shared by all entities.
 
 What the user sees is `fold(groundTruth, pendingOps)`, recomputed on demand:
 
@@ -82,9 +82,9 @@ The controller mutation classifies the outcome the same way for every entity:
 
 - **offline-locked** (`hasNetworkAccess()` is false) -> enqueue immediately.
 - **online, transport error / timeout / 5xx** (or `408`) -> "not reachable"; the
-  controller calls `enterOfflineMode()` (flips the app offline, shows the offline
-  modal, reveals Go Online) and enqueues. (`429` is rate limiting: kept pending
-  without flipping offline.) Matches the request-driven offline model in
+  controller calls `enterOfflineMode()` (flips the app offline, shows the
+  offline modal, reveals Go Online) and enqueues. (`429` is rate limiting: kept
+  pending without flipping offline.) Matches the request-driven offline model in
   `docs/networking.md`.
 - **online, definitive 4xx** -> a definitive answer; a typed error is thrown and
   the UI shows it. Nothing is enqueued.
@@ -100,8 +100,8 @@ The controller mutation classifies the outcome the same way for every entity:
 - `applyToTrackList(tracks)` -- fold over the server GPS-track list (gps ops;
   no-op default for others).
 - `describe()` -- a human summary for the pending list.
-- `serialize()` -- the persistable shape (`SerializedOfflineOp`, discriminated by
-  `entityType` + `kind`).
+- `serialize()` -- the persistable shape (`SerializedOfflineOp`, discriminated
+  by `entityType` + `kind`).
 - `subjectId()` -- the entity id this op concerns.
 
 Concrete subclasses:
@@ -178,7 +178,7 @@ recording with a pending upload discards that create op
 `syncAll()` / `syncOne(id)` run in chronological order; the relevant server
 snapshot(s) are pulled once per run. A run pulls only the snapshots its targeted
 ops need (landmarks and/or GPS tracks); a **mixed** landmark + GPS run pulls
-both. If *either* required pull fails, the whole run aborts as `pull_failed` and
+both. If _either_ required pull fails, the whole run aborts as `pull_failed` and
 nothing replays -- so a transient GPS-track-list fetch failure also defers any
 landmark ops queued in the same run (and vice versa). This is intentional: a
 failed ground-truth pull means the server is unreachable, so no op is safe to
@@ -207,18 +207,19 @@ that run but does not stop the rest of the queue (partial failure is fine).
 `resolveOfflineOpConflict(id, 'local' | 'server')`:
 
 - **local** ("Keep my change") -> force the request regardless of server drift,
-  then write ground truth and drop the op. A definitive 4xx leaves the op `error`.
+  then write ground truth and drop the op. A definitive 4xx leaves the op
+  `error`.
 - **server** ("Use server version") -> discard the op and adopt the current
   server state into ground truth.
 
-`OfflineOpConflictModal` is entity-agnostic: it renders `entityLabel` ("landmark"
-/ "GPS track"), the op `title`, the `kind`, the `server === null` ("removed")
-case, and the field `rows` diff. No ids, no jargon.
+`OfflineOpConflictModal` is entity-agnostic: it renders `entityLabel`
+("landmark" / "GPS track"), the op `title`, the `kind`, the `server === null`
+("removed") case, and the field `rows` diff. No ids, no jargon.
 
 ## UX
 
-- A **Pending** tab appears in the bottom tab bar (between Map and Settings) only
-  when there are queued ops, with a count badge (`pendingOpsCount`). Route
+- A **Pending** tab appears in the bottom tab bar (between Map and Settings)
+  only when there are queued ops, with a count badge (`pendingOpsCount`). Route
   `/pending`.
 - The **Pending Changes** page (`src/pages/PendingOps.tsx`) lists ops
   newest-first with a kind badge, title, summary, and timestamp; **Sync Now**
@@ -231,9 +232,8 @@ case, and the field `rows` diff. No ids, no jargon.
   `OfflineOpView`, `OfflineOpConflict`).
 - Snapshot/diff helpers: `src/offline/landmarkSnapshot.ts`,
   `src/offline/gpsTrackSnapshot.ts`.
-- Ops: `src/offline/ops/{OfflineOp,CreateLandmarkOp,UpdateLandmarkOp,
-  DeleteLandmarkOp,CreateGpsTrackOp,UpdateGpsTrackOp,DeleteGpsTrackOp,
-  deserialize}.ts`.
+- Ops:
+  `src/offline/ops/{OfflineOp,CreateLandmarkOp,UpdateLandmarkOp, DeleteLandmarkOp,CreateGpsTrackOp,UpdateGpsTrackOp,DeleteGpsTrackOp, deserialize}.ts`.
 - Persistence: `src/offline/OfflineOpStore.ts` (+ `offline_ops` in
   `src/services/CacheStore.ts`).
 - Orchestration: `src/offline/OfflineOpQueue.ts` (`OfflineReplayPort`,
@@ -250,8 +250,9 @@ case, and the field `rows` diff. No ids, no jargon.
 ## Reuse: averaged GPS points
 
 The GPS menu's "collect an averaged point and save it as a landmark" flow reuses
-this queue verbatim via the shared `LandmarkFormModal` + `controller.createLandmark`,
-so saving offline enqueues a `CreateLandmarkOp`. See `docs/gps-tracks.md`.
+this queue verbatim via the shared `LandmarkFormModal` +
+`controller.createLandmark`, so saving offline enqueues a `CreateLandmarkOp`.
+See `docs/gps-tracks.md`.
 
 ## Tests
 

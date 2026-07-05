@@ -26,8 +26,8 @@ focused typed boundary.
 
 The two components are intentionally separate so `DashboardGpsTrackDialogs`
 retains its existing stacking position between landmark dialogs and transient
-feedback. No z-order or simultaneous-modal behavior changes as a side effect
-of the extraction.
+feedback. No z-order or simultaneous-modal behavior changes as a side effect of
+the extraction.
 
 ## Invariants
 

@@ -10,8 +10,8 @@ is enabled (the default). The JavaScript credential adapter therefore rejects
 its first native call, and session coordination correctly fails closed.
 
 The Xcode console messages in the report do not identify this failure: they are
-unrelated WebKit, keyboard-extension, and RunningBoard diagnostics. The app
-also deliberately disables Capacitor bridge logging to avoid leaking plugin
+unrelated WebKit, keyboard-extension, and RunningBoard diagnostics. The app also
+deliberately disables Capacitor bridge logging to avoid leaking plugin
 arguments.
 
 ## Plan
@@ -36,8 +36,8 @@ arguments.
 2. Existing Keychain CRUD and fail-closed tests remain green.
 3. Web quality gates remain green because the TypeScript/native contract is
    unchanged.
-4. Debug and Release iOS simulator builds compile the same controller and
-   plugin sources used on device.
+4. Debug and Release iOS simulator builds compile the same controller and plugin
+   sources used on device.
 5. Physical-device login is called out separately because simulator tests and
    compilation cannot prove the user's device/network interaction.
 
@@ -53,8 +53,8 @@ arguments.
 - Updated authentication and secure-storage documentation with the ownership,
   fail-closed behavior, regression seam, and negligible one-instance startup
   cost.
-- Commit containing the implementation: `e0551b8` (`[Fix] Credentials Secure
-  Storage Interacting with Capacitor 8`).
+- Commit containing the implementation: `e0551b8`
+  (`[Fix] Credentials Secure Storage Interacting with Capacitor 8`).
 
 ### Verification
 
@@ -73,8 +73,8 @@ arguments.
 
 The initial sandboxed web run could not resolve `stage.speleodb.org`; the same
 suite passed unchanged with network access. An initial unsigned iOS test run
-also demonstrated that Keychain tests require a signed test host; the signed
-run passed and the reusable rule is captured in
+also demonstrated that Keychain tests require a signed test host; the signed run
+passed and the reusable rule is captured in
 `tasks/lessons/ios-keychain-tests-require-signing.md`.
 
 ### Limitations
@@ -82,12 +82,12 @@ run passed and the reusable rule is captured in
 - No physical-device login was performed from this environment. Compilation,
   live-bridge registration, and real simulator Keychain behavior are proven;
   final device/network interaction remains a device smoke test.
-- Android verification is inapplicable because no Android source,
-  configuration, dependency, or generated file changed.
+- Android verification is inapplicable because no Android source, configuration,
+  dependency, or generated file changed.
 
 ### Follow-up audit
 
-The commit also acquired unrelated `fetch` and `processing` iOS background
-modes while Xcode rewrote project metadata. SpeleoDB schedules neither mode;
-the mobile hardening ledger tracks their removal and a compiled-configuration
+The commit also acquired unrelated `fetch` and `processing` iOS background modes
+while Xcode rewrote project metadata. SpeleoDB schedules neither mode; the
+mobile hardening ledger tracks their removal and a compiled-configuration
 regression test as a separate objective.

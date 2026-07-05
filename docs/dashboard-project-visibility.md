@@ -35,10 +35,10 @@ A project is effectively visible only when all of these are true:
 3. current commit-matched GeoJSON is loaded; and
 4. its country gate is not explicitly off.
 
-The panel toggle reflects raw individual intent, not the country gate. This
-lets a user disable a country temporarily without losing project-level choices.
-Show all activates every loaded project and re-enables their country gates.
-Hide all disables loaded projects but preserves the country gates.
+The panel toggle reflects raw individual intent, not the country gate. This lets
+a user disable a country temporarily without losing project-level choices. Show
+all activates every loaded project and re-enables their country gates. Hide all
+disables loaded projects but preserves the country gates.
 
 Projects that become ineligible are removed from runtime state. A project that
 is newly eligible defaults on unless its stored preference is `false`; rerenders

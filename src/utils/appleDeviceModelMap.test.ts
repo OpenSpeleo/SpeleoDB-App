@@ -21,4 +21,3 @@ describe('appleDeviceModelMap', () => {
     expect(getAppleMarketingModelOrIdentifier('iPhone20,4')).toBe('iPhone20,4');
   });
 });
-

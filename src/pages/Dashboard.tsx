@@ -50,6 +50,7 @@ registerTileCacheProtocol();
 // ==================== Component ====================
 
 interface DashboardProps {
+  isActive: boolean;
   activeDashboardPanel: DashboardPanel;
   onDashboardPanelChange: DashboardPanelChange;
   showLandmarks: boolean;
@@ -61,6 +62,7 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({
+  isActive,
   activeDashboardPanel,
   onDashboardPanelChange,
   showLandmarks,
@@ -289,6 +291,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const {
     currentTrackPoints,
     currentTrackFeatureCollection,
+    currentRecordingLocation,
     isRecorderOpen,
     showBatteryHint,
     recordingCancelOpen: showRecordingCancelConfirm,
@@ -335,6 +338,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           <div className="relative flex-1 min-h-0 dashboard-map-container">
           <DashboardMapCanvas
             mapRef={mapRef}
+            isActive={isActive}
             selectedMapLayerId={selectedMapLayerId}
             onSelectedMapLayerIdChange={onSelectedMapLayerIdChange}
             isOfflineLocked={isOfflineLocked}
@@ -357,6 +361,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               currentTrackFeatureCollection,
               recordingState: gpsRecordingState,
             }}
+            recordingLocation={currentRecordingLocation}
             gestures={{
               onStart: handleMapGestureStart,
               onMove: handleMapGestureMove,
