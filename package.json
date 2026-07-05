@@ -34,7 +34,7 @@
     "@capacitor/status-bar": "8.0.2",
     "@capawesome-team/capacitor-android-battery-optimization": "8.0.1",
     "@capgo/capacitor-compass": "8.1.17",
-    "@ionic/react": "^8.8.12",
+    "@ionic/react": "^8.8.13",
     "@ionic/react-router": "^8.8.12",
     "@sentry/capacitor": "^4.2.0",
     "@sentry/react": "10.60.0",
