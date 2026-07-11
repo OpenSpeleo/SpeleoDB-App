@@ -75,7 +75,7 @@
     "globals": "^17.7.0",
     "jsdom": "^29.1.1",
     "lint-staged": "^17.0.8",
-    "postcss": "^8.5.16",
+    "postcss": "^8.5.17",
     "tailwindcss": "^4.3.2",
     "terser": "^5.48.0",
     "typescript": "~6.0.3",
