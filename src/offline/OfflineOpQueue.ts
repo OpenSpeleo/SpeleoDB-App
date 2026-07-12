@@ -162,6 +162,8 @@ export class OfflineOpQueue {
   private seqCounter = 0;
   private conflicts = new Map<string, ConflictContext>();
   private replaying = false;
+  private commandTail: Promise<void> = Promise.resolve();
+  private fullReplayFlight: Promise<OfflineSyncSummary> | null = null;
 
   constructor(
     private store: OfflineOpStore,
@@ -604,17 +606,33 @@ export class OfflineOpQueue {
 
   // ---- Replay ---------------------------------------------------------------
 
-  /** Replay every pending op in chronological order. */
-  async syncAll(): Promise<OfflineSyncSummary> {
-    await this.load();
-    return this.runReplay(this.ordered());
+  /**
+   * Replay every pending op in chronological order. Overlapping full replay
+   * callers are compatible and share one result instead of queuing redundant
+   * pulls after the active run.
+   */
+  syncAll(): Promise<OfflineSyncSummary> {
+    if (this.fullReplayFlight) return this.fullReplayFlight;
+
+    const flight = this.enqueueCommand(async () => {
+      await this.load();
+      return this.runReplay(this.ordered());
+    });
+    this.fullReplayFlight = flight;
+    const clearFlight = () => {
+      if (this.fullReplayFlight === flight) this.fullReplayFlight = null;
+    };
+    void flight.then(clearFlight, clearFlight);
+    return flight;
   }
 
   /** Replay a single op (and nothing else). */
-  async syncOne(id: string): Promise<OfflineSyncSummary> {
-    await this.load();
-    const op = this.ops.find((candidate) => candidate.id === id);
-    return this.runReplay(op ? [op] : []);
+  syncOne(id: string): Promise<OfflineSyncSummary> {
+    return this.enqueueCommand(async () => {
+      await this.load();
+      const op = this.ops.find((candidate) => candidate.id === id);
+      return this.runReplay(op ? [op] : []);
+    });
   }
 
   private async runReplay(targets: OfflineOp[]): Promise<OfflineSyncSummary> {
@@ -934,7 +952,14 @@ export class OfflineOpQueue {
 
   // ---- Conflict resolution --------------------------------------------------
 
-  async resolveConflict(id: string, choice: OfflineConflictChoice): Promise<OfflineSyncSummary> {
+  resolveConflict(id: string, choice: OfflineConflictChoice): Promise<OfflineSyncSummary> {
+    return this.enqueueCommand(() => this.resolveConflictCommand(id, choice));
+  }
+
+  private async resolveConflictCommand(
+    id: string,
+    choice: OfflineConflictChoice,
+  ): Promise<OfflineSyncSummary> {
     await this.load();
     const summary: OfflineSyncSummary = {
       reason: 'completed',
@@ -1255,6 +1280,20 @@ export class OfflineOpQueue {
     }
     this.ops = this.ops.filter((op) => op.id !== id);
     this.conflicts.delete(id);
+  }
+
+  /**
+   * Serialize network commands while keeping the lane usable after rejection.
+   * Admission is synchronous, so two UI actions in the same render frame
+   * cannot execute against the same durable operation concurrently.
+   */
+  private enqueueCommand<T>(command: () => Promise<T>): Promise<T> {
+    const result = this.commandTail.then(command, command);
+    this.commandTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private emitChange(): void {

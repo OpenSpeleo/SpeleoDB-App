@@ -196,12 +196,12 @@ React busy state rerenders can pull the same snapshot and issue the same POST or
 PATCH concurrently. Landmark creation has no client idempotency key, so this can
 create duplicate remote landmarks.
 
-- [ ] **RED:** defer the replay pull/POST, start two replay commands, and assert
+- [x] **RED:** defer the replay pull/POST, start two replay commands, and assert
       current code issues two remote mutations for one op.
-- [ ] **GREEN:** add a queue-owned command lane/single-flight replay contract.
+- [x] **GREEN:** add a queue-owned command lane/single-flight replay contract.
       Define whether compatible callers share a summary or serialize; never
       allow the same op to execute concurrently.
-- [ ] Rerun mixed-entity, per-op, conflict, network-interruption, and force-quit
+- [x] Rerun mixed-entity, per-op, conflict, network-interruption, and force-quit
       replay tests.
 
 #### RR-005 — Offline-op replacement is neither atomic nor concurrency-safe
@@ -559,3 +559,24 @@ a commit cannot contain its own stable final hash.
 - **Limitations:** native source and generated projects are unchanged; native
   compilation remains in the final cross-platform gate. Physical-device storage
   interruption remains an RR-008 protocol.
+
+### RR-004 — Serialized offline replay commands
+
+- **RED:** `npx vitest run src/offline/OfflineOpQueue.test.ts` — 3 expected
+  failures proved overlapping full replay, full-plus-single replay, and duplicate
+  conflict resolution each issued the same remote POST/PATCH twice.
+- **GREEN:** the unchanged focused command passed 47/47 tests. Compatible full
+  replay callers share the exact promise/summary; incompatible per-op and
+  conflict commands serialize and re-read the queue after admission. A rejected
+  shared flight leaves the lane reusable and the durable operation retryable.
+- **Design/performance:** a queue-owned promise tail provides synchronous
+  admission with constant-time bookkeeping. It adds no timers, polling,
+  persistence, or network requests and prevents redundant snapshot pulls.
+- **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
+  hard button scan, and configured staging integration (2 files / 13 tests)
+  passed. The deterministic covered suite passed 109 files / 1,858 tests with
+  13 staging-only skips; coverage was 90.09% statements, 81.98% branches,
+  92.51% functions, and 92.12% lines. MapLibre contract tests remain green.
+- **Limitations:** queue persistence replacement is intentionally deferred to
+  RR-005. Native source and generated projects are unchanged; native compilation
+  remains in the final cross-platform gate.

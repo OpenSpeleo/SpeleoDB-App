@@ -12,6 +12,14 @@ import type { GpsTrackSnapshot, RemoteGpsTrack } from '../types/gpsTrack';
 
 // ---- Fakes ----------------------------------------------------------------
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function createMemoryStore() {
   const records = new Map<string, SerializedOfflineOp>();
   const store = {
@@ -198,6 +206,80 @@ describe('OfflineOpQueue replay', () => {
     expect(summary.succeeded).toBe(1);
     expect(port.applyUpsert).toHaveBeenCalledWith(expect.objectContaining({ id: 'lm-1' }));
     expect(queue.count).toBe(0);
+  });
+
+  it('coalesces overlapping full replay commands into one remote mutation', async () => {
+    const releasePost = deferred<void>();
+    const postLandmark = vi.fn(async () => {
+      await releasePost.promise;
+      return { status: 201, data: { landmark: SERVER_LANDMARK } };
+    });
+    const port = createPort({ postLandmark });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueCreate(optimisticCreate());
+
+    const first = queue.syncAll();
+    await vi.waitFor(() => expect(postLandmark).toHaveBeenCalled());
+    const second = queue.syncAll();
+    expect(second).toBe(first);
+    releasePost.resolve();
+
+    const [firstSummary, secondSummary] = await Promise.all([first, second]);
+
+    expect(postLandmark).toHaveBeenCalledOnce();
+    expect(port.fetchLandmarksGeoJSON).toHaveBeenCalledOnce();
+    expect(secondSummary).toEqual(firstSummary);
+  });
+
+  it('keeps the serialized command lane usable after a shared replay rejects', async () => {
+    const storageError = new Error('ground-truth transaction failed');
+    const applyUpsert = vi
+      .fn()
+      .mockRejectedValueOnce(storageError)
+      .mockResolvedValue(undefined);
+    const port = createPort({ applyUpsert });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueCreate(optimisticCreate());
+
+    const first = queue.syncAll();
+    const shared = queue.syncAll();
+    const failures = await Promise.allSettled([first, shared]);
+
+    expect(failures).toEqual([
+      expect.objectContaining({ status: 'rejected', reason: storageError }),
+      expect.objectContaining({ status: 'rejected', reason: storageError }),
+    ]);
+    expect(port.postLandmark).toHaveBeenCalledOnce();
+    expect(queue.isReplaying).toBe(false);
+
+    const retry = await queue.syncAll();
+
+    expect(retry.succeeded).toBe(1);
+    expect(port.postLandmark).toHaveBeenCalledTimes(2);
+    expect(queue.count).toBe(0);
+  });
+
+  it('serializes a single-op replay behind an incompatible full replay', async () => {
+    const releasePost = deferred<void>();
+    const postLandmark = vi.fn(async () => {
+      await releasePost.promise;
+      return { status: 201, data: { landmark: SERVER_LANDMARK } };
+    });
+    const port = createPort({ postLandmark });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueCreate(optimisticCreate());
+    const [{ id }] = queue.views();
+
+    const fullReplay = queue.syncAll();
+    await vi.waitFor(() => expect(postLandmark).toHaveBeenCalled());
+    const singleReplay = queue.syncOne(id);
+    releasePost.resolve();
+
+    const [fullSummary, singleSummary] = await Promise.all([fullReplay, singleReplay]);
+
+    expect(postLandmark).toHaveBeenCalledOnce();
+    expect(fullSummary.succeeded).toBe(1);
+    expect(singleSummary.reason).toBe('nothing_to_sync');
   });
 
   it('retains a confirmed create when the strict ground-truth commit fails', async () => {
@@ -440,6 +522,33 @@ describe('OfflineOpQueue conflict resolution', () => {
 
     expect(port.patchLandmark).toHaveBeenCalledWith('lm-1', expect.objectContaining({ name: 'Mine' }));
     expect(queue.count).toBe(0);
+  });
+
+  it('serializes overlapping conflict resolutions for the same operation', async () => {
+    const server = landmarkFeature('lm-1', { name: 'Server', collection: 'col-1' }, -122.25, 45.5);
+    const releasePatch = deferred<void>();
+    const patchLandmark = vi.fn(async () => {
+      await releasePatch.promise;
+      return { status: 200, data: { landmark: SERVER_LANDMARK } };
+    });
+    const port = createPort({
+      fetchLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: fc([server]) })),
+      patchLandmark,
+    });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueUpdate('lm-1', baselineSnapshot(), { ...baselineSnapshot(), name: 'Mine' });
+    const { conflictIds } = await queue.syncAll();
+
+    const first = queue.resolveConflict(conflictIds[0], 'local');
+    await vi.waitFor(() => expect(patchLandmark).toHaveBeenCalled());
+    const second = queue.resolveConflict(conflictIds[0], 'local');
+    releasePatch.resolve();
+
+    const [firstSummary, secondSummary] = await Promise.all([first, second]);
+
+    expect(patchLandmark).toHaveBeenCalledOnce();
+    expect(firstSummary.succeeded).toBe(1);
+    expect(secondSummary.reason).toBe('nothing_to_sync');
   });
 
   it('use-server discards the local op and adopts the server version', async () => {

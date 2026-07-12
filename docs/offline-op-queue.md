@@ -196,6 +196,14 @@ landmark ops queued in the same run (and vice versa). This is intentional: a
 failed ground-truth pull means the server is unreachable, so no op is safe to
 replay; the user simply syncs again from the Pending page. Per op type:
 
+Replay and conflict-resolution commands enter one queue-owned serialized lane.
+Overlapping `syncAll()` callers are compatible and share the active result;
+single-op sync and conflict choices wait and re-read the current durable queue
+when admitted. Consequently, rapid taps or two callers in the same render frame
+cannot pull and mutate the same operation concurrently. The lane is promise
+based (no polling, timers, or extra persistence) and remains usable after a
+command rejects.
+
 - **landmark create** -> first identity-match the freshly pulled snapshot and
   adopt an existing result (covers a prior server success followed by local
   transaction failure); otherwise POST. A 2xx captures id + upserts; a `400
