@@ -688,10 +688,17 @@ export class ProjectCacheService {
    * tracks (e.g. on logout).
    */
   async clearAll(options: CacheOperationOptions = {}): Promise<void> {
-    await this.store.clear('projects', options);
-    await this.store.clear('geojson', options);
-    await this.store.clear('offline_ops', options);
-    await this.store.clear('gps_tracks', options);
+    throwIfAborted(options.signal);
+    const results = await Promise.allSettled([
+      this.store.clear('projects', options),
+      this.store.clear('geojson', options),
+      this.store.clear('offline_ops', options),
+      this.store.clear('gps_tracks', options),
+    ]);
+    throwIfAborted(options.signal);
+    if (results.some((result) => result.status === 'rejected')) {
+      throw new Error('Local cache deletion did not complete.');
+    }
   }
 
   private getOverlayCacheKey(overlayId: MapOverlayId): string {

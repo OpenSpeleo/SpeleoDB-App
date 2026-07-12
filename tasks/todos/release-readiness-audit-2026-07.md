@@ -98,15 +98,15 @@ to a later session because these caches are not account-namespaced.
 
 Owning seams: `ProjectCacheService.clearAll()` and controller logout.
 
-- [ ] **RED:** add a `ProjectCacheService` test whose first/second store clear
+- [x] **RED:** add a `ProjectCacheService` test whose first/second store clear
       rejects and assert all four store clears were attempted; add a controller
       integration test proving retained GPS/offline records are not observable
       after a failed-but-completed logout cleanup attempt.
-- [ ] Run the focused tests and record the expected skipped-clear failures.
-- [ ] **GREEN:** make the four cache-store clears independent, await all of
+- [x] Run the focused tests and record the expected skipped-clear failures.
+- [x] **GREEN:** make the four cache-store clears independent, await all of
       them, and throw one fixed aggregate cleanup failure only after every store
       has settled. Preserve abort authority.
-- [ ] Rerun the focused tests and the existing destructive-logout matrix.
+- [x] Rerun the focused tests and the existing destructive-logout matrix.
 
 #### RR-002 — User mutations and offline replay can repopulate data after logout
 
@@ -469,3 +469,20 @@ Approved for implementation on 2026-07-12. Each completed RR item will add exact
 red/green commands, results, limitations, and diff-inspection evidence here.
 Final commit hashes will be recorded in the closing review-ledger commit because
 a commit cannot contain its own stable final hash.
+
+### RR-001 — Independent logout cache cleanup
+
+- **RED:** `npx vitest run src/services/ProjectCacheService.test.ts` — failed as
+  expected: 3 failures proved the original store error leaked, later clears were
+  skipped, and a pending operation remained after controller logout.
+- **GREEN:** unchanged focused command — 38/38 tests passed. Failure injection
+  covers both first-store and second-store rejection; controller coverage reads
+  the durable offline/GPS stores after the rejected logout.
+- **Gates:** `npm run lint`, `npm run typecheck`, `npm run build`,
+  `API_TEST_ENABLED=false npm run test:ci` (109 files, 1,833 passed, 13 skipped),
+  live staging integration (2 files, 13 passed), `npm run quality:inventory`,
+  runtime/full `npm audit`, and the hard button scan passed. The full suite also
+  includes the MapLibre source-injection contracts.
+- **Limitations:** native projects and generated assets are unchanged, so native
+  compilation is deferred to the final cross-platform gate. Physical-device
+  evidence remains an explicit RR-008 release gate.

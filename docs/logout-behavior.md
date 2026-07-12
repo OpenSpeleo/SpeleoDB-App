@@ -68,6 +68,9 @@ Implementation notes:
   and tile-runtime restart are independent cleanup steps. A failure in one may
   not skip the others; logout rejects with a generic retryable error only after
   every step has been attempted,
+- project, GeoJSON, pending-operation, and GPS-record cache stores are also
+  cleared independently inside `ProjectCacheService.clearAll()`. Failure of one
+  store cannot prevent deletion attempts for the remaining user-data stores,
 - service/cache layers must treat aborts as authoritative: once logout starts,
   no stale state mutation, cache write, or tile-prefetch scheduling may be
   published from the cancelled run.

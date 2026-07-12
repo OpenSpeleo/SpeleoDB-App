@@ -405,6 +405,63 @@ describe('ProjectCacheService overlay cache', () => {
     expect(await cache.getOverlayGeoJSON('explorationLeads')).toBeNull();
   });
 
+  it.each(['projects', 'geojson'] as const)(
+    'attempts every user-data store clear when %s deletion fails',
+    async (failedStore) => {
+      const clear = vi.fn(async (store: Parameters<CacheStore['clear']>[0]) => {
+        if (store === failedStore) throw new Error(`${store} deletion failed`);
+      });
+      const failingCache = new ProjectCacheService({ clear } as unknown as CacheStore);
+
+      await expect(failingCache.clearAll()).rejects.toThrow(
+        'Local cache deletion did not complete.',
+      );
+
+      expect(clear.mock.calls.map(([store]) => store)).toEqual([
+        'projects',
+        'geojson',
+        'offline_ops',
+        'gps_tracks',
+      ]);
+    },
+  );
+
+  it('lets controller logout clear pending operations and GPS records after project deletion fails', async () => {
+    const backingStore = new CacheStore();
+    await backingStore.set('offline_ops', 'pending-op', {
+      data: { id: 'pending-op' },
+      cachedAt: Date.now(),
+    });
+    await backingStore.set('gps_tracks', 'recorded-track', {
+      data: { id: 'recorded-track' },
+      cachedAt: Date.now(),
+    });
+    const clear = vi.fn(async (
+      store: Parameters<CacheStore['clear']>[0],
+      options?: Parameters<CacheStore['clear']>[1],
+    ) => {
+      if (store === 'projects') throw new Error('projects deletion failed');
+      await backingStore.clear(store, options);
+    });
+    const failingCache = new ProjectCacheService({
+      clear,
+      get: backingStore.get.bind(backingStore),
+    } as unknown as CacheStore);
+    const controller = new SpeleoDBController(
+      persistenceService(persistenceProject('logout-cleanup'), vi.fn()),
+      persistencePreferences(),
+      failingCache,
+      persistenceTilePrefetch(),
+    );
+
+    await expect(controller.logout()).rejects.toThrow(
+      'Local data deletion did not complete during logout.',
+    );
+
+    expect(await backingStore.get('offline_ops', 'pending-op')).toBeNull();
+    expect(await backingStore.get('gps_tracks', 'recorded-track')).toBeNull();
+  });
+
   it('throws AbortError instead of swallowing cancelled writes', async () => {
     const abortController = new AbortController();
     abortController.abort();
