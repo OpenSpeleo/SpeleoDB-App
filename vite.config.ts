@@ -222,6 +222,8 @@ export default defineConfig(({ mode }) => {
       },
       onConsoleLog(log) {
         if (log.startsWith('[project-geojson:bbox]')) return false
+        if (log.startsWith('[project-geojson:timing]')) return false
+        if (log.startsWith('[dashboard-map:timing]')) return false
       },
       // Scope the runner to the mobile app's own tests. The nested `SpeleoDB/`
       // Django web reference is read-only and ships its own test runner; its

@@ -79,6 +79,7 @@
         "^\\.node-version$",
         "^\\.pre-commit-config\\.yaml$",
         "^\\.vscode/",
+        "^benchmarks/",
         "^Makefile$",
         "^capacitor\\.config\\.ts$",
         "^eslint\\.config\\.js$",

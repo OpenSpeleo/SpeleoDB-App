@@ -9,6 +9,8 @@ import java.util.Set;
 final class PerformanceTimingLogFormatter {
     private static final Set<String> SCOPES = immutableSet(
         "project-sync",
+        "project-geojson",
+        "dashboard-map",
         "offline-map"
     );
     private static final Set<String> PHASES = immutableSet(
@@ -20,7 +22,15 @@ final class PerformanceTimingLogFormatter {
         "tile_prefetch",
         "total",
         "coverage_source_collection",
-        "plan_schedule"
+        "plan_schedule",
+        "cache_read_work",
+        "download_work",
+        "normalization_work",
+        "validation_work",
+        "cache_write_work",
+        "project_cache_read_work",
+        "project_normalization_work",
+        "project_total_to_paint"
     );
     private static final Set<String> STATUSES = immutableSet(
         "applied",

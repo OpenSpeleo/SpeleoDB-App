@@ -100,6 +100,45 @@ afterEach(() => {
 });
 
 describe('useDashboardMapData', () => {
+  it('logs cache, normalization, and next-paint latency without project identity', async () => {
+    const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const project = createProject('private-project');
+    const projects = [project];
+    const source = createSource({
+      getProjectMapData: async () => mapData(project),
+    });
+    const yieldWork = async () => {};
+    const afterPaint = async () => {};
+    const { result } = renderHook(() => useDashboardMapData({
+      source,
+      projects,
+      mapDataRevision: 7,
+      landmarksRevision: 0,
+      yieldWork,
+      afterPaint,
+    }));
+
+    await waitFor(() => expect(result.current.geoJsonData[project.id]).toBeDefined());
+    await waitFor(() => {
+      const records = consoleLog.mock.calls.filter(
+        ([label]) => label === '[dashboard-map:timing]',
+      );
+      expect(records).toHaveLength(3);
+    });
+    const records = consoleLog.mock.calls
+      .filter(([label]) => label === '[dashboard-map:timing]')
+      .map(([, record]) => record);
+
+    expect(records.map((record) => record.phase)).toEqual([
+      'project_cache_read_work',
+      'project_normalization_work',
+      'project_total_to_paint',
+    ]);
+    expect(records.every((record) => record.runId === 7)).toBe(true);
+    expect(JSON.stringify(records)).not.toContain(project.id);
+    expect(JSON.stringify(records)).not.toContain(project.name);
+  });
+
   it('coalesces 60 ready records into one rendering turn', async () => {
     const renderingTurn = deferred<void>();
     const yieldWork = vi.fn(() => renderingTurn.promise);

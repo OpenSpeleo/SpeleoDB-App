@@ -1642,6 +1642,48 @@ describe('SpeleoDBController', () => {
       expect(JSON.stringify(timingRecords)).not.toContain(DEFAULT_PROJECT.name);
     });
 
+    it('logs aggregate GeoJSON work timings without project identity or payloads', async () => {
+      let monotonicTime = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => {
+        monotonicTime += 5;
+        return monotonicTime;
+      });
+      const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const withToken = createMockPrefs({
+        token: 'secret-token',
+        instance: 'https://private.example.test',
+      });
+      controller = new SpeleoDBController(
+        service,
+        withToken,
+        cache,
+        createMockTilePrefetch(),
+      );
+
+      const result = await controller.syncProjects();
+      const records = consoleLog.mock.calls
+        .filter(([label]) => label === '[project-geojson:timing]')
+        .map(([, record]) => record);
+
+      expect(records.map((record) => record.phase)).toEqual([
+        'cache_read_work',
+        'download_work',
+        'normalization_work',
+        'validation_work',
+        'cache_write_work',
+      ]);
+      expect(records.every((record) => (
+        record.runId === result.runId
+        && record.status === 'applied'
+        && typeof record.durationMs === 'number'
+        && record.durationMs >= 0
+      ))).toBe(true);
+      expect(JSON.stringify(records)).not.toContain('secret-token');
+      expect(JSON.stringify(records)).not.toContain('private.example.test');
+      expect(JSON.stringify(records)).not.toContain(DEFAULT_PROJECT.id);
+      expect(JSON.stringify(records)).not.toContain(DEFAULT_PROJECT.name);
+    });
+
     it('returns explicit per-phase results for a successful sync', async () => {
       cache.getGeoJSON = vi.fn(async () => ({
         type: 'FeatureCollection',

@@ -11,6 +11,7 @@ import { buildLandmarkCollectionGroups } from '../../utils/landmarkCollections';
 import { ensureLandmarkPropertyIds } from '../../utils/landmarkMutations';
 import { normalizeGeoJSON } from '../../utils/normalizeGeoJSON';
 import { createProjectColorState } from '../../utils/projectColors';
+import { logPerformanceTiming } from '../../utils/performanceTiming';
 import { yieldToMainThread } from '../../utils/yieldToMainThread';
 import {
   filterOverlayByProjectVisibility,
@@ -23,6 +24,7 @@ type ProjectMapDataRecord = Record<string, ProjectGeoJSONMapData>;
 type StaleCheck = () => boolean;
 type WarningReporter = (message: string, error: unknown) => void;
 type MainThreadYield = () => Promise<void>;
+type AfterPaint = () => Promise<void>;
 type BatchPublisher<T> = (batch: ReadonlyMap<string, T>) => void;
 
 interface ProjectMapLoadState {
@@ -49,9 +51,17 @@ export interface DashboardMapDataOptions {
   landmarksRevision: number;
   warn?: WarningReporter;
   yieldWork?: MainThreadYield;
+  afterPaint?: AfterPaint;
 }
 
 const defaultWarn: WarningReporter = (message, error) => console.warn(message, error);
+const defaultAfterPaint: AfterPaint = () => new Promise((resolve) => {
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => resolve());
+    return;
+  }
+  setTimeout(resolve, 0);
+});
 const depthEnrichedCollections = new WeakMap<
 GeoJSON.FeatureCollection,
 GeoJSON.FeatureCollection
@@ -122,7 +132,12 @@ async function loadProjectMapData(
   warn: WarningReporter,
   publish: BatchPublisher<ProjectGeoJSONMapData>,
   yieldWork: MainThreadYield,
+  runId: number,
+  afterPaint: AfterPaint,
 ): Promise<void> {
+  const totalStartedAt = performance.now();
+  let cacheReadWorkMs = 0;
+  let normalizationWorkMs = 0;
   let cursor = 0;
   const queuePublication = createRenderingBatcher(isStale, publish, yieldWork);
   const worker = async (): Promise<void> => {
@@ -131,11 +146,15 @@ async function loadProjectMapData(
       cursor += 1;
       const project = projects[index];
       try {
+        const cacheReadStartedAt = performance.now();
         const mapData = await source.getProjectMapData(project.id);
+        cacheReadWorkMs += Math.max(0, performance.now() - cacheReadStartedAt);
         if (isStale()) return;
         await yieldWork();
         if (isStale()) return;
+        const normalizationStartedAt = performance.now();
         const normalized = normalizeProjectMapData(project, mapData);
+        normalizationWorkMs += Math.max(0, performance.now() - normalizationStartedAt);
         if (normalized) await queuePublication(project.id, normalized);
         if (isStale()) return;
       } catch (error) {
@@ -148,6 +167,28 @@ async function loadProjectMapData(
     { length: Math.min(4, projects.length) },
     () => worker(),
   ));
+  if (isStale()) return;
+  await afterPaint();
+  if (isStale()) return;
+  const status = 'applied';
+  logPerformanceTiming('dashboard-map', {
+    runId,
+    phase: 'project_cache_read_work',
+    durationMs: Math.round(cacheReadWorkMs * 10) / 10,
+    status,
+  });
+  logPerformanceTiming('dashboard-map', {
+    runId,
+    phase: 'project_normalization_work',
+    durationMs: Math.round(normalizationWorkMs * 10) / 10,
+    status,
+  });
+  logPerformanceTiming('dashboard-map', {
+    runId,
+    phase: 'project_total_to_paint',
+    durationMs: Math.round(Math.max(0, performance.now() - totalStartedAt) * 10) / 10,
+    status,
+  });
 }
 
 function normalizeOverlay(
@@ -192,6 +233,7 @@ function useProjectMapData(
   mapDataRevision: number,
   warn: WarningReporter,
   yieldWork: MainThreadYield,
+  afterPaint: AfterPaint,
 ) {
   const [loadState, setLoadState] = useState<ProjectMapLoadState>({
     projects,
@@ -221,9 +263,11 @@ function useProjectMapData(
         });
       },
       yieldWork,
+      mapDataRevision,
+      afterPaint,
     );
     return () => { stale = true; };
-  }, [mapDataRevision, projects, source, warn, yieldWork]);
+  }, [afterPaint, mapDataRevision, projects, source, warn, yieldWork]);
   return loadState.projects === projects && loadState.revision === mapDataRevision
     ? loadState.data
     : {};
@@ -282,6 +326,7 @@ export function useDashboardMapData({
   landmarksRevision,
   warn = defaultWarn,
   yieldWork = yieldToMainThread,
+  afterPaint = defaultAfterPaint,
 }: DashboardMapDataOptions) {
   const { sortedProjects, projectColorsById } = useMemo(
     () => createProjectColorState([...projects]),
@@ -299,6 +344,7 @@ export function useDashboardMapData({
     mapDataRevision,
     warn,
     yieldWork,
+    afterPaint,
   );
   const currentProjectMapData = useMemo<ProjectMapDataRecord>(() => {
     const next: ProjectMapDataRecord = {};

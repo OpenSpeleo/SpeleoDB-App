@@ -29,6 +29,30 @@ public class PerformanceTimingLogFormatterTest {
     }
 
     @Test
+    public void formatsGranularGeoJSONAndDashboardTimings() {
+        assertEquals(
+            "[project-geojson] run=4 phase=validation_work durationMs=25.7 status=applied",
+            PerformanceTimingLogFormatter.format(
+                "project-geojson",
+                4,
+                "validation_work",
+                25.67,
+                "applied"
+            )
+        );
+        assertEquals(
+            "[dashboard-map] run=4 phase=project_total_to_paint durationMs=31.2 status=applied",
+            PerformanceTimingLogFormatter.format(
+                "dashboard-map",
+                4,
+                "project_total_to_paint",
+                31.24,
+                "applied"
+            )
+        );
+    }
+
+    @Test
     public void rejectsUnknownOrInvalidFields() {
         assertNull(PerformanceTimingLogFormatter.format("secret", 1, "total", 1.0, "done"));
         assertNull(PerformanceTimingLogFormatter.format("project-sync", -1, "total", 1.0, "done"));

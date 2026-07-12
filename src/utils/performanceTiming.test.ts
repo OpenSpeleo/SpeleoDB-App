@@ -50,6 +50,34 @@ describe('performance timing diagnostics', () => {
     expect(logTiming).not.toHaveBeenCalled();
   });
 
+  it('forwards aggregate project and Dashboard timing scopes without payload data', () => {
+    const writeConsole = vi.fn();
+    const logTiming = vi.fn(async () => {});
+    const log = createPerformanceTimingLogger({
+      writeConsole,
+      isNativePlatform: () => true,
+      nativeSink: { logTiming },
+    });
+
+    log('project-geojson', { ...RECORD, phase: 'validation_work' });
+    log('dashboard-map', { ...RECORD, phase: 'project_total_to_paint' });
+
+    expect(logTiming).toHaveBeenNthCalledWith(1, {
+      scope: 'project-geojson',
+      runId: 7,
+      phase: 'validation_work',
+      durationMs: 12.3,
+      status: 'applied',
+    });
+    expect(logTiming).toHaveBeenNthCalledWith(2, {
+      scope: 'dashboard-map',
+      runId: 7,
+      phase: 'project_total_to_paint',
+      durationMs: 12.3,
+      status: 'applied',
+    });
+  });
+
   it('contains a rejected native diagnostic without affecting sync work', async () => {
     const writeConsole = vi.fn();
     const log = createPerformanceTimingLogger({

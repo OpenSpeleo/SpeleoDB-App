@@ -20,6 +20,14 @@ import { isAbortError, throwIfAborted } from '../utils/abort';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { isProjectGeoJSONOversized } from '../utils/projectGeoJSONBounds';
 import { CancellationContext } from './CancellationContext';
+import { ProjectGeoJSONRunTiming } from './ProjectGeoJSONRunTiming';
+import {
+  createSkippedGeoJSONPhase,
+  NO_PROJECT_GEOJSON_OUTCOME as NO_OUTCOME,
+  type ProjectGeoJSONOutcome as ProjectOutcome,
+} from './ProjectGeoJSONSyncOutcome';
+
+export { createSkippedGeoJSONPhase } from './ProjectGeoJSONSyncOutcome';
 
 interface SessionProjectGeoJSONDisposition {
   reason: ProjectGeoJSONFailureReason;
@@ -37,48 +45,15 @@ interface ProjectGeoJSONCoordinatorDependencies {
   notifyStateChanged(): void;
 }
 
-interface ProjectOutcome {
-  downloaded: number;
-  validated: number;
-  quarantined: number;
-  skipped: number;
-  failed: number;
-  localWork: boolean;
-}
-
-const NO_OUTCOME: ProjectOutcome = {
-  downloaded: 0,
-  validated: 0,
-  quarantined: 0,
-  skipped: 0,
-  failed: 0,
-  localWork: false,
-};
-
 function isSuccessfulStatus(status: number): boolean {
   return status >= 200 && status < 300;
-}
-
-export function createSkippedGeoJSONPhase(
-  reason: GeoJSONSyncPhaseResult['reason'],
-): GeoJSONSyncPhaseResult {
-  return {
-    phase: 'geojson_sync',
-    status: reason === 'aborted' ? 'aborted' : 'skipped',
-    reason,
-    eligibleProjectCount: 0,
-    downloadedProjectCount: 0,
-    validatedProjectCount: 0,
-    quarantinedProjectCount: 0,
-    skippedProjectCount: 0,
-    failedProjectCount: 0,
-  };
 }
 
 /** Owns project GeoJSON validation, quarantine, warnings, and session blocks. */
 export class ProjectGeoJSONCoordinator {
   private _warnings: ProjectGeoJSONWarning[] = [];
   private readonly blockedCommits = new Map<string, SessionProjectGeoJSONDisposition>();
+  private readonly runTiming = new ProjectGeoJSONRunTiming();
 
   constructor(private readonly dependencies: ProjectGeoJSONCoordinatorDependencies) {}
 
@@ -158,45 +133,50 @@ export class ProjectGeoJSONCoordinator {
       return createSkippedGeoJSONPhase('no_geojson_candidates');
     }
     this.pruneStaleState(eligible);
+    this.runTiming.begin(context.runId);
 
-    const outcomes: ProjectOutcome[] = [];
-    const queue = [...eligible];
-    const worker = async (): Promise<void> => {
-      while (queue.length > 0) {
-        context.throwIfAborted();
-        const project = queue.shift();
-        if (!project) return;
-        try {
-          outcomes.push(await this.processProject(context, project, allowDownloads));
-        } catch (error) {
-          if (isAbortError(error)) throw error;
-          console.warn('Failed to cache project GeoJSON:', error);
-          outcomes.push({ ...NO_OUTCOME, failed: 1 });
+    try {
+      const outcomes: ProjectOutcome[] = [];
+      const queue = [...eligible];
+      const worker = async (): Promise<void> => {
+        while (queue.length > 0) {
+          context.throwIfAborted();
+          const project = queue.shift();
+          if (!project) return;
+          try {
+            outcomes.push(await this.processProject(context, project, allowDownloads));
+          } catch (error) {
+            if (isAbortError(error)) throw error;
+            console.warn('Failed to cache project GeoJSON:', error);
+            outcomes.push({ ...NO_OUTCOME, failed: 1 });
+          }
         }
-      }
-    };
-    await Promise.all(Array.from(
-      { length: Math.min(3, eligible.length) },
-      () => worker(),
-    ));
+      };
+      await Promise.all(Array.from(
+        { length: Math.min(3, eligible.length) },
+        () => worker(),
+      ));
 
-    const totals = outcomes.reduce((sum, outcome) => ({
-      downloaded: sum.downloaded + outcome.downloaded,
-      validated: sum.validated + outcome.validated,
-      quarantined: sum.quarantined + outcome.quarantined,
-      skipped: sum.skipped + outcome.skipped,
-      failed: sum.failed + outcome.failed,
-      localWork: sum.localWork || outcome.localWork,
-    }), NO_OUTCOME);
-    if (!allowDownloads && !totals.localWork && totals.failed === 0) {
-      return this.result('skipped', 'offline_locked', eligible.length, totals);
+      const totals = outcomes.reduce((sum, outcome) => ({
+        downloaded: sum.downloaded + outcome.downloaded,
+        validated: sum.validated + outcome.validated,
+        quarantined: sum.quarantined + outcome.quarantined,
+        skipped: sum.skipped + outcome.skipped,
+        failed: sum.failed + outcome.failed,
+        localWork: sum.localWork || outcome.localWork,
+      }), NO_OUTCOME);
+      if (!allowDownloads && !totals.localWork && totals.failed === 0) {
+        return this.result('skipped', 'offline_locked', eligible.length, totals);
+      }
+      return this.result(
+        totals.failed > 0 ? 'failed' : 'applied',
+        totals.failed > 0 ? 'geojson_sync_partial_failure' : 'geojson_synced',
+        eligible.length,
+        totals,
+      );
+    } finally {
+      this.runTiming.finish(context.runId, context.signal.aborted);
     }
-    return this.result(
-      totals.failed > 0 ? 'failed' : 'applied',
-      totals.failed > 0 ? 'geojson_sync_partial_failure' : 'geojson_synced',
-      eligible.length,
-      totals,
-    );
   }
 
   private async processProject(
@@ -209,9 +189,13 @@ export class ProjectGeoJSONCoordinator {
 
     let record: ProjectGeoJSONCacheRecord;
     try {
-      record = await this.dependencies.cache.getProjectGeoJSONRecord(
-        project.id,
-        { signal: context.signal },
+      record = await this.runTiming.measure(
+        context.runId,
+        'cache_read_work',
+        () => this.dependencies.cache.getProjectGeoJSONRecord(
+          project.id,
+          { signal: context.signal },
+        ),
       );
     } catch (error) {
       if (isAbortError(error)) throw error;
@@ -301,7 +285,11 @@ export class ProjectGeoJSONCoordinator {
     }
     if (record.state !== 'legacy') return null;
 
-    const normalized = normalizeGeoJSON(record.data);
+    const normalized = this.runTiming.measureSynchronous(
+      context.runId,
+      'normalization_work',
+      () => normalizeGeoJSON(record.data),
+    );
     if (!normalized) {
       await this.quarantine(
         context,
@@ -318,16 +306,24 @@ export class ProjectGeoJSONCoordinator {
     context: CancellationContext,
     project: Project,
   ): Promise<ProjectOutcome> {
-    const response = await this.dependencies.transport.downloadJSON(
-      project.geojson_file!,
-      { signal: context.signal },
+    const response = await this.runTiming.measure(
+      context.runId,
+      'download_work',
+      () => this.dependencies.transport.downloadJSON(
+        project.geojson_file!,
+        { signal: context.signal },
+      ),
     );
     context.throwIfAborted();
     if (!isSuccessfulStatus(response.status)) {
       console.warn(`Skipping project GeoJSON cache: status ${response.status}`);
       return { ...NO_OUTCOME, failed: 1 };
     }
-    const normalized = normalizeGeoJSON(response.data);
+    const normalized = this.runTiming.measureSynchronous(
+      context.runId,
+      'normalization_work',
+      () => normalizeGeoJSON(response.data),
+    );
     if (!normalized) {
       await this.quarantine(context, project, 'invalid_geojson', this.emptyDiagnostics());
       return { ...NO_OUTCOME, downloaded: 1, quarantined: 1, failed: 1, localWork: true };
@@ -354,9 +350,13 @@ export class ProjectGeoJSONCoordinator {
   ): Promise<'active' | 'quarantined'> {
     let analysis: ProjectGeoJSONAnalysis;
     try {
-      analysis = await this.dependencies.analyzer.analyze(
-        featureCollection,
-        { signal: context.signal },
+      analysis = await this.runTiming.measure(
+        context.runId,
+        'validation_work',
+        () => this.dependencies.analyzer.analyze(
+          featureCollection,
+          { signal: context.signal },
+        ),
       );
       context.throwIfAborted();
     } catch (error) {
@@ -378,12 +378,16 @@ export class ProjectGeoJSONCoordinator {
       );
       return 'quarantined';
     }
-    const didCache = await this.dependencies.cache.setValidatedProjectGeoJSON(
-      project.id,
-      featureCollection,
-      project.latest_commit.id,
-      analysis,
-      { signal: context.signal },
+    const didCache = await this.runTiming.measure(
+      context.runId,
+      'cache_write_work',
+      () => this.dependencies.cache.setValidatedProjectGeoJSON(
+        project.id,
+        featureCollection,
+        project.latest_commit.id,
+        analysis,
+        { signal: context.signal },
+      ),
     );
     context.throwIfAborted();
     if (!didCache) {
@@ -411,12 +415,16 @@ export class ProjectGeoJSONCoordinator {
     const fileScoped = this.isContentFailure(reason);
     let persisted = false;
     if (fileScoped) {
-      persisted = await this.dependencies.cache.setQuarantinedProjectGeoJSON(
-        project.id,
-        project.latest_commit.id,
-        reason,
-        diagnostics,
-        { signal: context.signal },
+      persisted = await this.runTiming.measure(
+        context.runId,
+        'cache_write_work',
+        () => this.dependencies.cache.setQuarantinedProjectGeoJSON(
+          project.id,
+          project.latest_commit.id,
+          reason,
+          diagnostics,
+          { signal: context.signal },
+        ),
       );
       context.throwIfAborted();
     }
@@ -580,4 +588,5 @@ export class ProjectGeoJSONCoordinator {
   ): reason is ProjectGeoJSONContentFailureReason {
     return reason !== 'validation_unavailable' && reason !== 'bbox_timeout';
   }
+
 }

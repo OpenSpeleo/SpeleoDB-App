@@ -196,6 +196,7 @@ const {
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: () => 'android', isNativePlatform: () => true },
+  registerPlugin: () => ({ logTiming: vi.fn(async () => {}) }),
 }));
 
 vi.mock('@capacitor/geolocation', () => ({

@@ -1,7 +1,9 @@
 import Foundation
 
 enum PerformanceTimingLogFormatter {
-    private static let scopes: Set<String> = ["project-sync", "offline-map"]
+    private static let scopes: Set<String> = [
+        "project-sync", "project-geojson", "dashboard-map", "offline-map"
+    ]
     private static let phases: Set<String> = [
         "cache_load",
         "project_refresh",
@@ -11,7 +13,15 @@ enum PerformanceTimingLogFormatter {
         "tile_prefetch",
         "total",
         "coverage_source_collection",
-        "plan_schedule"
+        "plan_schedule",
+        "cache_read_work",
+        "download_work",
+        "normalization_work",
+        "validation_work",
+        "cache_write_work",
+        "project_cache_read_work",
+        "project_normalization_work",
+        "project_total_to_paint"
     ]
     private static let statuses: Set<String> = [
         "applied",

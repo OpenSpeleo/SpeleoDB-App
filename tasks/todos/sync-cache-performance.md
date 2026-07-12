@@ -82,10 +82,10 @@ MapLibre source updates, so it is not the first optimization target.
 - [x] Add a reproducible 60-project benchmark using representative large
   GeoJSON payloads and measure wall-clock latency, publication latency, retained
   heap ownership, and main-thread task duration.
-- [ ] Run the same benchmark against `1a8e3ef` and the current implementation;
+- [x] Run the same benchmark against `1a8e3ef` and the current implementation;
   record raw samples, median, and worst result instead of operation-count
   proxies.
-- [ ] Add native-safe aggregate timings for project cache read, worker
+- [x] Add native-safe aggregate timings for project cache read, worker
   validation/structured-clone, durable cache write, Dashboard normalization,
   and Dashboard publication so the physical-device path reports the actual
   bottleneck without project identifiers or payload data.
@@ -96,9 +96,12 @@ MapLibre source updates, so it is not the first optimization target.
   because its operation counts improved.
 - [ ] Prove the corrected implementation beats the `1a8e3ef` baseline without
   weakening durability, cancellation, validation, or progressive visibility.
-- [ ] Update performance documentation with measured results and limitations.
+- [x] Update performance documentation with measured results and limitations.
 - [ ] Run focused, full web, native timing-formatter, and applicable native
   compilation verification.
+- [x] Commit the green diagnostic boundary independently as `[Feature] Add
+  granular sync wall-clock diagnostics`; inspect the commit and clean status
+  before implementing the measured correction. Do not push.
 - [ ] Commit the green correction independently as `[Fix] Remove sync
   performance regression`; inspect the commit and clean status. Do not push.
 
@@ -283,3 +286,40 @@ storage—is still dominant.
   ms; all-project cold median 195.9 ms (worst 260.8 ms); warm-revision median
   50.9 ms (worst 51.0 ms); mounted heap delta median 53.1 MiB. These numbers are
   not an improvement claim until the identical `1a8e3ef` baseline completes.
+- Identical final comparison after adding the full-path workload:
+  - First publication median: baseline 374.5 ms; current 139.5 ms.
+  - All-project cold median: baseline 634.2 ms; current 193.9 ms.
+  - Warm-revision median: baseline 749.0 ms; current 50.9 ms.
+  - Mounted heap delta median: baseline 173.0 MiB; current 59.7 MiB.
+  - Full post-network median: baseline 250.5 ms; current 164.5 ms.
+  - Maximum timer-delay median: baseline 23.4 ms; current 7.4 ms.
+- The deterministic desktop workload therefore does not reproduce the physical
+  phone regression. Worker structured cloning/startup, real WebKit IndexedDB,
+  and MapLibre commit-to-paint remain unmeasured and require native-safe timing
+  at their production boundaries before another behavior change.
+
+### PERF-006 diagnostic TDD evidence
+
+- Red command: `npx vitest run src/utils/performanceTiming.test.ts
+  src/pages/dashboard/useDashboardMapData.test.ts
+  src/controllers/SpeleoDBController.test.ts -t 'forwards aggregate|logs
+  aggregate GeoJSON|logs cache, normalization'`.
+- Red result: no aggregate GeoJSON records existed and no Dashboard-to-paint
+  records existed. The two production-boundary assertions failed as expected;
+  the fixed-field forwarding test established the new safe schema expectation.
+- Green selected result: 3/3 pass, followed by 331/331 owning web tests.
+- Android `./gradlew testDebugUnitTest` — pass, including the native formatter
+  allowlist and a production web-asset build.
+- iOS focused XCTest — 4/4 formatter tests pass on an iPhone 17 Pro / iOS 26.5
+  simulator. A fresh `ios/DerivedData/PerfDiagnostics` path avoided the stale
+  cross-module Swift `.priors` cache failure.
+- Production diagnostics now emit constant-memory aggregate work totals for
+  cache reads, download/JSON decoding, normalization, worker validation and
+  structured clone, durable writes, and Dashboard completion-to-next-paint.
+  Native formatters accept only the new fixed scopes/phases; identifiers,
+  credentials, URLs, coordinates, and payloads remain impossible to forward.
+- Full web gate: lint, typecheck, and production build pass (616 modules);
+  117 test files pass with 2 skipped, 1,923 tests pass with 13 skipped. Coverage
+  is 90.43% statements, 82.02% branches, 92.91% functions, and 92.55% lines.
+- Quality inventory passes after classifying the standalone benchmark tooling;
+  no generated Android or iOS web-asset diff remains tracked.

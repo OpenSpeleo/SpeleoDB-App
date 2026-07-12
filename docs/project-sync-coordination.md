@@ -81,6 +81,12 @@ same `runId`:
   generation, plan-chunk persistence, stale-generation cleanup, and durable
   admission of the new layer generations.
 
+`geojson_sync` also emits five aggregate work totals under
+`[project-geojson:timing]`: cache reads, download/JSON decoding, normalization,
+worker validation/structured-clone, and durable cache writes. These totals make
+physical-device WebKit and IndexedDB costs visible without logging any project
+identity or payload. See `performance-diagnostics.md` for interpretation.
+
 Neither source collection, plan admission, nor tile HTTP downloads hold
 `syncStatus === 'syncing'`; their progress remains in the offline-map store.
 The timing records deliberately exclude credentials, instance URLs,

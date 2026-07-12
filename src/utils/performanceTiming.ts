@@ -1,6 +1,10 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
-export type PerformanceTimingScope = 'project-sync' | 'offline-map';
+export type PerformanceTimingScope =
+  | 'project-sync'
+  | 'project-geojson'
+  | 'dashboard-map'
+  | 'offline-map';
 
 export interface PerformanceTimingRecord {
   runId: number;

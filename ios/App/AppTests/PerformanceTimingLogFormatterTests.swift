@@ -28,6 +28,29 @@ final class PerformanceTimingLogFormatterTests: XCTestCase {
         )
     }
 
+    func testFormatsGranularGeoJSONAndDashboardTimings() {
+        XCTAssertEqual(
+            PerformanceTimingLogFormatter.format(
+                scope: "project-geojson",
+                runId: 4,
+                phase: "validation_work",
+                durationMs: 25.67,
+                status: "applied"
+            ),
+            "[project-geojson] run=4 phase=validation_work durationMs=25.7 status=applied"
+        )
+        XCTAssertEqual(
+            PerformanceTimingLogFormatter.format(
+                scope: "dashboard-map",
+                runId: 4,
+                phase: "project_total_to_paint",
+                durationMs: 31.24,
+                status: "applied"
+            ),
+            "[dashboard-map] run=4 phase=project_total_to_paint durationMs=31.2 status=applied"
+        )
+    }
+
     func testRejectsUnknownOrInvalidFields() {
         XCTAssertNil(PerformanceTimingLogFormatter.format(
             scope: "secret", runId: 1, phase: "total", durationMs: 1, status: "done"

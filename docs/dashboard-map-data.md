@@ -78,6 +78,13 @@ revision-only reload reuses the enriched object without scanning every feature
 again. The weak cache does not retain data after the source record leaves both
 the bounded service cache and mounted UI.
 
+Every project-data generation emits three sanitized aggregate timings under
+`[dashboard-map:timing]`: cache-read work, normalization/depth work, and wall
+clock from reader admission through the animation frame after final
+publication. The last value includes the device-only React/MapLibre
+commit-to-paint delay that fake IndexedDB and jsdom cannot reproduce. Logging
+retains no project identifiers, names, coordinates, or GeoJSON.
+
 ## Verification
 
 `useDashboardMapData.test.ts` directly covers zero-revision cache publication,
