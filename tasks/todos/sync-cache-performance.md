@@ -79,7 +79,7 @@ MapLibre source updates, so it is not the first optimization target.
 
 ### PERF-006 — Prove and remove the wall-clock regression
 
-- [ ] Add a reproducible 60-project benchmark using representative large
+- [x] Add a reproducible 60-project benchmark using representative large
   GeoJSON payloads and measure wall-clock latency, publication latency, retained
   heap ownership, and main-thread task duration.
 - [ ] Run the same benchmark against `1a8e3ef` and the current implementation;
@@ -273,3 +273,13 @@ storage—is still dominant.
 - No native source or generated native asset changed, so native compilation is
   inapplicable to this TypeScript/coordinator delivery. Physical-device timings
   after installation remain the authoritative performance measurement.
+
+### PERF-006 benchmark evidence
+
+- Workload: 60 validated projects, 2,000 3D point features per project, 18.1
+  MiB total GeoJSON, five samples, fake IndexedDB, React hook publication, and
+  explicit garbage collection for mounted-heap comparison.
+- Current implementation preliminary result: first publication median 144.6
+  ms; all-project cold median 195.9 ms (worst 260.8 ms); warm-revision median
+  50.9 ms (worst 51.0 ms); mounted heap delta median 53.1 MiB. These numbers are
+  not an improvement claim until the identical `1a8e3ef` baseline completes.
