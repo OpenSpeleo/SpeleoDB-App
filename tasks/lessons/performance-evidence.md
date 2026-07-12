@@ -18,3 +18,9 @@ Before claiming a performance improvement:
 5. Treat operation-count reductions only as supporting evidence. If wall-clock
    or responsiveness regresses, revert or redesign the optimization regardless
    of its theoretical improvement.
+
+Load-sensitive build-performance advisories do not belong in artifact tests
+whose contract is unrelated to build speed. Disable that exact advisory through
+the build tool's scoped configuration for the test invocation; do not mute
+`console.warn`, weaken the repository console guard, or disable the advisory in
+normal production builds.

@@ -53,7 +53,14 @@ describe('built SpeleoDB PWA metadata', () => {
         configFile: path.resolve('vite.config.ts'),
         mode: 'production',
         logLevel: 'silent',
-        build: { outDir, emptyOutDir: true },
+        build: {
+          outDir,
+          emptyOutDir: true,
+          // This metadata-only build does not benchmark plugins. Rolldown's
+          // load-sensitive advisory is nondeterministic and bypasses Vite's
+          // silent logger; standalone production builds retain the check.
+          rolldownOptions: { checks: { pluginTimings: false } },
+        },
       });
     } finally {
       if (previousBundleBudget === undefined) {

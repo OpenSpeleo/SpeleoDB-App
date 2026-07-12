@@ -26,7 +26,7 @@ plan chunks.
       and transient-memory implications.
 - [x] Run focused tests, lint, typecheck, build, the complete CI test suite,
       coding-rule checks, and `git diff --check`.
-- [ ] Inspect staged and unstaged diffs, commit this objective independently,
+- [x] Inspect staged and unstaged diffs, commit this objective independently,
       verify the commit, and confirm no unintended worktree changes.
 
 ## Review
@@ -88,8 +88,10 @@ the authoritative candidate measurement.
   final rerun after adding the literal 1,000,001-coordinate boundary executed
   all 1,925 product tests successfully but was non-green because the PWA
   metadata test's in-process Vite build emitted Rolldown's known nondeterministic
-  `PLUGIN_TIMINGS` console warning. That separate harness issue must be corrected
-  and the full gate restored before final handoff.
+  `PLUGIN_TIMINGS` console warning. The separate test-harness correction then
+  restored the final full gate: 117 passed files / 1,925 passed tests with the
+  same 2 configured files and 13 staging-only tests skipped and the same
+  coverage values.
 - `npm run quality:inventory` covered all 607 tracked files.
 - `npx cap sync` passed for Android and iOS with no tracked native diff.
 - Android `./gradlew testDebugUnitTest lintDebug assembleDebug` passed.
@@ -108,3 +110,5 @@ iOS compilation, storage integration, worker protocol, exact limit, and
 operation-count behavior are proven; the post-fix physical-device wall clock
 and UI responsiveness still require the existing diagnostic log from an
 installed candidate build. No artifact was pushed or published.
+
+Planner fix commit: `1474cfd4a367eb0a6334fc1a60b1c5a6727451ef`.
