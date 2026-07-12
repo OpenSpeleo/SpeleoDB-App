@@ -4,6 +4,18 @@ Manual checklist for the GPS menu before shipping to Android and iPhone users.
 This focuses on device behavior that automated web tests cannot prove, plus the
 store declarations needed for background GPS recording, GPX sharing, and upload.
 
+## Evidence Boundary
+
+Run the repository's lint, typecheck, covered web suite, production build, and
+documentation-contract tests before starting this checklist. Automated tests own
+deterministic failure paths such as rejected IndexedDB writes, serialized recorder
+commands, notification-denial admission, explicit queue replay, and logout
+cancellation. This checklist owns behavior only a packaged native runtime or
+physical device can prove: permission sheets, visible/hidden OS indicators,
+background and lock-screen delivery, OEM battery policy, share sheets, and store
+declarations. Record the device model, OS version, build identifier, and outcome
+for each executed device case; an unchecked case remains an external release gate.
+
 ## Android Device Testing
 
 Test on at least:
@@ -52,9 +64,13 @@ Test on at least:
 2. Start GPS Track Recording.
 3. Grant location permission but deny notification permission.
 4. Expected:
-   - Recording does not start.
-   - A clear error toast is shown.
-   - App does not remain stuck in "Recording - 0 pts".
+   - Recording starts and continues to accept points.
+   - The foreground-service notification may be hidden while permission is denied.
+   - Pause, Resume, and Stop & Save remain usable.
+
+Notification permission is best-effort on Android 13+. Location authorization
+remains the recording gate; notification denial is not presented as a recording
+failure.
 
 ### Background And Screen-Lock Recording
 
@@ -96,7 +112,7 @@ Test on at least:
 8. Expected: banner stays dismissed for the current session; recording still
    works without the exemption.
 
-### Offline Upload Drain
+### Offline Upload Replay
 
 1. Turn on airplane mode or otherwise block network.
 2. Record and save a track.
@@ -105,8 +121,12 @@ Test on at least:
 5. Restore network.
 6. Use Settings -> Go Online or Pending -> Try Reconnect, or relaunch the app
    and let startup validation succeed.
-7. Expected: pending GPS upload drains automatically.
-8. Confirm untouched Local tracks do not upload until the user taps Upload.
+7. Expected: the offline lock clears and server data refreshes. Reconnect alone
+   must not replay or remove the pending operation.
+8. Open Pending and tap Sync for the row or Sync Now.
+9. Expected: the upload completes and the pending row disappears only after the
+   confirmed server result and local cache transaction complete.
+10. Confirm untouched Local tracks do not upload until the user taps Upload.
 
 ### GPX Share
 
@@ -124,6 +144,22 @@ Test on at least:
    - Captured points appear as a recovered local track.
    - No 0-point track appears.
    - User must start a new recording to continue.
+
+### Pending Operations And Sign-out
+
+1. Queue one offline GPS upload and note the Pending badge count.
+2. Open Settings and start sign-out.
+3. Expected: the modal names the exact pending-operation count, states that the
+   operations are permanently deleted and unrecoverable, and disables Wipe local
+   data & Sign Out until the acknowledgement is checked.
+4. Cancel, reopen, and confirm the acknowledgement is reset.
+5. Acknowledge and sign out.
+6. Expected: authentication, cached projects/GeoJSON, pending operations, and
+   local/cached GPS records are absent after relaunch.
+
+The acknowledgement is voluntary-sign-out UX only. A credential-invalidating
+`401`/`403` uses forced non-interactive logout so revoked credentials and local
+user data cannot remain merely because no confirmation UI is available.
 
 ## iPhone Device Testing
 

@@ -32,6 +32,13 @@ too easy to change accidentally.
   purge state remain current.
 - Confirmed server edit/delete responses update the cache before publishing
   remote ground truth.
+- Confirmed remote edits and deletes use one strict IndexedDB read-write
+  transaction. A cache failure rejects the mutation without publishing a
+  revision, removing a durable queue entry, or presenting the remote response as
+  locally committed.
+- Local record writes and deletions propagate storage failures. A failed delete
+  remains visible for retry; a failed final recording write leaves the complete
+  session paused and recoverable rather than announcing a save.
 - Project-sync GPS metadata is cached, cancellation is checked, and only then is
   the new list published. A completion after cancellation cannot expose stale
   state.
@@ -59,6 +66,11 @@ races, persistence serialization, late-write cleanup, snapshot folds, local and
 remote mutation paths, every retry class, queue persistence failure, response
 error shapes, lazy geometry, cancellation commit gates, and logout reset.
 `SpeleoDBController.test.ts` remains the public-façade integration seam.
+
+`quality/release-documentation-contract.test.ts` separately prevents the native
+release checklist from contradicting these persistence and replay invariants. It
+does not replace the IndexedDB transaction, cancellation, or device tests that
+own the behavior itself.
 
 No polling or passive network listener is added. Snapshot rebuilding remains
 limited to GPS revisions; geometry is downloaded once and cached; local writes

@@ -91,6 +91,25 @@ tests, raise each critical floor as evidence improves, and enable repository
 authoritative proof is still the full `npm run test:ci` command: Vitest exits
 non-zero when either a global or file-specific floor is missed.
 
+## Release Behavior Documentation
+
+Release instructions are executable contracts where a stale expectation can
+invalidate otherwise-correct device evidence. The covered suite therefore runs
+`quality/release-documentation-contract.test.ts`, which keeps the native GPS
+checklist and deep-link documentation aligned with five tested runtime rules:
+
+- reconnect refreshes state but queue replay is explicit from Pending;
+- Android notification denial does not block recording;
+- deep-link diagnostics never contain the received URL or query payload;
+- voluntary pending-operation deletion requires acknowledgement, while forced
+  credential-invalidating logout is non-interactive;
+- GPS save success is published only after durable persistence.
+
+This contract detects contradictory instructions; it is not a substitute for
+the owning component, coordinator, fake-IndexedDB, native, or physical-device
+tests. `GPS_NATIVE_RELEASE_CHECKLIST.md` defines that evidence boundary and
+requires device/build identity for each manual result.
+
 ## Secrets
 
 Integration tests are opt-in. They run only when `API_TEST_ENABLED=true` and all

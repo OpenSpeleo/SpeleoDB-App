@@ -328,9 +328,9 @@ hidden. `docs/deep-linking.md` says the URL itself is logged, while code logs a
 fixed event label. These contradictions can produce false release failures or
 miss the actual contract.
 
-- [ ] Align the native checklist and deep-link docs with code after behavior is
+- [x] Align the native checklist and deep-link docs with code after behavior is
       locked by tests.
-- [ ] Update logout, offline queue, GPS recording/track, persistence, testing,
+- [x] Update logout, offline queue, GPS recording/track, persistence, testing,
       and release docs for every correction above, including performance impact
       and physical-device limits.
 
@@ -700,3 +700,30 @@ a commit cannot contain its own stable final hash.
   `image/png` for every icon; MapLibre contracts remain green.
 - **Limitations:** browser/PWA metadata is covered here. Native icon resources
   are unchanged and remain subject to final Capacitor/native inspection.
+
+### RR-012 — Runtime-aligned release documentation
+
+- **RED:** `npx vitest run quality/release-documentation-contract.test.ts
+  --reporter=dot` — after removing one line-wrap-sensitive harness assertion,
+  3 expected failures proved that the native checklist still required automatic
+  replay, rejected recording after notification denial, and claimed deep-link
+  URL payloads were logged. The existing logout and durable GPS-save contracts
+  passed in the same run.
+- **GREEN:** the unchanged focused command passed 4/4. The persistent contract
+  scopes assertions to the owning checklist sections and tolerates Markdown line
+  wrapping while rejecting the contradictory behaviors.
+- **Design/performance:** the native checklist now separates deterministic web/
+  fake-IndexedDB evidence from packaged-native and physical-device evidence. It
+  requires explicit Pending replay, treats Android notification permission as
+  best-effort, records destructive sign-out behavior, and requires device/build
+  identity for manual results. Deep-link diagnostics document the fixed,
+  payload-free event label. No runtime code or shipped payload changed.
+- **Gates:** lint, typecheck, production build with bundle budgets, runtime/full
+  dependency audits (zero vulnerabilities), hard button scan, and configured
+  staging integration (2 files / 13 tests) passed. The threshold-enforced suite
+  passed 112 files / 1,886 tests with 13 staging-only skips; coverage remained
+  90.27% statements, 82.05% branches, 92.73% functions, and 92.36% lines.
+  MapLibre contracts remained green within the complete suite.
+- **Limitations:** this correction makes the protocols truthful; it does not
+  manufacture emulator, physical-device, store-console, or trusted-signing
+  evidence. Those remain RR-008/RR-009 gates.

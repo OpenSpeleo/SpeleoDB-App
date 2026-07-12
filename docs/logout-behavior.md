@@ -32,6 +32,8 @@ Logout must not be triggered by transient network conditions:
 - the native secure authentication token and its non-secret session marker,
 - `localStorage` and `sessionStorage`,
 - cached projects and GeoJSON (including dashboard overlay GeoJSON),
+- pending landmark/GPS operations in the `offline_ops` IndexedDB store,
+- local GPS recordings, cached remote GPS metadata, and cached GPS geometry,
 - cached map tiles,
 - persisted offline-map plans, generations, memberships, and cached tiles.
 
@@ -124,4 +126,5 @@ additional network requests.
 - Overlay details: `docs/dashboard-map-overlays.md`
 - Regression tests: `src/controllers/SessionCoordinator.test.ts`,
   `src/controllers/SpeleoDBController.test.ts`, and
-  `src/context/SpeleoDBProvider.test.tsx`
+  `src/context/SpeleoDBProvider.test.tsx`; voluntary confirmation coverage:
+  `src/pages/Settings.test.tsx`
