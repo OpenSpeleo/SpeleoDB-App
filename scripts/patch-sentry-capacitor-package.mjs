@@ -34,6 +34,7 @@ const sourceDependency = '.product(name: "Sentry", package: "sentry-cocoa")';
 const dynamicDependency = '.product(name: "Sentry-Dynamic", package: "sentry-cocoa")';
 const legacyProguardConfig = "getDefaultProguardFile('proguard-android.txt')";
 const optimizedProguardConfig = "getDefaultProguardFile('proguard-android-optimize.txt')";
+const gradle10PropertyAssignments = ['namespace', 'abortOnError'];
 
 // Historical filename aside, this postinstall owns all node_modules patches
 // required by the native Capacitor build: Sentry iOS product selection,
@@ -131,6 +132,49 @@ function patchBackgroundGeolocationAndroidProguardDefault() {
   const patchedGradle = currentGradle.split(legacyProguardConfig).join(optimizedProguardConfig);
   writeFileSync(backgroundGeolocationAndroidGradlePath, patchedGradle, 'utf8');
   console.log('[gradle] Updated default ProGuard file for: @capacitor-community/background-geolocation');
+}
+
+function patchAndroidGradlePropertyAssignments(gradleFilePath, packageName) {
+  if (!existsSync(gradleFilePath)) {
+    console.log(`[gradle] Skipping Gradle 10 syntax patch: ${packageName} Android build.gradle not found.`);
+    return;
+  }
+
+  let patchedGradle = readFileSync(gradleFilePath, 'utf8');
+  let changed = false;
+
+  for (const propertyName of gradle10PropertyAssignments) {
+    const assignment = new RegExp(`^(\\s*)${propertyName}\\s*=`, 'm');
+    if (assignment.test(patchedGradle)) {
+      continue;
+    }
+
+    const deprecatedSpaceAssignment = new RegExp(
+      `^(\\s*)${propertyName}\\s+(?![=])(.+)$`,
+      'm',
+    );
+    if (!deprecatedSpaceAssignment.test(patchedGradle)) {
+      throw new Error(
+        `[gradle] ${packageName} Android build.gradle contains neither the expected deprecated ` +
+          `'${propertyName} value' form nor the Gradle 10-compatible '${propertyName} = value' form. ` +
+          'The plugin version likely changed; review this compatibility patch before building Android.',
+      );
+    }
+
+    patchedGradle = patchedGradle.replace(
+      deprecatedSpaceAssignment,
+      `$1${propertyName} = $2`,
+    );
+    changed = true;
+  }
+
+  if (!changed) {
+    console.log(`[gradle] ${packageName} Android property assignments are already Gradle 10-compatible.`);
+    return;
+  }
+
+  writeFileSync(gradleFilePath, patchedGradle, 'utf8');
+  console.log(`[gradle] Updated Android property assignment syntax for: ${packageName}`);
 }
 
 function patchCapacitorKotlinPluginForAgp9() {
@@ -246,4 +290,12 @@ patchBackgroundGeolocationSwiftPackage();
 patchCapacitorAndroidProguardDefaults();
 patchSentryCapacitorAndroidProguardDefault();
 patchBackgroundGeolocationAndroidProguardDefault();
+patchAndroidGradlePropertyAssignments(
+  sentryCapacitorAndroidGradlePath,
+  '@sentry/capacitor',
+);
+patchAndroidGradlePropertyAssignments(
+  backgroundGeolocationAndroidGradlePath,
+  '@capacitor-community/background-geolocation',
+);
 patchCapacitorKotlinPluginForAgp9();

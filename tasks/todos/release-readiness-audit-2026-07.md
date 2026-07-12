@@ -342,9 +342,9 @@ The Android matrix passes, but Gradle reports plugin `flatDir` use and features
 that will be incompatible with Gradle 10. These warnings currently originate in
 the Capacitor/plugin build graph and do not demonstrate a shipped defect.
 
-- [ ] Capture `--warning-mode all`, attribute each warning to repository or
+- [x] Capture `--warning-mode all`, attribute each warning to repository or
       third-party ownership, and schedule only diagnosed compatible changes.
-- [ ] Do not perform a blanket dependency or Gradle upgrade in this release
+- [x] Do not perform a blanket dependency or Gradle upgrade in this release
       task.
 
 ## Implementation order
@@ -796,3 +796,43 @@ a commit cannot contain its own stable final hash.
   uploaded, installed, validated by a store, tagged, or published. Those actions
   require separate authorization; until their hashes, installation matrices,
   symbols, store receipts, and two-person approval exist, release remains blocked.
+
+### RR-013 — Audited Android Gradle deprecations
+
+- **RED:** `npm run test.unit -- --run
+  quality/gradle-deprecation-audit.test.ts` failed 1/1 because both installed
+  Android plugins still used Gradle's deprecated Groovy space-assignment syntax
+  for `namespace` and `abortOnError`.
+- **GREEN:** the unchanged focused command passed after extending the existing
+  deterministic native-package postinstall hook. The hook converts all four
+  assignments to explicit `=` syntax and fails closed if a future plugin version
+  contains neither the audited legacy form nor the compatible form.
+- **Warning audit:** `./gradlew :app:testDebugUnitTest :app:lintDebug
+  :app:assembleDebug --warning-mode all --console=plain` initially identified
+  exactly four plugin syntax warnings and one Capacitor-generated `flatDir`
+  warning. A clean dependency install/non-cached compile additionally exposed
+  Sentry's `PackageInfo.versionCode` use and Capacitor Filesystem's internal
+  deprecated `downloadFile` compatibility call. The unchanged command remained
+  green with those three attributed third-party/generated categories.
+  `docs/android-gradle-warnings.md` records owner, impact, exact source, and
+  removal conditions for every finding.
+- **Design/performance:** no dependency or Gradle version changed. The compatible
+  correction reuses the repository's existing postinstall compatibility seam;
+  it performs two small install-time rewrites and adds no shipped runtime work.
+  Capacitor's generated Cordova build file remains unmodified so `cap sync`
+  remains reproducible.
+- **Gates:** lint, typecheck, production build with bundle budgets, focused
+  postinstall idempotence, hard button scan, and the MapLibre contracts passed.
+  A clean `npm ci` applied the compatibility transforms from unmodified locked
+  packages and reported zero dependency vulnerabilities.
+  The threshold-enforced suite passed 115 files / 1,896 tests with 13
+  staging-only skips; coverage remained 90.27% statements, 82.05% branches,
+  92.73% functions, and 92.36% lines. `npx cap sync android` completed with no
+  tracked native drift, and the post-sync Android unit/lint/debug build remained
+  green with only the documented warning categories.
+- **Limitations:** the remaining `flatDir` declaration is Capacitor 8.4.1
+  generated output and currently resolves no local JAR/AAR. Sentry's deprecated
+  release-version read is upstream runtime logic; Filesystem's deprecated method
+  is not invoked by SpeleoDB's GPX export. None is suppressed; any additional
+  warning remains a release failure. Their removal requires reviewed upstream
+  changes or a separately tested compatibility correction.
