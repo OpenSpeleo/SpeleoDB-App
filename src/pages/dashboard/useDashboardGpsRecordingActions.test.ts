@@ -278,7 +278,25 @@ describe('useDashboardGpsRecordingActions recording', () => {
     expect(late.showToast).not.toHaveBeenCalled();
   });
 
-  it('closes idle cancellation and confirms active recording discard', () => {
+  it('keeps the recorder open and reports a durable stop failure', async () => {
+    const controller = createController({
+      stopTrackRecording: vi.fn().mockRejectedValue(new Error('final write failed')),
+    });
+    const { result, showToast } = renderActions({ controller });
+
+    act(() => {
+      result.current.openRecorder();
+      result.current.stopRecording();
+    });
+    await waitFor(() => expect(showToast).toHaveBeenLastCalledWith(
+      'Could not save the GPS track. Your recording is still available to retry.',
+      'error',
+    ));
+
+    expect(result.current.isRecorderOpen).toBe(true);
+  });
+
+  it('closes idle cancellation and confirms active recording discard', async () => {
     const { result, rerender, controller } = renderActions();
 
     act(() => {
@@ -302,8 +320,29 @@ describe('useDashboardGpsRecordingActions recording', () => {
       result.current.confirmRecordingCancel();
     });
     expect(controller.discardTrackRecording).toHaveBeenCalledTimes(1);
-    expect(result.current.recordingCancelOpen).toBe(false);
+    await waitFor(() => expect(result.current.recordingCancelOpen).toBe(false));
     expect(result.current.isRecorderOpen).toBe(false);
+  });
+
+  it('keeps discard recovery available and reports deletion failure', async () => {
+    const controller = createController({
+      discardTrackRecording: vi.fn().mockRejectedValue(new Error('delete failed')),
+    });
+    const { result, rerender, showToast } = renderActions({ controller });
+    rerender({ recordingState: 'paused', tracksRevision: 0 });
+
+    act(() => {
+      result.current.openRecorder();
+      result.current.cancelRecording();
+      result.current.confirmRecordingCancel();
+    });
+    await waitFor(() => expect(showToast).toHaveBeenLastCalledWith(
+      'Could not discard the GPS track. Your recording is still available to retry.',
+      'error',
+    ));
+
+    expect(result.current.recordingCancelOpen).toBe(true);
+    expect(result.current.isRecorderOpen).toBe(true);
   });
 });
 

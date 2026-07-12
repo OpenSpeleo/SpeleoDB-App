@@ -30,13 +30,22 @@ coordinator.
 - Accepted fixes are persisted incrementally through the track coordinator's
   serialized write seam, so an older slow write cannot replace a newer point
   buffer.
-- Stop waits for queued writes before publishing the finalized track.
-- Discard and logout invalidate queued writes before removing or clearing the
-  active session.
+- Stop waits for queued writes and a successful final IndexedDB write before
+  publishing the finalized track or allowing “Track saved.” A write failure
+  propagates, leaves the watcher stopped in `paused`, and retains the complete
+  point buffer for a deterministic retry.
+- Incremental write failures surface through the recording error channel without
+  dropping the accepted in-memory points; a later final write still persists the
+  complete buffer.
+- Discard invalidates queued writes but clears the active session only after its
+  durable record is removed. Logout invalidates writes before the logout purge.
 - A failed initial watcher start returns to `idle`; a failed resume returns to
   `paused` with the existing points intact.
 - A transient watcher error does not stop recording. Authorization loss stops
-  the watcher and saves any accepted points before surfacing the one-shot error.
+  the watcher and reports that finalization is in progress; it says the track
+  was saved only after the write completes. Failure retains a paused,
+  recoverable session and surfaces an actionable error without an unhandled
+  rejection.
 - Callbacks delivered after logout are ignored because the session is already
   idle.
 
@@ -57,12 +66,12 @@ not own sampling policy.
 
 ## Verification and performance
 
-`GpsRecordingCoordinator.test.ts` covers every statement, branch, function, and
-line in the coordinator, including denied permission, no-op transitions,
+`GpsRecordingCoordinator.test.ts` covers denied permission, no-op transitions,
 start/resume rollback, stale and throttled fixes, paused timing, empty stop,
-discard failure, transient/fatal watcher errors, data-preserving finalization,
-and logout races. `SpeleoDBController.test.ts` retains the public-façade and
-real IndexedDB characterization coverage.
+incremental/final write rejection, deletion rejection, retry, transient/fatal
+watcher errors, data-preserving finalization, and logout races.
+`SpeleoDBController.test.ts` retains the public-façade and real IndexedDB
+characterization coverage.
 
 Recording performs no polling. Each accepted fix causes one serialized local
 write and one revision notification; fixes rejected by the shared gate cause

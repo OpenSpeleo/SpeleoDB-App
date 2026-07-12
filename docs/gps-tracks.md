@@ -400,7 +400,9 @@ path -- it confirms (`ConfirmDialog`, `gps-recording-cancel-confirm`) and calls
 in-progress track when recording/paused, or just closes the screen when idle.
 `discardTrackRecording()` mirrors `stopTrackRecording()` minus the persist step:
 it stops the watch, removes the in-progress record from `GpsTrackStore`, and
-resets state to `idle` without adding a saved track.
+resets state to `idle` without adding a saved track. If deletion fails, the
+recording remains paused and visible for retry instead of disappearing only in
+memory.
 
 Mechanically: pausing toggles the hook's `active` to false. The watch effect's
 cleanup stops the watch/GNSS provider but **does not** clear `samples` (so the
@@ -464,6 +466,12 @@ GPS work mirrors the landmark offline model (`docs/networking.md`,
   on a force-quit during GPS warm-up, leave a useless 0-point "track" that can't
   be uploaded; `GpsTrackStore.list()` additionally drops (and self-heals) any
   0-point record left by older builds.
+  Incremental and final write failures are authoritative. Incremental failure
+  shows a recording error while retaining the live buffer; final failure keeps
+  the session paused with every point so Stop can be retried. “Track saved” is
+  emitted only after the final durable write. A fatal permission callback first
+  reports that saving is in progress and changes to “saved” only after commit;
+  on failure it retains the same recoverable session.
 - **Create / edit / delete go through the shared offline op queue** — the exact
   same mechanism as landmarks (`docs/offline-op-queue.md`). There is **no**
   GPS-specific `uploadStatus` field and **no** GPS-specific auto-drain anymore;
@@ -498,6 +506,12 @@ self-heal: on read it **backfills a valid `color`** (`normalizeHexColor`) for
 records persisted by an older build before `LocalGpsTrack.color` existed, so the
 panel dot, map line, and the edit modal's `color.toLowerCase()` never receive
 `undefined`.
+
+`GpsTrackCoordinator` serializes writes but no longer converts storage failures
+into success. Local track deletion removes the in-memory row only after
+`GpsTrackStore.remove()` completes; on failure the row and any loaded geometry
+remain visible while the Dashboard reports an actionable error. These checks
+add no extra IndexedDB operations or point-buffer copies.
 
 Server tracks reuse the **existing** `projects` + `geojson` stores (no schema
 bump): the metadata list under the `gps-tracks` key (like

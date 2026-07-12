@@ -218,21 +218,26 @@ describe('GpsTrackCoordinator', () => {
     expect(harness.coordinator.hasPendingPersistence).toBe(false);
   });
 
-  it('skips writes outside an active session and contains storage failures', async () => {
+  it('skips writes outside an active session and reports storage failures', async () => {
     const inactive = createHarness({ active: false });
     await inactive.coordinator.enqueuePersist(LOCAL);
     expect(inactive.store.put).not.toHaveBeenCalled();
 
     const failure = new Error('write failed');
-    allowConsoleWarn('Failed to persist GPS track:', failure);
     const harness = createHarness();
     harness.store.put.mockRejectedValueOnce(failure);
-    await harness.coordinator.enqueuePersist(LOCAL);
-    await harness.coordinator.waitForPersistence();
+
+    await expect(harness.coordinator.enqueuePersist(LOCAL)).rejects.toBe(failure);
+
     expect(harness.coordinator.hasPendingPersistence).toBe(false);
+    await expect(harness.coordinator.enqueuePersist({
+      ...LOCAL,
+      updatedAt: 3_000,
+    })).resolves.toBeUndefined();
+    expect(harness.store.put).toHaveBeenCalledTimes(2);
   });
 
-  it('updates and removes local tracks while containing delete failures', async () => {
+  it('updates local tracks and keeps a failed deletion visible', async () => {
     const harness = createHarness({ local: [LOCAL] });
     await harness.coordinator.load();
     harness.setNow(20_000);
@@ -241,11 +246,12 @@ describe('GpsTrackCoordinator', () => {
     expect(updated).toMatchObject({ name: 'Renamed', updatedAt: 20_000 });
 
     const deleteError = new Error('delete failed');
-    allowConsoleWarn('Failed to delete GPS track:', deleteError);
     harness.store.remove.mockRejectedValueOnce(deleteError);
-    await harness.coordinator.removeLocal('local-1');
+
+    await expect(harness.coordinator.removeLocal('local-1')).rejects.toBe(deleteError);
+
+    expect(harness.coordinator.localTrack('local-1')).toMatchObject({ name: 'Renamed' });
     await harness.coordinator.removeLocal('missing');
-    expect(harness.coordinator.localTrack('local-1')).toBeNull();
   });
 
   it('replaces, upserts, merges, and removes remote ground truth', async () => {

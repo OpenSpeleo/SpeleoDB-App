@@ -122,7 +122,7 @@ export class GpsTrackCoordinator {
       if (this.persistQueue === trackedQueue) this.persistQueue = null;
     });
     this.persistQueue = trackedQueue;
-    return queued;
+    return trackedQueue;
   }
 
   removePersisted(id: string): Promise<void> {
@@ -171,13 +171,8 @@ export class GpsTrackCoordinator {
 
   async removeLocal(id: string, signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal);
-    try {
-      await this.dependencies.store.remove(id);
-      throwIfAborted(signal);
-    } catch (error) {
-      if (isAbortError(error) || signal?.aborted) throwIfAborted(signal);
-      console.warn('Failed to delete GPS track:', error);
-    }
+    await this.dependencies.store.remove(id);
+    throwIfAborted(signal);
     const next = this.localTracks.filter((track) => track.id !== id);
     if (next.length === this.localTracks.length) return;
     this.localTracks = next;
@@ -437,21 +432,17 @@ export class GpsTrackCoordinator {
   private async persist(track: LocalGpsTrack): Promise<void> {
     const generation = this.persistGeneration;
     if (this.dependencies.isPurging() || !this.dependencies.isSessionActive()) return;
-    try {
-      await this.dependencies.store.put(track);
-      if (
-        generation !== this.persistGeneration ||
-        this.dependencies.isPurging() ||
-        !this.dependencies.isSessionActive()
-      ) {
-        try {
-          await this.dependencies.store.remove(track.id);
-        } catch {
-          // Best-effort cleanup of a write that finished after logout/discard.
-        }
+    await this.dependencies.store.put(track);
+    if (
+      generation !== this.persistGeneration ||
+      this.dependencies.isPurging() ||
+      !this.dependencies.isSessionActive()
+    ) {
+      try {
+        await this.dependencies.store.remove(track.id);
+      } catch {
+        // Best-effort cleanup of a write that finished after logout/discard.
       }
-    } catch (error) {
-      console.warn('Failed to persist GPS track:', error);
     }
   }
 

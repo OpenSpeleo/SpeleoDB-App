@@ -175,7 +175,17 @@ function useRecorderActions({
 
   const stopRecording = useCallback(() => {
     void (async () => {
-      const track: LocalGpsTrack | null = await controller.stopTrackRecording();
+      let track: LocalGpsTrack | null;
+      try {
+        track = await controller.stopTrackRecording();
+      } catch {
+        if (!mountedRef.current) return;
+        showToast(
+          'Could not save the GPS track. Your recording is still available to retry.',
+          'error',
+        );
+        return;
+      }
       if (!mountedRef.current) return;
       setIsRecorderOpen(false);
       showToast(track ? 'Track saved' : 'No points were recorded', track ? 'success' : 'error');
@@ -188,10 +198,22 @@ function useRecorderActions({
   }, [recordingState]);
 
   const confirmRecordingCancel = useCallback(() => {
-    setRecordingCancelOpen(false);
-    void controller.discardTrackRecording();
-    setIsRecorderOpen(false);
-  }, [controller]);
+    void (async () => {
+      try {
+        await controller.discardTrackRecording();
+      } catch {
+        if (!mountedRef.current) return;
+        showToast(
+          'Could not discard the GPS track. Your recording is still available to retry.',
+          'error',
+        );
+        return;
+      }
+      if (!mountedRef.current) return;
+      setRecordingCancelOpen(false);
+      setIsRecorderOpen(false);
+    })();
+  }, [controller, mountedRef, showToast]);
 
   const openRecorder = useCallback(() => setIsRecorderOpen(true), []);
   const closeRecorder = useCallback(() => setIsRecorderOpen(false), []);

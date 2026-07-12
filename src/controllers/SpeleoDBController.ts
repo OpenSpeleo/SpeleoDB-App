@@ -520,9 +520,10 @@ export class SpeleoDBController {
   }
 
   /**
-   * Set when an active recording was forcibly stopped by a fatal location error
-   * (permission denied/revoked). The UI surfaces it once then calls
-   * `clearGpsRecordingError()`. Null otherwise.
+   * Set when recording requires user attention (fatal location loss or durable
+   * persistence/cleanup failure). The UI surfaces it once then calls
+   * `clearGpsRecordingError()`. Null otherwise; recoverable points remain owned
+   * by the recording coordinator after the one-shot message is cleared.
    */
   get gpsRecordingError(): string | null {
     return this.gpsRecordingCoordinator.recordingError;

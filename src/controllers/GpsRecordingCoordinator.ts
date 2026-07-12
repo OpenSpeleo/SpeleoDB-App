@@ -8,6 +8,8 @@ import { randomTrackColor } from '../utils/gpsTrackColors';
 const PERMISSION_LOST_MESSAGE =
   'Location access was denied, so GPS recording stopped. Allow location ' +
   '(set to "Always" for background recording) and start again.';
+const INCREMENTAL_SAVE_MESSAGE =
+  'Could not save the latest GPS points to this device. Keep the app open and retry stopping the recording.';
 
 interface GpsRecordingDependencies {
   watcher: LocationWatcher;
@@ -139,29 +141,43 @@ export class GpsRecordingCoordinator {
     const name = this.name;
     const color = this.color;
     this.freezeElapsed();
-    await this.dependencies.waitForPersistence();
-    this.clearSession();
-    if (points.length === 0) {
-      await this.removeBestEffort(id, 'Failed to discard empty GPS track:');
+    this.state = 'paused';
+    try {
+      await this.dependencies.waitForPersistence();
+      if (points.length === 0) {
+        await this.dependencies.removePersisted(id);
+        this.clearSession();
+        this.notify();
+        return null;
+      }
+      const track = this.finalizedTrack(id, finalName?.trim() || name, color, points, startedAt);
+      await this.dependencies.persist(track);
+      this.clearSession();
+      this.dependencies.addCompletedTrack(track);
       this.notify();
-      return null;
+      return track;
+    } catch (error) {
+      this.notify();
+      throw error;
     }
-    const track = this.finalizedTrack(id, finalName?.trim() || name, color, points, startedAt);
-    await this.dependencies.persist(track);
-    this.dependencies.addCompletedTrack(track);
-    this.notify();
-    return track;
   }
 
   async discard(): Promise<void> {
     if (this.state === 'idle') return;
     await this.dependencies.watcher.stop();
     this.dependencies.invalidatePersistence();
-    await this.dependencies.waitForPersistence();
     const id = this.trackId as string;
-    this.clearSession();
-    await this.removeBestEffort(id, 'Failed to discard GPS track recording:');
-    this.notify();
+    this.freezeElapsed();
+    this.state = 'paused';
+    try {
+      await this.dependencies.waitForPersistence();
+      await this.dependencies.removePersisted(id);
+      this.clearSession();
+      this.notify();
+    } catch (error) {
+      this.notify();
+      throw error;
+    }
   }
 
   clearError(): void {
@@ -197,18 +213,18 @@ export class GpsRecordingCoordinator {
     const startedAt = this.startedAt;
     const name = this.name;
     const color = this.color;
-    this.clearSession();
+    this.freezeElapsed();
+    this.state = 'paused';
     this.error = points.length > 0
-      ? `${PERMISSION_LOST_MESSAGE} Your ${points.length}-point track was saved.`
-      : PERMISSION_LOST_MESSAGE;
+      ? `${PERMISSION_LOST_MESSAGE} Saving your ${points.length}-point track…`
+      : null;
+    this.notify();
     if (points.length > 0) {
       const track = this.finalizedTrack(id, name, color, points, startedAt);
-      void this.dependencies.persist(track);
-      this.dependencies.addCompletedTrack(track);
+      void this.finalizeAfterFatalError(track);
     } else {
-      void this.removeBestEffort(id, 'Failed to discard empty GPS track:');
+      void this.removeEmptyAfterFatalError(id);
     }
-    this.notify();
   }
 
   private appendPoint(point: RecordedPoint): void {
@@ -220,8 +236,42 @@ export class GpsRecordingCoordinator {
       minIntervalMs: GPS.TRACK_SAMPLE_INTERVAL_MS,
     })) return;
     this.points = [...this.points, point];
-    void this.dependencies.persist(this.recordingTrack());
+    const trackId = this.trackId;
+    void this.dependencies.persist(this.recordingTrack()).catch(() => {
+      if (this.trackId !== trackId || this.state === 'idle') return;
+      this.error = INCREMENTAL_SAVE_MESSAGE;
+      this.notify();
+    });
     this.notify();
+  }
+
+  private async finalizeAfterFatalError(track: LocalGpsTrack): Promise<void> {
+    try {
+      await this.dependencies.persist(track);
+      if (this.trackId !== track.id || this.state === 'idle') return;
+      this.clearSession();
+      this.dependencies.addCompletedTrack(track);
+      this.error = `${PERMISSION_LOST_MESSAGE} Your ${track.points.length}-point track was saved.`;
+      this.notify();
+    } catch {
+      if (this.trackId !== track.id || this.state === 'idle') return;
+      this.error = `${PERMISSION_LOST_MESSAGE} Your ${track.points.length}-point track could not be saved. The captured points are still available to retry.`;
+      this.notify();
+    }
+  }
+
+  private async removeEmptyAfterFatalError(id: string): Promise<void> {
+    try {
+      await this.dependencies.removePersisted(id);
+      if (this.trackId !== id || this.state === 'idle') return;
+      this.clearSession();
+      this.error = PERMISSION_LOST_MESSAGE;
+      this.notify();
+    } catch {
+      if (this.trackId !== id || this.state === 'idle') return;
+      this.error = `${PERMISSION_LOST_MESSAGE} Incomplete local recording data could not be removed; retry Cancel.`;
+      this.notify();
+    }
   }
 
   private finalizedTrack(
@@ -276,16 +326,9 @@ export class GpsRecordingCoordinator {
     this.name = '';
     this.color = '';
     this.state = 'idle';
+    this.error = null;
     this.elapsedMsSnapshot = 0;
     this.elapsedUpdatedAtSnapshot = null;
-  }
-
-  private async removeBestEffort(id: string, message: string): Promise<void> {
-    try {
-      await this.dependencies.removePersisted(id);
-    } catch (error) {
-      console.warn(message, error);
-    }
   }
 
   private notify(): void {

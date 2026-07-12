@@ -60,6 +60,7 @@ function createWatcher(permission = 'granted') {
 function createHarness(options: {
   permission?: string;
   watcher?: ReturnType<typeof createWatcher>;
+  persist?: (track: LocalGpsTrack) => Promise<void>;
   removePersisted?: (id: string) => Promise<void>;
 } = {}) {
   const watch = options.watcher ?? createWatcher(options.permission);
@@ -73,7 +74,7 @@ function createHarness(options: {
     now: vi.fn(() => now),
     generateId: vi.fn(() => 'track-1'),
     defaultName: vi.fn(() => 'Track default'),
-    persist: vi.fn(async (_track: LocalGpsTrack) => {}),
+    persist: vi.fn(options.persist ?? (async (_track: LocalGpsTrack) => {})),
     removePersisted: vi.fn(options.removePersisted ?? (async (_id: string) => {})),
     waitForPersistence: vi.fn(async () => {}),
     invalidatePersistence: vi.fn(),
@@ -212,21 +213,57 @@ describe('GpsRecordingCoordinator', () => {
     expect(track?.name).toBe('Track default');
   });
 
-  it('discards points, invalidates queued writes, and tolerates removal failure', async () => {
+  it('retains a recoverable recording when explicit discard deletion fails', async () => {
     const removalError = new Error('storage unavailable');
-    allowConsoleWarn('Failed to discard GPS track recording:', removalError);
     const { coordinator, dependencies, watch } = createHarness({
       removePersisted: async () => { throw removalError; },
     });
     await coordinator.start();
     watch.emitFix(point(0));
 
-    await coordinator.discard();
+    await expect(coordinator.discard()).rejects.toBe(removalError);
 
     expect(dependencies.invalidatePersistence).toHaveBeenCalledOnce();
     expect(dependencies.waitForPersistence).toHaveBeenCalledOnce();
-    expect(coordinator.currentPoints).toEqual([]);
+    expect(coordinator.currentPoints).toEqual([point(0)]);
+    expect(coordinator.recordingState).toBe('paused');
+  });
+
+  it('retains points and reports a final-save failure for retry', async () => {
+    const storageError = new Error('final write failed');
+    const persist = vi
+      .fn<(track: LocalGpsTrack) => Promise<void>>()
+      .mockResolvedValue(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(storageError);
+    const { coordinator, completed, watch } = createHarness({ persist });
+    await coordinator.start();
+    watch.emitFix(point(0));
+
+    await expect(coordinator.stop()).rejects.toBe(storageError);
+
+    expect(coordinator.recordingState).toBe('paused');
+    expect(coordinator.currentPoints).toEqual([point(0)]);
+    expect(completed).toEqual([]);
+
+    await expect(coordinator.stop()).resolves.toMatchObject({ id: 'track-1' });
     expect(coordinator.recordingState).toBe('idle');
+    expect(coordinator.currentPoints).toEqual([]);
+    expect(completed).toHaveLength(1);
+  });
+
+  it('reports incremental persistence failure without dropping captured points', async () => {
+    const storageError = new Error('incremental write failed');
+    const { coordinator, watch } = createHarness({
+      persist: async () => { throw storageError; },
+    });
+    await coordinator.start();
+
+    watch.emitFix(point(0));
+    await vi.waitFor(() => expect(coordinator.recordingError).toMatch(/could not save/i));
+
+    expect(coordinator.recordingState).toBe('recording');
+    expect(coordinator.currentPoints).toEqual([point(0)]);
   });
 
   it('keeps transient errors active and finalizes data on fatal authorization loss', async () => {
@@ -240,17 +277,35 @@ describe('GpsRecordingCoordinator', () => {
     watch.emitFix(point(0));
     watch.emitError({ code: '1' });
 
+    await vi.waitFor(() => expect(completed).toHaveLength(1));
     expect(coordinator.recordingState).toBe('idle');
     expect(coordinator.recordingError).toMatch(/1-point track was saved/i);
-    expect(completed).toHaveLength(1);
     expect(dependencies.persist).toHaveBeenLastCalledWith(completed[0]);
     coordinator.clearError();
     expect(coordinator.recordingError).toBeNull();
   });
 
-  it('removes an empty track after native fatal authorization loss', async () => {
+  it('does not claim fatal-error recovery was saved when persistence fails', async () => {
+    const storageError = new Error('fatal final write failed');
+    const persist = vi
+      .fn<(track: LocalGpsTrack) => Promise<void>>()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(storageError);
+    const { coordinator, completed, watch } = createHarness({ persist });
+    await coordinator.start();
+    watch.emitFix(point(0));
+
+    watch.emitError({ code: 'NOT_AUTHORIZED' });
+    await vi.waitFor(() => expect(coordinator.recordingError).toMatch(/could not be saved/i));
+
+    expect(coordinator.recordingError).not.toMatch(/was saved/i);
+    expect(coordinator.recordingState).toBe('paused');
+    expect(coordinator.currentPoints).toEqual([point(0)]);
+    expect(completed).toEqual([]);
+  });
+
+  it('reports failed empty-track cleanup after native fatal authorization loss', async () => {
     const removalError = new Error('remove failed');
-    allowConsoleWarn('Failed to discard empty GPS track:', removalError);
     const { coordinator, dependencies, watch } = createHarness({
       removePersisted: async () => { throw removalError; },
     });
@@ -259,8 +314,8 @@ describe('GpsRecordingCoordinator', () => {
     watch.emitError({ code: 'NOT_AUTHORIZED' });
     await vi.waitFor(() => expect(dependencies.removePersisted).toHaveBeenCalledWith('track-1'));
 
-    expect(coordinator.recordingState).toBe('idle');
-    expect(coordinator.recordingError).toMatch(/location access was denied/i);
+    await vi.waitFor(() => expect(coordinator.recordingError).toMatch(/could not be removed/i));
+    expect(coordinator.recordingState).toBe('paused');
     await coordinator.stopForLogout();
     expect(coordinator.recordingError).toBeNull();
   });

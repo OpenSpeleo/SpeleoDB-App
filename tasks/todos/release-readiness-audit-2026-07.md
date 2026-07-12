@@ -229,15 +229,15 @@ force quit can lose the accepted track despite the explicit durability
 contract. Local delete failures are also hidden while the item is removed from
 memory, allowing deleted tracks to reappear after restart.
 
-- [ ] **RED:** reject the final/incremental `GpsTrackStore.put()` and local
+- [x] **RED:** reject the final/incremental `GpsTrackStore.put()` and local
       delete ports. Assert stop/fatal finalization currently claims success and
       deletion currently disappears only in memory.
-- [ ] **GREEN:** propagate durable write/delete results at user-command
+- [x] **GREEN:** propagate durable write/delete results at user-command
       boundaries, retain a recoverable in-memory recording on final-save
       failure, and show a fixed actionable UI error. Fatal native callbacks must
       publish “saved” only after persistence completes; otherwise retain and
       surface recovery state without an unhandled rejection.
-- [ ] Rerun GPS coordinator, recording UI, logout persistence, and force-quit
+- [x] Rerun GPS coordinator, recording UI, logout persistence, and force-quit
       recovery tests.
 
 #### RR-007 — GPS recording transitions allow overlapping native commands
@@ -603,3 +603,29 @@ a commit cannot contain its own stable final hash.
   92.65% functions, and 92.30% lines. MapLibre contract tests remain green.
 - **Limitations:** native source and generated projects are unchanged; native
   compilation remains in the final cross-platform gate.
+
+### RR-006 — Honest GPS persistence results
+
+- **RED:** `npx vitest run src/controllers/GpsTrackCoordinator.test.ts
+  src/controllers/GpsRecordingCoordinator.test.ts
+  src/pages/dashboard/useDashboardGpsRecordingActions.test.ts` — 7 expected
+  failures plus one unhandled rejection proved incremental/final write errors
+  were hidden or unhandled, failed deletions disappeared in memory, fatal
+  recovery claimed “saved” early, and Dashboard stop had no rejection path.
+- **GREEN:** the focused GPS coordinator/recording/Dashboard action matrix
+  passed 58/58 tests; the expanded public-controller/global-toast matrix passed
+  256/256. Coverage proves incremental error reporting, final-save
+  retry with all points retained, fatal-callback success/failure publication,
+  strict local deletion, failed discard retention, command-lane recovery, and a
+  fixed actionable stop error that keeps the recorder open.
+- **Design/performance:** the existing serialized write lane now propagates its
+  tracked promise. State publication follows durable completion; failures retain
+  the authoritative in-memory buffer/row. No extra writes, reads, polling, or
+  point copies were added.
+- **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
+  hard button scan, and configured staging integration (2 files / 13 tests)
+  passed. The deterministic covered suite passed 109 files / 1,870 tests with
+  13 staging-only skips; coverage was 90.23% statements, 82.12% branches,
+  92.66% functions, and 92.33% lines. MapLibre contract tests remain green.
+- **Limitations:** physical background/permission-loss behavior remains an
+  RR-008 device protocol. Native source and generated projects are unchanged.

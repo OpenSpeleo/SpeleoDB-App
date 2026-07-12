@@ -4381,6 +4381,7 @@ describe('SpeleoDBController GPS tracks', () => {
       // background-geolocation reports NOT_AUTHORIZED when location is denied.
       watcher.emitError({ code: 'NOT_AUTHORIZED', message: 'denied' });
 
+      await vi.waitFor(() => expect(controller.gpsRecordingState).toBe('idle'));
       expect(controller.gpsRecordingState).toBe('idle');
       expect(controller.gpsRecordingError).toBeTruthy();
       expect(watcher.stop).toHaveBeenCalled();
@@ -4401,6 +4402,7 @@ describe('SpeleoDBController GPS tracks', () => {
       // Permission revoked mid-run (web GeolocationPositionError.code === 1).
       watcher.emitError({ code: 1, message: 'User denied Geolocation' });
 
+      await vi.waitFor(() => expect(controller.gpsTracks).toHaveLength(1));
       expect(controller.gpsRecordingState).toBe('idle');
       expect(controller.gpsRecordingError).toBeTruthy();
       expect(controller.gpsRecordingError).toMatch(/track was saved/i);
