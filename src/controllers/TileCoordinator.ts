@@ -184,12 +184,23 @@ export class TileCoordinator {
     forceRefresh = false,
   ): Promise<TilePrefetchPhaseResult> {
     const requestVersion = this.supersedeCoverageRequests();
+    let activeTiming: {
+      phase: 'coverage_source_collection' | 'plan_schedule';
+      startedAt: number;
+    } | null = null;
     if (!this.dependencies.hasNetworkAccess()) {
       return createSkippedTilePrefetchPhase('offline_locked');
     }
     try {
+      activeTiming = {
+        phase: 'coverage_source_collection',
+        startedAt: performance.now(),
+      };
       const sources = await this.collectCoverageSources(context, projects);
+      this.logOfflineMapTiming(context.runId, activeTiming, 'applied');
+      activeTiming = null;
       this.assertCoverageRequestCurrent(requestVersion, context);
+      activeTiming = { phase: 'plan_schedule', startedAt: performance.now() };
       const result = await this.engine.schedule({
         mode: 'rebuild',
         plan: sources.planning,
@@ -201,6 +212,8 @@ export class TileCoordinator {
         signal: context.signal,
       });
       context.throwIfAborted();
+      this.logOfflineMapTiming(context.runId, activeTiming, 'applied');
+      activeTiming = null;
       return {
         phase: 'tile_prefetch',
         status: sources.failedProjectCount > 0 ? 'failed' : 'applied',
@@ -214,6 +227,13 @@ export class TileCoordinator {
         landmarkScheduled: sources.landmarkCount > 0,
       };
     } catch (error) {
+      if (activeTiming) {
+        this.logOfflineMapTiming(
+          context.runId,
+          activeTiming,
+          isAbortError(error) || context.signal.aborted ? 'aborted' : 'failed',
+        );
+      }
       if (isAbortError(error)) throw error;
       return {
         phase: 'tile_prefetch',
@@ -224,6 +244,23 @@ export class TileCoordinator {
         failedProjectCount: 1,
       };
     }
+  }
+
+  private logOfflineMapTiming(
+    runId: number,
+    timing: {
+      phase: 'coverage_source_collection' | 'plan_schedule';
+      startedAt: number;
+    },
+    status: 'applied' | 'aborted' | 'failed',
+  ): void {
+    const elapsed = Math.max(0, performance.now() - timing.startedAt);
+    console.info('[offline-map:timing]', {
+      runId,
+      phase: timing.phase,
+      durationMs: Math.round(elapsed * 10) / 10,
+      status,
+    });
   }
 
   async refreshOfflineMaps(): Promise<void> {

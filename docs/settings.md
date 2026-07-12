@@ -49,6 +49,13 @@ Online** button (see Account section). It is also disabled while
 label (`data-testid="sync-status-label"`) to prevent double-submission. The
 `data-testid` remains `sync-button`.
 
+For a slow `Syncing…` state, the device console provides bounded structured
+timing records. `[project-sync:timing]` separates cache load, project refresh,
+GeoJSON, overlays, GPS, offline-map admission, and total time;
+`[offline-map:timing]` further separates coverage-source collection from plan
+generation/admission. See `docs/project-sync-coordination.md` for the schema,
+phase boundaries, and privacy contract.
+
 > Runtime offline transition: a Resync only runs while online, but if its
 > project-list refresh cannot reach the server (timeout, transport error, or
 > 5xx), the controller flips the app to offline mode (see `docs/offline-mode.md`

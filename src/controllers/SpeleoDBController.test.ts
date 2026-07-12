@@ -1430,6 +1430,76 @@ describe('SpeleoDBController', () => {
   });
 
   describe('syncProjects phase results', () => {
+    it('logs ordered phase timings and one terminal timing without user data', async () => {
+      let monotonicTime = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => {
+        monotonicTime += 5;
+        return monotonicTime;
+      });
+      const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
+      cache.getGeoJSON = vi.fn(async () => ({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'Point', coordinates: [2.3, 46.6] },
+        }],
+      }));
+      const withToken = createMockPrefs({
+        token: 'secret-token',
+        instance: 'https://private.example.test',
+      });
+      controller = new SpeleoDBController(
+        service,
+        withToken,
+        cache,
+        createMockTilePrefetch(),
+      );
+
+      const result = await controller.syncProjects();
+      const timingRecords = consoleInfo.mock.calls
+        .filter(([label]) => label === '[project-sync:timing]')
+        .map(([, record]) => record);
+
+      expect(timingRecords).toHaveLength(7);
+      expect(timingRecords.map((record) => record.phase)).toEqual([
+        'cache_load',
+        'project_refresh',
+        'geojson_sync',
+        'overlay_sync',
+        'gps_sync',
+        'tile_prefetch',
+        'total',
+      ]);
+      expect(timingRecords).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          runId: result.runId,
+          phase: 'project_refresh',
+          status: 'applied',
+          reason: 'project_list_refreshed',
+          durationMs: expect.any(Number),
+        }),
+        expect.objectContaining({
+          runId: result.runId,
+          phase: 'gps_sync',
+          status: 'applied',
+          reason: 'gps_sync_completed',
+          durationMs: expect.any(Number),
+        }),
+        expect.objectContaining({
+          runId: result.runId,
+          phase: 'total',
+          status: 'done',
+          durationMs: expect.any(Number),
+        }),
+      ]));
+      expect(timingRecords.every((record) => record.durationMs >= 0)).toBe(true);
+      expect(JSON.stringify(timingRecords)).not.toContain('secret-token');
+      expect(JSON.stringify(timingRecords)).not.toContain('private.example.test');
+      expect(JSON.stringify(timingRecords)).not.toContain(DEFAULT_PROJECT.id);
+      expect(JSON.stringify(timingRecords)).not.toContain(DEFAULT_PROJECT.name);
+    });
+
     it('returns explicit per-phase results for a successful sync', async () => {
       cache.getGeoJSON = vi.fn(async () => ({
         type: 'FeatureCollection',
@@ -1539,6 +1609,7 @@ describe('SpeleoDBController', () => {
     });
 
     it('aborts an older sync run when a newer sync starts', async () => {
+      const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
       const firstResponse = createDeferred<HttpResponse<Project[]>>();
       const secondProject = createProjectFixture({
         id: 'p2',
@@ -1588,6 +1659,18 @@ describe('SpeleoDBController', () => {
         [secondProject],
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
+      const totalTimingRecords = consoleInfo.mock.calls
+        .filter(([, record]) => (
+          record
+          && typeof record === 'object'
+          && 'phase' in record
+          && record.phase === 'total'
+        ))
+        .map(([, record]) => record);
+      expect(totalTimingRecords).toEqual(expect.arrayContaining([
+        expect.objectContaining({ runId: firstResult.runId, status: 'aborted' }),
+        expect.objectContaining({ runId: secondResult.runId, status: 'done' }),
+      ]));
     });
   });
 

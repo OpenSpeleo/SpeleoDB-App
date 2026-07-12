@@ -41,6 +41,46 @@ One run proceeds in this order:
    reports a failed tile phase rather than publishing a partial replacement.
 7. Publish exactly one terminal map-data revision for the current run.
 
+## Timing diagnostics
+
+Every run emits structured `console.info` records under
+`[project-sync:timing]`. Each record contains only `runId`, `phase`,
+`durationMs`, `status`, and, for coordinator phases, `reason`. Executed phase
+durations use the monotonic `performance.now()` clock and are rounded to a
+tenth of a millisecond. A phase that was intentionally skipped has
+`durationMs: null`; an admitted phase that failed or was superseded retains its
+measured duration and reports `failed` or `aborted`. Exactly one `total` record
+is emitted for every run, including superseded runs.
+
+The ordered coordinator phases are:
+
+| Phase | Timed work |
+| --- | --- |
+| `cache_load` | Read and publish the cached project list. |
+| `project_refresh` | Fetch and validate the server project list, persist it, and publish it. |
+| `geojson_sync` | Resolve project commits, download changed GeoJSON, validate it, and durably publish or quarantine it. |
+| `overlay_sync` | Fetch and persist the shared overlay collections allowed by pending-mutation protection. |
+| `gps_sync` | Fetch GPS metadata and durably reconcile its cache. |
+| `tile_prefetch` | Collect the canonical coverage sources and admit the immutable offline-map plan. |
+| `total` | The complete project-sync call from cache load through offline-map admission. |
+
+`tile_prefetch` has two nested records under `[offline-map:timing]` with the
+same `runId`:
+
+- `coverage_source_collection` includes IndexedDB reads for landmark, station,
+  validated project, and GPS coverage plus construction and hashing of the
+  source revision.
+- `plan_schedule` includes lazy engine loading, plan lookup or worker-based plan
+  generation, plan-chunk persistence, stale-generation cleanup, and durable
+  admission of the new layer generations.
+
+Tile HTTP downloads start after `plan_schedule` resolves and therefore do not
+hold `syncStatus === 'syncing'`; their progress remains in the offline-map
+store. The timing records deliberately exclude credentials, instance URLs,
+project identifiers and names, response bodies, GeoJSON, and cached payloads.
+This makes them safe for performance diagnosis without turning the console into
+a user-data export.
+
 A superseding sync or logout aborts the active `CancellationContext`. Every
 transport and cache seam receives its signal, and native best-effort transport
 cannot publish after the context is aborted. A `4xx` project response does not

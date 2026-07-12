@@ -105,6 +105,38 @@ function createHarness() {
 }
 
 describe('TileCoordinator offline coverage', () => {
+  it('logs source collection and plan scheduling as separate timing phases', async () => {
+    let monotonicTime = 0;
+    const performanceNow = vi.spyOn(performance, 'now').mockImplementation(() => {
+      monotonicTime += 5;
+      return monotonicTime;
+    });
+    const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const { coordinator } = createHarness();
+
+    await coordinator.scheduleSyncPhase(new CancellationContext(42, 'test'), []);
+    const timingRecords = consoleInfo.mock.calls
+      .filter(([label]) => label === '[offline-map:timing]')
+      .map(([, record]) => record);
+    performanceNow.mockRestore();
+    consoleInfo.mockRestore();
+
+    expect(timingRecords).toEqual([
+      expect.objectContaining({
+        runId: 42,
+        phase: 'coverage_source_collection',
+        status: 'applied',
+        durationMs: expect.any(Number),
+      }),
+      expect.objectContaining({
+        runId: 42,
+        phase: 'plan_schedule',
+        status: 'applied',
+        durationMs: expect.any(Number),
+      }),
+    ]);
+  });
+
   it('schedules landmarks, combined stations, local GPS, and server GPS', async () => {
     const { coordinator, schedule } = createHarness();
     await coordinator.scheduleSyncPhase(new CancellationContext(1, 'test'), []);

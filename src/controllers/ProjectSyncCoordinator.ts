@@ -5,6 +5,7 @@ import type { Project } from '../types/project';
 import type {
   CacheLoadPhaseResult,
   ProjectRefreshPhaseResult,
+  SyncPhaseStatus,
   SyncProjectsResult,
   TilePrefetchPhaseResult,
 } from '../types/sync';
@@ -48,6 +49,28 @@ interface ProjectSyncCoordinatorDependencies {
   overlays: ProjectOverlaySyncCoordinator;
   hooks: ProjectSyncHooks;
   now(): number;
+  elapsedNow(): number;
+}
+
+type TimedSyncPhase =
+  | 'cache_load'
+  | 'project_refresh'
+  | 'geojson_sync'
+  | 'overlay_sync'
+  | 'gps_sync'
+  | 'tile_prefetch';
+
+interface SyncTimingOutcome {
+  status: SyncPhaseStatus;
+  reason: string;
+}
+
+interface SyncRunTiming {
+  totalStartedAt: number;
+  active: {
+    phase: TimedSyncPhase;
+    startedAt: number;
+  } | null;
 }
 
 function isSuccessfulStatus(status: number): boolean {
@@ -115,30 +138,54 @@ export class ProjectSyncCoordinator {
   async sync(): Promise<SyncProjectsResult> {
     const context = this.beginContext();
     const result = this.createResult(context.runId);
+    const timing: SyncRunTiming = {
+      totalStartedAt: this.dependencies.elapsedNow(),
+      active: null,
+    };
     try {
+      this.startPhase(timing, 'cache_load');
       result.phases.cacheLoad = await this.loadCachedProjects(context);
+      this.finishPhase(context, timing, result.phases.cacheLoad);
       if (!this.dependencies.hooks.hasNetworkAccess()) {
-        return this.syncWithoutRefresh(context, result, 'offline_locked');
+        return this.syncWithoutRefresh(context, result, timing, 'offline_locked');
       }
       const session = this.dependencies.sessions.getSession();
-      if (!session) return this.syncWithoutRefresh(context, result, 'missing_credentials');
+      if (!session) {
+        return this.syncWithoutRefresh(context, result, timing, 'missing_credentials');
+      }
 
       this.setSyncStatus(context, 'syncing');
+      this.startPhase(timing, 'project_refresh');
       const refresh = await this.refreshProjects(context, session.instance, session.token);
+      this.finishPhase(context, timing, refresh.phase);
       result.phases.projectRefresh = refresh.phase;
       if (refresh.projects) {
-        await this.syncFreshProjects(context, result, refresh.projects, session.instance, session.token);
+        await this.syncFreshProjects(
+          context,
+          result,
+          timing,
+          refresh.projects,
+          session.instance,
+          session.token,
+        );
       } else {
-        await this.syncCachedFallback(context, result);
+        await this.syncCachedFallback(context, result, timing);
       }
       return this.complete(context, result);
     } catch (error) {
+      this.failActivePhase(context, timing, error);
       if (isAbortError(error) || !this.isCurrent(context)) {
         return this.finalizeAborted(result);
       }
       console.warn('syncProjects: unexpected sync failure:', error);
       return this.complete(context, result);
     } finally {
+      this.logTiming(
+        context.runId,
+        'total',
+        this.elapsedSince(timing.totalStartedAt),
+        result.status,
+      );
       if (this.activeContext === context) this.activeContext = null;
     }
   }
@@ -146,57 +193,150 @@ export class ProjectSyncCoordinator {
   private async syncWithoutRefresh(
     context: CancellationContext,
     result: SyncProjectsResult,
+    timing: SyncRunTiming,
     reason: 'offline_locked' | 'missing_credentials',
   ): Promise<SyncProjectsResult> {
     result.phases.projectRefresh = this.skippedRefresh(reason);
+    this.logSkippedPhase(context, 'project_refresh', result.phases.projectRefresh);
+    this.startPhase(timing, 'geojson_sync');
     result.phases.geojsonSync = await this.dependencies.geoJSON.sync(
       context,
       this._projects,
       false,
     );
+    this.finishPhase(context, timing, result.phases.geojsonSync);
     result.phases.overlaySync = createSkippedOverlaySyncPhase(reason);
     result.phases.tilePrefetch = createSkippedTilePrefetchPhase(reason);
+    this.logSkippedPhase(context, 'overlay_sync', result.phases.overlaySync);
+    this.logSkippedPhase(context, 'gps_sync', { status: 'skipped', reason });
+    this.logSkippedPhase(context, 'tile_prefetch', result.phases.tilePrefetch);
     return this.complete(context, result);
   }
 
   private async syncFreshProjects(
     context: CancellationContext,
     result: SyncProjectsResult,
+    timing: SyncRunTiming,
     projects: Project[],
     instance: string,
     token: string,
   ): Promise<void> {
+    this.startPhase(timing, 'geojson_sync');
     result.phases.geojsonSync = await this.dependencies.geoJSON.sync(context, projects, true);
+    this.finishPhase(context, timing, result.phases.geojsonSync);
+    this.startPhase(timing, 'overlay_sync');
     result.phases.overlaySync = await this.dependencies.overlays.sync(
       context,
       instance,
       token,
     );
+    this.finishPhase(context, timing, result.phases.overlaySync);
     if (this.isCurrent(context) && result.phases.overlaySync.status !== 'skipped') {
       this.dependencies.hooks.bumpLandmarksRevision();
     }
+    this.startPhase(timing, 'gps_sync');
     await this.dependencies.hooks.syncGpsTracks(context, instance, token);
+    this.finishPhase(context, timing, {
+      status: 'applied',
+      reason: 'gps_sync_completed',
+    });
+    this.startPhase(timing, 'tile_prefetch');
     result.phases.tilePrefetch = await this.dependencies.hooks.scheduleTilePrefetch(
       context,
       projects,
     );
+    this.finishPhase(context, timing, result.phases.tilePrefetch);
   }
 
   private async syncCachedFallback(
     context: CancellationContext,
     result: SyncProjectsResult,
+    timing: SyncRunTiming,
   ): Promise<void> {
+    this.startPhase(timing, 'geojson_sync');
     result.phases.geojsonSync = await this.dependencies.geoJSON.sync(
       context,
       this._projects,
       false,
     );
+    this.finishPhase(context, timing, result.phases.geojsonSync);
     result.phases.overlaySync = createSkippedOverlaySyncPhase(
       result.phases.projectRefresh.reason,
     );
     result.phases.tilePrefetch = createSkippedTilePrefetchPhase(
       result.phases.projectRefresh.reason,
     );
+    this.logSkippedPhase(context, 'overlay_sync', result.phases.overlaySync);
+    this.logSkippedPhase(context, 'gps_sync', {
+      status: 'skipped',
+      reason: result.phases.projectRefresh.reason,
+    });
+    this.logSkippedPhase(context, 'tile_prefetch', result.phases.tilePrefetch);
+  }
+
+  private startPhase(
+    timing: SyncRunTiming,
+    phase: TimedSyncPhase,
+  ): void {
+    timing.active = { phase, startedAt: this.dependencies.elapsedNow() };
+  }
+
+  private finishPhase(
+    context: CancellationContext,
+    timing: SyncRunTiming,
+    outcome: SyncTimingOutcome,
+  ): void {
+    if (!timing.active) return;
+    this.logTiming(
+      context.runId,
+      timing.active.phase,
+      this.elapsedSince(timing.active.startedAt),
+      outcome.status,
+      outcome.reason,
+    );
+    timing.active = null;
+  }
+
+  private failActivePhase(
+    context: CancellationContext,
+    timing: SyncRunTiming,
+    error: unknown,
+  ): void {
+    if (!timing.active) return;
+    const aborted = isAbortError(error) || context.signal.aborted;
+    this.finishPhase(context, timing, {
+      status: aborted ? 'aborted' : 'failed',
+      reason: aborted ? 'aborted' : 'unexpected_failure',
+    });
+  }
+
+  private logSkippedPhase(
+    context: CancellationContext,
+    phase: TimedSyncPhase,
+    outcome: SyncTimingOutcome,
+  ): void {
+    this.logTiming(context.runId, phase, null, outcome.status, outcome.reason);
+  }
+
+  private elapsedSince(startedAt: number): number {
+    const elapsed = Math.max(0, this.dependencies.elapsedNow() - startedAt);
+    return Math.round(elapsed * 10) / 10;
+  }
+
+  private logTiming(
+    runId: number,
+    phase: TimedSyncPhase | 'total',
+    durationMs: number | null,
+    status: SyncPhaseStatus | SyncProjectsResult['status'],
+    reason?: string,
+  ): void {
+    console.info('[project-sync:timing]', {
+      runId,
+      phase,
+      durationMs,
+      status,
+      ...(reason ? { reason } : {}),
+    });
   }
 
   private complete(

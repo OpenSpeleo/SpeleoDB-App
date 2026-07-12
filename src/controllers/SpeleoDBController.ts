@@ -296,6 +296,7 @@ export class SpeleoDBController {
         ),
       },
       now: () => Date.now(),
+      elapsedNow: () => performance.now(),
     });
     void this.gpsTrackCoordinator.load();
     // Load persisted ops so the map folds them and the Pending tab appears on
