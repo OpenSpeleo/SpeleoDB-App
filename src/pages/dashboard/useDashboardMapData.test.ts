@@ -99,6 +99,36 @@ afterEach(() => {
 });
 
 describe('useDashboardMapData', () => {
+  it('reuses depth-enriched project data across revision-only reloads', async () => {
+    const project = createProject('project');
+    const projects = [project];
+    const yieldWork = async () => {};
+    const raw = collection(pointFeature('depth-point'));
+    const source = createSource({
+      getProjectMapData: async () => mapData(project, raw),
+    });
+    const { result, rerender } = renderHook(
+      ({ revision }) => useDashboardMapData({
+        source,
+        projects,
+        mapDataRevision: revision,
+        landmarksRevision: 0,
+        yieldWork,
+      }),
+      { initialProps: { revision: 0 } },
+    );
+
+    await waitFor(() => expect(result.current.geoJsonData.project).toBeDefined());
+    const first = result.current.geoJsonData.project;
+    expect(first.features[0].properties).toMatchObject({ _speleoDepth: -5 });
+
+    rerender({ revision: 1 });
+    await waitFor(() => expect(source.getProjectMapData).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.geoJsonData.project).toBeDefined());
+
+    expect(result.current.geoJsonData.project).toBe(first);
+  });
+
   it('publishes an available project while a later project cache read is pending', async () => {
     const first = createProject('first');
     const second = createProject('second');

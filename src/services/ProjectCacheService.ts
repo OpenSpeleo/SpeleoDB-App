@@ -5,7 +5,8 @@
  * details from the rest of the app.
  */
 
-import { CacheStore } from './CacheStore';
+import { CacheStore, type CacheEntry } from './CacheStore';
+import { ProjectGeoJSONRecordMemoryCache } from './ProjectGeoJSONRecordMemoryCache';
 import type { Project } from '../types/project';
 import type { MapOverlayId } from '../types/mapOverlay';
 import type { LandmarkCollection } from '../types/landmark';
@@ -92,6 +93,52 @@ function isAnalysis(value: unknown): value is ProjectGeoJSONAnalysis {
     && isNonNegativeFiniteNumber(analysis.durationMs)
     && analysis.durationMs <= PROJECT_GEOJSON_VALIDATION.TIMEOUT_MS
     && isProjectedFootprintSafe(analysis.bounds);
+}
+
+function parseProjectGeoJSONCacheRecord(
+  entry: CacheEntry | null,
+): ProjectGeoJSONCacheRecord {
+  if (!entry) return { state: 'missing', commitId: null, data: null };
+
+  const rawCommitId = entry.meta?.commitId;
+  const commitId = isCommitId(rawCommitId) ? rawCommitId : null;
+  const version = entry.meta?.[GEOJSON_VALIDATION_VERSION_META_KEY];
+  const state = entry.meta?.[GEOJSON_STATE_META_KEY];
+  if (version !== String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION) || !commitId) {
+    return { state: 'legacy', commitId, data: entry.data };
+  }
+
+  const analysis = parseAnalysis(entry.meta?.[GEOJSON_ANALYSIS_META_KEY]);
+  if (state === 'active' && analysis && isFeatureCollection(entry.data)) {
+    return { state: 'active', commitId, data: entry.data, analysis };
+  }
+
+  const reason = entry.meta?.[GEOJSON_FAILURE_REASON_META_KEY];
+  const diagnostics = parseFailureDiagnostics(
+    entry.meta?.[GEOJSON_FAILURE_DIAGNOSTICS_META_KEY],
+  );
+  const warningAcknowledged = parseAcknowledged(
+    entry.meta?.[GEOJSON_WARNING_ACKNOWLEDGED_META_KEY],
+  );
+  if (
+    state === 'quarantined'
+    && entry.data === null
+    && isFileFailureReason(reason)
+    && diagnostics
+    && isFailureDiagnosticsForReason(reason, diagnostics)
+    && warningAcknowledged !== null
+  ) {
+    return {
+      state: 'quarantined',
+      commitId,
+      data: null,
+      reason,
+      diagnostics,
+      warningAcknowledged,
+    };
+  }
+
+  return { state: 'legacy', commitId, data: entry.data };
 }
 
 function isProjectedFootprintSafe(bounds: ProjectGeoJSONAnalysis['bounds']): boolean {
@@ -202,6 +249,7 @@ export interface CacheOperationOptions {
 
 export class ProjectCacheService {
   private store: CacheStore;
+  private readonly projectRecords = new ProjectGeoJSONRecordMemoryCache();
 
   constructor(store?: CacheStore) {
     this.store = store ?? new CacheStore();
@@ -277,6 +325,11 @@ export class ProjectCacheService {
         meta: { commitId },
       }, options);
       throwIfAborted(options.signal)
+      this.projectRecords.publish(projectId, {
+        state: 'legacy',
+        commitId: isCommitId(commitId) ? commitId : null,
+        data,
+      });
       return true
     } catch (error) {
       if (isAbortError(error) || options.signal?.aborted) {
@@ -294,50 +347,12 @@ export class ProjectCacheService {
   ): Promise<ProjectGeoJSONCacheRecord> {
     throwIfAborted(options.signal);
     try {
-      const entry = await this.store.get('geojson', projectId);
+      const record = await this.projectRecords.get(projectId, async () => {
+        const entry = await this.store.get('geojson', projectId);
+        return parseProjectGeoJSONCacheRecord(entry);
+      });
       throwIfAborted(options.signal);
-      if (!entry) return { state: 'missing', commitId: null, data: null };
-
-      const rawCommitId = entry.meta?.commitId;
-      const commitId = isCommitId(rawCommitId) ? rawCommitId : null;
-      const version = entry.meta?.[GEOJSON_VALIDATION_VERSION_META_KEY];
-      const state = entry.meta?.[GEOJSON_STATE_META_KEY];
-      if (version !== String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION) || !commitId) {
-        return { state: 'legacy', commitId, data: entry.data };
-      }
-
-      const analysis = parseAnalysis(entry.meta?.[GEOJSON_ANALYSIS_META_KEY]);
-      if (state === 'active' && analysis && isFeatureCollection(entry.data)) {
-        return { state: 'active', commitId, data: entry.data, analysis };
-      }
-
-      const reason = entry.meta?.[GEOJSON_FAILURE_REASON_META_KEY];
-      const diagnostics = parseFailureDiagnostics(
-        entry.meta?.[GEOJSON_FAILURE_DIAGNOSTICS_META_KEY],
-      );
-      const warningAcknowledged = parseAcknowledged(
-        entry.meta?.[GEOJSON_WARNING_ACKNOWLEDGED_META_KEY],
-      );
-      if (
-        state === 'quarantined'
-        && entry.data === null
-        && isFileFailureReason(reason)
-        && diagnostics
-        && isFailureDiagnosticsForReason(reason, diagnostics)
-        && warningAcknowledged !== null
-      ) {
-        return {
-          state: 'quarantined',
-          commitId,
-          data: null,
-          reason,
-          diagnostics,
-          warningAcknowledged,
-        };
-      }
-
-      // Corrupt/incomplete validation metadata is never trusted as active.
-      return { state: 'legacy', commitId, data: entry.data };
+      return record;
     } catch (error) {
       if (isAbortError(error) || options.signal?.aborted) {
         throwIfAborted(options.signal);
@@ -371,6 +386,12 @@ export class ProjectCacheService {
         },
       }, options);
       throwIfAborted(options.signal);
+      this.projectRecords.publish(projectId, {
+        state: 'active',
+        commitId,
+        data,
+        analysis,
+      });
       return true;
     } catch (error) {
       if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
@@ -411,6 +432,14 @@ export class ProjectCacheService {
         },
       }, options);
       throwIfAborted(options.signal);
+      this.projectRecords.publish(projectId, {
+        state: 'quarantined',
+        commitId,
+        data: null,
+        reason,
+        diagnostics,
+        warningAcknowledged: false,
+      });
       return true;
     } catch (error) {
       if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
@@ -427,7 +456,7 @@ export class ProjectCacheService {
   ): Promise<boolean> {
     throwIfAborted(options.signal);
     try {
-      return await this.store.update('geojson', projectId, (entry) => {
+      const updated = await this.store.update('geojson', projectId, (entry) => {
         const reason = entry?.meta?.[GEOJSON_FAILURE_REASON_META_KEY];
         const diagnostics = parseFailureDiagnostics(
           entry?.meta?.[GEOJSON_FAILURE_DIAGNOSTICS_META_KEY],
@@ -457,6 +486,22 @@ export class ProjectCacheService {
           },
         };
       }, options);
+      throwIfAborted(options.signal);
+      if (updated) {
+        const cached = this.projectRecords.peek(projectId);
+        if (
+          cached?.state === 'quarantined'
+          && cached.commitId === commitId
+        ) {
+          this.projectRecords.publish(projectId, {
+            ...cached,
+            warningAcknowledged: true,
+          });
+        } else {
+          this.projectRecords.invalidate(projectId);
+        }
+      }
+      return updated;
     } catch (error) {
       if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
       console.error(
@@ -792,6 +837,7 @@ export class ProjectCacheService {
    */
   async clearAll(options: CacheOperationOptions = {}): Promise<void> {
     throwIfAborted(options.signal);
+    this.projectRecords.clear();
     const results = await Promise.allSettled([
       this.store.clear('projects', options),
       this.store.clear('geojson', options),

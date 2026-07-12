@@ -51,6 +51,20 @@ export interface DashboardMapDataOptions {
 }
 
 const defaultWarn: WarningReporter = (message, error) => console.warn(message, error);
+const depthEnrichedCollections = new WeakMap<
+GeoJSON.FeatureCollection,
+GeoJSON.FeatureCollection
+>();
+
+function attachProjectDepth(
+  featureCollection: GeoJSON.FeatureCollection,
+): GeoJSON.FeatureCollection {
+  const cached = depthEnrichedCollections.get(featureCollection);
+  if (cached) return cached;
+  const enriched = attachDepthToFeatureCollection(featureCollection, DEPTH_PROPERTY_KEY);
+  depthEnrichedCollections.set(featureCollection, enriched);
+  return enriched;
+}
 
 function normalizeProjectMapData(
   project: Project,
@@ -61,7 +75,7 @@ function normalizeProjectMapData(
   if (mapData?.commitId !== project.latest_commit.id) return null;
   return {
     commitId: mapData.commitId,
-    featureCollection: attachDepthToFeatureCollection(featureCollection, DEPTH_PROPERTY_KEY),
+    featureCollection: attachProjectDepth(featureCollection),
     bounds: mapData.bounds,
   };
 }

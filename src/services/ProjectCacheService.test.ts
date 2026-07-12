@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROJECT_GEOJSON_VALIDATION } from '../constants';
 import { SpeleoDBController, type PreferencesPort } from '../controllers/SpeleoDBController';
-import { allowConsoleWarn } from '../test/consoleGuard';
+import { allowConsoleError, allowConsoleWarn } from '../test/consoleGuard';
 import type { Project } from '../types/project';
 import type { RemoteGpsTrack } from '../types/gpsTrack';
 import type { SpeleoDBService } from './SpeleoDBService';
@@ -9,6 +9,16 @@ import type { OfflineMapSyncEngineLike } from './OfflineMapSyncEngine';
 import { EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT } from './OfflineMapSyncStore';
 import { CacheStore } from './CacheStore';
 import { ProjectCacheService } from './ProjectCacheService';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function persistenceProject(commitId: string): Project {
   return {
@@ -104,6 +114,299 @@ describe('ProjectCacheService overlay cache', () => {
   beforeEach(async () => {
     cache = new ProjectCacheService();
     await cache.clearAll();
+  });
+
+  it('single-flights and reuses validated project records across concurrent consumers', async () => {
+    const geojson: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'Point', coordinates: [2, 45] },
+      }],
+    };
+    const analysis = {
+      bounds: { west: 2, east: 2, south: 45, north: 45, crossesDateline: false },
+      widthKm: 0,
+      heightKm: 0,
+      durationMs: 12,
+    };
+    const get = vi.fn(async () => ({
+      data: geojson,
+      cachedAt: 1,
+      meta: {
+        commitId: 'c1',
+        projectGeoJSONState: 'active',
+        projectGeoJSONValidationVersion:
+          String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION),
+        projectGeoJSONAnalysis: JSON.stringify(analysis),
+      },
+    }));
+    const sharedCache = new ProjectCacheService({ get } as unknown as CacheStore);
+
+    const records = await Promise.all([
+      sharedCache.getProjectGeoJSONRecord('p1'),
+      sharedCache.getProjectGeoJSONRecord('p1'),
+      sharedCache.getProjectGeoJSONRecord('p1'),
+    ]);
+    const later = await sharedCache.getProjectGeoJSONRecord('p1');
+
+    expect(get).toHaveBeenCalledOnce();
+    expect(records[0]).toBe(records[1]);
+    expect(records[1]).toBe(records[2]);
+    expect(later).toBe(records[0]);
+  });
+
+  it('keeps cancellation caller-scoped while sharing the underlying record read', async () => {
+    const recordRead = deferred<{
+      data: GeoJSON.FeatureCollection;
+      cachedAt: number;
+      meta: Record<string, string>;
+    }>();
+    const analysis = {
+      bounds: { west: 2, east: 2, south: 45, north: 45, crossesDateline: false },
+      widthKm: 0,
+      heightKm: 0,
+      durationMs: 1,
+    };
+    const get = vi.fn(() => recordRead.promise);
+    const sharedCache = new ProjectCacheService({ get } as unknown as CacheStore);
+    const cancelled = new AbortController();
+
+    const cancelledRead = sharedCache.getProjectGeoJSONRecord(
+      'p1',
+      { signal: cancelled.signal },
+    );
+    const liveRead = sharedCache.getProjectGeoJSONRecord('p1');
+    cancelled.abort();
+    recordRead.resolve({
+      data: { type: 'FeatureCollection', features: [] },
+      cachedAt: 1,
+      meta: {
+        commitId: 'c1',
+        projectGeoJSONState: 'active',
+        projectGeoJSONValidationVersion:
+          String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION),
+        projectGeoJSONAnalysis: JSON.stringify(analysis),
+      },
+    });
+
+    await expect(cancelledRead).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(liveRead).resolves.toMatchObject({ state: 'active', commitId: 'c1' });
+    expect(get).toHaveBeenCalledOnce();
+  });
+
+  it('does not let an older in-flight read overwrite a newer durable record', async () => {
+    const oldRead = deferred<{
+      data: GeoJSON.FeatureCollection;
+      cachedAt: number;
+      meta: Record<string, string>;
+    }>();
+    const oldAnalysis = {
+      bounds: { west: 1, east: 1, south: 44, north: 44, crossesDateline: false },
+      widthKm: 0,
+      heightKm: 0,
+      durationMs: 1,
+    };
+    const get = vi.fn(() => oldRead.promise);
+    const set = vi.fn(async () => {});
+    const sharedCache = new ProjectCacheService({ get, set } as unknown as CacheStore);
+    const staleRead = sharedCache.getProjectGeoJSONRecord('p1');
+    const newGeoJSON: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [],
+    };
+    const newAnalysis = {
+      bounds: { west: 3, east: 3, south: 46, north: 46, crossesDateline: false },
+      widthKm: 0,
+      heightKm: 0,
+      durationMs: 2,
+    };
+
+    expect(await sharedCache.setValidatedProjectGeoJSON(
+      'p1', newGeoJSON, 'new', newAnalysis,
+    )).toBe(true);
+    oldRead.resolve({
+      data: { type: 'FeatureCollection', features: [] },
+      cachedAt: 1,
+      meta: {
+        commitId: 'old',
+        projectGeoJSONState: 'active',
+        projectGeoJSONValidationVersion:
+          String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION),
+        projectGeoJSONAnalysis: JSON.stringify(oldAnalysis),
+      },
+    });
+    await expect(staleRead).resolves.toMatchObject({ commitId: 'old' });
+
+    await expect(sharedCache.getProjectGeoJSONRecord('p1')).resolves.toEqual({
+      state: 'active', commitId: 'new', data: newGeoJSON, analysis: newAnalysis,
+    });
+    expect(get).toHaveBeenCalledOnce();
+  });
+
+  it('prevents a pre-clear in-flight read from repopulating logout memory', async () => {
+    const oldRead = deferred<{
+      data: GeoJSON.FeatureCollection;
+      cachedAt: number;
+      meta: Record<string, string>;
+    }>();
+    const get = vi.fn()
+      .mockImplementationOnce(() => oldRead.promise)
+      .mockResolvedValueOnce(null);
+    const clear = vi.fn(async () => {});
+    const sharedCache = new ProjectCacheService({ get, clear } as unknown as CacheStore);
+    const staleRead = sharedCache.getProjectGeoJSONRecord('p1');
+
+    await sharedCache.clearAll();
+    oldRead.resolve({
+      data: { type: 'FeatureCollection', features: [] },
+      cachedAt: 1,
+      meta: { commitId: 'legacy' },
+    });
+    await expect(staleRead).resolves.toMatchObject({ commitId: 'legacy' });
+    await expect(sharedCache.getProjectGeoJSONRecord('p1')).resolves.toEqual({
+      state: 'missing', commitId: null, data: null,
+    });
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it('reduces two 60-project consumer passes to one backing read per project', async () => {
+    const analysis = {
+      bounds: { west: 2, east: 2, south: 45, north: 45, crossesDateline: false },
+      widthKm: 0,
+      heightKm: 0,
+      durationMs: 1,
+    };
+    const get = vi.fn(async (_store: string, projectId: string) => ({
+      data: {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          properties: { projectId },
+          geometry: { type: 'Point', coordinates: [2, 45] },
+        }],
+      },
+      cachedAt: 1,
+      meta: {
+        commitId: `commit-${projectId}`,
+        projectGeoJSONState: 'active',
+        projectGeoJSONValidationVersion:
+          String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION),
+        projectGeoJSONAnalysis: JSON.stringify(analysis),
+      },
+    }));
+    const sharedCache = new ProjectCacheService({ get } as unknown as CacheStore);
+    const projectIds = Array.from({ length: 60 }, (_, index) => `project-${index}`);
+
+    await Promise.all(projectIds.flatMap((projectId) => [
+      sharedCache.getProjectGeoJSONRecord(projectId),
+      sharedCache.getProjectGeoJSONRecord(projectId),
+    ]));
+    await Promise.all(projectIds.map((projectId) => (
+      sharedCache.getProjectGeoJSONRecord(projectId)
+    )));
+
+    expect(get).toHaveBeenCalledTimes(60);
+  });
+
+  it('publishes a durable replacement to readers and preserves the prior cache on failure', async () => {
+    const oldGeoJSON: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [],
+    };
+    const oldAnalysis = {
+      bounds: { west: 1, east: 1, south: 44, north: 44, crossesDateline: false },
+      widthKm: 0,
+      heightKm: 0,
+      durationMs: 1,
+    };
+    const get = vi.fn(async () => ({
+      data: oldGeoJSON,
+      cachedAt: 1,
+      meta: {
+        commitId: 'old',
+        projectGeoJSONState: 'active',
+        projectGeoJSONValidationVersion:
+          String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION),
+        projectGeoJSONAnalysis: JSON.stringify(oldAnalysis),
+      },
+    }));
+    const set = vi.fn(async () => {});
+    const sharedCache = new ProjectCacheService({ get, set } as unknown as CacheStore);
+    const oldRecord = await sharedCache.getProjectGeoJSONRecord('p1');
+    const newGeoJSON: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'Point', coordinates: [3, 46] },
+      }],
+    };
+    const newAnalysis = {
+      bounds: { west: 3, east: 3, south: 46, north: 46, crossesDateline: false },
+      widthKm: 0,
+      heightKm: 0,
+      durationMs: 2,
+    };
+
+    expect(await sharedCache.setValidatedProjectGeoJSON(
+      'p1', newGeoJSON, 'new', newAnalysis,
+    )).toBe(true);
+    const newRecord = await sharedCache.getProjectGeoJSONRecord('p1');
+    allowConsoleError(
+      'ProjectCacheService.setValidatedProjectGeoJSON failed:',
+      expect.any(Error),
+    );
+    set.mockRejectedValueOnce(new Error('write failed'));
+    expect(await sharedCache.setValidatedProjectGeoJSON(
+      'p1', oldGeoJSON, 'failed', oldAnalysis,
+    )).toBe(false);
+    const afterFailure = await sharedCache.getProjectGeoJSONRecord('p1');
+
+    expect(get).toHaveBeenCalledOnce();
+    expect(oldRecord).toMatchObject({ state: 'active', commitId: 'old' });
+    expect(newRecord).toEqual({
+      state: 'active', commitId: 'new', data: newGeoJSON, analysis: newAnalysis,
+    });
+    expect(afterFailure).toBe(newRecord);
+  });
+
+  it('updates legacy and quarantine cache entries after commit and invalidates them on clear', async () => {
+    const get = vi.fn(async () => null);
+    const set = vi.fn(async () => {});
+    const clear = vi.fn(async () => {});
+    const sharedCache = new ProjectCacheService({ get, set, clear } as unknown as CacheStore);
+    const legacyData = { type: 'FeatureCollection', features: [] };
+
+    expect(await sharedCache.setGeoJSON('p1', legacyData, 'legacy-commit')).toBe(true);
+    await expect(sharedCache.getProjectGeoJSONRecord('p1')).resolves.toEqual({
+      state: 'legacy', commitId: 'legacy-commit', data: legacyData,
+    });
+    const diagnostics = {
+      bounds: { west: 0, east: 75, south: 0, north: 0, crossesDateline: false },
+      widthKm: 8_000,
+      heightKm: 0,
+      durationMs: 20,
+    };
+    expect(await sharedCache.setQuarantinedProjectGeoJSON(
+      'p1', 'quarantined-commit', 'bbox_too_large', diagnostics,
+    )).toBe(true);
+    await expect(sharedCache.getProjectGeoJSONRecord('p1')).resolves.toEqual({
+      state: 'quarantined',
+      commitId: 'quarantined-commit',
+      data: null,
+      reason: 'bbox_too_large',
+      diagnostics,
+      warningAcknowledged: false,
+    });
+    expect(get).not.toHaveBeenCalled();
+
+    await sharedCache.clearAll();
+    await expect(sharedCache.getProjectGeoJSONRecord('p1')).resolves.toEqual({
+      state: 'missing', commitId: null, data: null,
+    });
+    expect(get).toHaveBeenCalledOnce();
   });
 
   it('stores and reads namespaced overlay geojson entries', async () => {

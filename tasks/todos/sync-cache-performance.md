@@ -29,22 +29,22 @@ MapLibre source updates, so it is not the first optimization target.
 
 ### PERF-003 — Deduplicate validated project-record reads
 
-- [ ] Add fake-IndexedDB/service tests proving concurrent consumers share one
+- [x] Add fake-IndexedDB/service tests proving concurrent consumers share one
   authoritative record read and later readers reuse the immutable result.
-- [ ] Prove durable validated/quarantined/legacy writes replace the read-through
+- [x] Prove durable validated/quarantined/legacy writes replace the read-through
   entry only after commit, failed writes preserve the prior entry, and logout
   clears memory immediately.
-- [ ] Execute the focused tests and record the expected failures.
-- [ ] Add a bounded read-through/single-flight record cache inside
+- [x] Execute the focused tests and record the expected failures.
+- [x] Add a bounded read-through/single-flight record cache inside
   `ProjectCacheService`; preserve per-caller cancellation checks without binding
   a shared IndexedDB read to the first caller's signal.
-- [ ] Reuse derived depth-enriched FeatureCollections by immutable source
+- [x] Reuse derived depth-enriched FeatureCollections by immutable source
   identity so revision-only reloads do not rescan coordinates.
-- [ ] Add a 60-project regression proving reconciliation plus subsequent map
+- [x] Add a 60-project regression proving reconciliation plus subsequent map
   reads require one durable record read per project, not two or three.
-- [ ] Update cache, sync, map-data, and performance documentation.
-- [ ] Run focused and complete verification.
-- [ ] Commit as `[Fix] Deduplicate project cache reads`; inspect the commit and
+- [x] Update cache, sync, map-data, and performance documentation.
+- [x] Run focused and complete verification.
+- [x] Commit as `[Fix] Deduplicate project cache reads`; inspect the commit and
   clean status before PERF-004. Do not push.
 
 ### PERF-004 — Batch ready map-data publication
@@ -105,4 +105,55 @@ storage—is still dominant.
 
 ## Review
 
-Pending implementation evidence.
+### PERF-003 TDD evidence
+
+- Red command: `npx vitest run src/services/ProjectCacheService.test.ts
+  src/pages/dashboard/useDashboardMapData.test.ts -t
+  'single-flights and reuses validated project records|keeps cancellation
+  caller-scoped|reduces two 60-project consumer passes|publishes a durable
+  replacement|updates legacy and quarantine cache entries|reuses
+  depth-enriched project data'`.
+- Red result: same-project consumers performed 4 backing reads instead of 1;
+  two concurrent and one later pass over 60 projects performed 180 reads
+  instead of 60; durable replacement readers returned the old backing value;
+  and a revision-only reload created a second depth-enriched collection.
+- Green focused result: 8/8 pass, including old-read/new-write ordering and
+  pre-clear in-flight logout invalidation.
+- Green owning suites: `ProjectCacheService.test.ts`,
+  `useDashboardMapData.test.ts`, and `SpeleoDBController.test.ts` — 256/256
+  pass before the final repository gate.
+
+### PERF-003 implementation result
+
+- `ProjectGeoJSONRecordMemoryCache` owns a 64-entry LRU, concurrent
+  single-flight reads, per-project write versions, and a logout generation.
+- The first consumer performs the unavoidable IndexedDB read and structured
+  clone; reconciliation and later Dashboard generations reuse its immutable
+  record. The 60-project regression reduces deterministic backing reads from
+  180 to 60.
+- Validated, legacy, and quarantine writes publish memory only after durable
+  completion. A failed write preserves the previous entry, and an older read
+  cannot overwrite a newer committed record.
+- Logout clears records and active-load admission before store deletion. A late
+  old-generation read cannot repopulate memory.
+- Depth-enriched FeatureCollections use weak identity memoization, eliminating
+  repeated full-feature scans without adding another strong data owner.
+
+### PERF-003 verification
+
+- Focused cache/map suites — 62/62 pass, including LRU eviction and explicit
+  invalidation at the memory-cache owning seam.
+- `npm run lint` — pass.
+- `npm run typecheck` — pass.
+- `npm run build` — pass; 614 modules transformed.
+- `API_TEST_ENABLED=false npm run test:ci` — pass: 117 files passed, 2 skipped;
+  1,916 tests passed, 13 skipped. Coverage: 90.41% statements, 82.16%
+  branches, 92.83% functions, 92.50% lines.
+- `npm run quality:inventory` — pass; all 599 files classified.
+- Button background hard-rule scan — no matches.
+- MapLibre declarations were not changed; source-ownership coverage remains
+  green in the complete suite.
+- `git diff --check` — pass.
+- No native source or generated native asset changed, so native compilation is
+  inapplicable to this TypeScript/cache delivery. Physical-device timings after
+  installation remain the authoritative performance measurement.

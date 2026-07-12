@@ -64,6 +64,13 @@ GeoJSON, bounds, colors, landmark groups, and visible overlays remain memoized.
 Project zoom and initial fit continue to use prevalidated bounds and never
 rescan coordinates.
 
+The project cache returns the same immutable validated-record object to
+reconciliation and Dashboard consumers within a bounded session LRU. Depth
+attachment uses a `WeakMap` keyed by the source FeatureCollection, so a
+revision-only reload reuses the enriched object without scanning every feature
+again. The weak cache does not retain data after the source record leaves both
+the bounded service cache and mounted UI.
+
 ## Verification
 
 `useDashboardMapData.test.ts` directly covers zero-revision cache publication,

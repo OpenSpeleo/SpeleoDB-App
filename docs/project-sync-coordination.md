@@ -122,6 +122,17 @@ remains in its worker. The six-worker download pipeline continues through its
 dedicated store. Per-tile progress does not publish a project/controller state
 change, so project sync subscribers do not rerender for map downloads.
 
-The flow adds no requests or retries. GeoJSON concurrency remains capped at
-three; offline-map project-record reads are capped at four; project arrays and
-warning arrays retain stable identity when their contents do not change.
+Validated project-record reads are shared through a 64-entry, session-scoped
+LRU in `ProjectCacheService`. Reconciliation, Dashboard publication, and a
+revision-only reload therefore share one IndexedDB structured clone per project
+instead of rereading the same large value. Concurrent first readers use one
+single-flight promise, while cancellation remains caller-scoped. Validated,
+legacy, quarantine, and acknowledgement entries change only after their durable
+transaction completes; failed writes retain the prior in-memory truth. A write
+version prevents an older in-flight read from replacing a newer commit.
+
+The flow adds no requests or retries. A cold process still performs the one
+GeoJSON read required to render each eligible project, but repeated consumers
+reuse that immutable record. GeoJSON reconciliation concurrency remains capped
+at three; offline-map project-record reads are capped at four; project arrays
+and warning arrays retain stable identity when their contents do not change.

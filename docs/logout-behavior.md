@@ -32,6 +32,8 @@ Logout must not be triggered by transient network conditions:
 - the native secure authentication token and its non-secret session marker,
 - `localStorage` and `sessionStorage`,
 - cached projects and GeoJSON (including dashboard overlay GeoJSON),
+- the bounded in-memory validated-project read-through cache and any
+  single-flight record reads admitted before purge,
 - pending landmark/GPS operations in the `offline_ops` IndexedDB store,
 - local GPS recordings, cached remote GPS metadata, and cached GPS geometry,
 - cached map tiles,
@@ -100,6 +102,9 @@ Implementation notes:
 - project, GeoJSON, pending-operation, and GPS-record cache stores are also
   cleared independently inside `ProjectCacheService.clearAll()`. Failure of one
   store cannot prevent deletion attempts for the remaining user-data stores,
+- `ProjectCacheService.clearAll()` invalidates its in-memory record generation
+  before IndexedDB deletion begins. A pre-clear read may settle for its already
+  admitted caller, but cannot repopulate the post-logout cache,
 - service/cache layers must treat aborts as authoritative: once logout starts,
   no stale state mutation, cache write, or tile-prefetch scheduling may be
   published from the cancelled run.
