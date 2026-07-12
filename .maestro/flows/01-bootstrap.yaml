@@ -1,0 +1,47 @@
+appId: org.speleodb.app
+androidWebViewHierarchy: devtools
+---
+# Fresh-install token login
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- assertVisible: Sign in to your account
+- tapOn: OAuth Token
+- tapOn: OAuth token
+- inputText: ${SPELEODB_E2E_OAUTH_TOKEN}
+- tapOn: SpeleoDB instance
+- eraseText
+- inputText: ${SPELEODB_E2E_INSTANCE_URL}
+- tapOn: Sign In with Token
+- extendedWaitUntil:
+    visible: Start exploring
+    timeout: 120000
+- tapOn: Start exploring
+- runFlow:
+    when:
+      visible: Acknowledge
+    commands:
+      - tapOn: Acknowledge
+- runFlow:
+    when:
+      visible: Not now
+    commands:
+      - tapOn: Not now
+- extendedWaitUntil:
+    visible: Map
+    timeout: 120000
+
+# Cached relaunch
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible: Map
+    timeout: 120000
+- assertNotVisible: Sign in to your account
+
+# Map and GPS navigation
+- tapOn: GPS
+- assertVisible: GPS Track Recording
+- assertVisible: High-Accuracy GPS Point
+- tapOn: Map
+- assertVisible: Map layer

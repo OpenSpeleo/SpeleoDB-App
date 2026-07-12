@@ -1,0 +1,42 @@
+appId: org.speleodb.app
+androidWebViewHierarchy: devtools
+---
+# Replay and remove server fixture
+- launchApp:
+    stopApp: false
+- runFlow:
+    when:
+      visible: Go Offline
+    commands:
+      - tapOn: Go Offline
+- tapOn: Pending
+- runFlow:
+    when:
+      visible: Try Reconnect
+    commands:
+      - tapOn: Try Reconnect
+- extendedWaitUntil:
+    visible: Sync Now
+    timeout: 120000
+- tapOn: Sync Now
+- extendedWaitUntil:
+    visible: All caught up
+    timeout: 120000
+- tapOn: Landmarks
+- extendedWaitUntil:
+    visible: ${SPELEODB_E2E_LANDMARK_NAME}
+    timeout: 60000
+- tapOn: ${SPELEODB_E2E_LANDMARK_NAME}
+- tapOn: Delete Landmark
+- tapOn: Delete
+- extendedWaitUntil:
+    visible: Landmark deleted
+    timeout: 60000
+
+# Zero pending operations keep the ordinary confirmation
+- tapOn: Settings
+- tapOn: Sign Out
+- assertVisible: Clear local data and sign out?
+- assertNotVisible: Pending offline operations will be lost
+- tapOn: Cancel
+- tapOn: Map

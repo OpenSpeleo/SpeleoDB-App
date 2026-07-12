@@ -79,6 +79,8 @@ behaviors.
   lifecycle.
 - `pwa-metadata.md`: built web branding, manifest/icon ownership, and emitted
   asset verification.
+- `release-device-evidence.md`: credential-safe Android/iOS E2E matrices,
+  physical-device protocols, evidence fields, and release blocking rules.
 - `settings.md`: Settings page sections (event-driven sync stats, map settings,
   tutorial, account), state ownership, progress lifecycle, and offline behavior.
 - `map-depth-and-scale.md`: dashboard distance scale, project/depth color mode

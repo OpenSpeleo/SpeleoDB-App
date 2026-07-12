@@ -265,11 +265,11 @@ but do not drive authentication, offline/online transitions, persistence across
 force-quit, background GPS, offline-map replacement, or the new compass cone.
 The existing task ledgers explicitly leave physical Android/iOS gates open.
 
-- [ ] Define the smallest maintainable black-box harness that can run against
+- [x] Define the smallest maintainable black-box harness that can run against
       Android and iOS without embedding production credentials in artifacts.
-- [ ] Automate fresh-install login, cached relaunch, logout purge, pending-op
+- [x] Automate fresh-install login, cached relaunch, logout purge, pending-op
       persistence/replay, and basic map/GPS navigation on emulators/simulators.
-- [ ] Keep background/lock, heading orientation, notification denial, storage
+- [x] Keep background/lock, heading orientation, notification denial, storage
       pressure, and WebView performance as named physical-device protocols where
       automation cannot prove behavior.
 - [ ] Record Android API 24/33/36 and minimum/latest iOS results. A release
@@ -727,3 +727,45 @@ a commit cannot contain its own stable final hash.
 - **Limitations:** this correction makes the protocols truthful; it does not
   manufacture emulator, physical-device, store-console, or trusted-signing
   evidence. Those remain RR-008/RR-009 gates.
+
+### RR-008 — Cross-platform release E2E workflows
+
+- **RED:** `npx vitest run quality/release-e2e-workflow.test.ts --reporter=dot`
+  failed at the owning repository seam with `ENOENT` for the absent manual
+  workflow; all 4 behavior/credential/device contracts were skipped. A second
+  focused red run passed 3/4 and proved the new `.maestro/` files were not yet
+  owned by the tracked-file quality inventory.
+- **GREEN:** the unchanged focused command passed 4/4 after adding one shared
+  four-phase Maestro suite, a credential-scoped runner, pinned/checksummed CLI
+  installer, Android API 24/33/36 and iOS minimum/latest lanes, and the physical
+  evidence protocol.
+- **Toolchain proof:** actionlint 1.7.12 reported no workflow findings; Ruby
+  parsed all five YAML files; `bash -n` and `node --check` passed. The published
+  Maestro 2.4.0 archive matched SHA-256
+  `aea22ce67ab6718997ec990c58652ede0c2be8f10ac4799039ca3dce3390d634`.
+  That exact CLI accepted all four flows and stopped only at the expected
+  no-connected-device boundary. The environment guard passed valid dummy input,
+  rejected missing configuration, and rejected a non-HTTPS/path-bearing origin.
+  Every GitHub Action reference resolves to an audited immutable commit.
+- **Design/security/performance:** only E2E execution steps receive the dedicated
+  OAuth token; packages and build steps do not. Reports/debug screenshots live in
+  an exit-trapped temp directory and are never uploaded. Runs are manual,
+  read-only at the GitHub permission boundary, sequential for the shared staging
+  fixture within each platform matrix, and delete the replayed server landmark
+  before the logout/purge case. No production JavaScript, native source,
+  dependency, application polling, or shipped asset was added.
+- **Gates:** lint, typecheck, production build with bundle budgets, actionlint,
+  shell/Node/YAML syntax, Prettier for all new artifacts, hard button scan,
+  runtime/full dependency audits (zero vulnerabilities), and configured staging
+  integration (2 files / 13 tests) passed. The threshold-enforced suite passed
+  113 files / 1,890 tests with 13 staging-only skips; coverage remained 90.27%
+  statements, 82.05% branches, 92.73% functions, and 92.36% lines. MapLibre
+  contracts remained green. The post-stage inventory classified all 576 tracked
+  files (42 build/quality-tooling files) with no gaps or overlaps.
+- **External evidence:** local CoreSimulator selected iOS 26.5 for `latest` and
+  the selector correctly failed closed because iOS 15.0 is unavailable. The
+  dedicated `SPELEODB_E2E_*` token/instance/project configuration and an Android
+  emulator are not present locally, so no app-flow matrix result is claimed.
+  Android 24/33/36, true iOS 15.0/latest, and both physical-platform records stay
+  unchecked above and block release until supplied by the manual workflow/device
+  ceremony.

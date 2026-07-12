@@ -110,6 +110,22 @@ the owning component, coordinator, fake-IndexedDB, native, or physical-device
 tests. `GPS_NATIVE_RELEASE_CHECKLIST.md` defines that evidence boundary and
 requires device/build identity for each manual result.
 
+## Release E2E Workflow
+
+`.github/workflows/release-e2e.yml` is a manual, credential-gated workflow rather
+than a pull-request check. It builds a credential-free debug package, then injects
+a dedicated staging OAuth token only into the Maestro execution steps. Android
+runs API 24/33/36 sequentially; iOS runs latest plus a required iOS 15.0 lane on
+an explicitly named compatible runner. The workflow has only `contents: read`
+permission, does not push or publish, and does not retain credential-bearing UI
+reports.
+
+The cross-platform flow owns fresh login, cached relaunch, Map/GPS navigation,
+pending-operation force-quit persistence, explicit replay, server-fixture cleanup,
+conditional sign-out warning, destructive purge, and signed-out relaunch. See
+`docs/release-device-evidence.md` for configuration, architecture, physical-only
+protocols, and the rule that missing matrix/device evidence blocks release.
+
 ## Secrets
 
 Integration tests are opt-in. They run only when `API_TEST_ENABLED=true` and all

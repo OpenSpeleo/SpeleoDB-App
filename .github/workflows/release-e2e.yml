@@ -1,0 +1,170 @@
+name: Release E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      ios_minimum_runner:
+        description: GitHub runner label with the iOS 15.0 simulator runtime installed
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MAESTRO_CLI_NO_ANALYTICS: 1
+  MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: true
+
+jobs:
+  build-android-e2e:
+    name: Build Android E2E APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SENTRY_DSN_ANDROID: https://public@example.invalid/1
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: zulu
+          java-version: 21
+      - run: npm ci
+      - run: npx cap sync android
+      - run: ./android/gradlew -p android assembleDebug
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-e2e-android-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 1
+
+  android-e2e:
+    name: Android API ${{ matrix.api-level }} E2E
+    needs: build-android-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        api-level: [24, 33, 36]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: zulu
+          java-version: 21
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-e2e-android-apk
+          path: build/release-e2e
+      - name: Require dedicated E2E configuration
+        run: scripts/verify-release-e2e-environment.sh
+        env:
+          SPELEODB_E2E_OAUTH_TOKEN: ${{ secrets.SPELEODB_E2E_OAUTH_TOKEN }}
+          SPELEODB_E2E_INSTANCE_URL: ${{ secrets.SPELEODB_E2E_INSTANCE_URL }}
+          SPELEODB_E2E_PROJECT_NAME: ${{ vars.SPELEODB_E2E_PROJECT_NAME }}
+      - name: Install pinned Maestro CLI
+        run: scripts/install-maestro-ci.sh
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run release E2E flow
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        env:
+          SPELEODB_E2E_OAUTH_TOKEN: ${{ secrets.SPELEODB_E2E_OAUTH_TOKEN }}
+          SPELEODB_E2E_INSTANCE_URL: ${{ secrets.SPELEODB_E2E_INSTANCE_URL }}
+          SPELEODB_E2E_PROJECT_NAME: ${{ vars.SPELEODB_E2E_PROJECT_NAME }}
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb install -r build/release-e2e/app-debug.apk
+            scripts/run-release-e2e.sh android
+
+  ios-e2e:
+    name: iOS ${{ matrix.lane }} E2E
+    runs-on: ${{ matrix.lane == 'minimum' && inputs.ios_minimum_runner || 'macos-latest' }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        lane: [minimum, latest]
+    env:
+      SENTRY_DSN_IOS: https://public@example.invalid/1
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
+        with:
+          distribution: zulu
+          java-version: 21
+      - run: npm ci
+      - run: npx cap sync ios
+      - name: Require dedicated E2E configuration
+        run: scripts/verify-release-e2e-environment.sh
+        env:
+          SPELEODB_E2E_OAUTH_TOKEN: ${{ secrets.SPELEODB_E2E_OAUTH_TOKEN }}
+          SPELEODB_E2E_INSTANCE_URL: ${{ secrets.SPELEODB_E2E_INSTANCE_URL }}
+          SPELEODB_E2E_PROJECT_NAME: ${{ vars.SPELEODB_E2E_PROJECT_NAME }}
+      - name: Install pinned Maestro CLI
+        run: scripts/install-maestro-ci.sh
+      - name: Select and boot simulator
+        id: simulator
+        run: |
+          node scripts/select-ios-simulator.mjs "${{ matrix.lane }}" 15.0 >> "$GITHUB_OUTPUT"
+          UDID="$(node scripts/select-ios-simulator.mjs "${{ matrix.lane }}" 15.0 --field udid)"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+      - name: Build and install simulator app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+          xcrun simctl install \
+            "${{ steps.simulator.outputs.udid }}" \
+            "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator/App.app"
+      - name: Run release E2E flow
+        run: scripts/run-release-e2e.sh ios
+        env:
+          SPELEODB_E2E_OAUTH_TOKEN: ${{ secrets.SPELEODB_E2E_OAUTH_TOKEN }}
+          SPELEODB_E2E_INSTANCE_URL: ${{ secrets.SPELEODB_E2E_INSTANCE_URL }}
+          SPELEODB_E2E_PROJECT_NAME: ${{ vars.SPELEODB_E2E_PROJECT_NAME }}
+      - name: Record exact simulator evidence
+        if: always()
+        run: |
+          {
+            echo "## iOS ${{ matrix.lane }} simulator"
+            echo "- Device: ${{ steps.simulator.outputs.name }}"
+            echo "- Runtime: ${{ steps.simulator.outputs.runtime }}"
+            echo "- UDID: ${{ steps.simulator.outputs.udid }}"
+            echo "- Result: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Stop simulator
+        if: always() && steps.simulator.outputs.udid != ''
+        run: xcrun simctl shutdown "${{ steps.simulator.outputs.udid }}" || true

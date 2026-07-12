@@ -73,6 +73,7 @@
         "^\\.cursor/",
         "^\\.env\\.dist$",
         "^\\.github/",
+        "^\\.maestro/",
         "^\\.gitignore$",
         "^\\.husky/",
         "^\\.node-version$",
