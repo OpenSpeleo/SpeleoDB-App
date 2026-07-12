@@ -13,5 +13,9 @@ export default defineConfig({
     include: ['benchmarks/sync-wall-clock.test.tsx'],
     testTimeout: 120_000,
     hookTimeout: 120_000,
+    onConsoleLog(log) {
+      if (log.startsWith('[project-geojson:bbox]')) return false;
+      if (log.startsWith('[project-sync:timing]')) return false;
+    },
   },
 });

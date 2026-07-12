@@ -2,13 +2,20 @@ import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CacheStore } from '../src/services/CacheStore';
 import { ProjectCacheService } from '../src/services/ProjectCacheService';
+import { ProjectGeoJSONAnalyzer } from '../src/services/ProjectGeoJSONAnalyzer';
+import type { SpeleoDBService } from '../src/services/SpeleoDBService';
 import type { Project } from '../src/types/project';
 import type { ProjectGeoJSONAnalysis } from '../src/types/projectGeoJSON';
 import { useDashboardMapData } from '../src/pages/dashboard/useDashboardMapData';
+import { ProjectGeoJSONCoordinator } from '../src/controllers/ProjectGeoJSONCoordinator';
+import { ProjectSyncCoordinator } from '../src/controllers/ProjectSyncCoordinator';
+import type { ProjectOverlaySyncCoordinator } from '../src/controllers/ProjectOverlaySyncCoordinator';
+import type { SessionStore } from '../src/services/SecureSessionStore';
 
 const PROJECT_COUNT = 60;
 const FEATURES_PER_PROJECT = 2_000;
 const SAMPLE_COUNT = 5;
+const FULL_SYNC_SAMPLE_COUNT = 3;
 
 function project(index: number): Project {
   return {
@@ -176,5 +183,96 @@ describe('60-project cache-to-Dashboard wall clock', () => {
       mountedHeapMedianMiB: Math.round(percentile(mountedHeapDeltaMiB, 0.5) * 10) / 10,
     };
     process.stdout.write(`SYNC_WALL_CLOCK ${JSON.stringify(record)}\n`);
+  });
+
+  it('records the complete post-network synchronization path', async () => {
+    const syncSamples: number[] = [];
+    const maximumTimerDelaySamples: number[] = [];
+
+    for (let sample = 0; sample < FULL_SYNC_SAMPLE_COUNT; sample += 1) {
+      const cache = new ProjectCacheService(store);
+      await cache.clearAll();
+      const transport = {
+        getProjectsGeoJSON: async () => ({ status: 200, data: projects }),
+        downloadJSON: async (url: string) => {
+          const projectIndex = Number(url.match(/project-(\d+)/)?.[1] ?? -1);
+          return { status: 200, data: payloads[projectIndex] };
+        },
+      } as unknown as SpeleoDBService;
+      const geoJSON = new ProjectGeoJSONCoordinator({
+        cache,
+        transport,
+        analyzer: new ProjectGeoJSONAnalyzer(),
+        hasNetworkAccess: () => true,
+        removePrefetchTarget: async () => {},
+        notifyStateChanged: () => {},
+      });
+      const overlays = {
+        sync: async () => ({
+          phase: 'overlay_sync' as const,
+          status: 'applied' as const,
+          reason: 'overlays_synced' as const,
+          attemptedOverlayCount: 5,
+          syncedOverlayCount: 5,
+          failedOverlayCount: 0,
+        }),
+      } as ProjectOverlaySyncCoordinator;
+      const sessions = {
+        initialize: async () => ({ instance: 'https://example.test', token: 'token' }),
+        getSession: () => ({ instance: 'https://example.test', token: 'token' }),
+        establish: async () => {},
+        clear: async () => {},
+      } as SessionStore;
+      const coordinator = new ProjectSyncCoordinator({
+        cache,
+        transport,
+        sessions,
+        metadata: { getLastSyncedAt: () => undefined, setLastSyncedAt: () => {} },
+        geoJSON,
+        overlays,
+        hooks: {
+          hasNetworkAccess: () => true,
+          markOnline: () => {},
+          enterOfflineMode: () => {},
+          notifyStateChanged: () => {},
+          bumpLandmarksRevision: () => {},
+          syncGpsTracks: async () => {},
+          queueTilePrefetch: () => {},
+        },
+        now: () => Date.now(),
+        elapsedNow: () => performance.now(),
+      });
+
+      let lastTimerAt = performance.now();
+      let maximumTimerDelay = 0;
+      const timer = setInterval(() => {
+        const now = performance.now();
+        maximumTimerDelay = Math.max(maximumTimerDelay, now - lastTimerAt);
+        lastTimerAt = now;
+      }, 1);
+      const startedAt = performance.now();
+      const result = await coordinator.sync();
+      syncSamples.push(performance.now() - startedAt);
+      clearInterval(timer);
+      maximumTimerDelaySamples.push(maximumTimerDelay);
+      expect(result.phases.geojsonSync).toMatchObject({
+        status: 'applied',
+        downloadedProjectCount: PROJECT_COUNT,
+        validatedProjectCount: PROJECT_COUNT,
+      });
+    }
+
+    const record = {
+      projectCount: PROJECT_COUNT,
+      payloadMiB: 18.1,
+      syncMs: syncSamples.map((value) => Math.round(value * 10) / 10),
+      syncMedianMs: Math.round(percentile(syncSamples, 0.5) * 10) / 10,
+      syncWorstMs: Math.round(Math.max(...syncSamples) * 10) / 10,
+      maximumTimerDelayMs:
+        maximumTimerDelaySamples.map((value) => Math.round(value * 10) / 10),
+      maximumTimerDelayMedianMs:
+        Math.round(percentile(maximumTimerDelaySamples, 0.5) * 10) / 10,
+    };
+    process.stdout.write(`SYNC_FULL_PATH ${JSON.stringify(record)}\n`);
   });
 });
