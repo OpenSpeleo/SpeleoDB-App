@@ -10,7 +10,7 @@ behaviors.
 - `offline-mode.md`: how offline mode works, startup auth timeout behavior,
   logout rules, and test expectations.
 - `tile-cache-architecture.md`: cache-first tile serving, 180-day freshness,
-  fail-closed streamed planning, additive IndexedDB v8 staging/layer
+  fail-closed bounded in-memory planning, compact IndexedDB plans/layer
   generations, six-worker downloads, paint-cadence progress, refresh, and
   performance regression seams.
 - `logout-behavior.md`: when logout/cache purge happens and what data is

@@ -1,6 +1,7 @@
-import type { OfflineMapCoordinate, OfflineMapPlanningInput } from '../types/offlineMapSync';
+import type { OfflineMapPlanningInput } from '../types/offlineMapSync';
 import {
-  encodeOfflineMapCoordinateChunk,
+  collectUniqueOfflineMapCoordinateKeys,
+  encodePackedOfflineMapCoordinateChunk,
   iterateRawOfflineMapCoordinates,
   OFFLINE_MAP_PLAN_CHUNK_SIZE,
 } from '../services/offlineMapPlanCore';
@@ -40,14 +41,16 @@ workerScope.onmessage = (event) => {
   const { id, input } = event.data;
   void (async () => {
     try {
-      let chunkIndex = 0;
-      let batch: OfflineMapCoordinate[] = [];
-      const flush = async () => {
-        if (batch.length === 0) return;
-        const index = chunkIndex;
-        chunkIndex += 1;
-        const encoded = encodeOfflineMapCoordinateChunk(batch);
-        batch = [];
+      const keys = collectUniqueOfflineMapCoordinateKeys(
+        iterateRawOfflineMapCoordinates(input),
+      );
+      for (
+        let start = 0, index = 0;
+        start < keys.length;
+        start += OFFLINE_MAP_PLAN_CHUNK_SIZE, index += 1
+      ) {
+        const end = Math.min(keys.length, start + OFFLINE_MAP_PLAN_CHUNK_SIZE);
+        const encoded = encodePackedOfflineMapCoordinateChunk(keys, start, end);
         const ack = new Promise<void>((resolve) => {
           acknowledge = (ackIndex) => {
             if (ackIndex !== index) return;
@@ -57,12 +60,7 @@ workerScope.onmessage = (event) => {
         });
         workerScope.postMessage({ id, type: 'chunk', index, coordinates: encoded }, [encoded.buffer]);
         await ack;
-      };
-      for (const coordinate of iterateRawOfflineMapCoordinates(input)) {
-        batch.push(coordinate);
-        if (batch.length >= OFFLINE_MAP_PLAN_CHUNK_SIZE) await flush();
       }
-      await flush();
       workerScope.postMessage({ id, type: 'done' });
     } catch (error) {
       workerScope.postMessage({

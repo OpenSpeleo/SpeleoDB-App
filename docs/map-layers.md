@@ -127,9 +127,11 @@ consistent while mounted.
 
 - Projects, landmarks, stations, and GPS paths are unioned into one immutable,
   layer-independent `{z,x,y}` plan. Tiles remain keyed by full provider URL.
-- The worker streams at most 2,048 raw coordinates at a time and waits for
-  storage acknowledgement. A temporary v8 compound-key store deduplicates and
-  counts the unique rows before the stable `N*M` total is published.
+- The worker packs and deduplicates coordinates in memory with a hard ceiling
+  of 1,000,000 unique tiles. It sorts the final keys and transfers at most 2,048
+  final coordinates at a time, waiting for each compact plan-chunk write before
+  continuing. The stable `N*M` total is published only after final chunks are
+  durable.
 - **Priority**: coordinates expand satellite first, then enabled extra layers. A
   six-worker queue downloads ready URLs while 16-coordinate auditing continues.
   Outstanding coordinates are backpressured at 64.
@@ -190,9 +192,10 @@ layers compete for the same pinned budget and honor the user's override.
 ## Migration
 
 - IndexedDB `speleo_tiles` is v8. Payloads, v7 manifests, generations, and
-  memberships are preserved; v8 additively introduces temporary compound-key
-  coordinate staging. The incremental, payload-preserving v6 migration is
-  described in `docs/tile-cache-architecture.md`.
+  memberships are preserved. The former v8 coordinate-staging store remains
+  schema-compatible and is cleared during recovery, but current planners write
+  only final compact chunks. The incremental, payload-preserving v6 migration
+  is described in `docs/tile-cache-architecture.md`.
 
 ## Source code
 
@@ -218,13 +221,14 @@ layers compete for the same pinned budget and honor the user's override.
   separation, hash-miss passthrough, empty-list bypass, and
   `getCachedLayerStyle` rewrite.
 - `src/services/tileCache/TileCacheRepository.test.ts`: payload-preserving
-  migration, v8 staging/recovery/GC, layer generations, transaction aborts,
+  migration, legacy v8 staging recovery/GC, layer generations, transaction aborts,
   atomic concurrent eviction, and statistics.
 - `src/services/OfflineMapSyncEngine.test.ts`: six-worker scheduling, manifest
   fast path, per-tile progress, and retry head-of-line avoidance.
 - `src/services/OfflineMapSyncEngine.repository.test.ts`: real fake-IndexedDB
   draining through payload and membership transactions.
-- `src/services/OfflineMapPlanner.test.ts`: canonical source union and chunks.
+- `src/services/OfflineMapPlanner.test.ts`: canonical source union, packed
+  deduplication, the 1M limit, and final chunks.
 - `src/services/tilePrefetchPlanner.test.ts`: meter padding, zoom ranges,
   dateline/root deduplication, zero-width bounds, and latitude clamping.
 - `src/services/PreferencesService.test.ts`: `selectedMapLayerId` +

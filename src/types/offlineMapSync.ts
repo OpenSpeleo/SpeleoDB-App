@@ -20,7 +20,7 @@ export interface OfflineMapPlanChunkRecord {
   coordinates: Uint32Array;
 }
 
-/** Temporary v8 staging row. The compound key makes raw worker output unique. */
+/** Legacy v8 staging row retained only for upgrade/crash cleanup compatibility. */
 export interface OfflineMapPlanCoordinateRecord extends OfflineMapCoordinate {
   buildId: string;
 }

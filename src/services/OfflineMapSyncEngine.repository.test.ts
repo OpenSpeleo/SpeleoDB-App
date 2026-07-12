@@ -174,7 +174,7 @@ describe('OfflineMapSyncEngine repository integration', () => {
     }
   });
 
-  it('builds a missing plan through unique v8 staging before downloading', async () => {
+  it('builds a missing plan from final compact worker chunks before downloading', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([7]), {
       status: 200,
       headers: { 'content-type': 'image/png' },
@@ -190,7 +190,7 @@ describe('OfflineMapSyncEngine repository integration', () => {
     await engine.schedule({
       mode: 'rebuild',
       plan: {
-        sourceRevision: 'staged-plan-revision',
+        sourceRevision: 'compact-plan-revision',
         projects: [],
         points: [[1, 1], [1, 1]],
         paths: [],
@@ -202,7 +202,7 @@ describe('OfflineMapSyncEngine repository integration', () => {
     });
     await engine.waitForIdle();
 
-    expect(await getOfflineMapPlanByRevision('staged-plan-revision')).toMatchObject({
+    expect(await getOfflineMapPlanByRevision('compact-plan-revision')).toMatchObject({
       coverageVersion: 2,
       coordinateCount: 1,
       chunkCount: 1,

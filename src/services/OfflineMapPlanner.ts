@@ -1,17 +1,21 @@
 import workerUrl from '../workers/offlineMapPlanner.worker.ts?worker&url';
-import type { OfflineMapCoordinate, OfflineMapPlanningInput } from '../types/offlineMapSync';
+import type { OfflineMapPlanningInput } from '../types/offlineMapSync';
 import { createAbortError } from '../utils/abort';
 import {
-  encodeOfflineMapCoordinateChunk,
+  collectUniqueOfflineMapCoordinateKeys,
+  encodePackedOfflineMapCoordinateChunk,
   iterateRawOfflineMapCoordinates,
   OFFLINE_MAP_PLAN_CHUNK_SIZE,
 } from './offlineMapPlanCore';
 
 export {
   collectOfflineMapCoordinates,
+  collectUniqueOfflineMapCoordinateKeys,
   decodeOfflineMapCoordinateChunk,
   encodeOfflineMapCoordinateChunk,
+  encodePackedOfflineMapCoordinateChunk,
   OFFLINE_MAP_PLAN_CHUNK_SIZE,
+  OFFLINE_MAP_PLAN_MAX_COORDINATES,
 } from './offlineMapPlanCore';
 
 type PlannerWorkerResponse =
@@ -33,9 +37,8 @@ export type OfflineMapPlanConsumer = (
 ) => void | Promise<void>;
 
 /**
- * Enumerates raw coordinates off the WebView thread with one-chunk
- * acknowledgement. IndexedDB staging performs global dedupe and locks the
- * exact total after enumeration completes.
+ * Deduplicates and sorts coordinates off the WebView thread, then sends final
+ * compact chunks with one-chunk acknowledgement.
  */
 export function planOfflineMapInWorker(
   input: OfflineMapPlanningInput,
@@ -46,23 +49,19 @@ export function planOfflineMapInWorker(
 
   if (import.meta.env.MODE === 'test' && typeof Worker === 'undefined') {
     return (async () => {
-      let rawCount = 0;
-      let chunkIndex = 0;
-      let batch: OfflineMapCoordinate[] = [];
-      const flush = async () => {
-        if (batch.length === 0) return;
+      const keys = collectUniqueOfflineMapCoordinateKeys(
+        iterateRawOfflineMapCoordinates(input),
+      );
+      for (
+        let start = 0, chunkIndex = 0;
+        start < keys.length;
+        start += OFFLINE_MAP_PLAN_CHUNK_SIZE, chunkIndex += 1
+      ) {
         if (signal?.aborted) throw createAbortError('Offline-map planning aborted');
-        await consume(encodeOfflineMapCoordinateChunk(batch), chunkIndex);
-        batch = [];
-        chunkIndex += 1;
-      };
-      for (const coordinate of iterateRawOfflineMapCoordinates(input)) {
-        batch.push(coordinate);
-        rawCount += 1;
-        if (batch.length >= OFFLINE_MAP_PLAN_CHUNK_SIZE) await flush();
+        const end = Math.min(keys.length, start + OFFLINE_MAP_PLAN_CHUNK_SIZE);
+        await consume(encodePackedOfflineMapCoordinateChunk(keys, start, end), chunkIndex);
       }
-      await flush();
-      return rawCount;
+      return keys.length;
     })();
   }
 

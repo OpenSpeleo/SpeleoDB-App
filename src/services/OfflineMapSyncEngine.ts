@@ -16,16 +16,13 @@ import {
 import {
   activateOfflineMapGeneration,
   commitOfflineMapPlan,
-  countStagedOfflineMapCoordinates,
   deleteOfflineMapPlan,
   deleteOfflineMapPlanChunks,
-  deleteStagedOfflineMapCoordinates,
   garbageCollectOfflineMapPlans,
   getOfflineMapGenerations,
   getOfflineMapPlanByRevision,
   getOfflineMapPlanById,
   getOfflineMapPlanChunk,
-  getStagedOfflineMapCoordinatePage,
   getTileCacheStats,
   normalizeOfflineMapGenerationCounters,
   putOfflineMapPlanChunk,
@@ -33,7 +30,6 @@ import {
   releaseOfflineMapGeneration,
   runOfflineMapV7Migration,
   setOfflineMapGeneration,
-  stageOfflineMapCoordinates,
 } from './tileCache/TileCacheRepository';
 import {
   decodeOfflineMapCoordinateChunk,
@@ -230,10 +226,6 @@ export interface OfflineMapSyncEngineDependencies {
   commitPlan: typeof commitOfflineMapPlan;
   deletePlan: typeof deleteOfflineMapPlan;
   deletePlanChunks: typeof deleteOfflineMapPlanChunks;
-  stagePlanCoordinates: typeof stageOfflineMapCoordinates;
-  countStagedCoordinates: typeof countStagedOfflineMapCoordinates;
-  getStagedCoordinatePage: typeof getStagedOfflineMapCoordinatePage;
-  deleteStagedCoordinates: typeof deleteStagedOfflineMapCoordinates;
   getPlanChunk: typeof getOfflineMapPlanChunk;
   getGenerations: typeof getOfflineMapGenerations;
   setGeneration: typeof setOfflineMapGeneration;
@@ -260,10 +252,6 @@ const defaultDependencies: OfflineMapSyncEngineDependencies = {
   commitPlan: commitOfflineMapPlan,
   deletePlan: deleteOfflineMapPlan,
   deletePlanChunks: deleteOfflineMapPlanChunks,
-  stagePlanCoordinates: stageOfflineMapCoordinates,
-  countStagedCoordinates: countStagedOfflineMapCoordinates,
-  getStagedCoordinatePage: getStagedOfflineMapCoordinatePage,
-  deleteStagedCoordinates: deleteStagedOfflineMapCoordinates,
   getPlanChunk: getOfflineMapPlanChunk,
   getGenerations: getOfflineMapGenerations,
   setGeneration: setOfflineMapGeneration,
@@ -782,39 +770,26 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
 
     const buildSuffix = `${this.dependencies.now()}:${this.sessionCounter++}`;
     const planId = `offline-plan:${COVERAGE_VERSION}:${request.plan.sourceRevision}:${buildSuffix}`;
-    const buildId = `${planId}:build`;
     let chunkCount = 0;
     try {
       await this.dependencies.deletePlanChunks(planId);
-      await this.dependencies.deleteStagedCoordinates(buildId);
-      await this.dependencies.plan(
+      const coordinateCount = await this.dependencies.plan(
         request.plan,
-        async (coordinates) => {
+        async (coordinates, index) => {
           throwIfAborted(signal);
-          await this.dependencies.stagePlanCoordinates(buildId, coordinates);
+          if (index !== chunkCount) {
+            throw new Error(`Offline-map planner returned out-of-order chunk ${index}`);
+          }
+          await this.dependencies.putPlanChunk({ planId, index, coordinates });
+          chunkCount += 1;
         },
         signal,
       );
       throwIfAborted(signal);
-      const coordinateCount = await this.dependencies.countStagedCoordinates(buildId);
-      onTotalLocked(coordinateCount);
-      let lastKey: IDBValidKey | null = null;
-      while (true) {
-        throwIfAborted(signal);
-        const page = await this.dependencies.getStagedCoordinatePage(
-          buildId,
-          lastKey,
-          2_048,
-        );
-        if (page.coordinates.length === 0) break;
-        await this.dependencies.putPlanChunk({
-          planId,
-          index: chunkCount,
-          coordinates: page.coordinates,
-        });
-        chunkCount += 1;
-        lastKey = page.lastKey;
+      if (chunkCount !== Math.ceil(coordinateCount / 2_048)) {
+        throw new Error('Offline-map planner returned an inconsistent coordinate count');
       }
+      onTotalLocked(coordinateCount);
       const plan: OfflineMapPlanRecord = {
         id: planId,
         sourceRevision: request.plan.sourceRevision,
@@ -837,8 +812,6 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
     } catch (error) {
       await this.dependencies.deletePlanChunks(planId).catch(() => {});
       throw error;
-    } finally {
-      await this.dependencies.deleteStagedCoordinates(buildId).catch(() => {});
     }
   }
 

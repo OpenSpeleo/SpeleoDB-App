@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type {
   OfflineMapGenerationRecord,
+  OfflineMapPlanningInput,
   OfflineMapPlanRecord,
   OfflineMapSyncRequest,
 } from '../types/offlineMapSync';
@@ -126,6 +127,74 @@ function harness(options: {
 }
 
 describe('OfflineMapSyncEngine', () => {
+  it('persists a 12K plan in six final chunks before the planner completes', async () => {
+    const finalChunks = [2_048, 2_048, 2_048, 2_048, 2_048, 1_760]
+      .map(encodedCoordinates);
+    const putPlanChunk = vi.fn(async () => {});
+    let chunkWasDurableBeforePlannerCompletion = false;
+    const planner = vi.fn(async (
+      _input: OfflineMapPlanningInput,
+      consume: (chunk: Uint32Array, index: number) => Promise<void> | void,
+    ) => {
+      for (let index = 0; index < finalChunks.length; index += 1) {
+        await consume(finalChunks[index], index);
+      }
+      chunkWasDurableBeforePlannerCompletion = putPlanChunk.mock.calls.length === 6;
+      return 12_000;
+    });
+    const committed: OfflineMapPlanRecord[] = [];
+    const engine = new OfflineMapSyncEngine({
+      getPlan: vi.fn(async () => null),
+      getPlanById: vi.fn(async (id: string) => committed.find((plan) => plan.id === id) ?? null),
+      deletePlan: vi.fn(async () => {}),
+      deletePlanChunks: vi.fn(async () => {}),
+      putPlanChunk,
+      commitPlan: vi.fn(async (plan: OfflineMapPlanRecord) => {
+        committed.push(plan);
+      }),
+      plan: planner,
+      getPlanChunk: vi.fn(async (_planId: string, index: number) => ({
+        planId: committed[0]?.id ?? 'pending', index, coordinates: finalChunks[index],
+      })),
+      getGenerations: vi.fn(async () => []),
+      setGeneration: vi.fn(async () => {}),
+      activateGeneration: vi.fn(async () => []),
+      releaseGeneration: vi.fn(async () => {}),
+      normalizeGenerations: vi.fn(async () => []),
+      recoverPlanStorage: vi.fn(async () => {}),
+      garbageCollectPlans: vi.fn(async () => {}),
+      getCacheStats: vi.fn(async () => ({
+        totalBytes: 0, tileCount: 0, pinnedBytes: 0, pinnedTileCount: 0, updatedAt: 1,
+      })),
+      claimCached: vi.fn(async () => [{
+        url: 'https://tiles/18/0/0',
+        sizeBytes: 1,
+        isNoData: false,
+        fetchedAt: Date.now(),
+        lastAccessedAt: Date.now(),
+        prefetchOwnerCount: 1,
+        pinnedByAutoPrefetch: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }]),
+      fetchTile: vi.fn(),
+      migrate: vi.fn(async () => {}),
+      isOnline: () => true,
+    });
+
+    await engine.schedule(request(12_000));
+    engine.cancel();
+    await engine.waitForIdle();
+
+    expect(chunkWasDurableBeforePlannerCompletion).toBe(true);
+    expect(putPlanChunk).toHaveBeenCalledTimes(6);
+    expect(putPlanChunk).toHaveBeenLastCalledWith(expect.objectContaining({
+      index: 5,
+      coordinates: finalChunks[5],
+    }));
+    expect(committed[0]).toMatchObject({ coordinateCount: 12_000, chunkCount: 6 });
+  });
+
   it('keeps six downloads active and drains the next tile immediately', async () => {
     const gates: Array<() => void> = [];
     let inFlight = 0;

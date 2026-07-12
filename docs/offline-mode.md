@@ -245,14 +245,16 @@ examples.
 
 ### Multi-layer synchronization (satellite first)
 
-The worker emits at most 2,048 raw coordinates and waits for storage
-acknowledgement. IndexedDB v8 compound-key staging deduplicates/counts them and
-commits sorted typed-array chunks before the manifest. The immutable count `N`
-is expanded satellite first, followed by opted-in layers. Expected coverage is
+The dedicated worker packs and deduplicates coordinates in memory, rejects more
+than 1,000,000 unique tiles, sorts the final keys, and transfers at most 2,048
+final coordinates per acknowledged IndexedDB plan-chunk write. It commits the
+manifest only after every compact chunk is durable. The immutable count `N` is
+expanded satellite first, followed by opted-in layers. Expected coverage is
 exactly `N * enabled layer count`; the denominator never comes from partial
-streamed work. The additive v8 schema preserves existing payloads, metadata, v7
-plans, generations, and memberships. Its incremental v6 migration retains
-URL-keyed payloads and treats unknown fetch dates as fresh from migration time.
+work. The additive v8 schema preserves existing payloads, metadata, v7 plans,
+generations, and memberships; legacy coordinate staging is cleared during
+recovery. Its incremental v6 migration retains URL-keyed payloads and treats
+unknown fetch dates as fresh from migration time.
 Disabling an optional layer cancels the current session, releases the layer,
 then evicts its namespace and resumes remaining layers from the active plan; a
 release failure never evicts payloads.

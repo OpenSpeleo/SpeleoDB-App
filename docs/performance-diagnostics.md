@@ -48,6 +48,13 @@ The foreground `total` ends after durable project, overlay, and GPS publication.
 Offline-map `coverage_source_collection` and `plan_schedule` are separate
 background timings and do not keep the Syncing action active.
 
+`plan_schedule` includes worker-side coordinate enumeration, packed in-memory
+deduplication and sorting, and durable writes of the final compact plan chunks.
+It does not include tile-provider downloads. For a typical 12,000-coordinate
+plan, only six final chunk transactions are required. A large value therefore
+points to planner computation or final plan persistence rather than temporary
+per-coordinate staging, which is not part of the current planner path.
+
 The `project-geojson` scope splits the local work hidden inside
 `geojson_sync`:
 

@@ -66,27 +66,35 @@ batches, and cancellation is rechecked after every yield. The planner remains a
 dedicated worker; these boundaries prevent offline preparation from owning the
 Settings spinner or monopolizing rendering/input on the WebView thread.
 
-## Bounded v8 plan construction
+## Bounded in-memory plan construction
 
-The worker enumerates raw `{z,x,y}` coordinates and sends at most 2,048 at a
-time. It waits for explicit consumer acknowledgement before producing the next
-chunk. Requests and acknowledgements use discriminated `plan` and `ack`
-messages; the production-worker protocol is tested directly rather than only
-through the test-only main-thread fallback. The consumer stores raw rows in
-`offline_map_plan_coordinates`, keyed by `[buildId,z,x,y]`; IndexedDB key
-uniqueness owns global deduplication without a lifetime JavaScript `Set`.
+The dedicated worker packs each `{z,x,y}` coordinate into one safe integer and
+deduplicates it in a worker-local `Set<number>`. The plan has a hard ceiling of
+1,000,000 unique coordinates; exceeding it fails planning before any final
+chunk or manifest is published. The final keys are copied into a
+`Float64Array`, sorted in place, decoded into compact `Uint32Array` chunks of at
+most 2,048 coordinates, and transferred one chunk at a time.
 
-After enumeration, the repository counts unique staged rows to lock `N`, reads
-them in sorted pages of at most 2,048, and writes compact `Uint32Array` plan
-chunks. The immutable manifest is committed last. Therefore:
+The worker waits for explicit consumer acknowledgement before producing the
+next final chunk. Acknowledgement follows the chunk's durable IndexedDB write,
+so the plan path performs one transaction per final chunk rather than one
+object-store write per raw coordinate. Requests and acknowledgements use
+discriminated `plan` and `ack` messages; the production-worker protocol is
+tested directly rather than only through the test-only main-thread fallback.
+The immutable manifest is committed last. Therefore:
 
 `expected tiles = unique coordinates (N) * enabled layers (M)`
 
 Builders have unique IDs. The unique source-revision index chooses one winner; a
-loser reuses that winner and discards its own staging/chunks. Startup deletes
-crashed staging and chunk-only builds. Structurally corrupt manifests are
-deleted and rebuilt. Old unreferenced manifests and chunks are collected in
-bounded batches after a grace period.
+loser reuses that winner and discards its own chunks. Startup deletes legacy v8
+staging rows and chunk-only builds. Structurally corrupt manifests are deleted
+and rebuilt. Old unreferenced manifests and chunks are collected in bounded
+batches after a grace period.
+
+The temporary memory envelope is intentionally bounded. At the 1,000,000-tile
+ceiling, the JavaScript hash set plus sorted typed array is expected to consume
+roughly 43-69 MiB depending on the WebView engine; a typical 12,000-tile plan is
+well below 1 MiB. Output chunks are transferred and released incrementally.
 
 ## IndexedDB v8 and migration
 
@@ -97,7 +105,7 @@ membership data:
 | ------------------------------ | ---------------------------------------------------- |
 | `offline_map_plans`            | immutable manifest and unique cryptographic revision |
 | `offline_map_plan_chunks`      | sorted compact coordinate chunks                     |
-| `offline_map_plan_coordinates` | temporary unique build staging                       |
+| `offline_map_plan_coordinates` | legacy v8 crash staging; cleared during recovery     |
 | `offline_map_generations`      | pending/active/failed/releasing layer state          |
 | `offline_map_memberships`      | generation claim per provider URL                    |
 
@@ -161,8 +169,9 @@ completion.
 
 ## Verification and release evidence
 
-Authoritative automated seams include planner acknowledgement/chunk bounds, v8
-staging/recovery/GC, real fake-IndexedDB aborts, payload/tombstone statistics,
+Authoritative automated seams include planner deduplication/limit enforcement,
+acknowledgement/final-chunk bounds, legacy v8 staging recovery/GC, real
+fake-IndexedDB aborts, payload/tombstone statistics,
 six-way concurrency and queue high-water marks, retry classes, deadline phases,
 late refresh/logout races, request supersession, paint scheduler hostility,
 context isolation, and Settings failure presentation.
