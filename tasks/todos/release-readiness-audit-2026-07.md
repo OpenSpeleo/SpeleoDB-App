@@ -147,18 +147,18 @@ cannot be blocked by UI.
 Owning seam: the voluntary Settings sign-out confirmation using the existing
 live `pendingOpsCount` context value.
 
-- [ ] **RED:** add Settings tests for zero, one, and multiple pending operations;
+- [x] **RED:** add Settings tests for zero, one, and multiple pending operations;
       assert the current modal lacks the conditional warning and required
       acknowledgement and permits destructive sign-out without agreement.
-- [ ] **GREEN:** when the count is positive, show “Pending offline operations
+- [x] **GREEN:** when the count is positive, show “Pending offline operations
       will be lost,” the exact singular/plural count, and the statement that the
       operations cannot be recovered or synchronized later. Require the user to
       check “I understand that these pending offline operations will be
       permanently deleted and are unrecoverable” before enabling sign-out.
-- [ ] Reset acknowledgement when the modal closes or the count changes. Preserve
+- [x] Reset acknowledgement when the modal closes or the count changes. Preserve
       it for an in-place retry only when the count is unchanged. Disable
       dismissal and duplicate actions while logout runs.
-- [ ] Prove zero pending operations preserve the existing flow and forced
+- [x] Prove zero pending operations preserve the existing flow and forced
       unauthorized logout never waits for UI consent.
 
 #### RR-003 — Confirmed mutations can corrupt or silently fail ground-truth cache publication
@@ -510,3 +510,25 @@ a commit cannot contain its own stable final hash.
 - **Limitations:** native source and generated projects are unchanged; native
   compilation remains in the final cross-platform gate. Physical-device logout
   races remain an explicit RR-008 release protocol.
+
+### RR-014 — Pending-operation loss acknowledgement
+
+- **RED:** `npx vitest run src/pages/Settings.test.tsx` — 5 expected failures
+  proved the voluntary sign-out modal had no conditional warning/count,
+  acknowledgement gate, reset behavior, or consent-aware duplicate protection.
+- **GREEN:** the unchanged focused command passed 66/66 tests. Coverage includes
+  zero/one/multiple pending operations, exact singular/plural copy, disabled
+  destructive action, cancel and count-change reset, unchanged-count retry, and
+  busy duplicate prevention. The existing controller/session tests in the full
+  suite continue to prove forced unauthorized logout is non-interactive.
+- **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
+  hard button scan, and the deterministic covered suite passed. The suite
+  reported 109 files / 1,846 passed tests and 13 staging-only skips; MapLibre
+  contracts remain green.
+- **Design/performance:** consent is stored as the exact acknowledged pending
+  count, so a live count change invalidates it without an effect, storage read,
+  polling, or extra render cascade.
+- **Limitations:** staging transport, native projects, and generated assets are
+  unchanged, so live API and native compilation are inapplicable to this UI-only
+  RR item and remain covered by RR-002/final gates. Physical interaction remains
+  part of RR-008.

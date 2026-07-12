@@ -29,6 +29,7 @@ const {
   mockIsTileCacheOverLimit,
   mockIsTileCacheOverLimitApproved,
   mockIsOfflineLocked,
+  mockPendingOpsCount,
 } = vi.hoisted(() => ({
   mockTilePrefetchJobs: { current: [] as unknown[] },
   mockOfflineMapSync: { current: {
@@ -59,6 +60,7 @@ const {
   mockIsTileCacheOverLimit: { current: false },
   mockIsTileCacheOverLimitApproved: { current: false },
   mockIsOfflineLocked: { current: false },
+  mockPendingOpsCount: { current: 0 },
 }));
 
 vi.mock('../context/useSpeleoDB', () => ({
@@ -81,6 +83,8 @@ vi.mock('../context/useSpeleoDB', () => ({
     isTileCacheOverLimit: mockIsTileCacheOverLimit.current,
     isTileCacheOverLimitApproved: mockIsTileCacheOverLimitApproved.current,
     isOfflineLocked: mockIsOfflineLocked.current,
+    pendingOpsCount: mockPendingOpsCount.current,
+    gpsRecordingState: 'idle',
   }),
 }));
 
@@ -295,6 +299,7 @@ describe('Settings page', () => {
     mockSetLayerOfflineSync.mockReset().mockResolvedValue(undefined);
     mockRefreshOfflineMaps.mockReset().mockResolvedValue(undefined);
     mockIsOfflineLocked.current = false;
+    mockPendingOpsCount.current = 0;
   });
 
   it('renders settings header', () => {
@@ -728,6 +733,103 @@ describe('Settings page', () => {
       expect(mockLogout).toHaveBeenCalled();
     });
     expect(history.location.pathname).toBe('/login');
+  });
+
+  it('preserves the existing confirmation when no offline operations are pending', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(screen.getByTestId('sign-out-button'));
+
+    expect(screen.queryByTestId('pending-ops-loss-warning')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pending-ops-loss-acknowledgement')).not.toBeInTheDocument();
+    expect(screen.getByTestId('confirm-logout')).toBeEnabled();
+  });
+
+  it('requires explicit acknowledgement before losing one pending offline operation', async () => {
+    mockPendingOpsCount.current = 1;
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(screen.getByTestId('sign-out-button'));
+
+    expect(screen.getByText('Pending offline operations will be lost')).toBeInTheDocument();
+    expect(screen.getByTestId('pending-ops-loss-warning')).toHaveTextContent(
+      'You have 1 pending offline operation.',
+    );
+    expect(screen.getByTestId('pending-ops-loss-warning')).toHaveTextContent(
+      'They cannot be recovered or synchronized later.',
+    );
+    const acknowledgement = screen.getByTestId('pending-ops-loss-acknowledgement');
+    const confirm = screen.getByTestId('confirm-logout');
+    expect(acknowledgement).not.toBeChecked();
+    expect(confirm).toBeDisabled();
+
+    await user.click(confirm);
+    expect(mockLogout).not.toHaveBeenCalled();
+    await user.click(acknowledgement);
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+    await waitFor(() => expect(mockLogout).toHaveBeenCalledOnce());
+  });
+
+  it('shows the exact plural pending-operation count', async () => {
+    mockPendingOpsCount.current = 3;
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(screen.getByTestId('sign-out-button'));
+
+    expect(screen.getByTestId('pending-ops-loss-warning')).toHaveTextContent(
+      'You have 3 pending offline operations.',
+    );
+  });
+
+  it('resets pending-operation acknowledgement after cancel and when the count changes', async () => {
+    mockPendingOpsCount.current = 2;
+    const user = userEvent.setup();
+    const { rerender } = renderSettings();
+
+    await user.click(screen.getByTestId('sign-out-button'));
+    await user.click(screen.getByTestId('pending-ops-loss-acknowledgement'));
+    expect(screen.getByTestId('confirm-logout')).toBeEnabled();
+    await user.click(screen.getByTestId('cancel-logout'));
+    await user.click(screen.getByTestId('sign-out-button'));
+    expect(screen.getByTestId('pending-ops-loss-acknowledgement')).not.toBeChecked();
+
+    await user.click(screen.getByTestId('pending-ops-loss-acknowledgement'));
+    mockPendingOpsCount.current = 4;
+    rerender();
+    expect(screen.getByTestId('pending-ops-loss-warning')).toHaveTextContent(
+      'You have 4 pending offline operations.',
+    );
+    expect(screen.getByTestId('pending-ops-loss-acknowledgement')).not.toBeChecked();
+    expect(screen.getByTestId('confirm-logout')).toBeDisabled();
+  });
+
+  it('keeps the acknowledgement for an unchanged-count retry and blocks duplicate logout', async () => {
+    mockPendingOpsCount.current = 2;
+    let rejectLogout!: (error: Error) => void;
+    mockLogout.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+      rejectLogout = reject;
+    }));
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(screen.getByTestId('sign-out-button'));
+    const acknowledgement = screen.getByTestId('pending-ops-loss-acknowledgement');
+    await user.click(acknowledgement);
+    const confirm = screen.getByTestId('confirm-logout');
+    await user.click(confirm);
+
+    expect(confirm).toBeDisabled();
+    expect(screen.getByTestId('cancel-logout')).toBeDisabled();
+    await user.click(confirm);
+    expect(mockLogout).toHaveBeenCalledOnce();
+
+    rejectLogout(new Error('cleanup failed'));
+    await waitFor(() => expect(confirm).toBeEnabled());
+    expect(acknowledgement).toBeChecked();
   });
 
   it('keeps modal open when logout rejects', async () => {

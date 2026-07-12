@@ -103,6 +103,10 @@ const Settings: React.FC<SettingsProps> = ({
   const [showRefreshConfirmModal, setShowRefreshConfirmModal] = useState(false);
   const [isRefreshingOfflineMaps, setIsRefreshingOfflineMaps] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [acknowledgedPendingOpsCount, setAcknowledgedPendingOpsCount] = useState<number | null>(null);
+  const hasPendingOfflineOps = pendingOpsCount > 0;
+  const hasAcknowledgedPendingOpsLoss = hasPendingOfflineOps
+    && acknowledgedPendingOpsCount === pendingOpsCount;
   const {
     isReconnecting,
     showReconnectFailedModal,
@@ -184,22 +188,35 @@ const Settings: React.FC<SettingsProps> = ({
   }, [history, onDashboardPanelChange]);
 
   const handleLogout = useCallback(() => {
+    setAcknowledgedPendingOpsCount(null);
     setShowLogoutConfirmModal(true);
   }, []);
 
+  const handleDismissLogout = useCallback(() => {
+    setShowLogoutConfirmModal(false);
+    setAcknowledgedPendingOpsCount(null);
+  }, []);
+
   const handleConfirmLogout = useCallback(async () => {
-    if (isLoggingOut) return;
+    if (isLoggingOut || (hasPendingOfflineOps && !hasAcknowledgedPendingOpsLoss)) return;
     setIsLoggingOut(true);
     try {
       await controller.logout();
       setShowLogoutConfirmModal(false);
+      setAcknowledgedPendingOpsCount(null);
       history.replace('/login');
     } catch {
       // Logout failed; keep modal open so user can retry or cancel.
     } finally {
       setIsLoggingOut(false);
     }
-  }, [controller, history, isLoggingOut]);
+  }, [
+    controller,
+    hasAcknowledgedPendingOpsLoss,
+    hasPendingOfflineOps,
+    history,
+    isLoggingOut,
+  ]);
 
   const geoJsonProjectCount = useMemo(
     () => projects.filter((p) => !p.exclude_geojson && Boolean(p.geojson_file)).length,
@@ -611,7 +628,7 @@ const Settings: React.FC<SettingsProps> = ({
 
         <IonModal
           isOpen={showLogoutConfirmModal}
-          onDidDismiss={() => setShowLogoutConfirmModal(false)}
+          onDidDismiss={handleDismissLogout}
           canDismiss={!isLoggingOut}
           backdropDismiss={!isLoggingOut}
         >
@@ -635,21 +652,57 @@ const Settings: React.FC<SettingsProps> = ({
                 <p className="text-slate-400 text-sm">
                   This includes cached maps, GeoJSON, projects, and offline credentials. You will not be able to reconnect without network access.
                 </p>
+                {hasPendingOfflineOps && (
+                  <div
+                    className="mt-5 rounded-lg border border-red-400/70 bg-red-950/60 p-4 text-left"
+                    data-testid="pending-ops-loss-warning"
+                  >
+                    <h3 className="text-base font-semibold text-red-200 mb-2">
+                      Pending offline operations will be lost
+                    </h3>
+                    <p className="text-sm text-red-100 mb-3" id="pending-ops-loss-description">
+                      You have {pendingOpsCount} pending offline operation{pendingOpsCount === 1 ? '' : 's'}.
+                      {' '}Signing out will permanently delete all pending offline operations from this device.
+                      {' '}They cannot be recovered or synchronized later.
+                    </p>
+                    <label className="flex items-start gap-3 text-sm text-red-100">
+                      <input
+                        type="checkbox"
+                        checked={hasAcknowledgedPendingOpsLoss}
+                        disabled={isLoggingOut}
+                        onChange={(event) => setAcknowledgedPendingOpsCount(
+                          event.target.checked ? pendingOpsCount : null,
+                        )}
+                        aria-describedby="pending-ops-loss-description"
+                        className="mt-1 h-4 w-4 accent-red-500"
+                        data-testid="pending-ops-loss-acknowledgement"
+                      />
+                      <span>
+                        I understand that these pending offline operations will be permanently deleted and are unrecoverable.
+                      </span>
+                    </label>
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-1 gap-3">
                 <button
                   type="button"
                   disabled={isLoggingOut}
-                  onClick={() => setShowLogoutConfirmModal(false)}
+                  onClick={handleDismissLogout}
                   className="app-btn app-btn--secondary"
+                  data-testid="cancel-logout"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
-                  disabled={isLoggingOut}
+                  disabled={
+                    isLoggingOut
+                    || (hasPendingOfflineOps && !hasAcknowledgedPendingOpsLoss)
+                  }
                   onClick={handleConfirmLogout}
                   className="app-btn app-btn--danger"
+                  data-testid="confirm-logout"
                 >
                   {isLoggingOut ? 'Clearing data\u2026' : 'Wipe local data & Sign Out'}
                 </button>

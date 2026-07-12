@@ -35,6 +35,23 @@ Logout must not be triggered by transient network conditions:
 - cached map tiles,
 - persisted offline-map plans, generations, memberships, and cached tiles.
 
+## Voluntary sign-out confirmation
+
+Settings uses the already-published pending-operation count; it does not perform
+another storage read. With no pending operations, the normal destructive
+sign-out confirmation remains unchanged. With one or more pending operations,
+the modal displays the exact count and explicitly states that every pending
+offline operation will be permanently deleted, cannot be recovered, and cannot
+be synchronized later. The destructive button remains disabled until the user
+checks the loss acknowledgement.
+
+The acknowledgement resets when the modal closes or the live pending count
+changes. A failed cleanup keeps an unchanged acknowledgement available for an
+in-place retry, while the busy state disables acknowledgement, cancellation,
+and duplicate submission. This consent applies only to voluntary Settings
+sign-out. A forced logout after `401`/`403` remains non-interactive because
+security revocation and local purge must not depend on UI availability.
+
 Implementation notes:
 
 - logout closes admission for new login and validation requests before it

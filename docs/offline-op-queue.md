@@ -153,7 +153,10 @@ Persistence failures fail closed: a mutation is not reported accepted unless its
 op was durably written. Conflict/error statuses are persisted before a sync
 summary returns, but transient statuses (`syncing`/`conflict`) are reset to
 `pending` on load so conflicts are always re-derived live against the current
-server. Cleared on logout via `ProjectCacheService.clearAll()`.
+server. Cleared on logout via `ProjectCacheService.clearAll()`. Voluntary
+Settings sign-out shows the exact pending count and requires explicit
+acknowledgement that these operations will be permanently and irrecoverably
+deleted. Forced credential-invalidating logout still purges without interaction.
 
 ## Coalescing: one subject, one pending op
 
