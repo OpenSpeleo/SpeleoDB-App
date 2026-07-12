@@ -4226,13 +4226,13 @@ describe('SpeleoDBController GPS tracks', () => {
       nowSpy.mockRestore();
     });
 
-    it('start while paused resumes without clearing the existing buffer', async () => {
+    it('resume while paused preserves the existing buffer', async () => {
       const { controller, watcher } = gpsControllerWith();
       await controller.startTrackRecording();
       watcher.emit(point(1, 2, 0));
       await controller.pauseTrackRecording();
 
-      await controller.startTrackRecording();
+      await controller.resumeTrackRecording();
 
       expect(controller.gpsRecordingState).toBe('recording');
       expect(controller.currentTrackPoints).toHaveLength(1);
@@ -4316,17 +4316,17 @@ describe('SpeleoDBController GPS tracks', () => {
       expect(store.records.size).toBe(0);
     });
 
-    it('discard is a no-op when not recording', async () => {
+    it('rejects discard when not recording', async () => {
       const { controller, watcher } = gpsControllerWith();
-      await controller.discardTrackRecording();
+      await expect(controller.discardTrackRecording()).rejects.toThrow(/cannot discard/i);
       expect(controller.gpsRecordingState).toBe('idle');
       expect(watcher.stop).not.toHaveBeenCalled();
     });
 
-    it('start is a no-op while already recording', async () => {
+    it('rejects start while already recording', async () => {
       const { controller, watcher } = gpsControllerWith();
       await controller.startTrackRecording();
-      await controller.startTrackRecording();
+      await expect(controller.startTrackRecording()).rejects.toThrow(/cannot start/i);
       expect(watcher.requestPermissions).toHaveBeenCalledTimes(1);
     });
 

@@ -219,6 +219,46 @@ describe('useDashboardGpsRecordingActions recording', () => {
     expect(showToast).toHaveBeenCalledTimes(2);
   });
 
+  it('surfaces pause and resume command failures without unhandled rejections', async () => {
+    const controller = createController({
+      pauseTrackRecording: vi.fn().mockRejectedValue(new Error('pause failed')),
+      resumeTrackRecording: vi.fn().mockRejectedValue(new Error('resume failed')),
+    });
+    const { result, showToast } = renderActions({ controller });
+
+    act(() => {
+      result.current.pauseRecording();
+      result.current.resumeRecording();
+    });
+
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      'Could not pause GPS recording.',
+      'error',
+    ));
+    expect(showToast).toHaveBeenCalledWith('Could not resume GPS recording.', 'error');
+  });
+
+  it('surfaces battery optimization command failures', async () => {
+    const batteryGuard = createBatteryGuard({
+      isOptimizationActive: vi.fn()
+        .mockRejectedValueOnce(new Error('check failed'))
+        .mockResolvedValue(true),
+      requestExemption: vi.fn().mockRejectedValue(new Error('request failed')),
+    });
+    const { result, showToast } = renderActions({ batteryGuard });
+
+    act(() => result.current.startRecording());
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      'Could not check battery optimization settings.',
+      'error',
+    ));
+    act(() => result.current.fixBatteryOptimization());
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      'Could not update battery optimization settings.',
+      'error',
+    ));
+  });
+
   it('rechecks battery exemption and handles active, exempted, and unmounted results', async () => {
     const batteryGuard = createBatteryGuard({
       isOptimizationActive: vi.fn()

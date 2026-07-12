@@ -31,6 +31,13 @@ function isFatalWatchError(error: unknown): boolean {
   return code === 'NOT_AUTHORIZED' || code === 1 || code === '1';
 }
 
+export class GpsRecordingTransitionError extends Error {
+  constructor(command: string, state: GpsRecordingState) {
+    super(`Cannot ${command} GPS recording while it is ${state}.`);
+    this.name = 'GpsRecordingTransitionError';
+  }
+}
+
 /** Owns the GPS recording/watch state machine and force-quit recovery writes. */
 export class GpsRecordingCoordinator {
   private state: GpsRecordingState = 'idle';
@@ -46,6 +53,8 @@ export class GpsRecordingCoordinator {
   private error: string | null = null;
   private elapsedMsSnapshot = 0;
   private elapsedUpdatedAtSnapshot: number | null = null;
+  private transitionTail: Promise<void> = Promise.resolve();
+  private transitionFlights = new Map<string, Promise<unknown>>();
 
   constructor(private readonly dependencies: GpsRecordingDependencies) {}
 
@@ -73,9 +82,12 @@ export class GpsRecordingCoordinator {
     return this.error;
   }
 
-  async start(): Promise<void> {
-    if (this.state === 'recording') return;
-    if (this.state === 'paused') return this.resume();
+  start(): Promise<void> {
+    return this.enqueueTransition('start', () => this.startCommand());
+  }
+
+  private async startCommand(): Promise<void> {
+    this.requireState('start', 'idle');
     const permission = await this.dependencies.watcher.requestPermissions();
     if (permission !== 'granted') {
       throw new Error('Location permission is required to record a GPS track.');
@@ -96,23 +108,36 @@ export class GpsRecordingCoordinator {
     try {
       await this.startWatch();
     } catch (error) {
-      await this.dependencies.watcher.stop();
-      this.clearSession();
-      this.notify();
+      try {
+        await this.dependencies.watcher.stop();
+      } catch {
+        // Preserve the start failure while still resetting local ownership.
+      } finally {
+        this.clearSession();
+        this.notify();
+      }
       throw error;
     }
   }
 
-  async pause(): Promise<void> {
-    if (this.state !== 'recording') return;
+  pause(): Promise<void> {
+    return this.enqueueTransition('pause', () => this.pauseCommand());
+  }
+
+  private async pauseCommand(): Promise<void> {
+    this.requireState('pause', 'recording');
     await this.dependencies.watcher.stop();
     this.freezeElapsed();
     this.state = 'paused';
     this.notify();
   }
 
-  async resume(): Promise<void> {
-    if (this.state !== 'paused') return;
+  resume(): Promise<void> {
+    return this.enqueueTransition('resume', () => this.resumeCommand());
+  }
+
+  private async resumeCommand(): Promise<void> {
+    this.requireState('resume', 'paused');
     await this.dependencies.notificationPermission.requestPermission();
     const previousWatchStart = this.watchSessionStartedAt;
     const previousActiveStart = this.activeStartedAt;
@@ -132,8 +157,16 @@ export class GpsRecordingCoordinator {
     }
   }
 
-  async stop(finalName?: string): Promise<LocalGpsTrack | null> {
-    if (this.state === 'idle') return null;
+  stop(finalName?: string): Promise<LocalGpsTrack | null> {
+    const normalizedName = finalName?.trim() ?? '';
+    return this.enqueueTransition(
+      `stop:${normalizedName}`,
+      () => this.stopCommand(normalizedName),
+    );
+  }
+
+  private async stopCommand(finalName: string): Promise<LocalGpsTrack | null> {
+    this.requireState('stop', 'recording', 'paused');
     await this.dependencies.watcher.stop();
     const points = this.points;
     const id = this.trackId as string;
@@ -150,7 +183,7 @@ export class GpsRecordingCoordinator {
         this.notify();
         return null;
       }
-      const track = this.finalizedTrack(id, finalName?.trim() || name, color, points, startedAt);
+      const track = this.finalizedTrack(id, finalName || name, color, points, startedAt);
       await this.dependencies.persist(track);
       this.clearSession();
       this.dependencies.addCompletedTrack(track);
@@ -162,8 +195,12 @@ export class GpsRecordingCoordinator {
     }
   }
 
-  async discard(): Promise<void> {
-    if (this.state === 'idle') return;
+  discard(): Promise<void> {
+    return this.enqueueTransition('discard', () => this.discardCommand());
+  }
+
+  private async discardCommand(): Promise<void> {
+    this.requireState('discard', 'recording', 'paused');
     await this.dependencies.watcher.stop();
     this.dependencies.invalidatePersistence();
     const id = this.trackId as string;
@@ -187,6 +224,10 @@ export class GpsRecordingCoordinator {
   }
 
   stopForLogout(): Promise<void> {
+    return this.enqueueTransition('logout', () => this.stopForLogoutCommand());
+  }
+
+  private stopForLogoutCommand(): Promise<void> {
     this.dependencies.invalidatePersistence();
     this.clearSession();
     this.error = null;
@@ -206,8 +247,17 @@ export class GpsRecordingCoordinator {
       console.warn('GPS watch error during recording:', error);
       return;
     }
+    void this.enqueueTransition('fatal-watch-error', () => this.handleFatalWatchError());
+  }
+
+  private async handleFatalWatchError(): Promise<void> {
     if (this.state === 'idle') return;
-    void this.dependencies.watcher.stop();
+    try {
+      await this.dependencies.watcher.stop();
+    } catch {
+      // Authorization loss already ended usable location delivery. Continue
+      // finalization and surface its durable outcome through recordingError.
+    }
     const points = this.points;
     const id = this.trackId as string;
     const startedAt = this.startedAt;
@@ -221,9 +271,9 @@ export class GpsRecordingCoordinator {
     this.notify();
     if (points.length > 0) {
       const track = this.finalizedTrack(id, name, color, points, startedAt);
-      void this.finalizeAfterFatalError(track);
+      await this.finalizeAfterFatalError(track);
     } else {
-      void this.removeEmptyAfterFatalError(id);
+      await this.removeEmptyAfterFatalError(id);
     }
   }
 
@@ -272,6 +322,38 @@ export class GpsRecordingCoordinator {
       this.error = `${PERMISSION_LOST_MESSAGE} Incomplete local recording data could not be removed; retry Cancel.`;
       this.notify();
     }
+  }
+
+  private requireState(
+    command: string,
+    ...allowed: GpsRecordingState[]
+  ): void {
+    if (!allowed.includes(this.state)) {
+      throw new GpsRecordingTransitionError(command, this.state);
+    }
+  }
+
+  /**
+   * Admit transitions synchronously, share compatible duplicate commands, and
+   * keep incompatible commands ordered even after a rejection.
+   */
+  private enqueueTransition<T>(key: string, transition: () => Promise<T>): Promise<T> {
+    const existing = this.transitionFlights.get(key);
+    if (existing) return existing as Promise<T>;
+
+    const result = this.transitionTail.then(transition, transition);
+    this.transitionTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.transitionFlights.set(key, result);
+    const clearFlight = () => {
+      if (this.transitionFlights.get(key) === result) {
+        this.transitionFlights.delete(key);
+      }
+    };
+    void result.then(clearFlight, clearFlight);
+    return result;
   }
 
   private finalizedTrack(

@@ -248,14 +248,14 @@ persistence calls. Real repeated taps can therefore admit two starts/stops and
 race native watcher ownership or duplicate finalized tracks. The Dashboard also
 fires stop/discard/pause/resume promises without complete rejection handling.
 
-- [ ] **RED:** use deferred permission, watcher, and persistence ports to invoke
+- [x] **RED:** use deferred permission, watcher, and persistence ports to invoke
       same-turn and overlapping start/pause/resume/stop/discard commands; assert
       duplicate calls and unhandled UI outcomes.
-- [ ] **GREEN:** give the recording coordinator synchronous command admission
+- [x] **GREEN:** give the recording coordinator synchronous command admission
       and a serialized transition lane, with explicit deterministic semantics
       for redundant/superseding commands. Add UI action ownership and fixed
       error feedback for every async command.
-- [ ] Rerun recording, Dashboard action, native watcher, and lifecycle suites.
+- [x] Rerun recording, Dashboard action, native watcher, and lifecycle suites.
 
 #### RR-008 — Critical device/E2E release evidence remains absent
 
@@ -353,7 +353,7 @@ the Capacitor/plugin build graph and do not demonstrate a shipped defect.
       and require informed consent for pending-operation loss first.
 - [x] Phase 2: RR-003 through RR-005 — make cache and offline intent durable,
       atomic, and single-flight.
-- [ ] Phase 3: RR-006 and RR-007 — make GPS save and native transitions honest
+- [x] Phase 3: RR-006 and RR-007 — make GPS save and native transitions honest
       and race-safe.
 - [ ] Phase 4: RR-010 through RR-012 — enforce regression gates and align
       shipped metadata/documentation.
@@ -629,3 +629,26 @@ a commit cannot contain its own stable final hash.
   92.66% functions, and 92.33% lines. MapLibre contract tests remain green.
 - **Limitations:** physical background/permission-loss behavior remains an
   RR-008 device protocol. Native source and generated projects are unchanged.
+
+### RR-007 — Serialized GPS recording transitions
+
+- **RED:** `npx vitest run src/controllers/GpsRecordingCoordinator.test.ts
+  src/pages/dashboard/useDashboardGpsRecordingActions.test.ts` — 6 expected
+  failures plus one unhandled rejection proved overlapping commands returned
+  independent promises, invalid states resolved silently, pause/resume errors
+  disappeared, and battery-optimization failures escaped the UI.
+- **GREEN:** the unchanged owning-seam command passed 37/37 tests. The expanded
+  coordinator/controller/Dashboard/native-watcher/session matrix passed 321/321,
+  including duplicate start/pause/resume/stop/discard, incompatible start→pause,
+  invalid-state rejection, rejection recovery, fatal callbacks, and logout.
+- **Design/performance:** one keyed promise map and serialized tail provide
+  synchronous admission. Compatible calls share exact results; incompatible
+  calls validate state when executed. This is constant-time bookkeeping with no
+  timers, polling, extra persistence, or duplicate native work.
+- **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
+  hard button scan, and configured staging integration (2 files / 13 tests)
+  passed. The deterministic covered suite passed 109 files / 1,878 tests with
+  13 staging-only skips; coverage was 90.27% statements, 82.05% branches,
+  92.73% functions, and 92.36% lines. MapLibre contract tests remain green.
+- **Limitations:** physical repeated-tap/background/lifecycle behavior remains
+  an RR-008 device protocol. Native source and generated projects are unchanged.

@@ -17,6 +17,15 @@ silently lose accepted points or leave a watcher running.
 - the live point buffer and incremental crash-recovery writes;
 - stop, discard, fatal-permission finalization, and logout teardown.
 
+All native/state transitions enter one coordinator-owned promise lane.
+Admission is synchronous: compatible overlapping commands with the same key
+(start, pause, resume, same-name stop, discard, fatal callback, or logout) share
+the exact in-flight promise/result, while incompatible commands execute in
+invocation order and validate state only when admitted. Commands outside their
+allowed state reject with `GpsRecordingTransitionError` instead of silently
+doing nothing. The lane absorbs prior rejection for scheduling purposes, so one
+native failure cannot poison later recovery.
+
 `GpsTrackCoordinator` supplies narrow ports for persistence serialization,
 completed-track publication, and revision notification; the controller supplies
 ID/name generation and time. Local and remote lists, GPX operations, server
@@ -26,6 +35,10 @@ coordinator.
 ## State and persistence invariants
 
 - A non-idle session always has an ID, name, color, and start timestamp.
+- `start` is valid only from `idle`; `pause` from `recording`; `resume` from
+  `paused`; and `stop`/`discard` from `recording` or `paused`. Redundant
+  overlapping calls share work; a later incompatible command observes the state
+  produced by everything before it.
 - No empty track is written before the first accepted fix.
 - Accepted fixes are persisted incrementally through the track coordinator's
   serialized write seam, so an older slow write cannot replace a newer point
@@ -73,7 +86,8 @@ watcher errors, data-preserving finalization, and logout races.
 `SpeleoDBController.test.ts` retains the public-façade and real IndexedDB
 characterization coverage.
 
-Recording performs no polling. Each accepted fix causes one serialized local
-write and one revision notification; fixes rejected by the shared gate cause
-neither. Point-buffer updates are linear in the number of accepted points, with
-the existing 15-second cadence bounding write and render frequency.
+Recording performs no polling. Transition admission is constant-time map/promise
+bookkeeping and adds no native calls. Each accepted fix causes one serialized
+local write and one revision notification; fixes rejected by the shared gate
+cause neither. Point-buffer updates are linear in the number of accepted points,
+with the existing 15-second cadence bounding write and render frequency.

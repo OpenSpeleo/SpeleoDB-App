@@ -112,25 +112,42 @@ interface RecorderActionOptions {
 function useBatteryOptimizationActions(
   batteryGuard: BatteryGuard,
   mountedRef: ReturnType<typeof useMountedRef>,
+  showToast: Toast,
 ) {
   const batteryHintDismissedRef = useRef(false);
   const [showBatteryHint, setShowBatteryHint] = useState(false);
 
   const showHintIfActive = useCallback(async () => {
     if (batteryHintDismissedRef.current) return;
-    const active = await batteryGuard.isOptimizationActive();
+    let active: boolean;
+    try {
+      active = await batteryGuard.isOptimizationActive();
+    } catch {
+      if (mountedRef.current) {
+        showToast('Could not check battery optimization settings.', 'error');
+      }
+      return;
+    }
     if (mountedRef.current && active) setShowBatteryHint(true);
-  }, [batteryGuard, mountedRef]);
+  }, [batteryGuard, mountedRef, showToast]);
 
   const fixBatteryOptimization = useCallback(() => {
     void (async () => {
-      await batteryGuard.requestExemption();
-      const stillActive = await batteryGuard.isOptimizationActive();
+      let stillActive: boolean;
+      try {
+        await batteryGuard.requestExemption();
+        stillActive = await batteryGuard.isOptimizationActive();
+      } catch {
+        if (mountedRef.current) {
+          showToast('Could not update battery optimization settings.', 'error');
+        }
+        return;
+      }
       if (!mountedRef.current || stillActive) return;
       setShowBatteryHint(false);
       batteryHintDismissedRef.current = true;
     })();
-  }, [batteryGuard, mountedRef]);
+  }, [batteryGuard, mountedRef, showToast]);
 
   const dismissBatteryHint = useCallback(() => {
     batteryHintDismissedRef.current = true;
@@ -154,7 +171,7 @@ function useRecorderActions({
   const mountedRef = useMountedRef();
   const [isRecorderOpen, setIsRecorderOpen] = useState(false);
   const [recordingCancelOpen, setRecordingCancelOpen] = useState(false);
-  const battery = useBatteryOptimizationActions(batteryGuard, mountedRef);
+  const battery = useBatteryOptimizationActions(batteryGuard, mountedRef, showToast);
   const { showHintIfActive } = battery;
 
   const startRecording = useCallback(() => {
@@ -217,8 +234,16 @@ function useRecorderActions({
 
   const openRecorder = useCallback(() => setIsRecorderOpen(true), []);
   const closeRecorder = useCallback(() => setIsRecorderOpen(false), []);
-  const pauseRecording = useCallback(() => void controller.pauseTrackRecording(), [controller]);
-  const resumeRecording = useCallback(() => void controller.resumeTrackRecording(), [controller]);
+  const pauseRecording = useCallback(() => {
+    void controller.pauseTrackRecording().catch(() => {
+      if (mountedRef.current) showToast('Could not pause GPS recording.', 'error');
+    });
+  }, [controller, mountedRef, showToast]);
+  const resumeRecording = useCallback(() => {
+    void controller.resumeTrackRecording().catch(() => {
+      if (mountedRef.current) showToast('Could not resume GPS recording.', 'error');
+    });
+  }, [controller, mountedRef, showToast]);
   const dismissRecordingCancel = useCallback(() => setRecordingCancelOpen(false), []);
 
   return {

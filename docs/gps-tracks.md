@@ -404,6 +404,15 @@ resets state to `idle` without adding a saved track. If deletion fails, the
 recording remains paused and visible for retry instead of disappearing only in
 memory.
 
+Recorder commands are single-flight and serialized by `GpsRecordingCoordinator`.
+Repeated taps cannot start two watchers, stop/finalize twice, or issue two
+deletions. Start/pause/resume/stop/discard validate their state when their turn
+arrives and reject invalid transitions deterministically. The Dashboard owns
+every returned promise: permission, pause/resume, stop/discard persistence, and
+battery-optimization failures produce fixed error feedback, while late results
+after unmount are ignored. This lane uses no timers or polling and prevents
+duplicate native/persistence work.
+
 Mechanically: pausing toggles the hook's `active` to false. The watch effect's
 cleanup stops the watch/GNSS provider but **does not** clear `samples` (so the
 result stays frozen). Clearing happens only via the render-phase reset guarded

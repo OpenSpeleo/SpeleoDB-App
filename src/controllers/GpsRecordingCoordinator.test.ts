@@ -97,7 +97,7 @@ describe('GpsRecordingCoordinator', () => {
     vi.restoreAllMocks();
   });
 
-  it('starts idle and keeps idle operations side-effect free', async () => {
+  it('starts idle with side-effect-free state reads', () => {
     const { coordinator, dependencies, watch } = createHarness();
 
     expect(coordinator.recordingState).toBe('idle');
@@ -106,14 +106,120 @@ describe('GpsRecordingCoordinator', () => {
     expect(coordinator.recordingElapsedUpdatedAt).toBeNull();
     expect(coordinator.currentPoints).toEqual([]);
     expect(coordinator.recordingError).toBeNull();
-    expect(await coordinator.stop()).toBeNull();
-    await coordinator.pause();
-    await coordinator.resume();
-    await coordinator.discard();
     coordinator.clearError();
 
     expect(watch.watcher.stop).not.toHaveBeenCalled();
     expect(dependencies.notifyStateChanged).not.toHaveBeenCalled();
+  });
+
+  it('coalesces overlapping start admission before permission resolves', async () => {
+    const permission = deferred<string>();
+    const watch = createWatcher();
+    vi.mocked(watch.watcher.requestPermissions).mockReturnValue(permission.promise);
+    const { coordinator } = createHarness({ watcher: watch });
+
+    const first = coordinator.start();
+    const duplicate = coordinator.start();
+
+    expect(duplicate).toBe(first);
+    await vi.waitFor(() => expect(watch.watcher.requestPermissions).toHaveBeenCalledOnce());
+    permission.resolve('granted');
+    await Promise.all([first, duplicate]);
+    expect(watch.watcher.start).toHaveBeenCalledOnce();
+  });
+
+  it('coalesces overlapping pause and resume native transitions', async () => {
+    const watch = createWatcher();
+    const { coordinator, dependencies } = createHarness({ watcher: watch });
+    await coordinator.start();
+    const pauseGate = deferred<void>();
+    vi.mocked(watch.watcher.stop).mockReturnValue(pauseGate.promise);
+
+    const pause = coordinator.pause();
+    const duplicatePause = coordinator.pause();
+    expect(duplicatePause).toBe(pause);
+    await vi.waitFor(() => expect(watch.watcher.stop).toHaveBeenCalledOnce());
+    pauseGate.resolve();
+    await Promise.all([pause, duplicatePause]);
+
+    const notificationGate = deferred<'granted'>();
+    dependencies.notificationPermission.requestPermission.mockClear();
+    dependencies.notificationPermission.requestPermission.mockReturnValue(
+      notificationGate.promise,
+    );
+    const resume = coordinator.resume();
+    const duplicateResume = coordinator.resume();
+    expect(duplicateResume).toBe(resume);
+    await vi.waitFor(() => (
+      expect(dependencies.notificationPermission.requestPermission).toHaveBeenCalledOnce()
+    ));
+    notificationGate.resolve('granted');
+    await Promise.all([resume, duplicateResume]);
+    expect(watch.watcher.start).toHaveBeenCalledTimes(2);
+  });
+
+  it('coalesces overlapping stop finalization and publishes one track', async () => {
+    const watch = createWatcher();
+    const finalWrite = deferred<void>();
+    const { coordinator, completed, dependencies } = createHarness({ watcher: watch });
+    await coordinator.start();
+    watch.emitFix(point(0));
+    dependencies.persist.mockReturnValueOnce(finalWrite.promise);
+
+    const stop = coordinator.stop();
+    const duplicateStop = coordinator.stop();
+    expect(duplicateStop).toBe(stop);
+    finalWrite.resolve();
+    const [track, duplicateTrack] = await Promise.all([stop, duplicateStop]);
+
+    expect(duplicateTrack).toBe(track);
+    expect(completed).toHaveLength(1);
+  });
+
+  it('coalesces overlapping discard deletion into one native transition', async () => {
+    const removal = deferred<void>();
+    const { coordinator, dependencies, watch } = createHarness({
+      removePersisted: async () => removal.promise,
+    });
+    await coordinator.start();
+    watch.emitFix(point(0));
+
+    const discard = coordinator.discard();
+    const duplicateDiscard = coordinator.discard();
+    expect(duplicateDiscard).toBe(discard);
+    removal.resolve();
+    await Promise.all([discard, duplicateDiscard]);
+
+    expect(dependencies.removePersisted).toHaveBeenCalledOnce();
+    expect(coordinator.recordingState).toBe('idle');
+  });
+
+  it('serializes incompatible commands and validates state when admitted', async () => {
+    const permission = deferred<string>();
+    const watch = createWatcher();
+    vi.mocked(watch.watcher.requestPermissions).mockReturnValue(permission.promise);
+    const { coordinator } = createHarness({ watcher: watch });
+
+    const start = coordinator.start();
+    const pause = coordinator.pause();
+    permission.resolve('granted');
+    await start;
+    await pause;
+
+    expect(watch.watcher.start).toHaveBeenCalledOnce();
+    expect(watch.watcher.stop).toHaveBeenCalledOnce();
+    expect(coordinator.recordingState).toBe('paused');
+  });
+
+  it('rejects commands that are invalid for the admitted state', async () => {
+    const { coordinator } = createHarness();
+
+    await expect(coordinator.pause()).rejects.toThrow(/cannot pause/i);
+    await expect(coordinator.resume()).rejects.toThrow(/cannot resume/i);
+    await expect(coordinator.stop()).rejects.toThrow(/cannot stop/i);
+    await expect(coordinator.discard()).rejects.toThrow(/cannot discard/i);
+    await expect(coordinator.start()).resolves.toBeUndefined();
+    expect(coordinator.recordingState).toBe('recording');
   });
 
   it('rejects denied location permission before starting a watch', async () => {
@@ -130,7 +236,7 @@ describe('GpsRecordingCoordinator', () => {
     const { coordinator, completed, dependencies, setNow, watch } = createHarness();
 
     await coordinator.start();
-    await coordinator.start();
+    await expect(coordinator.start()).rejects.toThrow(/cannot start/i);
     expect(watch.watcher.start).toHaveBeenCalledWith(
       GPS.WATCH_OPTIONS,
       expect.any(Function),
@@ -150,13 +256,13 @@ describe('GpsRecordingCoordinator', () => {
     setNow(STARTED_AT + 60_000);
     expect(coordinator.recordingElapsedMs).toBe(0);
     await coordinator.pause();
-    await coordinator.pause();
+    await expect(coordinator.pause()).rejects.toThrow(/cannot pause/i);
     expect(coordinator.recordingState).toBe('paused');
     expect(coordinator.recordingElapsedMs).toBe(60_000);
     expect(coordinator.recordingElapsedUpdatedAt).toBeNull();
 
     setNow(STARTED_AT + 600_000);
-    await coordinator.start();
+    await coordinator.resume();
     expect(coordinator.recordingState).toBe('recording');
     expect(coordinator.recordingElapsedMs).toBe(60_000);
 
@@ -178,6 +284,7 @@ describe('GpsRecordingCoordinator', () => {
   it('rolls a failed initial watch back to idle', async () => {
     const watch = createWatcher();
     vi.mocked(watch.watcher.start).mockRejectedValueOnce(new Error('watch failed'));
+    vi.mocked(watch.watcher.stop).mockRejectedValueOnce(new Error('cleanup failed'));
     const { coordinator, dependencies } = createHarness({ watcher: watch });
 
     await expect(coordinator.start()).rejects.toThrow('watch failed');
@@ -320,7 +427,7 @@ describe('GpsRecordingCoordinator', () => {
     expect(coordinator.recordingError).toBeNull();
   });
 
-  it('ignores a stale fatal callback after logout and returns the watcher stop promise directly', async () => {
+  it('serializes logout teardown ahead of a stale fatal callback', async () => {
     const stop = deferred<void>();
     const watch = createWatcher();
     vi.mocked(watch.watcher.stop).mockReturnValueOnce(stop.promise);
@@ -328,7 +435,7 @@ describe('GpsRecordingCoordinator', () => {
     await coordinator.start();
 
     const stopping = coordinator.stopForLogout();
-    expect(dependencies.invalidatePersistence).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(dependencies.invalidatePersistence).toHaveBeenCalledOnce());
     expect(coordinator.recordingState).toBe('idle');
     watch.emitFix(point(0));
     watch.emitError({ code: 1 });

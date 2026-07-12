@@ -1033,7 +1033,8 @@ export class SpeleoDBController {
    * Begin recording a GPS track. Requests location permission and starts the
    * shared position watch (no watcher-level filters; gating is the shared
    * `shouldAcceptFix` time gate). Throws if permission is denied so the UI can
-   * surface it. A no-op when already recording.
+   * surface it. Overlapping starts share one transition; a later start outside
+   * `idle` rejects with `GpsRecordingTransitionError`.
    */
   async startTrackRecording(): Promise<void> {
     await this.gpsRecordingCoordinator.start();
