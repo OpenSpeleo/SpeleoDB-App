@@ -299,10 +299,10 @@ functions, and 92.01% lines. There is no coverage threshold, and the critical
 offline queue is only 77.79% statements / 63.12% branches. A regression can
 lower coverage while CI remains green.
 
-- [ ] Add regression tests from RR-001 through RR-007 at their owning seams.
-- [ ] Add non-regression global and critical-file thresholds based on the new
+- [x] Add regression tests from RR-001 through RR-007 at their owning seams.
+- [x] Add non-regression global and critical-file thresholds based on the new
       audited baseline; do not game coverage with exclusions or mirror tests.
-- [ ] Record justified non-runtime exclusions and a staged path toward the
+- [x] Record justified non-runtime exclusions and a staged path toward the
       repository's existing 100%-per-file completion gate.
 
 #### RR-011 — Shipped web/PWA metadata references missing assets and stale product names
@@ -652,3 +652,27 @@ a commit cannot contain its own stable final hash.
   92.73% functions, and 92.36% lines. MapLibre contract tests remain green.
 - **Limitations:** physical repeated-tap/background/lifecycle behavior remains
   an RR-008 device protocol. Native source and generated projects are unchanged.
+
+### RR-010 — Audited coverage enforcement
+
+- **RED:** `npx vitest run src/coverageThresholds.test.ts` — 2 expected failures
+  proved `vite.config.ts` exposed no global or critical-module thresholds. The
+  contract test was then placed in the `quality/` tooling boundary so application
+  TypeScript does not import the separately compiled Vite config project.
+- **GREEN:** `npx vitest run quality/coverage-thresholds.test.ts` passed 2/2.
+  `API_TEST_ENABLED=false npm run test:ci` passed 110 files / 1,880 tests with
+  13 staging-only skips while enforcing every threshold. Coverage was 90.27%
+  statements, 82.05% branches, 92.73% functions, and 92.36% lines.
+- **Negative control:** a one-off 100% CLI override ran the same coverage engine
+  against the contract test and exited 1 with explicit statement/branch/function/
+  line threshold failures, proving enforcement is active rather than report-only.
+- **Design:** global floors preserve the audited repository baseline; stronger
+  exact-file floors protect session, GPS-transition, replay, and IndexedDB seams.
+  `autoUpdate` and `perFile` are intentionally false. No application exclusions
+  were added; the staged 100%-per-file path is documented in `docs/ci.md`.
+- **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
+  hard button scan, and configured staging integration (2 files / 13 tests)
+  passed. The covered suite is now itself the blocking threshold gate; MapLibre
+  contract tests remain green within it.
+- **Limitations:** this gate measures browser TypeScript. Native, static-asset,
+  build-tooling, and physical-device evidence remain separate release gates.

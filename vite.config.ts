@@ -180,6 +180,46 @@ export default defineConfig(({ mode }) => {
       environment: 'jsdom',
       setupFiles: './src/setupTests.ts',
       env,
+      coverage: {
+        provider: 'v8',
+        thresholds: {
+          // Audited July 2026 repository floors. Keep a small deterministic
+          // margin below the measured baseline while preventing regression.
+          statements: 90,
+          branches: 82,
+          functions: 92,
+          lines: 92,
+          perFile: false,
+          autoUpdate: false,
+          // Critical authority, transition, replay, and transaction seams use
+          // their own measured floors so strong local coverage cannot be hidden
+          // by the global aggregate.
+          'src/controllers/GpsRecordingCoordinator.ts': {
+            statements: 97,
+            branches: 91,
+            functions: 100,
+            lines: 100,
+          },
+          'src/controllers/SessionCoordinator.ts': {
+            statements: 100,
+            branches: 100,
+            functions: 100,
+            lines: 100,
+          },
+          'src/offline/OfflineOpQueue.ts': {
+            statements: 82,
+            branches: 65,
+            functions: 93,
+            lines: 83,
+          },
+          'src/services/CacheStore.ts': {
+            statements: 81,
+            branches: 69,
+            functions: 88,
+            lines: 81,
+          },
+        },
+      },
       onConsoleLog(log) {
         if (log.startsWith('[project-geojson:bbox]')) return false
       },
@@ -187,7 +227,10 @@ export default defineConfig(({ mode }) => {
       // Django web reference is read-only and ships its own test runner; its
       // error-path `console.error` calls trip this repo's consoleGuard when
       // swept in by vitest's default glob, so they are intentionally excluded.
-      include: ['src/**/*.{test,spec}.{ts,tsx}'],
+      include: [
+        'src/**/*.{test,spec}.{ts,tsx}',
+        'quality/**/*.test.ts',
+      ],
     },
   };
 })

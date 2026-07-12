@@ -59,6 +59,38 @@ node: bad option: --no-webstorage
 Do not call bare `npx vitest` from CI unless the wrapper behavior is also
 preserved.
 
+## Coverage Enforcement
+
+The covered suite is a blocking gate, not a report-only artifact. `vite.config.ts`
+sets audited July 2026 global floors of 90% statements, 82% branches, 92%
+functions, and 92% lines. Critical ownership seams also have file-specific
+floors so the global aggregate cannot hide regression in session authority, GPS
+recording transitions, offline replay, or IndexedDB transaction handling:
+
+- `SessionCoordinator.ts`: 100% for all four metrics;
+- `GpsRecordingCoordinator.ts`: 97% statements, 91% branches, 100% functions
+  and lines;
+- `OfflineOpQueue.ts`: 82% statements, 65% branches, 93% functions, 83% lines;
+- `CacheStore.ts`: 81% statements, 69% branches, 88% functions, 81% lines.
+
+These are fixed non-regression floors (`autoUpdate: false`), not aspirational
+targets. Raise them only with behavior-owning tests and an audited full-suite
+result. Do not lower them to make CI green and do not add file exclusions to
+hide a regression.
+
+No application module was excluded for this gate. Vitest's normal runtime
+instrumentation does not treat test files, declarations, native source, static
+assets, or build tooling as shipped browser modules; those non-runtime artifacts
+remain covered by their own typecheck, native, asset, and tooling gates. The
+staged path toward 100%-per-file remains: require 100% for new/refactored leaf
+modules where practical, close historical branch gaps with production-seam
+tests, raise each critical floor as evidence improves, and enable repository
+`perFile` enforcement only when the remaining historical modules meet it.
+
+`quality/coverage-thresholds.test.ts` protects the configuration contract. The
+authoritative proof is still the full `npm run test:ci` command: Vitest exits
+non-zero when either a global or file-specific floor is missed.
+
 ## Secrets
 
 Integration tests are opt-in. They run only when `API_TEST_ENABLED=true` and all
