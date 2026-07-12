@@ -200,14 +200,53 @@ describe('OfflineOpQueue replay', () => {
     expect(queue.count).toBe(0);
   });
 
+  it('retains a confirmed create when the strict ground-truth commit fails', async () => {
+    const storageError = new Error('ground-truth transaction failed');
+    const port = createPort({
+      applyUpsert: vi.fn(async () => { throw storageError; }),
+    });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueCreate(optimisticCreate());
+
+    await expect(queue.syncAll()).rejects.toBe(storageError);
+
+    expect(store.remove).not.toHaveBeenCalled();
+    expect(queue.count).toBe(1);
+  });
+
   it('treats a "already exists" 400 as success by matching server identity', async () => {
     // The create actually committed server-side (e.g. a 200-to-nothing tunnel),
     // so a replay must not duplicate it.
     const existing = landmarkFeature('lm-real', { name: 'New Camp' }, 20, 10);
+    const fetchLandmarksGeoJSON = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 200, data: fc([]) })
+      .mockResolvedValueOnce({ status: 200, data: fc([existing]) });
     const port = createPort({
       postLandmark: vi.fn(async () => ({
         status: 400,
         data: { error: 'A landmark for GPS coordinate (10, 20) already exists or is invalid.' },
+      })),
+      fetchLandmarksGeoJSON,
+    });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueCreate(optimisticCreate());
+
+    const summary = await queue.syncAll();
+
+    expect(summary.succeeded).toBe(1);
+    expect(port.postLandmark).toHaveBeenCalledOnce();
+    expect(fetchLandmarksGeoJSON).toHaveBeenCalledTimes(2);
+    expect(port.applyUpsert).toHaveBeenCalledWith(expect.objectContaining({ id: 'lm-real' }));
+    expect(queue.count).toBe(0);
+  });
+
+  it('adopts a freshly pulled matching create before POST after a prior local commit failure', async () => {
+    const existing = landmarkFeature('lm-real', { name: 'New Camp' }, 20, 10);
+    const port = createPort({
+      postLandmark: vi.fn(async () => ({
+        status: 201,
+        data: { landmark: { ...SERVER_LANDMARK, id: 'lm-duplicate' } },
       })),
       fetchLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: fc([existing]) })),
     });
@@ -217,6 +256,7 @@ describe('OfflineOpQueue replay', () => {
     const summary = await queue.syncAll();
 
     expect(summary.succeeded).toBe(1);
+    expect(port.postLandmark).not.toHaveBeenCalled();
     expect(port.applyUpsert).toHaveBeenCalledWith(expect.objectContaining({ id: 'lm-real' }));
     expect(queue.count).toBe(0);
   });

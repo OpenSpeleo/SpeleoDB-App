@@ -63,6 +63,12 @@ function createHarness(options: {
   const cache = {
     getGpsTracks: vi.fn(async () => cachedRemote),
     setGpsTracks: vi.fn(async (tracks: RemoteGpsTrack[]) => { cachedRemote = tracks; }),
+    updateGpsTracks: vi.fn(async (
+      updater: (current: RemoteGpsTrack[] | null) => RemoteGpsTrack[],
+    ) => {
+      cachedRemote = updater(cachedRemote);
+      return cachedRemote;
+    }),
     removeGpsTrackGeoJSON: vi.fn(async (_id: string) => {}),
     getGpsTrackGeoJSON: vi.fn(async (_id: string) => cachedGeoJSON),
     getGpsTrackGeoJSONRecord: vi.fn(async (_id: string) => (
@@ -265,6 +271,20 @@ describe('GpsTrackCoordinator', () => {
     await emptyUpsertCache.coordinator.applyRemoteUpsert(REMOTE);
     const emptyRemovalCache = createHarness();
     await emptyRemovalCache.coordinator.applyRemoteRemoval('remote-1');
+  });
+
+  it('does not publish a confirmed remote track when its atomic cache commit fails', async () => {
+    const storageError = new Error('GPS cache transaction failed');
+    const harness = createHarness({ remote: [REMOTE] });
+    await harness.coordinator.load();
+    harness.cache.updateGpsTracks.mockRejectedValueOnce(storageError);
+
+    await expect(harness.coordinator.applyRemoteUpsert({
+      ...REMOTE,
+      name: 'Late update',
+    })).rejects.toBe(storageError);
+
+    expect(harness.coordinator.remoteSnapshot('remote-1')?.name).toBe('Remote');
   });
 
   it('builds GPX and points for local and lazily downloaded remote tracks', async () => {

@@ -700,6 +700,15 @@ export class OfflineOpQueue {
     op: CreateLandmarkOp,
     server: GeoJSON.FeatureCollection,
   ): Promise<'success' | 'conflict' | 'error'> {
+    const existingBeforePost = findLandmarkFeatureByIdentity(
+      server,
+      snapshotFromApi(op.landmark),
+    );
+    if (existingBeforePost) {
+      await this.finalizeCreate(op, landmarkApiObjectFromFeature(existingBeforePost));
+      return 'success';
+    }
+
     let response: { status: number; data: unknown };
     try {
       response = await this.port.postLandmark(this.toCreateInput(op.landmark));
@@ -730,7 +739,11 @@ export class OfflineOpQueue {
     // "200 to nothing" tunnel that actually committed). Match by identity.
     const parsed = parseLandmarkMutationError(response.status, response.data);
     if (parsed.kind === 'duplicate') {
-      const existing = findLandmarkFeatureByIdentity(server, snapshotFromApi(op.landmark));
+      const freshServer = await this.fetchServerLandmarks();
+      const existing = findLandmarkFeatureByIdentity(
+        freshServer,
+        snapshotFromApi(op.landmark),
+      );
       if (existing) {
         await this.finalizeCreate(op, landmarkApiObjectFromFeature(existing));
         return 'success';

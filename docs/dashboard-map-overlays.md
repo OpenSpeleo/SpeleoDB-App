@@ -36,6 +36,13 @@ Implementation lives in:
 - `src/pages/dashboard/dashboardMapUtils.ts`
 - `src/components/OverlayMarkerDetailsModal.tsx`
 
+Confirmed landmark creates, edits, and removals mutate the cached landmark
+`FeatureCollection` through one strict IndexedDB read-write transaction. This
+preserves unrelated markers under concurrent confirmations and publishes the
+landmark revision only after durable completion. Optional sync snapshots remain
+best-effort, but mutation ground truth fails closed on storage, schema, abort,
+or transaction errors.
+
 ## Rendering contract (Django parity)
 
 Dashboard owns domain orchestration in `src/pages/Dashboard.tsx`, while

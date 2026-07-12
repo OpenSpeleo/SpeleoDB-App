@@ -210,6 +210,14 @@ function createMockCache(): ProjectCacheService {
   const gpsGeo = new Map<string, unknown>();
   const overlayGeoJSON = new Map<string, unknown>();
   const projectGeoJSON = new Map<string, import('../types/projectGeoJSON').ProjectGeoJSONCacheRecord>();
+  const setOverlayGeoJSON = vi.fn(async (id: string, value: unknown) => {
+    overlayGeoJSON.set(id, value);
+    return true;
+  });
+  const setGpsTracks = vi.fn(async (tracks: unknown[]) => {
+    gpsTracks = tracks;
+    return true;
+  });
   const cache = {
     getProjects: vi.fn(async () => null),
     setProjects: vi.fn(async () => true),
@@ -244,17 +252,29 @@ function createMockCache(): ProjectCacheService {
     }),
     acknowledgeProjectGeoJSONQuarantine: vi.fn(async () => true),
     getOverlayGeoJSON: vi.fn(async (id: string) => overlayGeoJSON.get(id) ?? null),
-    setOverlayGeoJSON: vi.fn(async (id: string, value: unknown) => {
-      overlayGeoJSON.set(id, value);
-      return true;
+    setOverlayGeoJSON,
+    updateOverlayFeatureCollection: vi.fn(async (
+      id: string,
+      updater: (
+        current: GeoJSON.FeatureCollection | null,
+      ) => GeoJSON.FeatureCollection,
+    ) => {
+      const current = (overlayGeoJSON.get(id) as GeoJSON.FeatureCollection | undefined) ?? null;
+      const next = updater(current);
+      await setOverlayGeoJSON(id, next);
+      return next;
     }),
     getCachedCommitId: vi.fn(async () => null),
     getLandmarkCollections: vi.fn(async () => null),
     setLandmarkCollections: vi.fn(async () => true),
     getGpsTracks: vi.fn(async () => gpsTracks),
-    setGpsTracks: vi.fn(async (tracks: unknown[]) => {
-      gpsTracks = tracks;
-      return true;
+    setGpsTracks,
+    updateGpsTracks: vi.fn(async (
+      updater: (current: unknown[] | null) => unknown[],
+    ) => {
+      const next = updater(gpsTracks);
+      await setGpsTracks(next);
+      return next;
     }),
     getGpsTrackGeoJSON: vi.fn(async (id: string) => gpsGeo.get(id) ?? null),
     setGpsTrackGeoJSON: vi.fn(async (id: string, data: unknown) => {
@@ -3231,7 +3251,8 @@ describe('SpeleoDBController landmark CRUD', () => {
         ],
       };
       const cache = createMockCache();
-      (cache.getOverlayGeoJSON as ReturnType<typeof vi.fn>).mockResolvedValue(existing);
+      await cache.setOverlayGeoJSON('landmarks', existing);
+      vi.mocked(cache.setOverlayGeoJSON).mockClear();
       const createLandmark = vi.fn(async () => ({ status: 201, data: { landmark: apiLandmark } }));
       const { controller } = onlineController({ createLandmark } as never, cache);
 
@@ -3239,6 +3260,28 @@ describe('SpeleoDBController landmark CRUD', () => {
 
       const written = (cache.setOverlayGeoJSON as ReturnType<typeof vi.fn>).mock.calls[0][1] as GeoJSON.FeatureCollection;
       expect(written.features.map((f) => f.id).sort()).toEqual(['lm-0', 'lm-1']);
+    });
+
+    it('does not publish a confirmed landmark when its atomic cache commit fails', async () => {
+      const storageError = new Error('landmark cache transaction failed');
+      const cache = createMockCache() as ProjectCacheService & {
+        updateOverlayFeatureCollection: ReturnType<typeof vi.fn>;
+      };
+      cache.updateOverlayFeatureCollection = vi.fn(async () => { throw storageError; });
+      vi.mocked(cache.setOverlayGeoJSON).mockResolvedValue(false);
+      const createLandmark = vi.fn(async () => ({
+        status: 201,
+        data: { landmark: apiLandmark },
+      }));
+      const { controller } = onlineController({ createLandmark } as never, cache);
+
+      await expect(controller.createLandmark({
+        name: 'Camp',
+        latitude: 1,
+        longitude: 2,
+      })).rejects.toBe(storageError);
+
+      expect(controller.landmarksRevision).toBe(0);
     });
 
     it('enqueues an offline op (no service call, ground truth untouched) when offline-locked', async () => {
@@ -3418,7 +3461,8 @@ describe('SpeleoDBController landmark CRUD', () => {
         ],
       };
       const cache = createMockCache();
-      (cache.getOverlayGeoJSON as ReturnType<typeof vi.fn>).mockResolvedValue(existing);
+      await cache.setOverlayGeoJSON('landmarks', existing);
+      vi.mocked(cache.setOverlayGeoJSON).mockClear();
       const deleteLandmark = vi.fn(async () => ({ status: 200, data: { message: 'deleted' } }));
       const { controller } = onlineController({ deleteLandmark } as never, cache);
 

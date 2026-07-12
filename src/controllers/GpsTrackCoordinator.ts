@@ -203,13 +203,13 @@ export class GpsTrackCoordinator {
 
   async applyRemoteUpsert(track: RemoteGpsTrack, signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal);
-    const list = (await this.dependencies.cache.getGpsTracks(...signalOptions(signal))) ?? [];
-    throwIfAborted(signal);
-    const index = list.findIndex((candidate) => candidate.id === track.id);
-    const next = index === -1
-      ? [track, ...list]
-      : [...list.slice(0, index), { ...list[index], ...track }, ...list.slice(index + 1)];
-    await this.dependencies.cache.setGpsTracks(next, ...signalOptions(signal));
+    const next = await this.dependencies.cache.updateGpsTracks((current) => {
+      const list = current ?? [];
+      const index = list.findIndex((candidate) => candidate.id === track.id);
+      return index === -1
+        ? [track, ...list]
+        : [...list.slice(0, index), { ...list[index], ...track }, ...list.slice(index + 1)];
+    }, ...signalOptions(signal));
     throwIfAborted(signal);
     this.remoteTracks = next;
     this.bump();
@@ -217,10 +217,10 @@ export class GpsTrackCoordinator {
 
   async applyRemoteRemoval(id: string, signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal);
-    const list = (await this.dependencies.cache.getGpsTracks(...signalOptions(signal))) ?? [];
-    throwIfAborted(signal);
-    const next = list.filter((track) => track.id !== id);
-    await this.dependencies.cache.setGpsTracks(next, ...signalOptions(signal));
+    const next = await this.dependencies.cache.updateGpsTracks(
+      (current) => (current ?? []).filter((track) => track.id !== id),
+      ...signalOptions(signal),
+    );
     throwIfAborted(signal);
     this.remoteTracks = next;
     await this.dependencies.cache.removeGpsTrackGeoJSON(id, ...signalOptions(signal));

@@ -3,6 +3,7 @@ import { PROJECT_GEOJSON_VALIDATION } from '../constants';
 import { SpeleoDBController, type PreferencesPort } from '../controllers/SpeleoDBController';
 import { allowConsoleWarn } from '../test/consoleGuard';
 import type { Project } from '../types/project';
+import type { RemoteGpsTrack } from '../types/gpsTrack';
 import type { SpeleoDBService } from './SpeleoDBService';
 import type { OfflineMapSyncEngineLike } from './OfflineMapSyncEngine';
 import { EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT } from './OfflineMapSyncStore';
@@ -403,6 +404,143 @@ describe('ProjectCacheService overlay cache', () => {
     await cache.clearAll();
 
     expect(await cache.getOverlayGeoJSON('explorationLeads')).toBeNull();
+  });
+
+  it('atomically serializes concurrent overlay feature mutations', async () => {
+    await cache.setOverlayGeoJSON('landmarks', {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          id: 'remove-me',
+          properties: { id: 'remove-me' },
+          geometry: { type: 'Point', coordinates: [0, 0] },
+        },
+        {
+          type: 'Feature',
+          id: 'keep-me',
+          properties: { id: 'keep-me' },
+          geometry: { type: 'Point', coordinates: [0, 0] },
+        },
+      ],
+    });
+    const atomicCache = cache as ProjectCacheService & {
+      updateOverlayFeatureCollection(
+        overlayId: 'landmarks',
+        updater: (
+          current: GeoJSON.FeatureCollection | null,
+        ) => GeoJSON.FeatureCollection,
+      ): Promise<GeoJSON.FeatureCollection>;
+    };
+    const append = (id: string) => atomicCache.updateOverlayFeatureCollection(
+      'landmarks',
+      (current) => ({
+        type: 'FeatureCollection',
+        features: [
+          ...(current?.features ?? []),
+          {
+            type: 'Feature',
+            id,
+            properties: { id },
+            geometry: { type: 'Point', coordinates: [0, 0] },
+          },
+        ],
+      }),
+    );
+
+    const remove = atomicCache.updateOverlayFeatureCollection(
+      'landmarks',
+      (current) => ({
+        type: 'FeatureCollection',
+        features: (current?.features ?? []).filter((feature) => feature.id !== 'remove-me'),
+      }),
+    );
+    await Promise.all([remove, append('added')]);
+
+    const stored = await cache.getOverlayGeoJSON('landmarks') as GeoJSON.FeatureCollection;
+    expect(stored.features.map((feature) => feature.id)).toEqual(['keep-me', 'added']);
+  });
+
+  it('atomically serializes concurrent GPS ground-truth mutations', async () => {
+    const track = (id: string): RemoteGpsTrack => ({
+      id,
+      name: id,
+      color: '#377eb8',
+      fileUrl: '',
+      sha256: '',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await cache.setGpsTracks([track('remove-me'), track('keep-me')]);
+    const atomicCache = cache as ProjectCacheService & {
+      updateGpsTracks(
+        updater: (current: RemoteGpsTrack[] | null) => RemoteGpsTrack[],
+      ): Promise<RemoteGpsTrack[]>;
+    };
+    const append = (id: string) => atomicCache.updateGpsTracks((current) => [
+      ...(current ?? []),
+      track(id),
+    ]);
+
+    const remove = atomicCache.updateGpsTracks(
+      (current) => (current ?? []).filter((candidate) => candidate.id !== 'remove-me'),
+    );
+    await Promise.all([remove, append('added')]);
+
+    expect((await cache.getGpsTracks())?.map((candidate) => candidate.id)).toEqual([
+      'keep-me',
+      'added',
+    ]);
+  });
+
+  it('propagates strict atomic mutation storage failures', async () => {
+    const storageError = new Error('IndexedDB update failed');
+    const failingStore = {
+      update: vi.fn(async () => { throw storageError; }),
+    } as unknown as CacheStore;
+    const failingCache = new ProjectCacheService(failingStore);
+
+    await expect(failingCache.updateOverlayFeatureCollection(
+      'landmarks',
+      () => ({ type: 'FeatureCollection', features: [] }),
+    )).rejects.toBe(storageError);
+    await expect(failingCache.updateGpsTracks(() => [])).rejects.toBe(storageError);
+  });
+
+  it('preserves the previous overlay when an atomic transaction aborts', async () => {
+    const original: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        id: 'original',
+        properties: { id: 'original' },
+        geometry: { type: 'Point', coordinates: [0, 0] },
+      }],
+    };
+    await cache.setOverlayGeoJSON('landmarks', original);
+    const originalPut = IDBObjectStore.prototype.put;
+    const putSpy = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function(
+      this: IDBObjectStore,
+      value: unknown,
+      key?: IDBValidKey,
+    ) {
+      const request = key === undefined
+        ? originalPut.call(this, value)
+        : originalPut.call(this, value, key);
+      this.transaction.abort();
+      return request;
+    });
+
+    try {
+      await expect(cache.updateOverlayFeatureCollection(
+        'landmarks',
+        () => ({ type: 'FeatureCollection', features: [] }),
+      )).rejects.toThrow(/aborted/i);
+    } finally {
+      putSpy.mockRestore();
+    }
+
+    expect(await cache.getOverlayGeoJSON('landmarks')).toEqual(original);
   });
 
   it.each(['projects', 'geojson'] as const)(

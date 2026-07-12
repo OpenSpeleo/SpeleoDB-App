@@ -1361,20 +1361,22 @@ export class SpeleoDBController {
     signal?: AbortSignal,
   ): Promise<void> {
     throwIfAborted(signal);
-    const current = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks', { signal }));
-    throwIfAborted(signal);
-    const next = upsertLandmarkFeature(current, landmark);
-    await this.cache.setOverlayGeoJSON('landmarks', next, { signal });
+    await this.cache.updateOverlayFeatureCollection(
+      'landmarks',
+      (current) => upsertLandmarkFeature(current, landmark),
+      { signal },
+    );
     throwIfAborted(signal);
     this.bumpLandmarksRevision();
   }
 
   private async applyLandmarkRemoval(id: string, signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal);
-    const current = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks', { signal }));
-    throwIfAborted(signal);
-    const next = removeLandmarkFeature(current, id);
-    await this.cache.setOverlayGeoJSON('landmarks', next, { signal });
+    await this.cache.updateOverlayFeatureCollection(
+      'landmarks',
+      (current) => removeLandmarkFeature(current, id),
+      { signal },
+    );
     throwIfAborted(signal);
     this.bumpLandmarksRevision();
   }

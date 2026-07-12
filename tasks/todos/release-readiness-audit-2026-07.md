@@ -174,19 +174,19 @@ though the server accepted the user's mutation.
 Owning seams: `CacheStore.update()`, strict project-cache mutation APIs,
 controller landmark apply, and GPS remote apply.
 
-- [ ] **RED:** add real fake-IndexedDB transaction tests for concurrent
+- [x] **RED:** add real fake-IndexedDB transaction tests for concurrent
       upserts/removals, read failure, write abort/failure, and offline-replay
       finalization. Assert unrelated ground truth is preserved and the op is
       retained until the confirmed server result is durably reflected.
-- [ ] Run the focused tests and record the lost-update/failure-opaque results.
-- [ ] **GREEN:** replace best-effort split read/write mutation paths with strict,
+- [x] Run the focused tests and record the lost-update/failure-opaque results.
+- [x] **GREEN:** replace best-effort split read/write mutation paths with strict,
       atomic single-transaction cache mutations. Only publish revisions and
       remove offline ops after transaction completion. Keep best-effort cache
       APIs only for genuinely optional snapshots.
-- [ ] For create replay, preflight the freshly pulled server snapshot by stable
+- [x] For create replay, preflight the freshly pulled server snapshot by stable
       identity before POST so retry after a local commit failure cannot create a
       duplicate remote landmark.
-- [ ] Rerun cache, controller, offline-queue, and integration suites.
+- [x] Rerun cache, controller, offline-queue, and integration suites.
 
 #### RR-004 — Offline replay admits concurrent runs and can duplicate remote mutations
 
@@ -349,7 +349,7 @@ the Capacitor/plugin build graph and do not demonstrate a shipped defect.
 
 ## Implementation order
 
-- [ ] Phase 1: RR-001, RR-002, and RR-014 — close logout/cross-session privacy
+- [x] Phase 1: RR-001, RR-002, and RR-014 — close logout/cross-session privacy
       and require informed consent for pending-operation loss first.
 - [ ] Phase 2: RR-003 through RR-005 — make cache and offline intent durable,
       atomic, and single-flight.
@@ -532,3 +532,30 @@ a commit cannot contain its own stable final hash.
   unchanged, so live API and native compilation are inapplicable to this UI-only
   RR item and remain covered by RR-002/final gates. Physical interaction remains
   part of RR-008.
+
+### RR-003 — Atomic confirmed ground-truth mutations
+
+- **RED:** `npx vitest run src/services/ProjectCacheService.test.ts
+  src/controllers/SpeleoDBController.test.ts src/offline/OfflineOpQueue.test.ts
+  src/controllers/GpsTrackCoordinator.test.ts` — 5 expected failures proved
+  the strict cache APIs did not exist, confirmed landmark/GPS mutations reported
+  success after cache failure, and create replay posted despite a matching fresh
+  server result.
+- **GREEN:** the unchanged focused command passed 295/295 tests. Real
+  fake-IndexedDB coverage proves concurrent collection mutations serialize and
+  a transaction abort preserves the previous record; owning-seam tests prove
+  storage errors block revision publication and offline-op removal. Create
+  replay preflights stable identity and refreshes again after a duplicate
+  response.
+- **Design/performance:** landmark and GPS ground truth now use one strict
+  `CacheStore.update()` transaction per confirmation. This removes split-read
+  lost updates without polling, additional network traffic, or collection
+  copies beyond the required immutable update.
+- **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
+  hard button scan, and configured staging integration (2 files / 13 tests)
+  passed. The final deterministic covered suite passed 109 files / 1,854 tests
+  with 13 staging-only skips; coverage was 90.02% statements, 81.96% branches,
+  92.44% functions, and 92.06% lines. MapLibre contract tests remain green.
+- **Limitations:** native source and generated projects are unchanged; native
+  compilation remains in the final cross-platform gate. Physical-device storage
+  interruption remains an RR-008 protocol.

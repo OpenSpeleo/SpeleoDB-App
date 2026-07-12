@@ -162,6 +162,15 @@ controller observer; other online/sync notifies reuse the same array reference,
 so the Dashboard's `gps-tracks` map source is not recomputed/re-fed on every
 tick and `summarizeTrack` does not run over every local recording each time.
 
+Confirmed remote-track upserts and removals are applied with
+`ProjectCacheService.updateGpsTracks()`, a strict single-entry IndexedDB
+transaction. Concurrent confirmations serialize without dropping unrelated
+tracks, and the in-memory list/revision advances only after durable completion.
+A cache read, write, abort, or schema failure is therefore reported to the
+mutation/replay owner instead of presenting a server-only result as locally
+saved. This replaces the former split read/write path without adding network or
+compute work.
+
 ## Shared GPS reading gate (one path, two cadences)
 
 Both GPS features run raw fixes through one shared sampling gate. Recording uses

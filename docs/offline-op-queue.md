@@ -64,6 +64,15 @@ pending op (or reordering the queue) becomes a pure recompute -- no re-pull,
 which matters because we may be offline. The ground truth is always a clean
 server snapshot we can reconcile against.
 
+Confirmed landmark and remote-GPS mutations update their collection through a
+strict `CacheStore.update()` read-write transaction. The read, transformation,
+and replacement therefore serialize at the IndexedDB store instead of using a
+split `get`/`set` sequence that can lose concurrent results. Storage, schema,
+and cancellation failures propagate to the mutation owner; no revision is
+published and no durable offline operation is removed until the transaction
+completes. This costs one transaction per confirmed mutation and adds no
+network request.
+
 ```mermaid
 flowchart TD
   crud["controller mutation (landmark or gps track)"] --> gate{"online & reachable?"}
@@ -187,8 +196,11 @@ landmark ops queued in the same run (and vice versa). This is intentional: a
 failed ground-truth pull means the server is unreachable, so no op is safe to
 replay; the user simply syncs again from the Pending page. Per op type:
 
-- **landmark create** -> POST (2xx capture id + upsert; `400 duplicate` ->
-  identity-match + adopt; other 4xx -> `error`; 5xx/transport -> abort rest).
+- **landmark create** -> first identity-match the freshly pulled snapshot and
+  adopt an existing result (covers a prior server success followed by local
+  transaction failure); otherwise POST. A 2xx captures id + upserts; a `400
+  duplicate` triggers one fresh pull, then identity-match + adopt; other 4xx ->
+  `error`; 5xx/transport -> abort rest.
 - **landmark update/delete** -> idempotent short-circuit, then baseline compare,
   then PATCH/DELETE (404 on delete = success).
 - **gps create** -> `uploadGpsTrack(localId)` builds the GPX and PUTs it to

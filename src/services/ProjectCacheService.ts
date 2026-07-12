@@ -537,6 +537,48 @@ export class ProjectCacheService {
     }
   }
 
+  /**
+   * Atomically mutate one overlay FeatureCollection. Storage and schema errors
+   * are authoritative: callers must not publish a confirmed server mutation
+   * unless this transaction completes.
+   */
+  async updateOverlayFeatureCollection(
+    overlayId: MapOverlayId,
+    updater: (
+      current: GeoJSON.FeatureCollection | null,
+    ) => GeoJSON.FeatureCollection,
+    options: CacheOperationOptions = {},
+  ): Promise<GeoJSON.FeatureCollection> {
+    throwIfAborted(options.signal);
+    let result: GeoJSON.FeatureCollection | undefined;
+    const updated = await this.store.update<GeoJSON.FeatureCollection>(
+      'geojson',
+      this.getOverlayCacheKey(overlayId),
+      (entry) => {
+        const currentData = entry?.data ?? null;
+        if (currentData !== null && !isFeatureCollection(currentData)) {
+          throw new Error(`Cached ${overlayId} overlay is not a FeatureCollection.`);
+        }
+        const next = updater(currentData as GeoJSON.FeatureCollection | null);
+        if (!isFeatureCollection(next)) {
+          throw new Error(`Updated ${overlayId} overlay is not a FeatureCollection.`);
+        }
+        result = next;
+        return {
+          ...(entry ?? {}),
+          data: next,
+          cachedAt: Date.now(),
+        };
+      },
+      options,
+    );
+    throwIfAborted(options.signal);
+    if (!updated || !result) {
+      throw new Error(`Atomic ${overlayId} overlay update did not commit.`);
+    }
+    return result;
+  }
+
   // ---- Writable landmark collections (offline create picker) ------------------
 
   /** Read the cached writable landmark collections, or null if none cached. */
@@ -609,6 +651,41 @@ export class ProjectCacheService {
       console.error('ProjectCacheService.setGpsTracks failed:', error);
       return false;
     }
+  }
+
+  /** Atomically mutate the confirmed server GPS-track list. */
+  async updateGpsTracks(
+    updater: (current: RemoteGpsTrack[] | null) => RemoteGpsTrack[],
+    options: CacheOperationOptions = {},
+  ): Promise<RemoteGpsTrack[]> {
+    throwIfAborted(options.signal);
+    let result: RemoteGpsTrack[] | undefined;
+    const updated = await this.store.update<RemoteGpsTrack[]>(
+      'projects',
+      GPS_TRACKS_KEY,
+      (entry) => {
+        const currentData = entry?.data ?? null;
+        if (currentData !== null && !Array.isArray(currentData)) {
+          throw new Error('Cached GPS track list is invalid.');
+        }
+        const next = updater(currentData as RemoteGpsTrack[] | null);
+        if (!Array.isArray(next)) {
+          throw new Error('Updated GPS track list is invalid.');
+        }
+        result = next;
+        return {
+          ...(entry ?? {}),
+          data: next,
+          cachedAt: Date.now(),
+        };
+      },
+      options,
+    );
+    throwIfAborted(options.signal);
+    if (!updated || !result) {
+      throw new Error('Atomic GPS track update did not commit.');
+    }
+    return result;
   }
 
   /** Read a cached GPS-track GeoJSON geometry by track id, or null. */
