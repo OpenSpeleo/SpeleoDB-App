@@ -77,6 +77,31 @@ MapLibre source updates, so it is not the first optimization target.
 - [x] Commit as `[Fix] Parallelize sync metadata persistence`; inspect the
   commit and clean status. Do not push.
 
+### PERF-006 — Prove and remove the wall-clock regression
+
+- [ ] Add a reproducible 60-project benchmark using representative large
+  GeoJSON payloads and measure wall-clock latency, publication latency, retained
+  heap ownership, and main-thread task duration.
+- [ ] Run the same benchmark against `1a8e3ef` and the current implementation;
+  record raw samples, median, and worst result instead of operation-count
+  proxies.
+- [ ] Add native-safe aggregate timings for project cache read, worker
+  validation/structured-clone, durable cache write, Dashboard normalization,
+  and Dashboard publication so the physical-device path reports the actual
+  bottleneck without project identifiers or payload data.
+- [ ] Reproduce the reported slowdown and add a failing regression at the seam
+  that owns the measured cause.
+- [ ] Remove or redesign any optimization that regressed wall-clock latency or
+  retained large GeoJSON unnecessarily. Do not preserve a prior change merely
+  because its operation counts improved.
+- [ ] Prove the corrected implementation beats the `1a8e3ef` baseline without
+  weakening durability, cancellation, validation, or progressive visibility.
+- [ ] Update performance documentation with measured results and limitations.
+- [ ] Run focused, full web, native timing-formatter, and applicable native
+  compilation verification.
+- [ ] Commit the green correction independently as `[Fix] Remove sync
+  performance regression`; inspect the commit and clean status. Do not push.
+
 ## Deferred architecture review
 
 After PERF-003 through PERF-005, use physical-device timings to decide whether
