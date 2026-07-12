@@ -208,15 +208,15 @@ describe('TileCoordinator offline coverage', () => {
       monotonicTime += 5;
       return monotonicTime;
     });
-    const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
     const { coordinator } = createHarness();
 
     await coordinator.scheduleSyncPhase(new CancellationContext(42, 'test'), []);
-    const timingRecords = consoleInfo.mock.calls
+    const timingRecords = consoleLog.mock.calls
       .filter(([label]) => label === '[offline-map:timing]')
       .map(([, record]) => record);
     performanceNow.mockRestore();
-    consoleInfo.mockRestore();
+    consoleLog.mockRestore();
 
     expect(timingRecords).toEqual([
       expect.objectContaining({

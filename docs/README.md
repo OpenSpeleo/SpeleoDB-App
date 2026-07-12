@@ -21,6 +21,8 @@ behaviors.
   validation, offline lock, reconnect, cancellation, and logout.
 - `project-sync-coordination.md`: project-list, GeoJSON quarantine, overlay,
   cancellation, publication, and downstream phase ownership.
+- `performance-diagnostics.md`: safe browser/native synchronization timing
+  records, Xcode and Logcat filters, field allowlists, and security boundaries.
 - `offline-tile-coordination.md`: offline queue lifecycle, replay ports, pending
   revisions, tile scheduling, consent, layer settings, and logout teardown.
 - `gps-recording-coordination.md`: recording-state ownership, watcher and
@@ -123,4 +125,5 @@ When behavior changes, update the related document in this folder in the same
 pull request so implementation and docs stay aligned. When a regression exposed
 a weak test seam, also capture the reusable rule under `tasks/lessons/`; see
 `tasks/lessons/authoritative-seam-tests.md` for persistence, concurrency, and
-revision-driven UI tests.
+revision-driven UI tests. First-party native plugins also require a live bridge
+resolution test; see `tasks/lessons/native-plugin-registration.md`.

@@ -44,18 +44,18 @@
 
 ### PERF-002 — Safe native timing visibility
 
-- [ ] Add TypeScript contract tests proving timing diagnostics contain only the
+- [x] Add TypeScript contract tests proving timing diagnostics contain only the
   fixed allowlisted fields and still reach the browser console.
-- [ ] Add iOS and Android native tests for rejecting unknown phases/statuses and
+- [x] Add iOS and Android native tests for rejecting unknown phases/statuses and
   formatting accepted timing records.
-- [ ] Execute the focused tests and record the expected failures.
-- [ ] Add a narrow first-party native performance-diagnostic plugin that writes
+- [x] Execute the focused tests and record the expected failures.
+- [x] Add a narrow first-party native performance-diagnostic plugin that writes
   only validated sync timing fields to OS logging while global Capacitor bridge
   logging remains disabled.
-- [ ] Route project-sync and offline-map timings through the shared diagnostic
+- [x] Route project-sync and offline-map timings through the shared diagnostic
   reporter and document Xcode/Logcat filtering instructions.
-- [ ] Run web, Android, and iOS verification applicable to the new bridge.
-- [ ] Commit as `[Fix] Surface sync timings in native logs` and inspect it. Do
+- [x] Run web, Android, and iOS verification applicable to the new bridge.
+- [x] Commit as `[Fix] Surface sync timings in native logs` and inspect it. Do
   not push.
 
 ## Verification gates
@@ -129,3 +129,71 @@
 - Native runtime responsiveness remains a physical-device evidence gate. This
   delivery changes shared TypeScript behavior and compiles into the production
   bundle; PERF-002 owns native device-log visibility and native compilation.
+
+### PERF-002 TDD evidence
+
+- TypeScript red command: `npx vitest run src/utils/performanceTiming.test.ts`.
+  Result: 3/3 failed because `createPerformanceTimingLogger` did not exist.
+- Android red command: `./gradlew testDebugUnitTest --tests
+  org.speleodb.app.PerformanceTimingLogFormatterTest`. Result: Java compilation
+  failed with seven missing `PerformanceTimingLogFormatter` symbols.
+- iOS red command: `xcodebuild -project ios/App/App.xcodeproj -scheme App
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath
+  /tmp/speleodb-perf-diagnostics-red build-for-testing
+  CODE_SIGNING_ALLOWED=NO`. Result: the new XCTest target failed to compile
+  because `PerformanceTimingLogFormatter` did not exist.
+- iOS bridge red command: focused simulator execution of
+  `AppBridgeViewControllerTests/testPerformanceDiagnosticsPluginIsRegisteredWithLoadedBridge`.
+  Result: the assertion failed because compiling the plugin did not register it
+  with this app's explicit first-party bridge.
+- Green focused web result: 3/3 pass. The native record excludes `reason`, the
+  browser path avoids the plugin, and a rejected native diagnostic cannot fail
+  synchronization.
+- Green Android result: 3/3 formatter tests pass through
+  `testDebugUnitTest`; accepted and skipped durations format consistently and
+  unknown/invalid fields are rejected.
+- Green iOS result: the app and XCTest bundle compile, then 3/3 focused tests
+  pass on the iOS 26.5 iPhone 17 Pro simulator. The simulator spent 138 seconds
+  booting/installing; the three tests executed in 0.004 seconds.
+
+### PERF-002 implementation result
+
+- Browser timings use `console.log`, making them visible in WebView developer
+  tools without relying on the filtered `info` level.
+- Native builds forward only `scope`, `runId`, `phase`, `durationMs`, and
+  `status` to an explicitly registered first-party plugin. iOS writes category
+  `SpeleoDBPerformance` through OSLog; Android uses the same Logcat tag.
+- Native formatters own closed value allowlists. Optional phase reasons and all
+  project, GPS, landmark, network, geometry, and credential data stay outside
+  the native API.
+- Capacitor `loggingBehavior` remains `none`; broad bridge logging was not
+  enabled.
+
+The iOS registration correction exposed a reusable native-boundary pattern;
+see `tasks/lessons/native-plugin-registration.md`.
+
+### PERF-002 verification
+
+- `npm run lint` — pass.
+- `npm run typecheck` — pass.
+- `npm run build` — pass; 613 modules transformed.
+- `API_TEST_ENABLED=false npm run test:ci` — pass: 116 files passed, 2 skipped;
+  1,906 tests passed, 13 skipped. Coverage: 90.34% statements, 82.09%
+  branches, 92.79% functions, 92.43% lines.
+- `npm run quality:inventory` — pass; all 589 tracked files classified.
+- `./gradlew testDebugUnitTest lintDebug assembleDebug` — pass; 739 Gradle
+  tasks completed or were up to date.
+- iOS generic-simulator `build-for-testing` — pass for the app and XCTest
+  bundle.
+- iOS formatter XCTest — 3/3 pass on iOS 26.5 iPhone 17 Pro simulator.
+- iOS production-bridge registration XCTest — 1/1 pass on the same simulator.
+- Button background hard-rule scan — no matches.
+- MapLibre code was not changed; source-ownership tests pass in the complete
+  web suite.
+- Generated Android/iOS web assets were inspected and produced no tracked
+  diffs.
+- `git diff --check` — pass.
+- Physical-device receipt of an OSLog/Logcat line remains the final device
+  evidence gate. The compiled formatter, plugin registration, and live iOS
+  bridge resolution are automated; install a new native build before testing
+  because an older installed shell does not contain this plugin.

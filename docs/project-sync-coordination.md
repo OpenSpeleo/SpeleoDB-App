@@ -46,8 +46,8 @@ One run proceeds in this order:
 
 ## Timing diagnostics
 
-Every run emits structured `console.info` records under
-`[project-sync:timing]`. Each record contains only `runId`, `phase`,
+Every run emits structured `console.log` records under
+`[project-sync:timing]`. Each browser record contains `runId`, `phase`,
 `durationMs`, `status`, and, for coordinator phases, `reason`. Executed phase
 durations use the monotonic `performance.now()` clock and are rounded to a
 tenth of a millisecond. A phase that was intentionally skipped has
@@ -82,7 +82,12 @@ Neither source collection, plan admission, nor tile HTTP downloads hold
 The timing records deliberately exclude credentials, instance URLs,
 project identifiers and names, response bodies, GeoJSON, and cached payloads.
 This makes them safe for performance diagnosis without turning the console into
-a user-data export.
+a user-data export. Native builds additionally forward only the fixed
+`scope`, `runId`, `phase`, `durationMs`, and `status` fields to the first-party
+performance diagnostics plugin. The plugin validates every value against a
+closed allowlist before writing to OS logging; even the browser-only `reason`
+field is not forwarded. See `performance-diagnostics.md` for filters and the
+security boundary.
 
 A superseding sync or logout aborts the active `CancellationContext`. Every
 transport and cache seam receives its signal, and native best-effort transport

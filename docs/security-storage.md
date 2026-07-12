@@ -36,7 +36,11 @@ normal response, so an authorization header, password body, landmark payload, or
 GPX document is never replayed automatically to a redirect target.
 
 Capacitor native logging is disabled because bridge debug logs include plugin
-arguments. Native store failures return stable error codes and never include
+arguments. The first-party `PerformanceDiagnostics` plugin does not weaken that
+boundary: it accepts only allowlisted sync scope, run ID, phase, duration, and
+status values and rejects every malformed or unknown record. It never accepts
+or logs reasons, URLs, project data, coordinates, request/response content, or
+credentials. Native store failures return stable error codes and never include
 tokens, ciphertext, coordinates, or operating-system error details.
 
 ## Lifecycle and ownership
@@ -109,6 +113,8 @@ account replacement use the same secure-first ordering and rollback contract.
 - Transport and diagnostic tests prove HTTPS policy, credential-bearing URL
   rejection, redirect suppression, recursive redaction, bounded output, and
   sanitized Sentry events.
+- Web and native formatter tests prove performance timing records remain on the
+  fixed field/value allowlist while global Capacitor bridge logging stays off.
 - Android unit tests exercise the production AES-GCM implementation, randomized
   encryption, authentication-tag failure, missing keys, replacement, clearing,
   and token bounds.

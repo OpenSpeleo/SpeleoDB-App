@@ -1505,7 +1505,7 @@ describe('SpeleoDBController', () => {
         monotonicTime += 5;
         return monotonicTime;
       });
-      const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
+      const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
       cache.getGeoJSON = vi.fn(async () => ({
         type: 'FeatureCollection',
         features: [{
@@ -1526,7 +1526,7 @@ describe('SpeleoDBController', () => {
       );
 
       const result = await controller.syncProjects();
-      const timingRecords = consoleInfo.mock.calls
+      const timingRecords = consoleLog.mock.calls
         .filter(([label]) => label === '[project-sync:timing]')
         .map(([, record]) => record);
 
@@ -1679,7 +1679,7 @@ describe('SpeleoDBController', () => {
     });
 
     it('aborts an older sync run when a newer sync starts', async () => {
-      const consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {});
+      const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
       const firstResponse = createDeferred<HttpResponse<Project[]>>();
       const secondProject = createProjectFixture({
         id: 'p2',
@@ -1729,7 +1729,7 @@ describe('SpeleoDBController', () => {
         [secondProject],
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
-      const totalTimingRecords = consoleInfo.mock.calls
+      const totalTimingRecords = consoleLog.mock.calls
         .filter(([, record]) => (
           record
           && typeof record === 'object'

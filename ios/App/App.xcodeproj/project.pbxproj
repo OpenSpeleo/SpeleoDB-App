@@ -21,10 +21,13 @@
 		A10000000000000000000002 /* CredentialStorePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* CredentialStorePlugin.swift */; };
 		A10000000000000000000003 /* KeychainCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* KeychainCredentialStore.swift */; };
 		A10000000000000000000004 /* SensitiveDataProtection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SensitiveDataProtection.swift */; };
+		A10000000000000000000005 /* PerformanceTimingLogFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* PerformanceTimingLogFormatter.swift */; };
+		A10000000000000000000006 /* PerformanceDiagnosticsPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* PerformanceDiagnosticsPlugin.swift */; };
 		B10000000000000000000001 /* KeychainCredentialStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* KeychainCredentialStoreTests.swift */; };
 		B10000000000000000000002 /* SensitiveDataProtectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* SensitiveDataProtectionTests.swift */; };
 		B10000000000000000000003 /* AppBridgeViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* AppBridgeViewControllerTests.swift */; };
 		B10000000000000000000004 /* SceneDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* SceneDelegateTests.swift */; };
+		B10000000000000000000005 /* PerformanceTimingLogFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* PerformanceTimingLogFormatterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -54,11 +57,14 @@
 		A10000000000000000000012 /* CredentialStorePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStorePlugin.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* KeychainCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCredentialStore.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* SensitiveDataProtection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataProtection.swift; sourceTree = "<group>"; };
+		A10000000000000000000015 /* PerformanceTimingLogFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTimingLogFormatter.swift; sourceTree = "<group>"; };
+		A10000000000000000000016 /* PerformanceDiagnosticsPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceDiagnosticsPlugin.swift; sourceTree = "<group>"; };
 		B10000000000000000000010 /* AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000000000000000000011 /* KeychainCredentialStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCredentialStoreTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000012 /* SensitiveDataProtectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataProtectionTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000013 /* AppBridgeViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBridgeViewControllerTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000014 /* SceneDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegateTests.swift; sourceTree = "<group>"; };
+		B10000000000000000000015 /* PerformanceTimingLogFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTimingLogFormatterTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -109,6 +115,8 @@
 				A10000000000000000000012 /* CredentialStorePlugin.swift */,
 				A10000000000000000000013 /* KeychainCredentialStore.swift */,
 				A10000000000000000000014 /* SensitiveDataProtection.swift */,
+				A10000000000000000000015 /* PerformanceTimingLogFormatter.swift */,
+				A10000000000000000000016 /* PerformanceDiagnosticsPlugin.swift */,
 				50A1B2C21FED79650016851F /* SceneDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
@@ -127,6 +135,7 @@
 				B10000000000000000000014 /* SceneDelegateTests.swift */,
 				B10000000000000000000011 /* KeychainCredentialStoreTests.swift */,
 				B10000000000000000000012 /* SensitiveDataProtectionTests.swift */,
+				B10000000000000000000015 /* PerformanceTimingLogFormatterTests.swift */,
 			);
 			path = AppTests;
 			sourceTree = "<group>";
@@ -279,6 +288,8 @@
 				A10000000000000000000002 /* CredentialStorePlugin.swift in Sources */,
 				A10000000000000000000003 /* KeychainCredentialStore.swift in Sources */,
 				A10000000000000000000004 /* SensitiveDataProtection.swift in Sources */,
+				A10000000000000000000005 /* PerformanceTimingLogFormatter.swift in Sources */,
+				A10000000000000000000006 /* PerformanceDiagnosticsPlugin.swift in Sources */,
 				50A1B2C31FED79650016851F /* SceneDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -291,6 +302,7 @@
 				B10000000000000000000002 /* SensitiveDataProtectionTests.swift in Sources */,
 				B10000000000000000000003 /* AppBridgeViewControllerTests.swift in Sources */,
 				B10000000000000000000004 /* SceneDelegateTests.swift in Sources */,
+				B10000000000000000000005 /* PerformanceTimingLogFormatterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -456,6 +468,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 130;
+				DEVELOPMENT_TEAM = UDUF7J66TN;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SpeleoDB;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
@@ -482,6 +495,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 130;
+				DEVELOPMENT_TEAM = UDUF7J66TN;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SpeleoDB;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
