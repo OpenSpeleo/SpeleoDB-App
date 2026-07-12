@@ -836,3 +836,23 @@ a commit cannot contain its own stable final hash.
   is not invoked by SpeleoDB's GPX export. None is suppressed; any additional
   warning remains a release failure. Their removal requires reviewed upstream
   changes or a separately tested compatibility correction.
+- **Post-commit Release correction:** the first complete clean Release matrix
+  after `f830602` forced tasks that the debug audit had not executed and exposed
+  three more warning classes: 13 background-geolocation Android/Play Services
+  deprecations, one Filesystem legacy-download nullability mismatch, and Sentry
+  native-library strip notices. The expanded quality contract failed before the
+  ledger named those exact sources. The unchanged test then passed after the
+  audit documented every API/line/owner and added a reusable Java
+  `-Xlint:deprecation` init script. No warning was suppressed and no dependency
+  or native runtime implementation changed.
+- **Corrective native gate:** `./gradlew testDebugUnitTest lint assembleDebug
+  assembleRelease bundleRelease assembleDebugAndroidTest --warning-mode all
+  --console=plain` passed 1,845 tasks (1,158 executed / 687 up-to-date), producing
+  Debug and unsigned Release APKs, a Release AAB, and the app instrumentation
+  APK. The remaining warning classes are the documented third-party/generated
+  exceptions; the worktree remained free of generated native drift.
+- **Corrective repository gates:** lint and typecheck passed. The complete
+  threshold-enforced suite passed 115 files / 1,896 tests with 13 staging-only
+  skips and unchanged 90.27% / 82.05% / 92.73% / 92.36% coverage. The hard
+  button scan, MapLibre contracts, diff check, and 581-file tracked inventory
+  passed.

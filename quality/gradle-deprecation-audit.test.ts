@@ -44,6 +44,14 @@ describe("Android Gradle deprecation audit", () => {
       "PackageInfo.versionCode",
       "FilesystemPlugin.kt",
       "downloadFile",
+      "LegacyFilesystemImplementation.kt",
+      "Java type mismatch",
+      "BackgroundGeolocation.java",
+      "Notification.PRIORITY_HIGH",
+      "LocationRequest.PRIORITY_HIGH_ACCURACY",
+      "Unable to strip",
+      "libsentry-android.so",
+      "quality/gradle-deprecation.init.gradle",
     ]) {
       expect(audit).toContain(marker);
     }
