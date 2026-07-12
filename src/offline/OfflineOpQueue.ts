@@ -338,11 +338,6 @@ export class OfflineOpQueue {
 
   // ---- Enqueue (with coalescing) --------------------------------------------
 
-  private nextSeq(): number {
-    this.seqCounter += 1;
-    return this.seqCounter;
-  }
-
   private genId(): string {
     const cryptoObj =
       typeof globalThis !== 'undefined' ? (globalThis.crypto as Crypto | undefined) : undefined;
@@ -350,21 +345,35 @@ export class OfflineOpQueue {
     return `op-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   }
 
-  async enqueueCreate(landmark: LandmarkApiObject): Promise<CreateLandmarkOp> {
+  enqueueCreate(landmark: LandmarkApiObject): Promise<CreateLandmarkOp> {
+    return this.enqueueCommand(() => this.enqueueCreateCommand(landmark));
+  }
+
+  private async enqueueCreateCommand(landmark: LandmarkApiObject): Promise<CreateLandmarkOp> {
     await this.load();
+    const seq = this.seqCounter + 1;
     const op = new CreateLandmarkOp({
       id: this.genId(),
-      seq: this.nextSeq(),
+      seq,
       createdAt: Date.now(),
       landmark,
     });
     await this.persist(op);
+    this.seqCounter = seq;
     this.ops.push(op);
     this.emitChange();
     return op;
   }
 
-  async enqueueUpdate(
+  enqueueUpdate(
+    targetId: string,
+    baseline: LandmarkSnapshot | null,
+    next: LandmarkSnapshot,
+  ): Promise<void> {
+    return this.enqueueCommand(() => this.enqueueUpdateCommand(targetId, baseline, next));
+  }
+
+  private async enqueueUpdateCommand(
     targetId: string,
     baseline: LandmarkSnapshot | null,
     next: LandmarkSnapshot,
@@ -374,21 +383,22 @@ export class OfflineOpQueue {
     // Editing a not-yet-synced offline create: mutate the create in place.
     const create = this.findCreate(targetId);
     if (create) {
-      const previous = create.landmark;
-      create.landmark = {
-        ...create.landmark,
-        name: next.name,
-        description: next.description,
-        latitude: next.latitude,
-        longitude: next.longitude,
-        collection: next.collection ?? '',
-      };
-      try {
-        await this.persist(create);
-      } catch (error) {
-        create.landmark = previous;
-        throw error;
-      }
+      const replacement = new CreateLandmarkOp({
+        id: create.id,
+        seq: create.seq,
+        createdAt: create.createdAt,
+        status: create.status,
+        lastError: create.lastError,
+        landmark: {
+          ...create.landmark,
+          name: next.name,
+          description: next.description,
+          latitude: next.latitude,
+          longitude: next.longitude,
+          collection: next.collection ?? '',
+        },
+      });
+      await this.replaceOp(create, replacement);
       this.emitChange();
       return;
     }
@@ -398,23 +408,15 @@ export class OfflineOpQueue {
       (op): op is UpdateLandmarkOp => op instanceof UpdateLandmarkOp && op.targetId === targetId,
     );
     if (existingUpdate) {
-      const previous = {
-        next: existingUpdate.next,
-        status: existingUpdate.status,
-        lastError: existingUpdate.lastError,
-      };
-      existingUpdate.next = next;
-      existingUpdate.status = 'pending';
-      existingUpdate.lastError = undefined;
-      this.conflicts.delete(existingUpdate.id);
-      try {
-        await this.persist(existingUpdate);
-      } catch (error) {
-        existingUpdate.next = previous.next;
-        existingUpdate.status = previous.status;
-        existingUpdate.lastError = previous.lastError;
-        throw error;
-      }
+      const replacement = new UpdateLandmarkOp({
+        id: existingUpdate.id,
+        seq: existingUpdate.seq,
+        createdAt: existingUpdate.createdAt,
+        targetId,
+        baseline: existingUpdate.baseline,
+        next,
+      });
+      await this.replaceOp(existingUpdate, replacement);
       this.emitChange();
       return;
     }
@@ -427,23 +429,33 @@ export class OfflineOpQueue {
     );
     const effectiveBaseline = existingDelete ? existingDelete.baseline : baseline;
 
+    const seq = this.seqCounter + 1;
     const op = new UpdateLandmarkOp({
       id: this.genId(),
-      seq: this.nextSeq(),
+      seq,
       createdAt: Date.now(),
       targetId,
       baseline: effectiveBaseline,
       next,
     });
-    await this.persist(op);
     if (existingDelete) {
-      await this.removeOp(existingDelete.id);
+      await this.replaceOp(existingDelete, op);
+    } else {
+      await this.persist(op);
+      this.ops.push(op);
     }
-    this.ops.push(op);
+    this.seqCounter = seq;
     this.emitChange();
   }
 
-  async enqueueDelete(targetId: string, baseline: LandmarkSnapshot | null): Promise<void> {
+  enqueueDelete(targetId: string, baseline: LandmarkSnapshot | null): Promise<void> {
+    return this.enqueueCommand(() => this.enqueueDeleteCommand(targetId, baseline));
+  }
+
+  private async enqueueDeleteCommand(
+    targetId: string,
+    baseline: LandmarkSnapshot | null,
+  ): Promise<void> {
     await this.load();
 
     // Deleting a not-yet-synced offline create: it never existed server-side, so
@@ -461,54 +473,78 @@ export class OfflineOpQueue {
       (op): op is UpdateLandmarkOp => op instanceof UpdateLandmarkOp && op.targetId === targetId,
     );
     const effectiveBaseline = existingUpdate ? existingUpdate.baseline : baseline;
-    if (existingUpdate) {
-      await this.removeOp(existingUpdate.id);
-    }
-
+    const seq = this.seqCounter + 1;
     const op = new DeleteLandmarkOp({
       id: this.genId(),
-      seq: this.nextSeq(),
+      seq,
       createdAt: Date.now(),
       targetId,
       baseline: effectiveBaseline,
     });
-    await this.persist(op);
-    this.ops.push(op);
+    if (existingUpdate) {
+      await this.replaceOp(existingUpdate, op);
+    } else {
+      await this.persist(op);
+      this.ops.push(op);
+    }
+    this.seqCounter = seq;
     this.emitChange();
   }
 
   // ---- GPS track enqueue (with coalescing) ----------------------------------
 
-  async enqueueGpsCreate(track: { id: string; name: string; color: string }): Promise<CreateGpsTrackOp> {
+  enqueueGpsCreate(
+    track: { id: string; name: string; color: string },
+  ): Promise<CreateGpsTrackOp> {
+    return this.enqueueCommand(() => this.enqueueGpsCreateCommand(track));
+  }
+
+  private async enqueueGpsCreateCommand(
+    track: { id: string; name: string; color: string },
+  ): Promise<CreateGpsTrackOp> {
     await this.load();
     // Re-uploading the same recorded track replaces the pending upload in place.
     const existing = this.findOp(
       (op): op is CreateGpsTrackOp => op instanceof CreateGpsTrackOp && op.localTrackId === track.id,
     );
     if (existing) {
-      existing.name = track.name;
-      existing.color = track.color;
-      existing.status = 'pending';
-      existing.lastError = undefined;
-      await this.persist(existing);
+      const replacement = new CreateGpsTrackOp({
+        id: existing.id,
+        seq: existing.seq,
+        createdAt: existing.createdAt,
+        localTrackId: existing.localTrackId,
+        name: track.name,
+        color: track.color,
+      });
+      await this.replaceOp(existing, replacement);
       this.emitChange();
-      return existing;
+      return replacement;
     }
+    const seq = this.seqCounter + 1;
     const op = new CreateGpsTrackOp({
       id: this.genId(),
-      seq: this.nextSeq(),
+      seq,
       createdAt: Date.now(),
       localTrackId: track.id,
       name: track.name,
       color: track.color,
     });
     await this.persist(op);
+    this.seqCounter = seq;
     this.ops.push(op);
     this.emitChange();
     return op;
   }
 
-  async enqueueGpsUpdate(
+  enqueueGpsUpdate(
+    targetId: string,
+    baseline: GpsTrackSnapshot | null,
+    next: GpsTrackSnapshot,
+  ): Promise<void> {
+    return this.enqueueCommand(() => this.enqueueGpsUpdateCommand(targetId, baseline, next));
+  }
+
+  private async enqueueGpsUpdateCommand(
     targetId: string,
     baseline: GpsTrackSnapshot | null,
     next: GpsTrackSnapshot,
@@ -520,11 +556,15 @@ export class OfflineOpQueue {
       (op): op is UpdateGpsTrackOp => op instanceof UpdateGpsTrackOp && op.targetId === targetId,
     );
     if (existingUpdate) {
-      existingUpdate.next = next;
-      existingUpdate.status = 'pending';
-      existingUpdate.lastError = undefined;
-      this.conflicts.delete(existingUpdate.id);
-      await this.persist(existingUpdate);
+      const replacement = new UpdateGpsTrackOp({
+        id: existingUpdate.id,
+        seq: existingUpdate.seq,
+        createdAt: existingUpdate.createdAt,
+        targetId,
+        baseline: existingUpdate.baseline,
+        next,
+      });
+      await this.replaceOp(existingUpdate, replacement);
       this.emitChange();
       return;
     }
@@ -536,23 +576,33 @@ export class OfflineOpQueue {
     );
     const effectiveBaseline = existingDelete ? existingDelete.baseline : baseline;
 
+    const seq = this.seqCounter + 1;
     const op = new UpdateGpsTrackOp({
       id: this.genId(),
-      seq: this.nextSeq(),
+      seq,
       createdAt: Date.now(),
       targetId,
       baseline: effectiveBaseline,
       next,
     });
-    await this.persist(op);
     if (existingDelete) {
-      await this.removeOp(existingDelete.id);
+      await this.replaceOp(existingDelete, op);
+    } else {
+      await this.persist(op);
+      this.ops.push(op);
     }
-    this.ops.push(op);
+    this.seqCounter = seq;
     this.emitChange();
   }
 
-  async enqueueGpsDelete(targetId: string, baseline: GpsTrackSnapshot | null): Promise<void> {
+  enqueueGpsDelete(targetId: string, baseline: GpsTrackSnapshot | null): Promise<void> {
+    return this.enqueueCommand(() => this.enqueueGpsDeleteCommand(targetId, baseline));
+  }
+
+  private async enqueueGpsDeleteCommand(
+    targetId: string,
+    baseline: GpsTrackSnapshot | null,
+  ): Promise<void> {
     await this.load();
 
     // A delete supersedes any pending edit for the same track; keep the edit's
@@ -561,19 +611,21 @@ export class OfflineOpQueue {
       (op): op is UpdateGpsTrackOp => op instanceof UpdateGpsTrackOp && op.targetId === targetId,
     );
     const effectiveBaseline = existingUpdate ? existingUpdate.baseline : baseline;
-    if (existingUpdate) {
-      await this.removeOp(existingUpdate.id);
-    }
-
+    const seq = this.seqCounter + 1;
     const op = new DeleteGpsTrackOp({
       id: this.genId(),
-      seq: this.nextSeq(),
+      seq,
       createdAt: Date.now(),
       targetId,
       baseline: effectiveBaseline,
     });
-    await this.persist(op);
-    this.ops.push(op);
+    if (existingUpdate) {
+      await this.replaceOp(existingUpdate, op);
+    } else {
+      await this.persist(op);
+      this.ops.push(op);
+    }
+    this.seqCounter = seq;
     this.emitChange();
   }
 
@@ -585,7 +637,11 @@ export class OfflineOpQueue {
   }
 
   /** Discard every queued op whose subject is `subjectId` (any GPS-track op). */
-  async discardGpsTrackOpsForSubject(subjectId: string): Promise<void> {
+  discardGpsTrackOpsForSubject(subjectId: string): Promise<void> {
+    return this.enqueueCommand(() => this.discardGpsTrackOpsForSubjectCommand(subjectId));
+  }
+
+  private async discardGpsTrackOpsForSubjectCommand(subjectId: string): Promise<void> {
     await this.load();
     const ids = this.ops
       .filter((op) => op.entityType === 'gpsTrack' && op.subjectId() === subjectId)
@@ -598,7 +654,11 @@ export class OfflineOpQueue {
   }
 
   /** Discard a pending op (the map reverts via re-fold). */
-  async discard(id: string): Promise<void> {
+  discard(id: string): Promise<void> {
+    return this.enqueueCommand(() => this.discardCommand(id));
+  }
+
+  private async discardCommand(id: string): Promise<void> {
     await this.load();
     await this.removeOp(id);
     this.emitChange();
@@ -1264,6 +1324,22 @@ export class OfflineOpQueue {
         cause: error,
       });
     }
+  }
+
+  private async replaceOp(current: OfflineOp, replacement: OfflineOp): Promise<void> {
+    try {
+      const ok = await this.store.replace(current.id, replacement.serialize());
+      if (!ok) {
+        throw new OfflineOpPersistenceError('Could not replace a pending offline change.');
+      }
+    } catch (error) {
+      if (error instanceof OfflineOpPersistenceError) throw error;
+      throw new OfflineOpPersistenceError('Could not replace a pending offline change.', {
+        cause: error,
+      });
+    }
+    this.ops = this.ops.map((op) => (op === current ? replacement : op));
+    this.conflicts.delete(current.id);
   }
 
   private async removeOp(id: string): Promise<void> {

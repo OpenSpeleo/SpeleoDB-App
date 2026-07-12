@@ -32,6 +32,11 @@ function createMemoryStore() {
       records.delete(id);
       return true;
     }),
+    replace: vi.fn(async (removedId: string, op: SerializedOfflineOp) => {
+      records.delete(removedId);
+      records.set(op.id, op);
+      return true;
+    }),
     clear: vi.fn(async () => {
       records.clear();
     }),
@@ -500,6 +505,106 @@ describe('OfflineOpQueue persistence failures', () => {
 
     await expect(queue.discard(op.id)).rejects.toBeInstanceOf(OfflineOpPersistenceError);
     expect(queue.count).toBe(1);
+  });
+
+  it.each([
+    {
+      label: 'landmark update with delete',
+      seed: (queue: OfflineOpQueue) => queue.enqueueUpdate(
+        'lm-1',
+        baselineSnapshot(),
+        { ...baselineSnapshot(), name: 'Edited' },
+      ),
+      replace: (queue: OfflineOpQueue) => queue.enqueueDelete('lm-1', baselineSnapshot()),
+      currentFailure: 'put' as const,
+      expectedKind: 'update',
+    },
+    {
+      label: 'landmark delete with update',
+      seed: (queue: OfflineOpQueue) => queue.enqueueDelete('lm-1', baselineSnapshot()),
+      replace: (queue: OfflineOpQueue) => queue.enqueueUpdate(
+        'lm-1',
+        baselineSnapshot(),
+        { ...baselineSnapshot(), name: 'Edited' },
+      ),
+      currentFailure: 'remove' as const,
+      expectedKind: 'delete',
+    },
+    {
+      label: 'GPS update with delete',
+      seed: (queue: OfflineOpQueue) => queue.enqueueGpsUpdate(
+        'g1',
+        { name: 'Track', color: '#377eb8' },
+        { name: 'Edited', color: '#377eb8' },
+      ),
+      replace: (queue: OfflineOpQueue) => queue.enqueueGpsDelete(
+        'g1',
+        { name: 'Track', color: '#377eb8' },
+      ),
+      currentFailure: 'put' as const,
+      expectedKind: 'update',
+    },
+    {
+      label: 'GPS delete with update',
+      seed: (queue: OfflineOpQueue) => queue.enqueueGpsDelete(
+        'g1',
+        { name: 'Track', color: '#377eb8' },
+      ),
+      replace: (queue: OfflineOpQueue) => queue.enqueueGpsUpdate(
+        'g1',
+        { name: 'Track', color: '#377eb8' },
+        { name: 'Edited', color: '#377eb8' },
+      ),
+      currentFailure: 'remove' as const,
+      expectedKind: 'delete',
+    },
+  ])('keeps the durable $label when atomic replacement fails', async ({
+    seed,
+    replace,
+    currentFailure,
+    expectedKind,
+  }) => {
+    const { store, records } = createMemoryStore();
+    const queue = new OfflineOpQueue(store, createPort());
+    await seed(queue);
+    vi.mocked(store.put).mockClear();
+    vi.mocked(store.remove).mockClear();
+    vi.mocked(store.replace).mockClear();
+    const storageError = new Error('replacement transaction failed');
+    vi.mocked(store.replace).mockRejectedValueOnce(storageError);
+    vi.mocked(store[currentFailure]).mockRejectedValueOnce(storageError);
+
+    await expect(replace(queue)).rejects.toThrow();
+
+    expect(queue.views()).toHaveLength(1);
+    expect(queue.views()[0].kind).toBe(expectedKind);
+    expect(store.replace).toHaveBeenCalledOnce();
+    expect(store.put).not.toHaveBeenCalled();
+    expect(store.remove).not.toHaveBeenCalled();
+    expect(records.size).toBe(1);
+    const reopened = new OfflineOpQueue(store, createPort());
+    await reopened.load();
+    expect(reopened.views()).toHaveLength(1);
+    expect(reopened.views()[0].kind).toBe(expectedKind);
+  });
+
+  it('serializes simultaneous same-subject enqueues into one durable intent', async () => {
+    const { store, records } = createMemoryStore();
+    const queue = new OfflineOpQueue(store, createPort());
+    const baseline = baselineSnapshot();
+
+    await Promise.all([
+      queue.enqueueUpdate('lm-1', baseline, { ...baseline, name: 'First' }),
+      queue.enqueueUpdate('lm-1', baseline, { ...baseline, name: 'Second' }),
+    ]);
+
+    expect(queue.views()).toHaveLength(1);
+    expect(queue.views()[0].title).toBe('Second');
+    expect(records.size).toBe(1);
+    const reopened = new OfflineOpQueue(store, createPort());
+    await reopened.load();
+    expect(reopened.views()).toHaveLength(1);
+    expect(reopened.views()[0].title).toBe('Second');
   });
 });
 

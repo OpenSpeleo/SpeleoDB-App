@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { OfflineOpStore } from './OfflineOpStore';
 import { CacheStore } from '../services/CacheStore';
 import { ProjectCacheService } from '../services/ProjectCacheService';
@@ -46,6 +46,40 @@ describe('OfflineOpStore', () => {
     const list = await store.list();
     expect(list).toHaveLength(1);
     expect(list[0].status).toBe('error');
+  });
+
+  it('atomically replaces an old operation id with a new record', async () => {
+    await store.put(createOp('old', 1));
+
+    await store.replace('old', createOp('new', 2));
+
+    const reopened = new OfflineOpStore(new CacheStore());
+    expect((await reopened.list()).map((op) => op.id)).toEqual(['new']);
+  });
+
+  it('preserves the old operation after an aborted replacement transaction', async () => {
+    await store.put(createOp('old', 1));
+    const originalPut = IDBObjectStore.prototype.put;
+    const putSpy = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function(
+      this: IDBObjectStore,
+      value: unknown,
+      key?: IDBValidKey,
+    ) {
+      const request = key === undefined
+        ? originalPut.call(this, value)
+        : originalPut.call(this, value, key);
+      this.transaction.abort();
+      return request;
+    });
+
+    try {
+      await expect(store.replace('old', createOp('new', 2))).rejects.toThrow(/aborted/i);
+    } finally {
+      putSpy.mockRestore();
+    }
+
+    const reopened = new OfflineOpStore(new CacheStore());
+    expect((await reopened.list()).map((op) => op.id)).toEqual(['old']);
   });
 
   it('removes a single op and clears all', async () => {

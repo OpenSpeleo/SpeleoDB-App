@@ -212,13 +212,13 @@ them leaves two durable ops for one subject; the in-memory queue can disagree
 with disk. Concurrent enqueues can both observe no existing op and independently
 append, violating the documented one-subject/one-op invariant.
 
-- [ ] **RED:** add failure-injection and fake-IndexedDB tests for every
+- [x] **RED:** add failure-injection and fake-IndexedDB tests for every
       update↔delete replacement boundary plus two simultaneous same-subject
       enqueues; reopen the queue and assert the current duplicate/divergent
       records.
-- [ ] **GREEN:** serialize queue mutations and add one atomic store transaction
+- [x] **GREEN:** serialize queue mutations and add one atomic store transaction
       for replace/remove+put. Update memory only after durable commit.
-- [ ] Rerun load, coalescing, persistence-error, replay, and force-quit tests.
+- [x] Rerun load, coalescing, persistence-error, replay, and force-quit tests.
 
 #### RR-006 — GPS recording reports durable success after storage rejection
 
@@ -351,7 +351,7 @@ the Capacitor/plugin build graph and do not demonstrate a shipped defect.
 
 - [x] Phase 1: RR-001, RR-002, and RR-014 — close logout/cross-session privacy
       and require informed consent for pending-operation loss first.
-- [ ] Phase 2: RR-003 through RR-005 — make cache and offline intent durable,
+- [x] Phase 2: RR-003 through RR-005 — make cache and offline intent durable,
       atomic, and single-flight.
 - [ ] Phase 3: RR-006 and RR-007 — make GPS save and native transitions honest
       and race-safe.
@@ -580,3 +580,26 @@ a commit cannot contain its own stable final hash.
 - **Limitations:** queue persistence replacement is intentionally deferred to
   RR-005. Native source and generated projects are unchanged; native compilation
   remains in the final cross-platform gate.
+
+### RR-005 — Atomic offline-operation replacement
+
+- **RED:** `npx vitest run src/offline/OfflineOpStore.test.ts
+  src/offline/OfflineOpQueue.test.ts` — 7 expected failures proved both missing
+  store-level atomic replacement/rollback and all four landmark/GPS
+  update↔delete failure windows. Reopening showed a lost old intent or duplicate
+  records, while simultaneous same-subject enqueues produced two durable ops.
+- **GREEN:** the unchanged focused command passed 59/59 tests. Real
+  fake-IndexedDB abort coverage reopens the old record after rollback; all four
+  queue replacement directions retain the prior in-memory and durable intent on
+  failure. Simultaneous enqueues deterministically coalesce to the latest intent.
+- **Design/performance:** every public queue mutation now shares the serialized
+  command lane. `CacheStore.replace()` removes the old key and writes the new
+  record in one transaction, while memory/sequence/revision publication occurs
+  only after commit. This adds no reads, polling, or network work.
+- **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
+  hard button scan, and configured staging integration (2 files / 13 tests)
+  passed. The deterministic covered suite passed 109 files / 1,865 tests with
+  13 staging-only skips; coverage was 90.25% statements, 82.16% branches,
+  92.65% functions, and 92.30% lines. MapLibre contract tests remain green.
+- **Limitations:** native source and generated projects are unchanged; native
+  compilation remains in the final cross-platform gate.

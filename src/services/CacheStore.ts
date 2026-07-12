@@ -123,6 +123,29 @@ export class CacheStore {
   }
 
   /**
+   * Atomically remove one key and write another entry in the same read-write
+   * transaction. If either request or the transaction fails, IndexedDB rolls
+   * both changes back.
+   */
+  async replace<T = unknown>(
+    store: StoreName,
+    removedKey: string,
+    writtenKey: string,
+    value: CacheEntry<T>,
+    options: CacheStoreWriteOptions = {},
+  ): Promise<void> {
+    return this.write(
+      store,
+      (objectStore) => {
+        if (removedKey !== writtenKey) objectStore.delete(removedKey);
+        objectStore.put(value, writtenKey);
+      },
+      'replace',
+      options,
+    );
+  }
+
+  /**
    * Atomically read and conditionally replace one entry in a single
    * read-write transaction. Returning null leaves the current value intact.
    */

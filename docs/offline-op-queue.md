@@ -167,6 +167,16 @@ Settings sign-out shows the exact pending count and requires explicit
 acknowledgement that these operations will be permanently and irrecoverably
 deleted. Forced credential-invalidating logout still purges without interaction.
 
+All public enqueue/discard/replay/conflict commands share the queue's serialized
+admission lane. Coalescing that changes operation type (update <-> delete)
+commits the old-key removal and replacement record through
+`OfflineOpStore.replace()` in one IndexedDB transaction. In-place replacements
+also construct a new operation object; the in-memory queue, sequence counter,
+conflict state, and UI revision change only after the durable transaction
+completes. A failed or interrupted replacement therefore reopens with exactly
+the previous intent. Serialization and one transaction add constant-time
+bookkeeping and prevent duplicate records without extra database reads.
+
 ## Coalescing: one subject, one pending op
 
 Enqueue coalesces so the queue never builds dependency chains and the pending
