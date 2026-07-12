@@ -339,6 +339,7 @@ export class SessionCoordinator {
     this.isLoggingOut = true;
     this.invalidate();
     this.activeAuthenticationContext?.abort('Logout superseded authentication');
+    this.dependencies.hooks.invalidateApplicationOperations();
     this.reset(true);
     const pendingAuthentication = [...this.authenticationOperations];
     const operation = (async () => {

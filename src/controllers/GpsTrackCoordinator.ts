@@ -32,6 +32,10 @@ export class OfflineMapGpsGeometryUnavailableError extends Error {
   }
 }
 
+function signalOptions(signal?: AbortSignal): [] | [{ signal: AbortSignal }] {
+  return signal ? [{ signal }] : [];
+}
+
 interface GpsTrackCoordinatorDependencies {
   store: GpsTrackStore;
   cache: ProjectCacheService;
@@ -141,7 +145,12 @@ export class GpsTrackCoordinator {
     this.bump(false);
   }
 
-  async updateLocal(id: string, patch: Partial<LocalGpsTrack>): Promise<LocalGpsTrack | null> {
+  async updateLocal(
+    id: string,
+    patch: Partial<LocalGpsTrack>,
+    signal?: AbortSignal,
+  ): Promise<LocalGpsTrack | null> {
+    throwIfAborted(signal);
     const index = this.localTracks.findIndex((track) => track.id === id);
     if (index === -1) return null;
     const updated: LocalGpsTrack = {
@@ -150,6 +159,7 @@ export class GpsTrackCoordinator {
       updatedAt: this.dependencies.now(),
     };
     await this.enqueuePersist(updated);
+    throwIfAborted(signal);
     this.localTracks = [
       ...this.localTracks.slice(0, index),
       updated,
@@ -159,10 +169,13 @@ export class GpsTrackCoordinator {
     return updated;
   }
 
-  async removeLocal(id: string): Promise<void> {
+  async removeLocal(id: string, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     try {
       await this.dependencies.store.remove(id);
+      throwIfAborted(signal);
     } catch (error) {
+      if (isAbortError(error) || signal?.aborted) throwIfAborted(signal);
       console.warn('Failed to delete GPS track:', error);
     }
     const next = this.localTracks.filter((track) => track.id !== id);
@@ -171,13 +184,16 @@ export class GpsTrackCoordinator {
     this.bump();
   }
 
-  async replaceRemote(tracks: RemoteGpsTrack[]): Promise<void> {
-    await this.cacheRemote(tracks);
+  async replaceRemote(tracks: RemoteGpsTrack[], signal?: AbortSignal): Promise<void> {
+    await this.cacheRemote(tracks, signal);
+    throwIfAborted(signal);
     this.publishRemote(tracks);
   }
 
-  async cacheRemote(tracks: RemoteGpsTrack[]): Promise<void> {
-    await this.dependencies.cache.setGpsTracks(tracks);
+  async cacheRemote(tracks: RemoteGpsTrack[], signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    await this.dependencies.cache.setGpsTracks(tracks, ...signalOptions(signal));
+    throwIfAborted(signal);
   }
 
   publishRemote(tracks: RemoteGpsTrack[]): void {
@@ -185,23 +201,30 @@ export class GpsTrackCoordinator {
     this.bump();
   }
 
-  async applyRemoteUpsert(track: RemoteGpsTrack): Promise<void> {
-    const list = (await this.dependencies.cache.getGpsTracks()) ?? [];
+  async applyRemoteUpsert(track: RemoteGpsTrack, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    const list = (await this.dependencies.cache.getGpsTracks(...signalOptions(signal))) ?? [];
+    throwIfAborted(signal);
     const index = list.findIndex((candidate) => candidate.id === track.id);
     const next = index === -1
       ? [track, ...list]
       : [...list.slice(0, index), { ...list[index], ...track }, ...list.slice(index + 1)];
-    await this.dependencies.cache.setGpsTracks(next);
+    await this.dependencies.cache.setGpsTracks(next, ...signalOptions(signal));
+    throwIfAborted(signal);
     this.remoteTracks = next;
     this.bump();
   }
 
-  async applyRemoteRemoval(id: string): Promise<void> {
-    const list = (await this.dependencies.cache.getGpsTracks()) ?? [];
+  async applyRemoteRemoval(id: string, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    const list = (await this.dependencies.cache.getGpsTracks(...signalOptions(signal))) ?? [];
+    throwIfAborted(signal);
     const next = list.filter((track) => track.id !== id);
-    await this.dependencies.cache.setGpsTracks(next);
+    await this.dependencies.cache.setGpsTracks(next, ...signalOptions(signal));
+    throwIfAborted(signal);
     this.remoteTracks = next;
-    await this.dependencies.cache.removeGpsTrackGeoJSON(id);
+    await this.dependencies.cache.removeGpsTrackGeoJSON(id, ...signalOptions(signal));
+    throwIfAborted(signal);
     this.bump();
   }
 
@@ -236,10 +259,12 @@ export class GpsTrackCoordinator {
     return this.dependencies.gpx.buildFile(track);
   }
 
-  async buildGpxFile(item: GpsTrackListItem): Promise<GpsTrackGpxFile> {
+  async buildGpxFile(item: GpsTrackListItem, signal?: AbortSignal): Promise<GpsTrackGpxFile> {
+    throwIfAborted(signal);
     const local = this.localTrack(item.id);
     if (local) return this.buildLocalGpx(local);
-    const points = await this.getPoints(item.id);
+    const points = await this.getPoints(item.id, signal);
+    throwIfAborted(signal);
     return this.buildLocalGpx({
       id: item.id,
       name: item.name,
@@ -250,28 +275,45 @@ export class GpsTrackCoordinator {
     });
   }
 
-  async getPoints(id: string): Promise<RecordedPoint[]> {
+  async getPoints(id: string, signal?: AbortSignal): Promise<RecordedPoint[]> {
+    throwIfAborted(signal);
     const local = this.localTrack(id);
     if (local) return [...local.points];
-    const geojson = await this.getGeoJSON(id);
+    const geojson = await this.getGeoJSON(id, signal);
+    throwIfAborted(signal);
     return geojson ? gpsTrackGeoJsonToPoints(geojson) : [];
   }
 
-  async getGeoJSON(id: string): Promise<GeoJSON.FeatureCollection | null> {
+  async getGeoJSON(id: string, signal?: AbortSignal): Promise<GeoJSON.FeatureCollection | null> {
+    throwIfAborted(signal);
     if (this.localTrack(id)) return null;
     const remote = this.remoteTracks.find((track) => track.id === id);
-    const cached = await this.dependencies.cache.getGpsTrackGeoJSON(id);
+    const cached = await this.dependencies.cache.getGpsTrackGeoJSON(
+      id,
+      ...signalOptions(signal),
+    );
+    throwIfAborted(signal);
     if (cached) {
       const normalizedCache = normalizeGeoJSON(cached);
       if (normalizedCache) return normalizedCache;
     }
     if (!remote?.fileUrl || !this.dependencies.hasNetworkAccess()) return null;
     try {
-      const response = await this.dependencies.transport.downloadJSON(remote.fileUrl);
+      const response = await this.dependencies.transport.downloadJSON(
+        remote.fileUrl,
+        ...signalOptions(signal),
+      );
+      throwIfAborted(signal);
       if (!isSuccessfulStatus(response.status)) return null;
       const normalized = normalizeGeoJSON(response.data);
       if (!normalized) return null;
-      await this.dependencies.cache.setGpsTrackGeoJSON(id, normalized, remote.sha256);
+      await this.dependencies.cache.setGpsTrackGeoJSON(
+        id,
+        normalized,
+        remote.sha256,
+        ...signalOptions(signal),
+      );
+      throwIfAborted(signal);
       return normalized;
     } catch (error) {
       if (isAbortError(error)) throw error;

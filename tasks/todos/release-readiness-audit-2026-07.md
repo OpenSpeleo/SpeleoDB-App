@@ -121,18 +121,18 @@ also remains live after `OfflineMutationCoordinator.reset()`.
 Owning seams: controller user-operation lifetime, mutation coordinators,
 offline replay port, and service request `AbortSignal` forwarding.
 
-- [ ] **RED:** add deferred controller tests for in-flight landmark create,
+- [x] **RED:** add deferred controller tests for in-flight landmark create,
       landmark/GPS edit/delete, collection/geometry load, and offline replay.
       Start each operation, begin logout, settle the ignored transport after
       teardown, and assert: transport sees abort, logout waits for admitted
       work, no cache write occurs, no revision publishes, no op is removed, and
       no old-session data reappears.
-- [ ] Run the focused tests and record every stale publication/write.
-- [ ] **GREEN:** create one controller-owned cancellable user-operation lifetime,
+- [x] Run the focused tests and record every stale publication/write.
+- [x] **GREEN:** create one controller-owned cancellable user-operation lifetime,
       track admitted mutations/replays, pass its signal through every service
       wrapper and replay port, recheck authority after each awaited persistence
       boundary, and abort/reset it during logout before cache deletion.
-- [ ] Rerun the focused tests, auth/logout suites, and real staging auth tests.
+- [x] Rerun the focused tests, auth/logout suites, and real staging auth tests.
 
 ### P1 — release blockers
 
@@ -486,3 +486,27 @@ a commit cannot contain its own stable final hash.
 - **Limitations:** native projects and generated assets are unchanged, so native
   compilation is deferred to the final cross-platform gate. Physical-device
   evidence remains an explicit RR-008 release gate.
+
+### RR-002 — Cancellable user-operation lifetime
+
+- **RED:** `npx vitest run src/controllers/SpeleoDBController.test.ts` — 8
+  expected failures proved landmark create/update/delete, collection loading,
+  offline replay, remote GPS edit/delete, and lazy GPS geometry download did not
+  receive an abort signal and could outlive logout.
+- **GREEN:** the same controller command passed 194/194 tests. The related
+  session, GPS coordinator/mutation, cache, and logout matrix passed 337/337
+  tests across 5 files. Deferred transports deliberately ignored cancellation;
+  logout waited for settlement while every late mutation, cache write, revision
+  publication, and offline-op removal remained blocked.
+- **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
+  hard button scan, and live staging integration (2 files, 13 tests) passed.
+  The deterministic covered suite passed 109 files / 1,841 tests with 13 tests
+  skipped only because staging was disabled for that command. MapLibre contract
+  tests are included in that suite.
+- **Design/performance:** one generation-scoped cancellation context is shared
+  by admitted user operations. It adds constant-time tracking and signal
+  forwarding, no polling or extra requests. Invalidated offline queues suppress
+  stale callbacks.
+- **Limitations:** native source and generated projects are unchanged; native
+  compilation remains in the final cross-platform gate. Physical-device logout
+  races remain an explicit RR-008 release protocol.

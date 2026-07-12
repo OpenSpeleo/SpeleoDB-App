@@ -94,7 +94,8 @@ import { TileCoordinator } from './TileCoordinator';
 import { GpsRecordingCoordinator } from './GpsRecordingCoordinator';
 import { GpsTrackCoordinator } from './GpsTrackCoordinator';
 import { GpsTrackMutationCoordinator } from './GpsTrackMutationCoordinator';
-import { isAbortError } from '../utils/abort';
+import { createAbortError, isAbortError, throwIfAborted } from '../utils/abort';
+import { CancellationContext } from './CancellationContext';
 import type {
   SyncProjectsResult,
 } from '../types/sync';
@@ -165,6 +166,8 @@ export class SpeleoDBController {
   private _isPurgingLocalData = false;
   private _asyncGeneration = 0;
   private _trackedOperations = new Set<Promise<unknown>>();
+  private _userOperationContext: CancellationContext | null = null;
+  private _nextUserOperationRunId = 1;
 
   // Snapshot references for useSyncExternalStore (identity-stable between notifies)
   private _landmarksRevisionSnapshot: number = this._landmarksRevision;
@@ -314,40 +317,72 @@ export class SpeleoDBController {
       hasNetworkAccess: () => this.hasNetworkAccess(),
       postLandmark: (input) => {
         const credentials = this.requireQueueCredentials();
-        return this.service.createLandmark(credentials.instance, credentials.token, input);
+        return this.service.createLandmark(credentials.instance, credentials.token, input, {
+          signal: this.requireUserOperationContext().signal,
+        });
       },
       patchLandmark: (id, input) => {
         const credentials = this.requireQueueCredentials();
-        return this.service.updateLandmark(credentials.instance, credentials.token, id, input);
+        return this.service.updateLandmark(credentials.instance, credentials.token, id, input, {
+          signal: this.requireUserOperationContext().signal,
+        });
       },
       deleteLandmark: (id) => {
         const credentials = this.requireQueueCredentials();
-        return this.service.deleteLandmark(credentials.instance, credentials.token, id);
+        return this.service.deleteLandmark(credentials.instance, credentials.token, id, {
+          signal: this.requireUserOperationContext().signal,
+        });
       },
       fetchLandmarksGeoJSON: () => {
         const credentials = this.requireQueueCredentials();
-        return this.service.getLandmarksGeoJSON(credentials.instance, credentials.token);
+        return this.service.getLandmarksGeoJSON(credentials.instance, credentials.token, {
+          signal: this.requireUserOperationContext().signal,
+        });
       },
-      applyUpsert: (landmark) => this.applyLandmarkUpsert(landmark),
-      applyRemoval: (id) => this.applyLandmarkRemoval(id),
+      applyUpsert: (landmark) => this.applyLandmarkUpsert(
+        landmark,
+        this.requireUserOperationContext().signal,
+      ),
+      applyRemoval: (id) => this.applyLandmarkRemoval(
+        id,
+        this.requireUserOperationContext().signal,
+      ),
       uploadGpsTrack: (localTrackId) =>
-        this.gpsTrackMutationCoordinator.performReplayUpload(localTrackId),
+        this.gpsTrackMutationCoordinator.performReplayUpload(
+          localTrackId,
+          this.requireUserOperationContext().signal,
+        ),
       patchGpsTrack: (id, input) => {
         const credentials = this.requireQueueCredentials();
-        return this.service.updateGpsTrack(credentials.instance, credentials.token, id, input);
+        return this.service.updateGpsTrack(credentials.instance, credentials.token, id, input, {
+          signal: this.requireUserOperationContext().signal,
+        });
       },
       deleteGpsTrackRemote: (id) => {
         const credentials = this.requireQueueCredentials();
-        return this.service.deleteGpsTrack(credentials.instance, credentials.token, id);
+        return this.service.deleteGpsTrack(credentials.instance, credentials.token, id, {
+          signal: this.requireUserOperationContext().signal,
+        });
       },
       fetchGpsTracks: () => {
         const credentials = this.requireQueueCredentials();
-        return this.service.getGpsTracks(credentials.instance, credentials.token);
+        return this.service.getGpsTracks(credentials.instance, credentials.token, {
+          signal: this.requireUserOperationContext().signal,
+        });
       },
-      applyGpsTrackUpsert: (track) => this.gpsTrackCoordinator.applyRemoteUpsert(track),
-      applyGpsTrackRemoval: (id) => this.gpsTrackCoordinator.applyRemoteRemoval(id),
+      applyGpsTrackUpsert: (track) => this.gpsTrackCoordinator.applyRemoteUpsert(
+        track,
+        this.requireUserOperationContext().signal,
+      ),
+      applyGpsTrackRemoval: (id) => this.gpsTrackCoordinator.applyRemoteRemoval(
+        id,
+        this.requireUserOperationContext().signal,
+      ),
       onGpsTrackCreated: (localTrackId) =>
-        this.gpsTrackMutationCoordinator.finalizeUpload(localTrackId),
+        this.gpsTrackMutationCoordinator.finalizeUpload(
+          localTrackId,
+          this.requireUserOperationContext().signal,
+        ),
     };
     return port;
   }
@@ -551,6 +586,8 @@ export class SpeleoDBController {
 
   private invalidateAsyncOperations(): void {
     this._asyncGeneration += 1;
+    this._userOperationContext?.abort('User operations invalidated');
+    this._userOperationContext = null;
     this.sessionCoordinator.invalidate();
     this.projectSyncCoordinator.cancel();
     this.tileCoordinator.cancel();
@@ -570,6 +607,37 @@ export class SpeleoDBController {
     });
     this._trackedOperations.add(tracked);
     return tracked;
+  }
+
+  private runUserOperation<T>(
+    operation: (context: CancellationContext) => Promise<T>,
+  ): Promise<T> {
+    let context: CancellationContext;
+    try {
+      context = this.requireUserOperationContext();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return this.trackOperation((async () => {
+      context.throwIfAborted();
+      const result = await operation(context);
+      context.throwIfAborted();
+      return result;
+    })());
+  }
+
+  private requireUserOperationContext(): CancellationContext {
+    if (this._isPurgingLocalData || !this.sessionCoordinator.isAuthenticated) {
+      throw createAbortError('No active user session.');
+    }
+    if (!this._userOperationContext) {
+      this._userOperationContext = new CancellationContext(
+        this._nextUserOperationRunId,
+        'User operation lifetime',
+      );
+      this._nextUserOperationRunId += 1;
+    }
+    return this._userOperationContext;
   }
 
   private async waitForTrackedOperations(): Promise<void> {
@@ -777,10 +845,11 @@ export class SpeleoDBController {
    * and session-blocked entries are fail-closed.
    */
   async getProjectMapData(projectId: string): Promise<ProjectGeoJSONMapData | null> {
-    return this.projectGeoJSONCoordinator.getMapData(
+    return this.runUserOperation((context) => this.projectGeoJSONCoordinator.getMapData(
       this.projectSyncCoordinator.projects,
       projectId,
-    );
+      context.signal,
+    ));
   }
 
   /** Backward-compatible data-only accessor; still enforces validation. */
@@ -790,7 +859,9 @@ export class SpeleoDBController {
 
   /** Persist acknowledgement for the exact warning versions currently shown. */
   async acknowledgeProjectGeoJSONWarnings(): Promise<ProjectGeoJSONAcknowledgementResult> {
-    return this.projectGeoJSONCoordinator.acknowledgeWarnings();
+    return this.runUserOperation((context) => (
+      this.projectGeoJSONCoordinator.acknowledgeWarnings(context.signal)
+    ));
   }
 
   /**
@@ -802,12 +873,16 @@ export class SpeleoDBController {
    * online path is unaffected.
    */
   async getOverlayGeoJSON(overlayId: MapOverlayId): Promise<unknown | null> {
-    const raw = await this.cache.getOverlayGeoJSON(overlayId);
-    if (overlayId !== 'landmarks') return raw;
-    await this.offlineMutations.load();
-    if (this.offlineMutations.count === 0) return raw;
-    const base = normalizeGeoJSON(raw) ?? { type: 'FeatureCollection', features: [] };
-    return this.offlineMutations.foldLandmarks(base);
+    return this.runUserOperation(async (context) => {
+      const raw = await this.cache.getOverlayGeoJSON(overlayId, { signal: context.signal });
+      context.throwIfAborted();
+      if (overlayId !== 'landmarks') return raw;
+      await this.offlineMutations.load();
+      context.throwIfAborted();
+      if (this.offlineMutations.count === 0) return raw;
+      const base = normalizeGeoJSON(raw) ?? { type: 'FeatureCollection', features: [] };
+      return this.offlineMutations.foldLandmarks(base);
+    });
   }
 
   // ==================== Landmark CRUD ====================
@@ -820,28 +895,33 @@ export class SpeleoDBController {
    * `[]` so the form falls back to the personal collection. Never throws.
    */
   async getLandmarkCollections(): Promise<LandmarkCollection[]> {
-    if (!this.hasNetworkAccess()) {
-      return (await this.cache.getLandmarkCollections()) ?? [];
-    }
     const credentials = this.getSyncCredentials();
     if (!credentials) return [];
-
-    try {
-      const response = await this.service.getLandmarkCollections(
-        credentials.instance,
-        credentials.token,
-      );
-      if (!isSuccessfulStatus(response.status)) {
-        return (await this.cache.getLandmarkCollections()) ?? [];
+    return this.runUserOperation(async (context) => {
+      if (!this.hasNetworkAccess()) {
+        return (await this.cache.getLandmarkCollections({ signal: context.signal })) ?? [];
       }
-      const collections = mapLandmarkCollections(response.data);
-      await this.cache.setLandmarkCollections(collections);
-      return collections;
-    } catch (error) {
-      if (isAbortError(error)) return [];
-      console.warn('Failed to load landmark collections:', error);
-      return (await this.cache.getLandmarkCollections()) ?? [];
-    }
+
+      try {
+        const response = await this.service.getLandmarkCollections(
+          credentials.instance,
+          credentials.token,
+          { signal: context.signal },
+        );
+        context.throwIfAborted();
+        if (!isSuccessfulStatus(response.status)) {
+          return (await this.cache.getLandmarkCollections({ signal: context.signal })) ?? [];
+        }
+        const collections = mapLandmarkCollections(response.data);
+        await this.cache.setLandmarkCollections(collections, { signal: context.signal });
+        context.throwIfAborted();
+        return collections;
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        console.warn('Failed to load landmark collections:', error);
+        return (await this.cache.getLandmarkCollections({ signal: context.signal })) ?? [];
+      }
+    });
   }
 
   /**
@@ -856,24 +936,28 @@ export class SpeleoDBController {
   async createLandmark(input: LandmarkCreateInput): Promise<LandmarkApiObject> {
     const credentials = this.getSyncCredentials();
     if (!credentials) throw new LandmarkMutationError('permission', 'You are not signed in.');
-
-    if (this.hasNetworkAccess()) {
-      try {
-        const response = await this.attemptLandmarkRequest(() =>
-          this.service.createLandmark(credentials.instance, credentials.token, input),
-        );
-        const landmark = this.extractLandmark(response.status, response.data);
-        await this.applyLandmarkUpsert(landmark);
-        return landmark;
-      } catch (error) {
-        if (this.isUnreachableError(error)) {
-          this.enterOfflineMode();
-          return this.enqueueCreate(input);
+    return this.runUserOperation(async (context) => {
+      if (this.hasNetworkAccess()) {
+        try {
+          const response = await this.attemptLandmarkRequest(() =>
+            this.service.createLandmark(credentials.instance, credentials.token, input, {
+              signal: context.signal,
+            }),
+          );
+          context.throwIfAborted();
+          const landmark = this.extractLandmark(response.status, response.data);
+          await this.applyLandmarkUpsert(landmark, context.signal);
+          return landmark;
+        } catch (error) {
+          if (this.isUnreachableError(error)) {
+            this.enterOfflineMode();
+            return this.enqueueCreate(input, context.signal);
+          }
+          throw error;
         }
-        throw error;
       }
-    }
-    return this.enqueueCreate(input);
+      return this.enqueueCreate(input, context.signal);
+    });
   }
 
   /**
@@ -885,24 +969,28 @@ export class SpeleoDBController {
   ): Promise<LandmarkApiObject> {
     const credentials = this.getSyncCredentials();
     if (!credentials) throw new LandmarkMutationError('permission', 'You are not signed in.');
-
-    if (this.hasNetworkAccess()) {
-      try {
-        const response = await this.attemptLandmarkRequest(() =>
-          this.service.updateLandmark(credentials.instance, credentials.token, id, input),
-        );
-        const landmark = this.extractLandmark(response.status, response.data);
-        await this.applyLandmarkUpsert(landmark);
-        return landmark;
-      } catch (error) {
-        if (this.isUnreachableError(error)) {
-          this.enterOfflineMode();
-          return this.enqueueUpdate(id, input);
+    return this.runUserOperation(async (context) => {
+      if (this.hasNetworkAccess()) {
+        try {
+          const response = await this.attemptLandmarkRequest(() =>
+            this.service.updateLandmark(credentials.instance, credentials.token, id, input, {
+              signal: context.signal,
+            }),
+          );
+          context.throwIfAborted();
+          const landmark = this.extractLandmark(response.status, response.data);
+          await this.applyLandmarkUpsert(landmark, context.signal);
+          return landmark;
+        } catch (error) {
+          if (this.isUnreachableError(error)) {
+            this.enterOfflineMode();
+            return this.enqueueUpdate(id, input, context.signal);
+          }
+          throw error;
         }
-        throw error;
       }
-    }
-    return this.enqueueUpdate(id, input);
+      return this.enqueueUpdate(id, input, context.signal);
+    });
   }
 
   /**
@@ -911,27 +999,31 @@ export class SpeleoDBController {
   async deleteLandmark(id: string): Promise<void> {
     const credentials = this.getSyncCredentials();
     if (!credentials) throw new LandmarkMutationError('permission', 'You are not signed in.');
-
-    if (this.hasNetworkAccess()) {
-      try {
-        const response = await this.attemptLandmarkRequest(() =>
-          this.service.deleteLandmark(credentials.instance, credentials.token, id),
-        );
-        if (!isSuccessfulStatus(response.status)) {
-          throw parseLandmarkMutationError(response.status, response.data);
-        }
-        await this.applyLandmarkRemoval(id);
-        return;
-      } catch (error) {
-        if (this.isUnreachableError(error)) {
-          this.enterOfflineMode();
-          await this.enqueueDelete(id);
+    return this.runUserOperation(async (context) => {
+      if (this.hasNetworkAccess()) {
+        try {
+          const response = await this.attemptLandmarkRequest(() =>
+            this.service.deleteLandmark(credentials.instance, credentials.token, id, {
+              signal: context.signal,
+            }),
+          );
+          context.throwIfAborted();
+          if (!isSuccessfulStatus(response.status)) {
+            throw parseLandmarkMutationError(response.status, response.data);
+          }
+          await this.applyLandmarkRemoval(id, context.signal);
           return;
+        } catch (error) {
+          if (this.isUnreachableError(error)) {
+            this.enterOfflineMode();
+            await this.enqueueDelete(id, context.signal);
+            return;
+          }
+          throw error;
         }
-        throw error;
       }
-    }
-    await this.enqueueDelete(id);
+      await this.enqueueDelete(id, context.signal);
+    });
   }
 
   // ---- GPS track recording + upload -----------------------------------------
@@ -973,7 +1065,9 @@ export class SpeleoDBController {
    * downloaded + cached on demand). Reuses the same builder as upload.
    */
   async buildGpxFileForTrack(item: GpsTrackListItem): Promise<GpsTrackGpxFile> {
-    return this.gpsTrackCoordinator.buildGpxFile(item);
+    return this.runUserOperation((context) => (
+      this.gpsTrackCoordinator.buildGpxFile(item, context.signal)
+    ));
   }
 
   /**
@@ -981,7 +1075,9 @@ export class SpeleoDBController {
    * their in-memory buffer; server tracks download + cache their GeoJSON.
    */
   async getGpsTrackPoints(id: string): Promise<RecordedPoint[]> {
-    return this.gpsTrackCoordinator.getPoints(id);
+    return this.runUserOperation((context) => (
+      this.gpsTrackCoordinator.getPoints(id, context.signal)
+    ));
   }
 
   /**
@@ -990,7 +1086,9 @@ export class SpeleoDBController {
    * unavailable offline.
    */
   async getGpsTrackGeoJSON(id: string): Promise<GeoJSON.FeatureCollection | null> {
-    return this.gpsTrackCoordinator.getGeoJSON(id);
+    return this.runUserOperation((context) => (
+      this.gpsTrackCoordinator.getGeoJSON(id, context.signal)
+    ));
   }
 
   /**
@@ -1000,7 +1098,9 @@ export class SpeleoDBController {
    * `CreateGpsTrackOp` (drained from the Pending page); a definitive 4xx throws.
    */
   async uploadGpsTrack(id: string): Promise<void> {
-    await this.gpsTrackMutationCoordinator.upload(id);
+    await this.runUserOperation((context) => (
+      this.gpsTrackMutationCoordinator.upload(id, context.signal)
+    ));
   }
 
   /**
@@ -1010,7 +1110,9 @@ export class SpeleoDBController {
    * unreachable; throw on definitive 4xx).
    */
   async editGpsTrack(id: string, input: { name?: string; color?: string }): Promise<void> {
-    await this.gpsTrackMutationCoordinator.edit(id, input);
+    await this.runUserOperation((context) => (
+      this.gpsTrackMutationCoordinator.edit(id, input, context.signal)
+    ));
   }
 
   /**
@@ -1019,12 +1121,16 @@ export class SpeleoDBController {
    * (DELETE; enqueue on unreachable; throw on definitive 4xx).
    */
   async removeGpsTrack(id: string): Promise<void> {
-    await this.gpsTrackMutationCoordinator.remove(id);
+    await this.runUserOperation((context) => (
+      this.gpsTrackMutationCoordinator.remove(id, context.signal)
+    ));
   }
 
   /** Refresh the server GPS-track list (used after an upload + standalone). */
   async syncGpsTracks(): Promise<void> {
-    await this.gpsTrackMutationCoordinator.sync();
+    await this.runUserOperation((context) => (
+      this.gpsTrackMutationCoordinator.sync(context.signal)
+    ));
   }
 
   private defaultTrackName(timestamp: number): string {
@@ -1052,6 +1158,7 @@ export class SpeleoDBController {
     try {
       response = await call();
     } catch (error) {
+      if (isAbortError(error)) throw error;
       if (error instanceof LandmarkMutationError) throw error;
       throw new LandmarkMutationError(
         'network',
@@ -1067,10 +1174,16 @@ export class SpeleoDBController {
     return response;
   }
 
-  private async enqueueCreate(input: LandmarkCreateInput): Promise<LandmarkApiObject> {
-    const landmark = await this.buildOptimisticCreate(input);
+  private async enqueueCreate(
+    input: LandmarkCreateInput,
+    signal?: AbortSignal,
+  ): Promise<LandmarkApiObject> {
+    throwIfAborted(signal);
+    const landmark = await this.buildOptimisticCreate(input, signal);
+    throwIfAborted(signal);
     try {
       await this.offlineMutations.enqueueLandmarkCreate(landmark);
+      throwIfAborted(signal);
     } catch (error) {
       this.throwOfflineQueuePersistenceError(error);
     }
@@ -1080,15 +1193,18 @@ export class SpeleoDBController {
   private async enqueueUpdate(
     id: string,
     input: LandmarkUpdateInput,
+    signal?: AbortSignal,
   ): Promise<LandmarkApiObject> {
     // The footprint is ONLY the last known server state from the ground-truth
     // cache. If the landmark isn't in the ground truth we record `null` rather
     // than fabricating a baseline from the user's own edit -- inventing one
     // would guarantee a false "changed on the server" conflict on the next sync.
-    const baseline = await this.currentLandmarkSnapshot(id);
+    throwIfAborted(signal);
+    const baseline = await this.currentLandmarkSnapshot(id, signal);
     const next = this.snapshotFromUpdate(input, baseline);
     try {
       await this.offlineMutations.enqueueLandmarkUpdate(id, baseline, next);
+      throwIfAborted(signal);
     } catch (error) {
       this.throwOfflineQueuePersistenceError(error);
     }
@@ -1102,10 +1218,12 @@ export class SpeleoDBController {
     };
   }
 
-  private async enqueueDelete(id: string): Promise<void> {
-    const baseline = await this.currentLandmarkSnapshot(id);
+  private async enqueueDelete(id: string, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    const baseline = await this.currentLandmarkSnapshot(id, signal);
     try {
       await this.offlineMutations.enqueueLandmarkDelete(id, baseline);
+      throwIfAborted(signal);
     } catch (error) {
       this.throwOfflineQueuePersistenceError(error);
     }
@@ -1126,8 +1244,13 @@ export class SpeleoDBController {
    * ground-truth cache. Returns `null` when the landmark is not in the ground
    * truth (see the footprint rules in docs/offline-op-queue.md).
    */
-  private async currentLandmarkSnapshot(id: string): Promise<LandmarkSnapshot | null> {
-    const fc = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks'));
+  private async currentLandmarkSnapshot(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<LandmarkSnapshot | null> {
+    throwIfAborted(signal);
+    const fc = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks', { signal }));
+    throwIfAborted(signal);
     const feature = findLandmarkFeature(fc, id);
     return feature ? snapshotFromFeature(feature) : null;
   }
@@ -1149,7 +1272,11 @@ export class SpeleoDBController {
   }
 
   /** Build the optimistic landmark for an offline create (resolves display props from cache). */
-  private async buildOptimisticCreate(input: LandmarkCreateInput): Promise<LandmarkApiObject> {
+  private async buildOptimisticCreate(
+    input: LandmarkCreateInput,
+    signal?: AbortSignal,
+  ): Promise<LandmarkApiObject> {
+    throwIfAborted(signal);
     const collectionId =
       typeof input.collection === 'string' && input.collection.trim() !== ''
         ? input.collection.trim()
@@ -1158,7 +1285,8 @@ export class SpeleoDBController {
     let collectionColor = '';
     let isPersonal = collectionId === null;
     if (collectionId) {
-      const cached = await this.cache.getLandmarkCollections();
+      const cached = await this.cache.getLandmarkCollections({ signal });
+      throwIfAborted(signal);
       const match = cached?.find((collection) => collection.id === collectionId);
       collectionName = match?.name ?? '';
       collectionColor = match?.color ?? '';
@@ -1188,17 +1316,17 @@ export class SpeleoDBController {
 
   /** Replay every pending op against the server. */
   async syncOfflineOps(): Promise<OfflineSyncSummary> {
-    return this.offlineMutations.syncAll();
+    return this.runUserOperation(() => this.offlineMutations.syncAll());
   }
 
   /** Replay a single pending op. */
   async syncOfflineOp(id: string): Promise<OfflineSyncSummary> {
-    return this.offlineMutations.syncOne(id);
+    return this.runUserOperation(() => this.offlineMutations.syncOne(id));
   }
 
   /** Discard a pending op; the map reverts to the prior version via re-fold. */
   async discardOfflineOp(id: string): Promise<void> {
-    await this.offlineMutations.discard(id);
+    await this.runUserOperation(() => this.offlineMutations.discard(id));
   }
 
   /** Resolve a conflicted op by keeping the local change or the server version. */
@@ -1206,7 +1334,7 @@ export class SpeleoDBController {
     id: string,
     choice: OfflineConflictChoice,
   ): Promise<OfflineSyncSummary> {
-    return this.offlineMutations.resolveConflict(id, choice);
+    return this.runUserOperation(() => this.offlineMutations.resolveConflict(id, choice));
   }
 
   private extractLandmark(status: number, data: unknown): LandmarkApiObject {
@@ -1228,17 +1356,26 @@ export class SpeleoDBController {
     return candidate as unknown as LandmarkApiObject;
   }
 
-  private async applyLandmarkUpsert(landmark: LandmarkApiObject): Promise<void> {
-    const current = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks'));
+  private async applyLandmarkUpsert(
+    landmark: LandmarkApiObject,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
+    const current = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks', { signal }));
+    throwIfAborted(signal);
     const next = upsertLandmarkFeature(current, landmark);
-    await this.cache.setOverlayGeoJSON('landmarks', next);
+    await this.cache.setOverlayGeoJSON('landmarks', next, { signal });
+    throwIfAborted(signal);
     this.bumpLandmarksRevision();
   }
 
-  private async applyLandmarkRemoval(id: string): Promise<void> {
-    const current = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks'));
+  private async applyLandmarkRemoval(id: string, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    const current = normalizeGeoJSON(await this.cache.getOverlayGeoJSON('landmarks', { signal }));
+    throwIfAborted(signal);
     const next = removeLandmarkFeature(current, id);
-    await this.cache.setOverlayGeoJSON('landmarks', next);
+    await this.cache.setOverlayGeoJSON('landmarks', next, { signal });
+    throwIfAborted(signal);
     this.bumpLandmarksRevision();
   }
 

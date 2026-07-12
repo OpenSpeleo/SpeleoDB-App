@@ -53,6 +53,16 @@ Implementation notes:
   admitted again only after that operation settles,
 - logout invalidates and cancels coordinator-owned startup validation and
   controller-owned sync run contexts before the destructive cache wipe starts,
+- one controller-owned user-operation lifetime also covers landmark mutations,
+  GPS-track mutations and lazy geometry reads, collection/cache reads, warning
+  acknowledgements, and offline replay. Logout aborts that lifetime before
+  purge, forwards its signal to network and writable cache seams, and waits for
+  every admitted operation to settle before deletion,
+- authority is checked again after every awaited transport or persistence
+  boundary. A dependency that ignores cancellation may delay logout, but its
+  late result cannot publish state, write cache data, or finalize/remove an
+  offline operation. Replaced offline-queue instances ignore notifications from
+  their invalidated predecessors,
 - UI auth/session state resets immediately so the app stops rendering the old
   session; cancelled validation/reconnect callers resolve `unauthorized` when
   logout owns the transition and can never report a stale online success,
@@ -74,6 +84,10 @@ Implementation notes:
 - service/cache layers must treat aborts as authoritative: once logout starts,
   no stale state mutation, cache write, or tile-prefetch scheduling may be
   published from the cancelled run.
+
+The shared lifetime adds only constant-time admission/tracking and one abort
+listener per active transport. It does not add polling, background work, or
+additional network requests.
 
 ## Offline mode interaction
 

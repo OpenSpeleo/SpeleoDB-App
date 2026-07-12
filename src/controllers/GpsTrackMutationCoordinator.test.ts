@@ -323,7 +323,10 @@ describe('GpsTrackMutationCoordinator', () => {
     const harness = createHarness();
     const context = new CancellationContext(1, 'test');
     await harness.coordinator.syncPhase(context, 'https://example.com', 'token');
-    expect(harness.tracks.cacheRemote).toHaveBeenCalledWith([REMOTE]);
+    expect(harness.tracks.cacheRemote).toHaveBeenCalledWith(
+      [REMOTE],
+      context.signal,
+    );
     expect(harness.tracks.publishRemote).toHaveBeenCalledWith([REMOTE]);
 
     harness.transport.getGpsTracks.mockResolvedValueOnce({ status: 401, data: [] });

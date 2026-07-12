@@ -6,7 +6,7 @@ import type { GpsTrackSnapshot, LocalGpsTrack } from '../types/gpsTrack';
 import { LandmarkMutationError } from '../types/landmark';
 import { normalizeHexColor } from '../utils/gpsTrackColors';
 import { parseRemoteGpsTracks } from '../utils/remoteGpsTrack';
-import { isAbortError } from '../utils/abort';
+import { isAbortError, throwIfAborted } from '../utils/abort';
 import type { CancellationContext } from './CancellationContext';
 import type { OfflineMutationCoordinator } from './OfflineMutationCoordinator';
 import type { GpsTrackCoordinator } from './GpsTrackCoordinator';
@@ -20,11 +20,20 @@ interface GpsTrackMutationDependencies {
   enterOfflineMode(): void;
 }
 
+function signalArgument(signal?: AbortSignal): [] | [AbortSignal] {
+  return signal ? [signal] : [];
+}
+
+function signalOptions(signal?: AbortSignal): [] | [{ signal: AbortSignal }] {
+  return signal ? [{ signal }] : [];
+}
+
 /** Owns GPS track upload/edit/delete decisions and server-list synchronization. */
 export class GpsTrackMutationCoordinator {
   constructor(private readonly dependencies: GpsTrackMutationDependencies) {}
 
-  async upload(id: string): Promise<void> {
+  async upload(id: string, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     const track = this.dependencies.tracks.localTrack(id);
     if (!track) return;
     if (track.points.length === 0) throw new Error('This track has no points to upload.');
@@ -32,13 +41,14 @@ export class GpsTrackMutationCoordinator {
 
     let response: { status: number; data: unknown };
     try {
-      response = await this.performUpload(track);
+      response = await this.performUpload(track, signal);
+      throwIfAborted(signal);
     } catch (error) {
       if (isAbortError(error)) throw error;
       this.dependencies.enterOfflineMode();
       return this.enqueueCreate(track);
     }
-    if (isSuccessfulStatus(response.status)) return this.finalizeUpload(id);
+    if (isSuccessfulStatus(response.status)) return this.finalizeUpload(id, signal);
     if (isRetryableStatus(response.status)) {
       if (response.status !== 429) this.dependencies.enterOfflineMode();
       return this.enqueueCreate(track);
@@ -46,9 +56,14 @@ export class GpsTrackMutationCoordinator {
     throw new Error(parseUploadError(response.data));
   }
 
-  async edit(id: string, input: { name?: string; color?: string }): Promise<void> {
+  async edit(
+    id: string,
+    input: { name?: string; color?: string },
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
     const local = this.dependencies.tracks.localTrack(id);
-    if (local) return this.editLocal(local, input);
+    if (local) return this.editLocal(local, input, signal);
 
     const baseline = this.dependencies.tracks.remoteSnapshot(id);
     const next: GpsTrackSnapshot = {
@@ -66,7 +81,9 @@ export class GpsTrackMutationCoordinator {
         credentials.token,
         id,
         { name: next.name, color: next.color } satisfies GpsTrackUpdateInput,
+        ...signalOptions(signal),
       );
+      throwIfAborted(signal);
     } catch (error) {
       if (isAbortError(error)) throw error;
       this.dependencies.enterOfflineMode();
@@ -75,6 +92,7 @@ export class GpsTrackMutationCoordinator {
     if (isSuccessfulStatus(response.status)) {
       return this.dependencies.tracks.applyRemoteUpsert(
         this.dependencies.tracks.mergeRemote(id, next, response.data),
+        ...signalArgument(signal),
       );
     }
     if (isRetryableStatus(response.status)) {
@@ -84,11 +102,13 @@ export class GpsTrackMutationCoordinator {
     throw new Error(parseUploadError(response.data));
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     const local = this.dependencies.tracks.localTrack(id);
     if (local) {
       await this.dependencies.mutations.discardGpsTrackOpsForSubject(id);
-      return this.dependencies.tracks.removeLocal(id);
+      throwIfAborted(signal);
+      return this.dependencies.tracks.removeLocal(id, ...signalArgument(signal));
     }
     const baseline = this.dependencies.tracks.remoteSnapshot(id);
     if (!this.canAttemptOnline()) return this.enqueueDelete(id, baseline);
@@ -99,14 +119,16 @@ export class GpsTrackMutationCoordinator {
         credentials.instance,
         credentials.token,
         id,
+        ...signalOptions(signal),
       );
+      throwIfAborted(signal);
     } catch (error) {
       if (isAbortError(error)) throw error;
       this.dependencies.enterOfflineMode();
       return this.enqueueDelete(id, baseline);
     }
     if (isSuccessfulStatus(response.status) || response.status === 404) {
-      return this.dependencies.tracks.applyRemoteRemoval(id);
+      return this.dependencies.tracks.applyRemoteRemoval(id, ...signalArgument(signal));
     }
     if (isRetryableStatus(response.status)) {
       if (response.status !== 429) this.dependencies.enterOfflineMode();
@@ -115,7 +137,8 @@ export class GpsTrackMutationCoordinator {
     throw new Error(parseUploadError(response.data));
   }
 
-  async sync(): Promise<void> {
+  async sync(signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
     if (!this.dependencies.hasNetworkAccess()) return;
     const credentials = this.dependencies.getCredentials();
     if (!credentials) return;
@@ -123,9 +146,14 @@ export class GpsTrackMutationCoordinator {
       const response = await this.dependencies.transport.getGpsTracks(
         credentials.instance,
         credentials.token,
+        ...signalOptions(signal),
       );
+      throwIfAborted(signal);
       if (!isSuccessfulStatus(response.status)) return;
-      await this.dependencies.tracks.replaceRemote(parseRemoteGpsTracks(response.data));
+      await this.dependencies.tracks.replaceRemote(
+        parseRemoteGpsTracks(response.data),
+        ...signalArgument(signal),
+      );
     } catch (error) {
       if (isAbortError(error)) return;
       console.warn('syncGpsTracks failed:', error);
@@ -145,7 +173,7 @@ export class GpsTrackMutationCoordinator {
       context.throwIfAborted();
       if (!isSuccessfulStatus(response.status)) return;
       const tracks = parseRemoteGpsTracks(response.data);
-      await this.dependencies.tracks.cacheRemote(tracks);
+      await this.dependencies.tracks.cacheRemote(tracks, context.signal);
       context.throwIfAborted();
       this.dependencies.tracks.publishRemote(tracks);
     } catch (error) {
@@ -154,41 +182,68 @@ export class GpsTrackMutationCoordinator {
     }
   }
 
-  async performReplayUpload(localTrackId: string): Promise<{ status: number; data: unknown }> {
+  async performReplayUpload(
+    localTrackId: string,
+    signal?: AbortSignal,
+  ): Promise<{ status: number; data: unknown }> {
+    throwIfAborted(signal);
     const track = this.dependencies.tracks.localTrack(localTrackId);
-    return track ? this.performUpload(track) : { status: 200, data: {} };
+    return track ? this.performUpload(track, signal) : { status: 200, data: {} };
   }
 
-  async finalizeUpload(localTrackId: string): Promise<void> {
-    await this.dependencies.tracks.removeLocal(localTrackId);
-    await this.sync();
+  async finalizeUpload(localTrackId: string, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    await this.dependencies.tracks.removeLocal(localTrackId, ...signalArgument(signal));
+    throwIfAborted(signal);
+    await this.sync(signal);
   }
 
   private async editLocal(
     local: LocalGpsTrack,
     input: { name?: string; color?: string },
+    signal?: AbortSignal,
   ): Promise<void> {
     const name = input.name?.trim() ? input.name.trim() : local.name;
     const color = input.color !== undefined
       ? normalizeHexColor(input.color, local.color)
       : local.color;
-    await this.dependencies.tracks.updateLocal(local.id, { name, color });
+    await this.dependencies.tracks.updateLocal(
+      local.id,
+      { name, color },
+      ...signalArgument(signal),
+    );
+    throwIfAborted(signal);
     if (this.dependencies.mutations.hasGpsCreateFor(local.id)) {
       await this.enqueueCreate({ ...local, name, color });
     }
   }
 
-  private async performUpload(track: LocalGpsTrack): Promise<{ status: number; data: unknown }> {
+  private async performUpload(
+    track: LocalGpsTrack,
+    signal?: AbortSignal,
+  ): Promise<{ status: number; data: unknown }> {
+    throwIfAborted(signal);
     const credentials = this.dependencies.getCredentials();
     if (!credentials) return { status: 401, data: { error: 'You are not signed in.' } };
     try {
       const file = await this.dependencies.tracks.buildLocalGpx(track);
-      const response = await this.dependencies.transport.uploadGpx(
-        credentials.instance,
-        credentials.token,
-        file.gpx,
-        file.fileName,
-      );
+      throwIfAborted(signal);
+      const response = signal
+        ? await this.dependencies.transport.uploadGpx(
+          credentials.instance,
+          credentials.token,
+          file.gpx,
+          file.fileName,
+          undefined,
+          { signal },
+        )
+        : await this.dependencies.transport.uploadGpx(
+          credentials.instance,
+          credentials.token,
+          file.gpx,
+          file.fileName,
+        );
+      throwIfAborted(signal);
       return { status: response.status, data: response.data };
     } catch (error) {
       if (error instanceof EmptyGpxTrackError || error instanceof MultipartPayloadError) {

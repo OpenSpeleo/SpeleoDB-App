@@ -2791,10 +2791,18 @@ describe('SpeleoDBController', () => {
     it('returns overlay geojson from cache service', async () => {
       const payload = { type: 'FeatureCollection', features: [] };
       cache.getOverlayGeoJSON = vi.fn(async () => payload);
+      controller = new SpeleoDBController(
+        service,
+        createMockPrefs({ token: 'tok', instance: 'https://www.speleodb.org' }),
+        cache,
+      );
 
       const result = await controller.getOverlayGeoJSON('landmarks');
 
-      expect(cache.getOverlayGeoJSON).toHaveBeenCalledWith('landmarks');
+      expect(cache.getOverlayGeoJSON).toHaveBeenCalledWith(
+        'landmarks',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       expect(result).toEqual(payload);
     });
   });
@@ -3021,6 +3029,150 @@ describe('SpeleoDBController landmark CRUD', () => {
     return { service, prefs, cache, controller };
   }
 
+  it.each([
+    {
+      label: 'create',
+      serviceMethod: 'createLandmark' as const,
+      optionsIndex: 3,
+      response: { status: 201, data: { landmark: apiLandmark } },
+      invoke: (controller: SpeleoDBController) => controller.createLandmark({
+        name: 'Camp',
+        latitude: 45.5,
+        longitude: -122.25,
+      }),
+    },
+    {
+      label: 'update',
+      serviceMethod: 'updateLandmark' as const,
+      optionsIndex: 4,
+      response: { status: 200, data: { landmark: { ...apiLandmark, name: 'Updated' } } },
+      invoke: (controller: SpeleoDBController) => controller.updateLandmark(
+        'lm-1',
+        { name: 'Updated' },
+      ),
+    },
+    {
+      label: 'delete',
+      serviceMethod: 'deleteLandmark' as const,
+      optionsIndex: 3,
+      response: { status: 200, data: { message: 'deleted' } },
+      invoke: (controller: SpeleoDBController) => controller.deleteLandmark('lm-1'),
+    },
+  ])(
+    'aborts and drains an in-flight landmark $label before logout cache deletion',
+    async ({ serviceMethod, optionsIndex, response, invoke }) => {
+      const pendingResponse = deferred<{ status: number; data: unknown }>();
+      const request = vi.fn(() => pendingResponse.promise);
+      const { controller, cache } = onlineController({
+        [serviceMethod]: request,
+      } as Partial<SpeleoDBService>);
+
+      const mutation = invoke(controller);
+      await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+      let logoutSettled = false;
+      const logout = controller.logout().then(() => { logoutSettled = true; });
+      await flushPromises(3);
+      const requestOptions = request.mock.calls[0]?.[optionsIndex] as
+        | { signal?: AbortSignal }
+        | undefined;
+      const logoutSettledBeforeResponse = logoutSettled;
+
+      pendingResponse.resolve(response);
+      const [mutationResult, logoutResult] = await Promise.allSettled([mutation, logout]);
+
+      expect(requestOptions?.signal?.aborted).toBe(true);
+      expect(logoutSettledBeforeResponse).toBe(false);
+      expect(mutationResult).toMatchObject({
+        status: 'rejected',
+        reason: expect.objectContaining({ name: 'AbortError' }),
+      });
+      expect(logoutResult.status).toBe('fulfilled');
+      expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+      expect(controller.landmarksRevision).toBe(0);
+    },
+  );
+
+  it('aborts a collection load and prevents its response from repopulating cache after logout', async () => {
+    const pendingResponse = deferred<{ status: number; data: unknown }>();
+    const getLandmarkCollections = vi.fn((
+      _instance: string,
+      _token: string,
+      _options?: { signal?: AbortSignal },
+    ) => pendingResponse.promise);
+    const { controller, cache } = onlineController({ getLandmarkCollections } as never);
+
+    const load = controller.getLandmarkCollections();
+    await vi.waitFor(() => expect(getLandmarkCollections).toHaveBeenCalledOnce());
+    const logout = controller.logout();
+    await flushPromises(3);
+    const options = getLandmarkCollections.mock.calls[0]?.[2];
+    pendingResponse.resolve({
+      status: 200,
+      data: [{ id: 'c1', name: 'Survey', user_permission_level: 2 }],
+    });
+    const [loadResult, logoutResult] = await Promise.allSettled([load, logout]);
+
+    expect(options?.signal?.aborted).toBe(true);
+    expect(loadResult).toMatchObject({
+      status: 'rejected',
+      reason: expect.objectContaining({ name: 'AbortError' }),
+    });
+    expect(logoutResult.status).toBe('fulfilled');
+    expect(cache.setLandmarkCollections).not.toHaveBeenCalled();
+  });
+
+  it('invalidates an old offline replay so it cannot publish or remove its op after logout', async () => {
+    const opStore = createMemoryOpStore();
+    await opStore.put({
+      id: 'logout-replay',
+      entityType: 'landmark',
+      kind: 'create',
+      seq: 1,
+      createdAt: Date.now(),
+      status: 'pending',
+      created: {
+        id: 'local:logout-replay',
+        name: 'Pending camp',
+        description: '',
+        latitude: 1,
+        longitude: 2,
+        collection: '',
+      },
+    });
+    const pendingResponse = deferred<{ status: number; data: unknown }>();
+    const createLandmark = vi.fn((
+      _instance: string,
+      _token: string,
+      _input: unknown,
+      _options?: { signal?: AbortSignal },
+    ) => pendingResponse.promise);
+    const { controller, cache } = onlineController({ createLandmark } as never, undefined, opStore);
+    await vi.waitFor(() => expect(controller.pendingOpsCount).toBe(1));
+
+    const replay = controller.syncOfflineOps();
+    await vi.waitFor(() => expect(createLandmark).toHaveBeenCalledOnce());
+    const revisionBeforeLogout = controller.landmarksRevision;
+    let logoutSettled = false;
+    const logout = controller.logout().then(() => { logoutSettled = true; });
+    await flushPromises(3);
+    const options = createLandmark.mock.calls[0]?.[3];
+    const logoutSettledBeforeResponse = logoutSettled;
+
+    pendingResponse.resolve({ status: 201, data: { landmark: apiLandmark } });
+    const [replayResult, logoutResult] = await Promise.allSettled([replay, logout]);
+
+    expect(options?.signal?.aborted).toBe(true);
+    expect(logoutSettledBeforeResponse).toBe(false);
+    expect(replayResult).toMatchObject({
+      status: 'rejected',
+      reason: expect.objectContaining({ name: 'AbortError' }),
+    });
+    expect(logoutResult.status).toBe('fulfilled');
+    expect(opStore.remove).not.toHaveBeenCalled();
+    expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
+    expect(controller.landmarksRevision).toBe(revisionBeforeLogout);
+  });
+
   /** Build an offline-locked controller by failing startup validation. */
   async function offlineController(serviceOverrides?: Partial<SpeleoDBService>) {
     const service = createMockService({
@@ -3061,6 +3213,7 @@ describe('SpeleoDBController landmark CRUD', () => {
         ONLINE_PREFS.instance,
         ONLINE_PREFS.token,
         expect.objectContaining({ name: 'Camp', collection: 'col-1' }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
       const setCalls = (cache.setOverlayGeoJSON as ReturnType<typeof vi.fn>).mock.calls;
       expect(setCalls).toHaveLength(1);
@@ -3216,6 +3369,7 @@ describe('SpeleoDBController landmark CRUD', () => {
         ONLINE_PREFS.token,
         'lm-1',
         expect.objectContaining({ name: 'Renamed' }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
       const written = (cache.setOverlayGeoJSON as ReturnType<typeof vi.fn>).mock.calls[0][1] as GeoJSON.FeatureCollection;
       expect(written.features.find((f) => f.id === 'lm-1')?.properties?.name).toBe('Renamed');
@@ -4320,6 +4474,106 @@ describe('SpeleoDBController GPS tracks', () => {
     await controller.syncGpsTracks();
   }
 
+  it.each([
+    {
+      label: 'edit',
+      serviceMethod: 'updateGpsTrack' as const,
+      optionsIndex: 4,
+      response: {
+        status: 200,
+        data: { id: 'srv-1', name: 'Late edit', color: '#984ea3' },
+      },
+      invoke: (controller: SpeleoDBController) => controller.editGpsTrack(
+        'srv-1',
+        { name: 'Late edit', color: '#984ea3' },
+      ),
+    },
+    {
+      label: 'delete',
+      serviceMethod: 'deleteGpsTrack' as const,
+      optionsIndex: 3,
+      response: { status: 200, data: { message: 'deleted' } },
+      invoke: (controller: SpeleoDBController) => controller.removeGpsTrack('srv-1'),
+    },
+  ])(
+    'aborts and drains an in-flight server GPS $label before logout cache deletion',
+    async ({ serviceMethod, optionsIndex, response, invoke }) => {
+      const pendingResponse = deferred<{ status: number; data: unknown }>();
+      const { controller, service, cache } = gpsControllerWith();
+      await seedRemoteTrack(controller, service);
+      const request = vi.fn(() => pendingResponse.promise);
+      service[serviceMethod] = request as never;
+      vi.mocked(cache.setGpsTracks).mockClear();
+      vi.mocked(cache.removeGpsTrackGeoJSON).mockClear();
+
+      const mutation = invoke(controller);
+      await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+      let logoutSettled = false;
+      const logout = controller.logout().then(() => { logoutSettled = true; });
+      await flushPromises(3);
+      const requestOptions = request.mock.calls[0]?.[optionsIndex] as
+        | { signal?: AbortSignal }
+        | undefined;
+      const logoutSettledBeforeResponse = logoutSettled;
+
+      pendingResponse.resolve(response);
+      const [mutationResult, logoutResult] = await Promise.allSettled([mutation, logout]);
+
+      expect(requestOptions?.signal?.aborted).toBe(true);
+      expect(logoutSettledBeforeResponse).toBe(false);
+      expect(mutationResult).toMatchObject({
+        status: 'rejected',
+        reason: expect.objectContaining({ name: 'AbortError' }),
+      });
+      expect(logoutResult.status).toBe('fulfilled');
+      expect(cache.setGpsTracks).not.toHaveBeenCalled();
+      expect(cache.removeGpsTrackGeoJSON).not.toHaveBeenCalled();
+      expect(controller.gpsTracks).toEqual([]);
+    },
+  );
+
+  it('aborts a lazy server GPS geometry load before it can repopulate cache after logout', async () => {
+    const pendingResponse = deferred<{ status: number; data: unknown }>();
+    const { controller, service, cache } = gpsControllerWith();
+    await seedRemoteTrack(controller, service);
+    const downloadJSON = vi.fn((
+      _url: string,
+      _options?: { signal?: AbortSignal },
+    ) => pendingResponse.promise);
+    service.downloadJSON = downloadJSON as never;
+    vi.mocked(cache.setGpsTrackGeoJSON).mockClear();
+
+    const load = controller.getGpsTrackGeoJSON('srv-1');
+    await vi.waitFor(() => expect(downloadJSON).toHaveBeenCalledOnce());
+    let logoutSettled = false;
+    const logout = controller.logout().then(() => { logoutSettled = true; });
+    await flushPromises(3);
+    const options = downloadJSON.mock.calls[0]?.[1];
+    const logoutSettledBeforeResponse = logoutSettled;
+
+    pendingResponse.resolve({
+      status: 200,
+      data: {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: [[-73, 45], [-73.01, 45.01]] },
+        }],
+      },
+    });
+    const [loadResult, logoutResult] = await Promise.allSettled([load, logout]);
+
+    expect(options?.signal?.aborted).toBe(true);
+    expect(logoutSettledBeforeResponse).toBe(false);
+    expect(loadResult).toMatchObject({
+      status: 'rejected',
+      reason: expect.objectContaining({ name: 'AbortError' }),
+    });
+    expect(logoutResult.status).toBe('fulfilled');
+    expect(cache.setGpsTrackGeoJSON).not.toHaveBeenCalled();
+  });
+
   describe('edit + delete (local recordings)', () => {
     it('edits a local track name + color in place (no network)', async () => {
       const { controller, store, watcher, service } = gpsControllerWith();
@@ -4417,7 +4671,7 @@ describe('SpeleoDBController GPS tracks', () => {
       expect(service.updateGpsTrack).toHaveBeenCalledWith('https://api.test', 'tok', 'srv-1', {
         name: 'New Name',
         color: '#984ea3',
-      });
+      }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
       const item = controller.gpsTracks.find((t) => t.id === 'srv-1')!;
       expect(item.name).toBe('New Name');
       expect(item.color).toBe('#984ea3');
@@ -4427,7 +4681,12 @@ describe('SpeleoDBController GPS tracks', () => {
       const { controller, service } = gpsControllerWith();
       await seedRemoteTrack(controller, service);
       await controller.removeGpsTrack('srv-1');
-      expect(service.deleteGpsTrack).toHaveBeenCalledWith('https://api.test', 'tok', 'srv-1');
+      expect(service.deleteGpsTrack).toHaveBeenCalledWith(
+        'https://api.test',
+        'tok',
+        'srv-1',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       expect(controller.gpsTracks.find((t) => t.id === 'srv-1')).toBeUndefined();
     });
 
@@ -4485,6 +4744,8 @@ describe('SpeleoDBController GPS tracks', () => {
         'tok',
         expect.stringContaining('<trkpt'),
         expect.stringMatching(/\.gpx$/),
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
       // Local copy deleted + a tracks-only sync triggered (delete + replace).
       expect(store.records.has(id)).toBe(false);

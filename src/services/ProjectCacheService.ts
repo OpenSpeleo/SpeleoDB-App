@@ -540,25 +540,36 @@ export class ProjectCacheService {
   // ---- Writable landmark collections (offline create picker) ------------------
 
   /** Read the cached writable landmark collections, or null if none cached. */
-  async getLandmarkCollections(): Promise<LandmarkCollection[] | null> {
+  async getLandmarkCollections(
+    options: CacheOperationOptions = {},
+  ): Promise<LandmarkCollection[] | null> {
+    throwIfAborted(options.signal);
     try {
       const entry = await this.store.get<LandmarkCollection[]>('projects', LANDMARK_COLLECTIONS_KEY);
+      throwIfAborted(options.signal);
       return entry?.data ?? null;
     } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
       console.error('ProjectCacheService.getLandmarkCollections failed:', error);
       return null;
     }
   }
 
   /** Cache the writable landmark collections (overwrites). */
-  async setLandmarkCollections(collections: LandmarkCollection[]): Promise<boolean> {
+  async setLandmarkCollections(
+    collections: LandmarkCollection[],
+    options: CacheOperationOptions = {},
+  ): Promise<boolean> {
+    throwIfAborted(options.signal);
     try {
       await this.store.set('projects', LANDMARK_COLLECTIONS_KEY, {
         data: collections,
         cachedAt: Date.now(),
-      });
+      }, options);
+      throwIfAborted(options.signal);
       return true;
     } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
       console.error('ProjectCacheService.setLandmarkCollections failed:', error);
       return false;
     }
@@ -567,25 +578,34 @@ export class ProjectCacheService {
   // ---- Server GPS tracks (synced list + lazy geometry) ------------------------
 
   /** Read the cached server GPS-track metadata list, or null if none cached. */
-  async getGpsTracks(): Promise<RemoteGpsTrack[] | null> {
+  async getGpsTracks(options: CacheOperationOptions = {}): Promise<RemoteGpsTrack[] | null> {
+    throwIfAborted(options.signal);
     try {
       const entry = await this.store.get<RemoteGpsTrack[]>('projects', GPS_TRACKS_KEY);
+      throwIfAborted(options.signal);
       return entry?.data ?? null;
     } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
       console.error('ProjectCacheService.getGpsTracks failed:', error);
       return null;
     }
   }
 
   /** Cache the server GPS-track metadata list (overwrites). */
-  async setGpsTracks(tracks: RemoteGpsTrack[]): Promise<boolean> {
+  async setGpsTracks(
+    tracks: RemoteGpsTrack[],
+    options: CacheOperationOptions = {},
+  ): Promise<boolean> {
+    throwIfAborted(options.signal);
     try {
       await this.store.set('projects', GPS_TRACKS_KEY, {
         data: tracks,
         cachedAt: Date.now(),
-      });
+      }, options);
+      throwIfAborted(options.signal);
       return true;
     } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
       console.error('ProjectCacheService.setGpsTracks failed:', error);
       return false;
     }
@@ -673,10 +693,16 @@ export class ProjectCacheService {
   }
 
   /** Remove a cached GPS-track GeoJSON geometry by track id (best-effort). */
-  async removeGpsTrackGeoJSON(trackId: string): Promise<void> {
+  async removeGpsTrackGeoJSON(
+    trackId: string,
+    options: CacheOperationOptions = {},
+  ): Promise<void> {
+    throwIfAborted(options.signal);
     try {
-      await this.store.delete('geojson', this.getGpsTrackGeoJSONKey(trackId));
+      await this.store.delete('geojson', this.getGpsTrackGeoJSONKey(trackId), options);
+      throwIfAborted(options.signal);
     } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
       console.error('ProjectCacheService.removeGpsTrackGeoJSON failed:', error);
     }
   }

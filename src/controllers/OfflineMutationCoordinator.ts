@@ -26,6 +26,7 @@ interface OfflineMutationCoordinatorDependencies {
  */
 export class OfflineMutationCoordinator {
   private queue: OfflineOpQueue;
+  private queueGeneration = 0;
   private _revision = 0;
   private restoredStatePublished = false;
 
@@ -55,6 +56,7 @@ export class OfflineMutationCoordinator {
   }
 
   reset(): void {
+    this.queueGeneration += 1;
     this.queue = this.createQueue();
     this.restoredStatePublished = false;
     this._revision += 1;
@@ -144,10 +146,12 @@ export class OfflineMutationCoordinator {
   }
 
   private createQueue(): OfflineOpQueue {
+    const generation = this.queueGeneration;
     return new OfflineOpQueue(
       this.dependencies.store,
       this.dependencies.replay,
       () => {
+        if (generation !== this.queueGeneration) return;
         this._revision += 1;
         this.dependencies.onStateChanged();
       },

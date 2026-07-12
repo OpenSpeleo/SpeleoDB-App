@@ -16,7 +16,7 @@ import type {
   ProjectGeoJSONWarning,
 } from '../types/projectGeoJSON';
 import type { GeoJSONSyncPhaseResult } from '../types/sync';
-import { isAbortError } from '../utils/abort';
+import { isAbortError, throwIfAborted } from '../utils/abort';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { isProjectGeoJSONOversized } from '../utils/projectGeoJSONBounds';
 import { CancellationContext } from './CancellationContext';
@@ -95,12 +95,18 @@ export class ProjectGeoJSONCoordinator {
     return this.blockedCommits.has(this.key(projectId, commitId));
   }
 
-  async getMapData(projects: Project[], projectId: string): Promise<ProjectGeoJSONMapData | null> {
+  async getMapData(
+    projects: Project[],
+    projectId: string,
+    signal?: AbortSignal,
+  ): Promise<ProjectGeoJSONMapData | null> {
+    throwIfAborted(signal);
     const project = projects.find((candidate) => candidate.id === projectId);
     if (!project) return null;
     const commitId = project.latest_commit.id;
     if (this.isBlocked(projectId, commitId)) return null;
-    const record = await this.dependencies.cache.getProjectGeoJSONRecord(projectId);
+    const record = await this.dependencies.cache.getProjectGeoJSONRecord(projectId, { signal });
+    throwIfAborted(signal);
     if (record.state !== 'active' || record.commitId !== commitId) return null;
     return {
       commitId,
@@ -109,7 +115,8 @@ export class ProjectGeoJSONCoordinator {
     };
   }
 
-  async acknowledgeWarnings(): Promise<ProjectGeoJSONAcknowledgementResult> {
+  async acknowledgeWarnings(signal?: AbortSignal): Promise<ProjectGeoJSONAcknowledgementResult> {
+    throwIfAborted(signal);
     const warnings = [...this._warnings];
     const results = await Promise.all(warnings.map(async (warning) => {
       const key = this.key(warning.projectId, warning.commitId);
@@ -121,9 +128,11 @@ export class ProjectGeoJSONCoordinator {
       const persisted = await this.dependencies.cache.acknowledgeProjectGeoJSONQuarantine(
         warning.projectId,
         warning.commitId,
+        { signal },
       );
       return persisted ? key : null;
     }));
+    throwIfAborted(signal);
     const acknowledged = new Set(results.filter((key): key is string => key !== null));
     if (acknowledged.size === 0) {
       return { acknowledgedCount: 0, failedCount: warnings.length };
