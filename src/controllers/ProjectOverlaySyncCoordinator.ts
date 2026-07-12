@@ -51,15 +51,17 @@ export class ProjectOverlaySyncCoordinator {
       return createSkippedOverlaySyncPhase('offline_locked');
     }
 
-    const outcomes = await Promise.all(MAP_OVERLAYS.map(async (overlay) => {
-      context.throwIfAborted();
-      if (!this.dependencies.hasNetworkAccess()) return 'skipped' as const;
-      if (overlay.id === 'landmarks' && await this.shouldSkipLandmarks()) {
-        return 'skipped' as const;
-      }
-      return this.syncOverlay(context, overlay.id, instance, token);
-    }));
-    await this.cacheLandmarkCollections(context, instance, token);
+    const [outcomes] = await Promise.all([
+      Promise.all(MAP_OVERLAYS.map(async (overlay) => {
+        context.throwIfAborted();
+        if (!this.dependencies.hasNetworkAccess()) return 'skipped' as const;
+        if (overlay.id === 'landmarks' && await this.shouldSkipLandmarks()) {
+          return 'skipped' as const;
+        }
+        return this.syncOverlay(context, overlay.id, instance, token);
+      })),
+      this.cacheLandmarkCollections(context, instance, token),
+    ]);
 
     const syncedOverlayCount = outcomes.filter((outcome) => outcome === 'synced').length;
     const failedOverlayCount = outcomes.filter((outcome) => outcome === 'failed').length;
@@ -131,7 +133,11 @@ export class ProjectOverlaySyncCoordinator {
       );
       context.throwIfAborted();
       if (isSuccessfulStatus(response.status)) {
-        await this.dependencies.cache.setLandmarkCollections(mapLandmarkCollections(response.data));
+        await this.dependencies.cache.setLandmarkCollections(
+          mapLandmarkCollections(response.data),
+          { signal: context.signal },
+        );
+        context.throwIfAborted();
       }
     } catch (error) {
       if (isAbortError(error)) throw error;

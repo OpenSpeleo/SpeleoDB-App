@@ -1462,6 +1462,79 @@ describe('SpeleoDBController', () => {
       expect(revisionBeforeLandmarksFinish).toBeGreaterThan(initialRevision);
     });
 
+    it('starts overlay and GPS persistence together after project map publication', async () => {
+      const landmarks = createDeferred<HttpResponse<GeoJSON.FeatureCollection>>();
+      const gpsTracks = createDeferred<HttpResponse<unknown>>();
+      service = createMockService({
+        getLandmarksGeoJSON: vi.fn(() => landmarks.promise),
+        getGpsTracks: vi.fn(() => gpsTracks.promise),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(
+        service,
+        withToken,
+        cache,
+        createMockTilePrefetch(),
+      );
+      const initialRevision = controller.mapDataRevision;
+      let foregroundSettled = false;
+
+      const sync = controller.syncProjects().then((result) => {
+        foregroundSettled = true;
+        return result;
+      });
+      await vi.waitFor(() => {
+        expect(cache.setValidatedProjectGeoJSON).toHaveBeenCalledOnce();
+        expect(service.getLandmarksGeoJSON).toHaveBeenCalledOnce();
+      });
+      const gpsStartedBeforeOverlayFinished = vi.mocked(service.getGpsTracks).mock.calls.length === 1;
+      const revisionWhileMetadataPending = controller.mapDataRevision;
+
+      landmarks.resolve({
+        status: 200,
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      await vi.waitFor(() => expect(service.getGpsTracks).toHaveBeenCalledOnce());
+      expect(foregroundSettled).toBe(false);
+      gpsTracks.resolve({ status: 200, data: [] });
+      await sync;
+
+      expect(gpsStartedBeforeOverlayFinished).toBe(true);
+      expect(revisionWhileMetadataPending).toBeGreaterThan(initialRevision);
+    });
+
+    it('loads landmark collections without waiting for overlay cache writes', async () => {
+      const overlayWrite = createDeferred<boolean>();
+      cache.setOverlayGeoJSON = vi.fn(() => overlayWrite.promise);
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(
+        service,
+        withToken,
+        cache,
+        createMockTilePrefetch(),
+      );
+
+      const sync = controller.syncProjects();
+      await vi.waitFor(() => expect(cache.setOverlayGeoJSON).toHaveBeenCalledTimes(5));
+      const collectionsStartedWhileOverlayWritesPending = vi.mocked(
+        service.getLandmarkCollections,
+      ).mock.calls.length === 1;
+      overlayWrite.resolve(true);
+      await sync;
+
+      expect(collectionsStartedWhileOverlayWritesPending).toBe(true);
+      expect(cache.setLandmarkCollections).toHaveBeenCalledWith(
+        [],
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+
     it('completes foreground sync before offline-map preparation starts', async () => {
       const tileSchedule = createDeferred<{
         coordinateCount: number;

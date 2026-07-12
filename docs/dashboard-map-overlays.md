@@ -26,6 +26,14 @@ The app fetches these authenticated endpoints during dashboard sync:
 - `/api/v2/exploration-leads/geojson/`
 - `/api/v2/cylinder-installs/geojson/`
 
+All five read-only overlay operations and writable landmark-collection metadata
+are independent after project GeoJSON is durable, so their transport and cache
+work starts concurrently. GPS metadata synchronization starts at the same
+boundary. Foreground sync still waits for every durable result, but its elapsed
+time is bounded by the slowest independent branch rather than the sum of those
+branches. A shared cancellation context prevents stale publication after logout
+or a superseding sync.
+
 Implementation lives in:
 
 - `src/services/SpeleoDBService.ts`

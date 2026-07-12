@@ -32,14 +32,15 @@ One run proceeds in this order:
 3. Fetch the project list. Only `2xx + Project[]` replaces in-memory state;
    malformed success and failed responses preserve the cached list.
 4. Validate project GeoJSON through the bounded three-worker pool.
-5. Refresh shared overlays, skipping landmarks when pending mutations could be
-   overwritten.
-6. Publish the map-data revision immediately after durable project GeoJSON
+5. Publish the map-data revision immediately after durable project GeoJSON
    processing. Dashboard can progressively load those records while overlays
    and GPS continue.
-7. Refresh shared overlays and GPS metadata; each publishes from its owning
-   durable boundary.
-8. Mark foreground synchronization complete and queue offline-map preparation
+6. Refresh shared overlays and GPS metadata concurrently; each publishes from
+   its owning durable boundary, and foreground completion waits for both.
+   Writable landmark-collection metadata runs concurrently with the five
+   independent overlay fetch/write paths. Landmark GeoJSON remains skipped when
+   pending mutations could be overwritten.
+7. Mark foreground synchronization complete and queue offline-map preparation
    on a later task. `TileCoordinator` owns its cancellable lifecycle, collects
    current sources, and admits the immutable plan without holding the Settings
    button or the project-sync promise.
@@ -55,14 +56,17 @@ tenth of a millisecond. A phase that was intentionally skipped has
 measured duration and reports `failed` or `aborted`. Exactly one `total` record
 is emitted for every run, including superseded runs.
 
-The ordered coordinator phases are:
+The coordinator emits phases in the following stable diagnostic order. Overlay
+and GPS measurements overlap in wall-clock time, then their records are emitted
+in this order after both settle; the total therefore includes their maximum
+duration rather than their sum.
 
 | Phase | Timed work |
 | --- | --- |
 | `cache_load` | Read and publish the cached project list. |
 | `project_refresh` | Fetch and validate the server project list, persist it, and publish it. |
 | `geojson_sync` | Resolve project commits, download changed GeoJSON, validate it, and durably publish or quarantine it. |
-| `overlay_sync` | Fetch and persist the shared overlay collections allowed by pending-mutation protection. |
+| `overlay_sync` | Fetch and persist the shared overlays plus writable landmark-collection metadata allowed by pending-mutation protection. |
 | `gps_sync` | Fetch GPS metadata and durably reconcile its cache. |
 | `tile_prefetch` | Queue background offline-map preparation (`durationMs: null`, reason `tile_prefetch_queued`). |
 | `total` | Foreground sync from cache load through durable project, overlay, and GPS publication. |
@@ -131,8 +135,13 @@ legacy, quarantine, and acknowledgement entries change only after their durable
 transaction completes; failed writes retain the prior in-memory truth. A write
 version prevents an older in-flight read from replacing a newer commit.
 
-The flow adds no requests or retries. A cold process still performs the one
-GeoJSON read required to render each eligible project, but repeated consumers
-reuse that immutable record. GeoJSON reconciliation concurrency remains capped
-at three; offline-map project-record reads are capped at four; project arrays
-and warning arrays retain stable identity when their contents do not change.
+The flow adds no requests or retries. Independent overlay, landmark-collection,
+and GPS requests overlap after the project GeoJSON durability boundary, so a
+slow endpoint no longer delays admission of unrelated work. Cancellation is
+shared across the concurrent work, both settlements are observed, and stale
+results retain the existing publication guards. A cold process still performs
+the one GeoJSON read required to render each eligible project, but repeated
+consumers reuse that immutable record. GeoJSON reconciliation concurrency
+remains capped at three; offline-map project-record reads are capped at four;
+project arrays and warning arrays retain stable identity when their contents do
+not change.

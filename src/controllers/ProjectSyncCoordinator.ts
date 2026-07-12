@@ -74,6 +74,10 @@ interface SyncRunTiming {
   } | null;
 }
 
+type MeasuredPhase<T> =
+  | { ok: true; value: T; durationMs: number }
+  | { ok: false; error: unknown; durationMs: number };
+
 function isSuccessfulStatus(status: number): boolean {
   return status >= 200 && status < 300;
 }
@@ -220,22 +224,34 @@ export class ProjectSyncCoordinator {
     result.phases.geojsonSync = await this.dependencies.geoJSON.sync(context, projects, true);
     this.finishPhase(context, timing, result.phases.geojsonSync);
     this.publishMapData(context);
-    this.startPhase(timing, 'overlay_sync');
-    result.phases.overlaySync = await this.dependencies.overlays.sync(
+    const [overlay, gps] = await Promise.all([
+      this.measureConcurrentPhase(async () => {
+        const phase = await this.dependencies.overlays.sync(context, instance, token);
+        result.phases.overlaySync = phase;
+        if (this.isCurrent(context) && phase.status !== 'skipped') {
+          this.dependencies.hooks.bumpLandmarksRevision();
+        }
+        return phase;
+      }),
+      this.measureConcurrentPhase(
+        () => this.dependencies.hooks.syncGpsTracks(context, instance, token),
+      ),
+    ]);
+
+    this.logMeasuredPhase(
       context,
-      instance,
-      token,
+      'overlay_sync',
+      overlay,
+      (phase) => phase,
     );
-    this.finishPhase(context, timing, result.phases.overlaySync);
-    if (this.isCurrent(context) && result.phases.overlaySync.status !== 'skipped') {
-      this.dependencies.hooks.bumpLandmarksRevision();
-    }
-    this.startPhase(timing, 'gps_sync');
-    await this.dependencies.hooks.syncGpsTracks(context, instance, token);
-    this.finishPhase(context, timing, {
-      status: 'applied',
-      reason: 'gps_sync_completed',
-    });
+    this.logMeasuredPhase(
+      context,
+      'gps_sync',
+      gps,
+      () => ({ status: 'applied', reason: 'gps_sync_completed' }),
+    );
+    if (!overlay.ok) throw overlay.error;
+    if (!gps.ok) throw gps.error;
   }
 
   private async syncCachedFallback(
@@ -299,6 +315,50 @@ export class ProjectSyncCoordinator {
       status: aborted ? 'aborted' : 'failed',
       reason: aborted ? 'aborted' : 'unexpected_failure',
     });
+  }
+
+  private async measureConcurrentPhase<T>(
+    work: () => Promise<T>,
+  ): Promise<MeasuredPhase<T>> {
+    const startedAt = this.dependencies.elapsedNow();
+    try {
+      return {
+        ok: true,
+        value: await work(),
+        durationMs: this.elapsedSince(startedAt),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error,
+        durationMs: this.elapsedSince(startedAt),
+      };
+    }
+  }
+
+  private logMeasuredPhase<T>(
+    context: CancellationContext,
+    phase: TimedSyncPhase,
+    measured: MeasuredPhase<T>,
+    successOutcome: (value: T) => SyncTimingOutcome,
+  ): void {
+    const outcome = measured.ok
+      ? successOutcome(measured.value)
+      : {
+        status: isAbortError(measured.error) || context.signal.aborted
+          ? 'aborted' as const
+          : 'failed' as const,
+        reason: isAbortError(measured.error) || context.signal.aborted
+          ? 'aborted'
+          : 'unexpected_failure',
+      };
+    this.logTiming(
+      context.runId,
+      phase,
+      measured.durationMs,
+      outcome.status,
+      outcome.reason,
+    );
   }
 
   private logSkippedPhase(

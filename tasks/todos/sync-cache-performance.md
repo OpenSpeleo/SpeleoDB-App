@@ -63,18 +63,18 @@ MapLibre source updates, so it is not the first optimization target.
 
 ### PERF-005 — Parallelize independent foreground metadata sync
 
-- [ ] Add a coordinator regression proving overlay and GPS phases start
+- [x] Add a coordinator regression proving overlay and GPS phases start
   together after durable project GeoJSON publication and the foreground result
   waits for both.
-- [ ] Add an overlay regression proving landmark collections do not wait for
+- [x] Add an overlay regression proving landmark collections do not wait for
   unrelated overlay cache writes.
-- [ ] Execute and record the expected failures.
-- [ ] Run overlay and GPS synchronization concurrently with independent timing
+- [x] Execute and record the expected failures.
+- [x] Run overlay and GPS synchronization concurrently with independent timing
   records, cancellation, durable publication, and partial-failure behavior.
-- [ ] Fetch/persist landmark collections concurrently with overlay work.
-- [ ] Update phase-order and timing documentation.
-- [ ] Run focused and complete verification.
-- [ ] Commit as `[Fix] Parallelize sync metadata persistence`; inspect the
+- [x] Fetch/persist landmark collections concurrently with overlay work.
+- [x] Update phase-order and timing documentation.
+- [x] Run focused and complete verification.
+- [x] Commit as `[Fix] Parallelize sync metadata persistence`; inspect the
   commit and clean status. Do not push.
 
 ## Deferred architecture review
@@ -202,3 +202,49 @@ storage—is still dominant.
 - No native source or generated native asset changed, so native compilation is
   inapplicable to this TypeScript/render-publication delivery. Physical-device
   timings after installation remain the authoritative performance measurement.
+
+### PERF-005 TDD evidence
+
+- Red command: `npx vitest run src/controllers/SpeleoDBController.test.ts -t
+  'starts overlay and GPS persistence together|loads landmark collections
+  without waiting'`.
+- Red result: GPS had not started while a deferred landmarks overlay was still
+  pending, and landmark collections had not started while five deferred overlay
+  cache writes were pending. Both regressions failed as expected (0/2 pass).
+- Green selected command adds the progressive map-publication and ordered-timing
+  characterizations; 4/4 pass.
+- Green owning controller suite — 200/200 pass.
+
+### PERF-005 implementation result
+
+- Overlay and GPS metadata synchronization start from the same post-project
+  GeoJSON durability boundary. The foreground promise observes both settlements
+  before completing, so their wall-clock contribution is the slower branch
+  rather than the sum of both branches.
+- Each branch retains its owning durable publication boundary. Overlay revision
+  publication does not wait for GPS; GPS publication remains inside the GPS
+  coordinator after its cache commit.
+- Concurrent measurements retain independent durations and are emitted in the
+  stable overlay/GPS diagnostic order after both settle. Failure and abort
+  outcomes remain explicit, and no rejection is left unobserved.
+- Landmark-collection fetch/persistence now overlaps all five overlay paths and
+  forwards the shared cancellation signal through its cache commit.
+
+### PERF-005 verification
+
+- Selected orchestration/timing regressions — 4/4 pass.
+- Owning `SpeleoDBController.test.ts` suite — 200/200 pass.
+- `npm run lint` — pass.
+- `npm run typecheck` — pass.
+- `npm run build` — pass; 614 modules transformed.
+- `API_TEST_ENABLED=false npm run test:ci` — pass: 117 files passed, 2 skipped;
+  1,920 tests passed, 13 skipped. Coverage: 90.41% statements, 82.03%
+  branches, 92.86% functions, 92.52% lines.
+- `npm run quality:inventory` — pass; all 601 files classified.
+- Button background hard-rule scan — no matches.
+- MapLibre declarations were not changed; source-ownership coverage remains
+  green in the complete suite.
+- `git diff --check` — pass.
+- No native source or generated native asset changed, so native compilation is
+  inapplicable to this TypeScript/coordinator delivery. Physical-device timings
+  after installation remain the authoritative performance measurement.
