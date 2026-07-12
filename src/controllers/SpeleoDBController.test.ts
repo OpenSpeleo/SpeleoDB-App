@@ -1430,6 +1430,75 @@ describe('SpeleoDBController', () => {
   });
 
   describe('syncProjects phase results', () => {
+    it('publishes validated project map data before later remote phases finish', async () => {
+      const landmarks = createDeferred<HttpResponse<GeoJSON.FeatureCollection>>();
+      service = createMockService({
+        getLandmarksGeoJSON: vi.fn(() => landmarks.promise),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(
+        service,
+        withToken,
+        cache,
+        createMockTilePrefetch(),
+      );
+      const initialRevision = controller.mapDataRevision;
+
+      const sync = controller.syncProjects();
+      await vi.waitFor(() => {
+        expect(cache.setValidatedProjectGeoJSON).toHaveBeenCalledOnce();
+        expect(service.getLandmarksGeoJSON).toHaveBeenCalledOnce();
+      });
+      const revisionBeforeLandmarksFinish = controller.mapDataRevision;
+      landmarks.resolve({
+        status: 200,
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      await sync;
+
+      expect(revisionBeforeLandmarksFinish).toBeGreaterThan(initialRevision);
+    });
+
+    it('completes foreground sync before offline-map preparation starts', async () => {
+      const tileSchedule = createDeferred<{
+        coordinateCount: number;
+        scheduledTileCount: number;
+        failedTileCount: number;
+      }>();
+      let foregroundSettled = false;
+      let foregroundSettledWhenPlanningStarted: boolean | null = null;
+      const tilePrefetch = createMockTilePrefetch({
+        schedule: vi.fn(() => {
+          foregroundSettledWhenPlanningStarted = foregroundSettled;
+          return tileSchedule.promise;
+        }),
+      });
+      const withToken = createMockPrefs({
+        token: 'tok',
+        instance: 'https://www.speleodb.org',
+      });
+      controller = new SpeleoDBController(service, withToken, cache, tilePrefetch);
+
+      const sync = controller.syncProjects().then((result) => {
+        foregroundSettled = true;
+        return result;
+      });
+      await vi.waitFor(() => expect(tilePrefetch.schedule).toHaveBeenCalledOnce());
+      tileSchedule.resolve({
+        coordinateCount: 0,
+        scheduledTileCount: 0,
+        failedTileCount: 0,
+      });
+      const result = await sync;
+
+      expect(foregroundSettledWhenPlanningStarted).toBe(true);
+      expect(result.status).toBe('done');
+      expect(controller.syncStatus).toBe('done');
+    });
+
     it('logs ordered phase timings and one terminal timing without user data', async () => {
       let monotonicTime = 0;
       vi.spyOn(performance, 'now').mockImplementation(() => {
@@ -1545,8 +1614,9 @@ describe('SpeleoDBController', () => {
       expect(result.phases.tilePrefetch).toEqual(expect.objectContaining({
         phase: 'tile_prefetch',
         status: 'applied',
+        reason: 'tile_prefetch_queued',
         eligibleProjectCount: 1,
-        scheduledProjectCount: 1,
+        scheduledProjectCount: 0,
       }));
     });
 
@@ -1707,8 +1777,10 @@ describe('SpeleoDBController', () => {
       );
 
       const first = await quarantineController.syncProjects();
+      await vi.waitFor(() => expect(quarantineTile.schedule).toHaveBeenCalledTimes(1));
       const warningSnapshot = quarantineController.projectGeoJSONWarnings;
       const second = await quarantineController.syncProjects();
+      await vi.waitFor(() => expect(quarantineTile.schedule).toHaveBeenCalledTimes(2));
 
       expect(first.phases.geojsonSync).toMatchObject({
         status: 'failed', quarantinedProjectCount: 1, validatedProjectCount: 0,
@@ -1932,7 +2004,13 @@ describe('SpeleoDBController', () => {
       );
 
       const first = await readFailureController.syncProjects();
+      await vi.waitFor(() => {
+        expect(failingCache.getProjectGeoJSONRecord).toHaveBeenCalledTimes(2);
+      });
       const second = await readFailureController.syncProjects();
+      await vi.waitFor(() => {
+        expect(failingCache.getProjectGeoJSONRecord).toHaveBeenCalledTimes(3);
+      });
 
       expect(first.phases.geojsonSync).toMatchObject({
         quarantinedProjectCount: 1,
@@ -1954,8 +2032,8 @@ describe('SpeleoDBController', () => {
         expect.objectContaining({ reason: 'validation_unavailable', persistent: false }),
       ]);
       expect(tilePrefetch.schedule).not.toHaveBeenCalled();
-      expect(first.phases.tilePrefetch.status).toBe('failed');
-      expect(second.phases.tilePrefetch.status).toBe('failed');
+      expect(first.phases.tilePrefetch.reason).toBe('tile_prefetch_queued');
+      expect(second.phases.tilePrefetch.reason).toBe('tile_prefetch_queued');
     });
 
     it('keeps unversioned legacy bytes fail-closed offline without attributing or analyzing them', async () => {
@@ -2182,7 +2260,7 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.syncProjects();
-      await Promise.resolve();
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
 
       expect(schedule).toHaveBeenCalledOnce();
       const request = schedule.mock.calls[0][0];
@@ -2221,15 +2299,14 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       const result = await controller.syncProjects();
-      await Promise.resolve();
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
 
       const request = schedule.mock.calls[0][0];
       expectRebuildRequest(request);
       expect(request.plan.points).toEqual(
         expect.arrayContaining([[10.4, 45.3], [-73.9, 40.7]]),
       );
-      expect(result.phases.tilePrefetch.landmarkScheduled).toBe(true);
-      expect(result.phases.tilePrefetch.landmarkTileCount).toBe(7);
+      expect(result.phases.tilePrefetch.reason).toBe('tile_prefetch_queued');
     });
 
     it('skips landmark tile prefetch when there are no landmark points', async () => {
@@ -2246,12 +2323,12 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       const result = await controller.syncProjects();
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
 
       const request = schedule.mock.calls[0][0];
       expectRebuildRequest(request);
       expect(request.plan.points).toEqual([]);
-      expect(result.phases.tilePrefetch.landmarkScheduled).toBe(false);
-      expect(result.phases.tilePrefetch.landmarkTileCount).toBe(0);
+      expect(result.phases.tilePrefetch.reason).toBe('tile_prefetch_queued');
     });
 
     it('produces a stable landmark signature across repeated syncs', async () => {
@@ -2277,7 +2354,9 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.syncProjects();
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
       await controller.syncProjects();
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(2));
 
       const firstRequest = schedule.mock.calls[0][0];
       const secondRequest = schedule.mock.calls[1][0];
@@ -2307,7 +2386,7 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.syncProjects();
-      await Promise.resolve();
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
 
       const request = schedule.mock.calls[0][0];
       expectRebuildRequest(request);
@@ -2336,7 +2415,7 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.syncProjects();
-      await Promise.resolve();
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
 
       const layerIds = schedule.mock.calls[0][0].layers.map((layer) => layer.id);
       expect(layerIds).toEqual(['esri-satellite']);
@@ -2358,6 +2437,7 @@ describe('SpeleoDBController', () => {
       await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
       await controller.syncProjects();
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
       schedule.mockClear();
 
       await controller.setLayerOfflineSync('esri-world-hillshade', true);
@@ -2430,6 +2510,7 @@ describe('SpeleoDBController', () => {
       await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
       await controller.syncProjects();
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
       schedule.mockClear();
 
       // Hang the active-plan reuse request so logout can invalidate it.
@@ -3718,7 +3799,7 @@ describe('SpeleoDBController landmark CRUD', () => {
     // the lock. validateToken defaults to 200 in the mock service.
     async function goOnlineAndSync(controller: SpeleoDBController) {
       await controller.attemptReconnect();
-      await flushPromises(5);
+      await vi.waitFor(() => expect(controller.syncStatus).toBe('done'));
       return controller.syncOfflineOps();
     }
 

@@ -99,6 +99,35 @@ afterEach(() => {
 });
 
 describe('useDashboardMapData', () => {
+  it('publishes an available project while a later project cache read is pending', async () => {
+    const first = createProject('first');
+    const second = createProject('second');
+    const secondRead = deferred<ProjectGeoJSONMapData | null>();
+    const source = createSource({
+      getProjectMapData: (id) => (
+        id === first.id ? Promise.resolve(mapData(first)) : secondRead.promise
+      ),
+    });
+    const projects = [first, second];
+    const { result } = renderHook(() => useDashboardMapData({
+      source,
+      projects,
+      mapDataRevision: 1,
+      landmarksRevision: 1,
+    }));
+
+    await waitFor(() => expect(source.getProjectMapData).toHaveBeenCalledWith(second.id));
+    await waitFor(() => expect(result.current.geoJsonData.first).toBeDefined());
+    const firstVisibleWhileSecondPending = result.current.geoJsonData.first;
+    await act(async () => {
+      secondRead.resolve(mapData(second));
+      await secondRead.promise;
+    });
+
+    expect(firstVisibleWhileSecondPending).toBeDefined();
+    await waitFor(() => expect(result.current.geoJsonData.second).toBeDefined());
+  });
+
   it('publishes validated cache records before the first completed sync revision', async () => {
     const visible = createProject('b', 'Bravo');
     const source = createSource({

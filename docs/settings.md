@@ -37,9 +37,11 @@ Displays live sync statistics and a manual sync trigger.
 
 The **Resync button** (compact success variant with the circular-arrow
 `syncOutline` icon in the section header) calls `controller.syncProjects()`. It
-does not attempt offline reconnect. `syncProjects()` returns a structured phase
-result (cache load, project refresh, GeoJSON sync, overlay sync, offline-map
-scheduling). Errors are caught locally; cache statistics and map progress
+does not attempt offline reconnect. `syncProjects()` returns after cache load,
+project refresh, validated GeoJSON, overlays, and GPS have durably published.
+Its tile phase reports that offline-map preparation was queued; source
+collection, plan construction, and downloads continue independently. Errors are
+caught locally; cache statistics and map progress
 continue through the dedicated event stream rather than a follow-up query.
 
 The button is **disabled while offline-locked** (`isOfflineLocked`): syncing is
@@ -47,11 +49,12 @@ an online-only action, and going back online is handled by the dedicated **Go
 Online** button (see Account section). It is also disabled while
 `syncStatus === 'syncing'`, where it shows an inline spinner plus a `Syncing…`
 label (`data-testid="sync-status-label"`) to prevent double-submission. The
-`data-testid` remains `sync-button`.
+button no longer waits for offline-map source collection or plan construction.
+The `data-testid` remains `sync-button`.
 
 For a slow `Syncing…` state, the device console provides bounded structured
 timing records. `[project-sync:timing]` separates cache load, project refresh,
-GeoJSON, overlays, GPS, offline-map admission, and total time;
+GeoJSON, overlays, GPS, background admission, and foreground total time;
 `[offline-map:timing]` further separates coverage-source collection from plan
 generation/admission. See `docs/project-sync-coordination.md` for the schema,
 phase boundaries, and privacy contract.

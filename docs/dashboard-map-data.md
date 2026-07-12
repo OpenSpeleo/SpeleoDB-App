@@ -16,7 +16,7 @@ The hook owns:
 - immediate validated-cache reads plus revision-driven refreshes;
 - normalization of cached GeoJSON and landmark property identifiers;
 - attachment of the precomputed depth property used by map layers;
-- atomic project/overlay publication after a complete read pass;
+- incremental project/overlay publication as each commit-consistent record is ready;
 - immediate commit gating while replacement data is still loading;
 - cancellation of stale success and failure completions;
 - projection of current GeoJSON and prevalidated bounds from the same record;
@@ -47,23 +47,28 @@ Global landmarks and surface stations remain independent of project toggles.
   records from loading.
 - Unmount, dependency replacement, and revision supersession invalidate both
   late successes and late failures. Stale work cannot publish or report noise.
-- A completed empty pass publishes an empty record, clearing data removed by a
-  newer revision.
+- A generation mismatch hides prior data synchronously. An empty newer
+  generation therefore remains empty without an effect-driven clearing render.
 
 `landmarksRevision` independently reloads overlays after local landmark
 mutations without re-reading project map records.
 
 ## Performance
 
-The extraction preserves the existing request count and sequential cache-read
-ordering. Derived project records, GeoJSON, bounds, colors, landmark groups, and
-visible overlays are memoized. Project zoom and initial fit continue to use
-prevalidated bounds and never rescan coordinates.
+Project cache reads use a four-worker pool and publish independently, so one
+slow project cannot hide an earlier ready project. Each record yields the
+WebView thread before CPU normalization/depth attachment and after publication,
+allowing input, React, and MapLibre work between records. Overlay reads publish
+independently with the same cooperative-yield boundary. Derived project records,
+GeoJSON, bounds, colors, landmark groups, and visible overlays remain memoized.
+Project zoom and initial fit continue to use prevalidated bounds and never
+rescan coordinates.
 
 ## Verification
 
 `useDashboardMapData.test.ts` directly covers zero-revision cache publication,
-project eligibility, valid/empty/malformed/stale commits, depth attachment,
+project eligibility, progressive publication behind a deferred record,
+valid/empty/malformed/stale commits, depth attachment,
 every overlay shape, failure containment, default diagnostics, revision
 clearing, commit replacement, and all late-success/late-failure cancellation
 pairings. It also covers global and project-linked overlay visibility. The

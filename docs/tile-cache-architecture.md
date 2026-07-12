@@ -59,6 +59,13 @@ parts. `TileCoordinator` assigns every request a monotonic ownership version, so
 an older source read cannot supersede newer geometry, layer preferences, or a
 refresh even when the older dependency ignores cancellation.
 
+Project-sync preparation is queued on a later WebView task after foreground
+data publication. Project cache records are read through a four-worker bounded
+pool rather than one serial chain. Source conversion yields between local
+batches, and cancellation is rechecked after every yield. The planner remains a
+dedicated worker; these boundaries prevent offline preparation from owning the
+Settings spinner or monopolizing rendering/input on the WebView thread.
+
 ## Bounded v8 plan construction
 
 The worker enumerates raw `{z,x,y}` coordinates and sends at most 2,048 at a

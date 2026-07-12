@@ -11,6 +11,7 @@ import { buildLandmarkCollectionGroups } from '../../utils/landmarkCollections';
 import { ensureLandmarkPropertyIds } from '../../utils/landmarkMutations';
 import { normalizeGeoJSON } from '../../utils/normalizeGeoJSON';
 import { createProjectColorState } from '../../utils/projectColors';
+import { yieldToMainThread } from '../../utils/yieldToMainThread';
 import {
   filterOverlayByProjectVisibility,
   normalizeOverlayGeoJSON,
@@ -21,6 +22,19 @@ type GeoJsonRecord = Record<string, GeoJSON.FeatureCollection>;
 type ProjectMapDataRecord = Record<string, ProjectGeoJSONMapData>;
 type StaleCheck = () => boolean;
 type WarningReporter = (message: string, error: unknown) => void;
+type MainThreadYield = () => Promise<void>;
+
+interface ProjectMapLoadState {
+  projects: readonly Project[];
+  revision: number;
+  data: ProjectMapDataRecord;
+}
+
+interface OverlayMapLoadState {
+  mapRevision: number;
+  landmarksRevision: number;
+  data: MapOverlayGeoJsonRecord;
+}
 
 export interface DashboardMapDataSource {
   getProjectMapData: (projectId: string) => Promise<ProjectGeoJSONMapData | null>;
@@ -33,6 +47,7 @@ export interface DashboardMapDataOptions {
   mapDataRevision: number;
   landmarksRevision: number;
   warn?: WarningReporter;
+  yieldWork?: MainThreadYield;
 }
 
 const defaultWarn: WarningReporter = (message, error) => console.warn(message, error);
@@ -56,20 +71,34 @@ async function loadProjectMapData(
   projects: readonly Project[],
   isStale: StaleCheck,
   warn: WarningReporter,
-): Promise<ProjectMapDataRecord | null> {
-  const next: ProjectMapDataRecord = {};
-  for (const project of projects) {
-    try {
-      const mapData = await source.getProjectMapData(project.id);
-      if (isStale()) return null;
-      const normalized = normalizeProjectMapData(project, mapData);
-      if (normalized) next[project.id] = normalized;
-    } catch (error) {
-      if (isStale()) return null;
-      warn('Failed to load project GeoJSON:', error);
+  publish: (projectId: string, data: ProjectGeoJSONMapData) => void,
+  yieldWork: MainThreadYield,
+): Promise<void> {
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < projects.length) {
+      const index = cursor;
+      cursor += 1;
+      const project = projects[index];
+      try {
+        const mapData = await source.getProjectMapData(project.id);
+        if (isStale()) return;
+        await yieldWork();
+        if (isStale()) return;
+        const normalized = normalizeProjectMapData(project, mapData);
+        if (normalized) publish(project.id, normalized);
+        await yieldWork();
+        if (isStale()) return;
+      } catch (error) {
+        if (isStale()) return;
+        warn('Failed to load project GeoJSON:', error);
+      }
     }
-  }
-  return next;
+  };
+  await Promise.all(Array.from(
+    { length: Math.min(4, projects.length) },
+    () => worker(),
+  ));
 }
 
 function normalizeOverlay(
@@ -88,20 +117,24 @@ async function loadOverlayMapData(
   source: DashboardMapDataSource,
   isStale: StaleCheck,
   warn: WarningReporter,
-): Promise<MapOverlayGeoJsonRecord | null> {
-  const next: MapOverlayGeoJsonRecord = {};
+  publish: (overlayId: MapOverlayId, data: GeoJSON.FeatureCollection) => void,
+  yieldWork: MainThreadYield,
+): Promise<void> {
   for (const overlay of MAP_OVERLAYS) {
     try {
       const raw = await source.getOverlayGeoJSON(overlay.id);
-      if (isStale()) return null;
+      if (isStale()) return;
+      await yieldWork();
+      if (isStale()) return;
       const normalized = normalizeOverlay(overlay.id, raw);
-      if (normalized) next[overlay.id] = normalized;
+      if (normalized) publish(overlay.id, normalized);
+      await yieldWork();
+      if (isStale()) return;
     } catch (error) {
-      if (isStale()) return null;
+      if (isStale()) return;
       warn('Failed to load a cached overlay:', error);
     }
   }
-  return next;
 }
 
 function useProjectMapData(
@@ -109,16 +142,40 @@ function useProjectMapData(
   projects: readonly Project[],
   mapDataRevision: number,
   warn: WarningReporter,
+  yieldWork: MainThreadYield,
 ) {
-  const [projectMapData, setProjectMapData] = useState<ProjectMapDataRecord>({});
+  const [loadState, setLoadState] = useState<ProjectMapLoadState>({
+    projects,
+    revision: mapDataRevision,
+    data: {},
+  });
   useEffect(() => {
     let stale = false;
-    void loadProjectMapData(source, projects, () => stale, warn).then((next) => {
-      if (!stale && next) setProjectMapData(next);
-    });
+    void loadProjectMapData(
+      source,
+      projects,
+      () => stale,
+      warn,
+      (projectId, data) => {
+        if (stale) return;
+        setLoadState((current) => {
+          const currentData = current.projects === projects && current.revision === mapDataRevision
+            ? current.data
+            : {};
+          return {
+            projects,
+            revision: mapDataRevision,
+            data: { ...currentData, [projectId]: data },
+          };
+        });
+      },
+      yieldWork,
+    );
     return () => { stale = true; };
-  }, [mapDataRevision, projects, source, warn]);
-  return projectMapData;
+  }, [mapDataRevision, projects, source, warn, yieldWork]);
+  return loadState.projects === projects && loadState.revision === mapDataRevision
+    ? loadState.data
+    : {};
 }
 
 function useOverlayMapData(
@@ -126,16 +183,41 @@ function useOverlayMapData(
   mapDataRevision: number,
   landmarksRevision: number,
   warn: WarningReporter,
+  yieldWork: MainThreadYield,
 ) {
-  const [overlayGeoJsonData, setOverlayGeoJsonData] = useState<MapOverlayGeoJsonRecord>({});
+  const [loadState, setLoadState] = useState<OverlayMapLoadState>({
+    mapRevision: mapDataRevision,
+    landmarksRevision,
+    data: {},
+  });
   useEffect(() => {
     let stale = false;
-    void loadOverlayMapData(source, () => stale, warn).then((next) => {
-      if (!stale && next) setOverlayGeoJsonData(next);
-    });
+    void loadOverlayMapData(
+      source,
+      () => stale,
+      warn,
+      (overlayId, data) => {
+        if (stale) return;
+        setLoadState((current) => {
+          const currentData = current.mapRevision === mapDataRevision
+            && current.landmarksRevision === landmarksRevision
+            ? current.data
+            : {};
+          return {
+            mapRevision: mapDataRevision,
+            landmarksRevision,
+            data: { ...currentData, [overlayId]: data },
+          };
+        });
+      },
+      yieldWork,
+    );
     return () => { stale = true; };
-  }, [landmarksRevision, mapDataRevision, source, warn]);
-  return overlayGeoJsonData;
+  }, [landmarksRevision, mapDataRevision, source, warn, yieldWork]);
+  return loadState.mapRevision === mapDataRevision
+    && loadState.landmarksRevision === landmarksRevision
+    ? loadState.data
+    : {};
 }
 
 export function useDashboardMapData({
@@ -144,6 +226,7 @@ export function useDashboardMapData({
   mapDataRevision,
   landmarksRevision,
   warn = defaultWarn,
+  yieldWork = yieldToMainThread,
 }: DashboardMapDataOptions) {
   const { sortedProjects, projectColorsById } = useMemo(
     () => createProjectColorState([...projects]),
@@ -160,6 +243,7 @@ export function useDashboardMapData({
     geoJsonProjects,
     mapDataRevision,
     warn,
+    yieldWork,
   );
   const currentProjectMapData = useMemo<ProjectMapDataRecord>(() => {
     const next: ProjectMapDataRecord = {};
@@ -180,6 +264,7 @@ export function useDashboardMapData({
     mapDataRevision,
     landmarksRevision,
     warn,
+    yieldWork,
   );
   const landmarkCollectionGroups = useMemo(
     () => buildLandmarkCollectionGroups(overlayGeoJsonData.landmarks ?? null),

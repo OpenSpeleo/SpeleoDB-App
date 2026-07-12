@@ -25,6 +25,7 @@ export type SyncPhaseReason =
   | 'overlay_sync_partial_failure'
   | 'no_prefetch_candidates'
   | 'tile_prefetch_scheduled'
+  | 'tile_prefetch_queued'
   | 'tile_prefetch_failed'
   | 'aborted'
 

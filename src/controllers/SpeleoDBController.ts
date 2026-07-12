@@ -290,9 +290,9 @@ export class SpeleoDBController {
           instance,
           token,
         ),
-        scheduleTilePrefetch: (context, projects) => this.tileCoordinator.scheduleSyncPhase(
-          context,
+        queueTilePrefetch: (projects, runId) => this.tileCoordinator.queueProjectSync(
           projects,
+          runId,
         ),
       },
       now: () => Date.now(),

@@ -7,6 +7,7 @@ import { CancellationContext } from './CancellationContext';
 import { TileCoordinator } from './TileCoordinator';
 import type { GpsTrackPrefetchSource } from './GpsTrackCoordinator';
 import { evictLayerTilesRuntime } from '../services/TileCacheRuntime';
+import type { Project } from '../types/project';
 
 function expectRebuildRequest(
   request: OfflineMapSyncRequest,
@@ -32,7 +33,50 @@ function pointCollection(lng: number, lat: number): GeoJSON.FeatureCollection {
   };
 }
 
-function createHarness() {
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function projectFixture(id: string): Project {
+  return {
+    id,
+    name: id,
+    description: '',
+    country: 'FR',
+    color: '#123456',
+    type: 'private',
+    visibility: 'private',
+    is_active: true,
+    created_by: 'owner',
+    creation_date: '2026-01-01',
+    modified_date: '2026-01-01',
+    commit_count: 1,
+    active_mutex: null,
+    fork_from: null,
+    exclude_geojson: false,
+    geojson_file: `${id}.geojson`,
+    latest_commit: {
+      id: `commit-${id}`,
+      message: '',
+      author_email: '',
+      author_name: '',
+      authored_date: '',
+      dt_since: '',
+      parent_ids: [],
+      url: '',
+      formats: [],
+      tree: [],
+    },
+  };
+}
+
+function createHarness(options: { deferWork?: (work: () => void) => void } = {}) {
   let progressListener: () => void = () => {};
   const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
     coordinateCount: 1,
@@ -90,6 +134,8 @@ function createHarness() {
     getProjects: () => [],
     getGpsPrefetchSources,
     notifyStateChanged,
+    deferWork: options.deferWork ?? ((work) => work()),
+    yieldToMainThread: async () => {},
   }, service);
   return {
     coordinator,
@@ -105,6 +151,57 @@ function createHarness() {
 }
 
 describe('TileCoordinator offline coverage', () => {
+  it('does not start queued project-sync preparation after cancellation', async () => {
+    let deferredWork: (() => void) | null = null;
+    const { coordinator, schedule } = createHarness({
+      deferWork: (work) => { deferredWork = work; },
+    });
+
+    coordinator.queueProjectSync([], 11);
+    coordinator.cancel();
+    (deferredWork as (() => void) | null)?.();
+    await Promise.resolve();
+
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it('reads project coverage records with bounded concurrency', async () => {
+    const { coordinator, cache } = createHarness();
+    const gate = deferred<void>();
+    let activeReads = 0;
+    let maximumActiveReads = 0;
+    cache.getProjectGeoJSONRecord = vi.fn(async (id: string) => {
+      activeReads += 1;
+      maximumActiveReads = Math.max(maximumActiveReads, activeReads);
+      await gate.promise;
+      activeReads -= 1;
+      return {
+        state: 'active' as const,
+        commitId: `commit-${id}`,
+        data: pointCollection(1, 1),
+        analysis: {
+          bounds: { west: 0, east: 2, south: 0, north: 2, crossesDateline: false },
+          widthKm: 1,
+          heightKm: 1,
+          durationMs: 1,
+        },
+      };
+    });
+    const projects = Array.from({ length: 6 }, (_, index) => projectFixture(`p${index}`));
+
+    const schedule = coordinator.scheduleSyncPhase(
+      new CancellationContext(7, 'test'),
+      projects,
+    );
+    await vi.waitFor(() => expect(cache.getProjectGeoJSONRecord).toHaveBeenCalled());
+    const admittedBeforeFirstReadSettled = vi.mocked(cache.getProjectGeoJSONRecord).mock.calls.length;
+    gate.resolve();
+    await schedule;
+
+    expect(admittedBeforeFirstReadSettled).toBe(4);
+    expect(maximumActiveReads).toBe(4);
+  });
+
   it('logs source collection and plan scheduling as separate timing phases', async () => {
     let monotonicTime = 0;
     const performanceNow = vi.spyOn(performance, 'now').mockImplementation(() => {

@@ -19,9 +19,14 @@ import type { TilePrefetchProjectInput } from '../types/tilePrefetch';
 import type { TilePrefetchPhaseResult } from '../types/sync';
 import { isAbortError } from '../utils/abort';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
+import { deferToNextTask, yieldToMainThread } from '../utils/yieldToMainThread';
+import {
+  logElapsedPerformanceTiming,
+  type ActivePerformanceTiming,
+} from '../utils/performanceTiming';
 import type { GpsTrackPrefetchSource } from './GpsTrackCoordinator';
 import { CancellationContext } from './CancellationContext';
-import { createSkippedTilePrefetchPhase } from './ProjectSyncCoordinator';
+import { createSkippedTilePrefetchPhase } from './ProjectSyncPhases';
 
 interface TilePreferences {
   tileCacheOverLimitApproved?: boolean;
@@ -39,6 +44,8 @@ interface TileCoordinatorDependencies {
   getProjects(): Project[];
   getGpsPrefetchSources(signal?: AbortSignal): Promise<GpsTrackPrefetchSource[]>;
   notifyStateChanged(): void;
+  deferWork?(work: () => void): void;
+  yieldToMainThread?(): Promise<void>;
 }
 
 interface BuiltProjectInputs {
@@ -184,10 +191,7 @@ export class TileCoordinator {
     forceRefresh = false,
   ): Promise<TilePrefetchPhaseResult> {
     const requestVersion = this.supersedeCoverageRequests();
-    let activeTiming: {
-      phase: 'coverage_source_collection' | 'plan_schedule';
-      startedAt: number;
-    } | null = null;
+    let activeTiming: ActivePerformanceTiming | null = null;
     if (!this.dependencies.hasNetworkAccess()) {
       return createSkippedTilePrefetchPhase('offline_locked');
     }
@@ -197,9 +201,10 @@ export class TileCoordinator {
         startedAt: performance.now(),
       };
       const sources = await this.collectCoverageSources(context, projects);
-      this.logOfflineMapTiming(context.runId, activeTiming, 'applied');
+      logElapsedPerformanceTiming('offline-map', context.runId, activeTiming, 'applied');
       activeTiming = null;
       this.assertCoverageRequestCurrent(requestVersion, context);
+      await this.yieldForRendering(context);
       activeTiming = { phase: 'plan_schedule', startedAt: performance.now() };
       const result = await this.engine.schedule({
         mode: 'rebuild',
@@ -212,7 +217,7 @@ export class TileCoordinator {
         signal: context.signal,
       });
       context.throwIfAborted();
-      this.logOfflineMapTiming(context.runId, activeTiming, 'applied');
+      logElapsedPerformanceTiming('offline-map', context.runId, activeTiming, 'applied');
       activeTiming = null;
       return {
         phase: 'tile_prefetch',
@@ -228,7 +233,8 @@ export class TileCoordinator {
       };
     } catch (error) {
       if (activeTiming) {
-        this.logOfflineMapTiming(
+        logElapsedPerformanceTiming(
+          'offline-map',
           context.runId,
           activeTiming,
           isAbortError(error) || context.signal.aborted ? 'aborted' : 'failed',
@@ -246,21 +252,22 @@ export class TileCoordinator {
     }
   }
 
-  private logOfflineMapTiming(
-    runId: number,
-    timing: {
-      phase: 'coverage_source_collection' | 'plan_schedule';
-      startedAt: number;
-    },
-    status: 'applied' | 'aborted' | 'failed',
-  ): void {
-    const elapsed = Math.max(0, performance.now() - timing.startedAt);
-    console.info('[offline-map:timing]', {
-      runId,
-      phase: timing.phase,
-      durationMs: Math.round(elapsed * 10) / 10,
-      status,
-    });
+  queueProjectSync(projects: Project[], runId: number): void {
+    const context = this.beginContext('Project sync offline-map preparation', runId);
+    const run = () => {
+      if (context.signal.aborted) {
+        this.activeContexts.delete(context);
+        return;
+      }
+      void this.scheduleSyncPhase(context, projects)
+        .catch((error) => {
+          if (!isAbortError(error)) {
+            console.warn('Background offline-map preparation failed:', error);
+          }
+        })
+        .finally(() => this.activeContexts.delete(context));
+    };
+    (this.dependencies.deferWork ?? deferToNextTask)(run);
   }
 
   async refreshOfflineMaps(): Promise<void> {
@@ -331,12 +338,12 @@ export class TileCoordinator {
     });
   }
 
-  private beginContext(label: string): CancellationContext {
+  private beginContext(label: string, runId?: number): CancellationContext {
     for (const context of this.activeContexts) context.abort('Superseded offline-map request');
     this.activeContexts.clear();
     this.engine.cancel();
-    const context = new CancellationContext(this.nextRunId, label);
-    this.nextRunId += 1;
+    const context = new CancellationContext(runId ?? this.nextRunId, label);
+    if (runId === undefined) this.nextRunId += 1;
     this.activeContexts.add(context);
     return context;
   }
@@ -421,6 +428,7 @@ export class TileCoordinator {
       this.buildProjectInputs(context, projects),
     ]);
     context.throwIfAborted();
+    await this.yieldForRendering(context);
     const enabledLayers = this.getEnabledLayers();
     const maxZoom = Math.min(
       TILE_PREFETCH.PROJECT_REQUEST.maxZoom,
@@ -477,6 +485,7 @@ export class TileCoordinator {
         if (!collection) {
           throw new Error(`Required offline-map overlay is invalid: ${overlayId}`);
         }
+        await this.yieldForRendering(context);
         points.push(...extractPointCoordinates(collection));
       }
       return points;
@@ -491,10 +500,14 @@ export class TileCoordinator {
     projects: Project[],
   ): Promise<BuiltProjectInputs> {
     const eligible = projects.filter((project) => project.geojson_file && !project.exclude_geojson);
-    const inputs: TilePrefetchProjectInput[] = [];
+    const inputs: Array<TilePrefetchProjectInput | undefined> = new Array(eligible.length);
     const failedCount = 0;
-    for (const project of eligible) {
-      try {
+    let cursor = 0;
+    const worker = async (): Promise<void> => {
+      while (cursor < eligible.length) {
+        const index = cursor;
+        cursor += 1;
+        const project = eligible[index];
         context.throwIfAborted();
         const commitId = project.latest_commit.id;
         const record = await this.dependencies.cache.getProjectGeoJSONRecord(
@@ -508,13 +521,34 @@ export class TileCoordinator {
         if (record.state !== 'active' || record.commitId !== commitId) {
           throw new Error(`Current project geometry is unavailable: ${project.id}`);
         }
-        inputs.push({ projectId: project.id, commitId, bounds: record.analysis.bounds });
-      } catch (error) {
-        if (isAbortError(error)) throw error;
-        throw error;
+        inputs[index] = {
+          projectId: project.id,
+          commitId,
+          bounds: record.analysis.bounds,
+        };
       }
+    };
+    const workers = Array.from(
+      { length: Math.min(4, eligible.length) },
+      () => worker(),
+    );
+    const settled = await Promise.allSettled(workers);
+    const failed = settled.find(
+      (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+    );
+    if (failed) {
+      throw failed.reason;
     }
-    return { inputs, eligibleCount: eligible.length, failedCount };
+    return {
+      inputs: inputs.filter((input): input is TilePrefetchProjectInput => input !== undefined),
+      eligibleCount: eligible.length,
+      failedCount,
+    };
+  }
+
+  private async yieldForRendering(context: CancellationContext): Promise<void> {
+    await (this.dependencies.yieldToMainThread ?? yieldToMainThread)();
+    context.throwIfAborted();
   }
 
   private restoreConsent(): void {

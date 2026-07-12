@@ -7,7 +7,6 @@ import type {
   ProjectRefreshPhaseResult,
   SyncPhaseStatus,
   SyncProjectsResult,
-  TilePrefetchPhaseResult,
 } from '../types/sync';
 import { isAbortError } from '../utils/abort';
 import { CancellationContext } from './CancellationContext';
@@ -19,6 +18,11 @@ import {
   ProjectOverlaySyncCoordinator,
   createSkippedOverlaySyncPhase,
 } from './ProjectOverlaySyncCoordinator';
+import {
+  createQueuedTilePrefetchPhase,
+  createSkippedTilePrefetchPhase,
+} from './ProjectSyncPhases';
+import { logPerformanceTiming } from '../utils/performanceTiming';
 
 export type SyncStatus = 'idle' | 'syncing' | 'done' | 'error';
 
@@ -34,10 +38,7 @@ interface ProjectSyncHooks {
   notifyStateChanged(): void;
   bumpLandmarksRevision(): void;
   syncGpsTracks(context: CancellationContext, instance: string, token: string): Promise<void>;
-  scheduleTilePrefetch(
-    context: CancellationContext,
-    projects: Project[],
-  ): Promise<TilePrefetchPhaseResult>;
+  queueTilePrefetch(projects: Project[], runId: number): void;
 }
 
 interface ProjectSyncCoordinatorDependencies {
@@ -79,19 +80,6 @@ function isSuccessfulStatus(status: number): boolean {
 
 function isClientErrorStatus(status: number): boolean {
   return status >= 400 && status < 500;
-}
-
-export function createSkippedTilePrefetchPhase(
-  reason: TilePrefetchPhaseResult['reason'],
-): TilePrefetchPhaseResult {
-  return {
-    phase: 'tile_prefetch',
-    status: reason === 'aborted' ? 'aborted' : 'skipped',
-    reason,
-    eligibleProjectCount: 0,
-    scheduledProjectCount: 0,
-    failedProjectCount: 0,
-  };
 }
 
 /** Owns project-list state, sync cancellation, phase ordering, and publication. */
@@ -171,7 +159,13 @@ export class ProjectSyncCoordinator {
       } else {
         await this.syncCachedFallback(context, result, timing);
       }
-      return this.complete(context, result);
+      const completed = this.complete(context, result);
+      if (refresh.projects && this.isCurrent(context)) {
+        result.phases.tilePrefetch = createQueuedTilePrefetchPhase(refresh.projects);
+        this.logSkippedPhase(context, 'tile_prefetch', result.phases.tilePrefetch);
+        this.dependencies.hooks.queueTilePrefetch(refresh.projects, context.runId);
+      }
+      return completed;
     } catch (error) {
       this.failActivePhase(context, timing, error);
       if (isAbortError(error) || !this.isCurrent(context)) {
@@ -205,6 +199,7 @@ export class ProjectSyncCoordinator {
       false,
     );
     this.finishPhase(context, timing, result.phases.geojsonSync);
+    this.publishMapData(context);
     result.phases.overlaySync = createSkippedOverlaySyncPhase(reason);
     result.phases.tilePrefetch = createSkippedTilePrefetchPhase(reason);
     this.logSkippedPhase(context, 'overlay_sync', result.phases.overlaySync);
@@ -224,6 +219,7 @@ export class ProjectSyncCoordinator {
     this.startPhase(timing, 'geojson_sync');
     result.phases.geojsonSync = await this.dependencies.geoJSON.sync(context, projects, true);
     this.finishPhase(context, timing, result.phases.geojsonSync);
+    this.publishMapData(context);
     this.startPhase(timing, 'overlay_sync');
     result.phases.overlaySync = await this.dependencies.overlays.sync(
       context,
@@ -240,12 +236,6 @@ export class ProjectSyncCoordinator {
       status: 'applied',
       reason: 'gps_sync_completed',
     });
-    this.startPhase(timing, 'tile_prefetch');
-    result.phases.tilePrefetch = await this.dependencies.hooks.scheduleTilePrefetch(
-      context,
-      projects,
-    );
-    this.finishPhase(context, timing, result.phases.tilePrefetch);
   }
 
   private async syncCachedFallback(
@@ -260,6 +250,7 @@ export class ProjectSyncCoordinator {
       false,
     );
     this.finishPhase(context, timing, result.phases.geojsonSync);
+    this.publishMapData(context);
     result.phases.overlaySync = createSkippedOverlaySyncPhase(
       result.phases.projectRefresh.reason,
     );
@@ -330,7 +321,7 @@ export class ProjectSyncCoordinator {
     status: SyncPhaseStatus | SyncProjectsResult['status'],
     reason?: string,
   ): void {
-    console.info('[project-sync:timing]', {
+    logPerformanceTiming('project-sync', {
       runId,
       phase,
       durationMs,
@@ -345,12 +336,17 @@ export class ProjectSyncCoordinator {
   ): SyncProjectsResult {
     const status = this.deriveCompletionStatus(result.phases.projectRefresh);
     if (this.isCurrent(context)) {
-      this._mapDataRevision += 1;
       this._syncStatus = status;
       this.dependencies.hooks.notifyStateChanged();
     }
     result.status = status;
     return result;
+  }
+
+  private publishMapData(context: CancellationContext): void {
+    if (!this.isCurrent(context)) return;
+    this._mapDataRevision += 1;
+    this.dependencies.hooks.notifyStateChanged();
   }
 
   private async loadCachedProjects(

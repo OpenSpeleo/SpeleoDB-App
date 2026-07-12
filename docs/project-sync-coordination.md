@@ -11,15 +11,15 @@ mutation ownership separate from server overlay refresh.
 project-sync behavior:
 
 - `ProjectSyncCoordinator` owns project-list state, sync status, last-sync time,
-  run cancellation, phase ordering, terminal map-data revision, and publication.
+  run cancellation, phase ordering, post-GeoJSON map-data revision, and publication.
 - `ProjectGeoJSONCoordinator` owns per-commit download, normalization, worker
   validation, durable quarantine, session-only fail-closed disposition, warning
   acknowledgement, and active map-data reads.
 - `ProjectOverlaySyncCoordinator` owns read-only overlay refresh and protects
   the landmarks ground truth while pending mutations exist or replay is active.
 
-All three production modules remain below the 600-line limit. Tile scheduling is
-an explicit `TileCoordinator` phase hook; GPS refresh remains an injected hook
+All production modules remain below the 600-line limit. Tile preparation is
+queued through `TileCoordinator`; GPS refresh remains an injected hook
 until GPS ownership is extracted in the next objective.
 
 ## Phase contract
@@ -34,12 +34,15 @@ One run proceeds in this order:
 4. Validate project GeoJSON through the bounded three-worker pool.
 5. Refresh shared overlays, skipping landmarks when pending mutations could be
    overwritten.
-6. Refresh GPS metadata, then hand validated bounds/points/paths to
-   `TileCoordinator`; it independently revalidates complete current planning
-   inputs and schedules one cryptographically identified canonical plan through
-   a monotonic abort-aware hook. Planning failure preserves active coverage and
-   reports a failed tile phase rather than publishing a partial replacement.
-7. Publish exactly one terminal map-data revision for the current run.
+6. Publish the map-data revision immediately after durable project GeoJSON
+   processing. Dashboard can progressively load those records while overlays
+   and GPS continue.
+7. Refresh shared overlays and GPS metadata; each publishes from its owning
+   durable boundary.
+8. Mark foreground synchronization complete and queue offline-map preparation
+   on a later task. `TileCoordinator` owns its cancellable lifecycle, collects
+   current sources, and admits the immutable plan without holding the Settings
+   button or the project-sync promise.
 
 ## Timing diagnostics
 
@@ -61,10 +64,10 @@ The ordered coordinator phases are:
 | `geojson_sync` | Resolve project commits, download changed GeoJSON, validate it, and durably publish or quarantine it. |
 | `overlay_sync` | Fetch and persist the shared overlay collections allowed by pending-mutation protection. |
 | `gps_sync` | Fetch GPS metadata and durably reconcile its cache. |
-| `tile_prefetch` | Collect the canonical coverage sources and admit the immutable offline-map plan. |
-| `total` | The complete project-sync call from cache load through offline-map admission. |
+| `tile_prefetch` | Queue background offline-map preparation (`durationMs: null`, reason `tile_prefetch_queued`). |
+| `total` | Foreground sync from cache load through durable project, overlay, and GPS publication. |
 
-`tile_prefetch` has two nested records under `[offline-map:timing]` with the
+The queued work later emits two records under `[offline-map:timing]` with the
 same `runId`:
 
 - `coverage_source_collection` includes IndexedDB reads for landmark, station,
@@ -74,9 +77,9 @@ same `runId`:
   generation, plan-chunk persistence, stale-generation cleanup, and durable
   admission of the new layer generations.
 
-Tile HTTP downloads start after `plan_schedule` resolves and therefore do not
-hold `syncStatus === 'syncing'`; their progress remains in the offline-map
-store. The timing records deliberately exclude credentials, instance URLs,
+Neither source collection, plan admission, nor tile HTTP downloads hold
+`syncStatus === 'syncing'`; their progress remains in the offline-map store.
+The timing records deliberately exclude credentials, instance URLs,
 project identifiers and names, response bodies, GeoJSON, and cached payloads.
 This makes them safe for performance diagnosis without turning the console into
 a user-data export.
@@ -107,11 +110,13 @@ quarantine persistence, warning identity, overlay protection, and tile/GPS hook
 ordering through the public façade. Geometry, worker, cache, and tile seams
 retain their dedicated tests.
 
-Offline-map scheduling resolves once its immutable denominator and layer
-generations are installed; the six-worker download pipeline continues through
-its dedicated store. Per-tile progress does not publish a project/controller
-state change, so project sync subscribers do not rerender for map downloads.
+Offline-map preparation begins on a later WebView task so the foreground state
+change can paint first. Project coverage records use four-way bounded reads;
+source conversion yields between local batches; immutable plan enumeration
+remains in its worker. The six-worker download pipeline continues through its
+dedicated store. Per-tile progress does not publish a project/controller state
+change, so project sync subscribers do not rerender for map downloads.
 
-The extraction adds no requests, retries, timers, or scans. GeoJSON concurrency
-remains capped at three; project arrays and warning arrays retain stable
-identity when their contents do not change.
+The flow adds no requests or retries. GeoJSON concurrency remains capped at
+three; offline-map project-record reads are capped at four; project arrays and
+warning arrays retain stable identity when their contents do not change.
