@@ -77,6 +77,8 @@ behaviors.
 - `dashboard-map-overlays.md`: read-only dashboard overlay endpoints, icon/label
   mapping, marker detail modal contract, share functionality, and offline cache
   lifecycle.
+- `pwa-metadata.md`: built web branding, manifest/icon ownership, and emitted
+  asset verification.
 - `settings.md`: Settings page sections (event-driven sync stats, map settings,
   tutorial, account), state ownership, progress lifecycle, and offline behavior.
 - `map-depth-and-scale.md`: dashboard distance scale, project/depth color mode

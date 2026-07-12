@@ -312,11 +312,11 @@ shipped. `index.html` references `/app-icon.png`, also absent from `dist`, and
 uses “Ionic App” for the document and Apple home-screen titles. Native app names
 are correct, but the web/PWA artifact has 404 icons and stale branding.
 
-- [ ] **RED:** add a build-artifact metadata test that resolves every manifest
+- [x] **RED:** add a build-artifact metadata test that resolves every manifest
       and HTML icon path inside `dist` and asserts SpeleoDB titles.
-- [ ] **GREEN:** ship one reviewed icon source at the referenced public path(s),
+- [x] **GREEN:** ship one reviewed icon source at the referenced public path(s),
       use correct sizes/MIME metadata, and replace stale Ionic titles.
-- [ ] Build and inspect the rendered manifest/icon responses.
+- [x] Build and inspect the rendered manifest/icon responses.
 
 #### RR-012 — Release documentation contradicts current behavior
 
@@ -676,3 +676,27 @@ a commit cannot contain its own stable final hash.
   contract tests remain green within it.
 - **Limitations:** this gate measures browser TypeScript. Native, static-asset,
   build-tooling, and physical-device evidence remain separate release gates.
+
+### RR-011 — Correct SpeleoDB PWA metadata
+
+- **RED:** `npx vitest run quality/pwa-metadata.test.ts` — 2 expected failures
+  at the emitted artifact proved the built title remained “Ionic App” and
+  `/app-icon.png` did not exist. The harness build disables only bundle-budget
+  enforcement because Vitest instrumentation inflates chunks; standalone build
+  retains that independent gate.
+- **GREEN:** the unchanged command passed 2/2. It builds into an isolated temp
+  directory, resolves every local HTML link/script and manifest icon, asserts
+  SpeleoDB document/Apple/manifest branding, validates PNG signatures, and
+  compares encoded dimensions with declared 180/192/512px sizes.
+- **Design/performance:** three exact-size renditions were generated from the
+  existing reviewed `resources/icon.png` source. They total 99,091 bytes, have
+  opaque navy backgrounds, and declare `purpose: any` rather than making an
+  unreviewed maskable-safe-area claim. No application JavaScript was added.
+- **Gates:** lint, typecheck, threshold-enforced coverage, standalone build with
+  bundle budgets, inventory, runtime/full dependency audits, hard button scan,
+  and configured staging integration (2 files / 13 tests) passed. The covered
+  suite passed 111 files / 1,882 tests with 13 staging-only skips. A localhost
+  preview returned 200 + `application/json` for the manifest and 200 +
+  `image/png` for every icon; MapLibre contracts remain green.
+- **Limitations:** browser/PWA metadata is covered here. Native icon resources
+  are unchanged and remain subject to final Capacitor/native inspection.
