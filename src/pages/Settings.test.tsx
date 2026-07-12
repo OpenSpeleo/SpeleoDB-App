@@ -754,6 +754,8 @@ describe('Settings page', () => {
     await user.click(screen.getByTestId('sign-out-button'));
 
     expect(screen.getByText('Pending offline operations will be lost')).toBeInTheDocument();
+    expect(screen.queryByText(/clear local data and sign out/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/all local data will be cleared immediately/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('pending-ops-loss-warning')).toHaveTextContent(
       'You have 1 pending offline operation.',
     );
@@ -762,6 +764,7 @@ describe('Settings page', () => {
     );
     const acknowledgement = screen.getByTestId('pending-ops-loss-acknowledgement');
     const confirm = screen.getByTestId('confirm-logout');
+    expect(confirm).toHaveTextContent('Delete Offline Operations & Sign Out');
     expect(acknowledgement).not.toBeChecked();
     expect(confirm).toBeDisabled();
 

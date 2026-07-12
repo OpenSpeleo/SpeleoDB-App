@@ -645,21 +645,26 @@ const Settings: React.FC<SettingsProps> = ({
                     />
                   </svg>
                 </span>
-                <h2 className="text-xl font-semibold text-slate-100 mb-2">Clear local data and sign out?</h2>
-                <p className="text-slate-300 text-sm mb-2">
-                  All local data will be cleared immediately from this device.
-                </p>
-                <p className="text-slate-400 text-sm">
-                  This includes cached maps, GeoJSON, projects, and offline credentials. You will not be able to reconnect without network access.
-                </p>
+                <h2 className="text-xl font-semibold text-slate-100 mb-2">
+                  {hasPendingOfflineOps
+                    ? 'Pending offline operations will be lost'
+                    : 'Clear local data and sign out?'}
+                </h2>
+                {!hasPendingOfflineOps && (
+                  <>
+                    <p className="text-slate-300 text-sm mb-2">
+                      All local data will be cleared immediately from this device.
+                    </p>
+                    <p className="text-slate-400 text-sm">
+                      This includes cached maps, GeoJSON, projects, and offline credentials. You will not be able to reconnect without network access.
+                    </p>
+                  </>
+                )}
                 {hasPendingOfflineOps && (
                   <div
                     className="mt-5 rounded-lg border border-red-400/70 bg-red-950/60 p-4 text-left"
                     data-testid="pending-ops-loss-warning"
                   >
-                    <h3 className="text-base font-semibold text-red-200 mb-2">
-                      Pending offline operations will be lost
-                    </h3>
                     <p className="text-sm text-red-100 mb-3" id="pending-ops-loss-description">
                       You have {pendingOpsCount} pending offline operation{pendingOpsCount === 1 ? '' : 's'}.
                       {' '}Signing out will permanently delete all pending offline operations from this device.
@@ -704,7 +709,11 @@ const Settings: React.FC<SettingsProps> = ({
                   className="app-btn app-btn--danger"
                   data-testid="confirm-logout"
                 >
-                  {isLoggingOut ? 'Clearing data\u2026' : 'Wipe local data & Sign Out'}
+                  {isLoggingOut
+                    ? 'Clearing data\u2026'
+                    : hasPendingOfflineOps
+                      ? 'Delete Offline Operations & Sign Out'
+                      : 'Wipe local data & Sign Out'}
                 </button>
               </div>
             </div>

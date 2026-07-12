@@ -178,9 +178,13 @@ placed between the Tutorial and Account sections.
 
 ### Account
 
-- **Sign Out** button: opens a confirmation modal. On confirm, calls
-  `controller.logout()`, dismisses the modal, and navigates to `/login`. The
-  button is disabled while logout is in progress to prevent double-submission.
+- **Sign Out** button: users with no pending offline operations see the generic
+  local-data confirmation. Users with pending operations instead see one
+  mutually exclusive irreversible-loss confirmation with the exact operation
+  count and required acknowledgement; accepting it calls `controller.logout()`
+  directly without a second generic confirmation. Successful logout dismisses
+  the modal and navigates to `/login`. Actions and dismissal are disabled while
+  logout is in progress to prevent double-submission.
 
 ## State ownership
 
