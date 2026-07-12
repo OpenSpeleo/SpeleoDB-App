@@ -44,6 +44,10 @@ on a target device. Accordingly:
   verify the expected certificate/team identity, install the exact artifacts,
   validate symbols/mappings, and require the physical-device release checklist.
 
+The authorized trusted-signing, artifact, installation, store-validation,
+approval, and rollback protocol is defined in `docs/release-ceremony.md`. It is a
+manual authorization boundary; this CI workflow does not implement publishing.
+
 ## Vitest Wrapper
 
 All CI Vitest invocations must go through `npm run test.unit`, which calls

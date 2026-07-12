@@ -283,10 +283,10 @@ That correctly proves compilation but not publisher identity, entitlements,
 store eligibility, upgrade installation, symbol/mapping retention, or release
 artifact reproducibility.
 
-- [ ] Document the trusted manual/automated release ceremony: exact version
+- [x] Document the trusted manual/automated release ceremony: exact version
       bump, protected signing identity, clean install + upgrade install, store
       validation, symbol/mapping retention, artifact hashes, and rollback rule.
-- [ ] Do not add secrets or publishing permissions without explicit user
+- [x] Do not add secrets or publishing permissions without explicit user
       authorization. Record this as an external release gate if trusted signing
       is performed outside the repository.
 
@@ -769,3 +769,30 @@ a commit cannot contain its own stable final hash.
   Android 24/33/36, true iOS 15.0/latest, and both physical-platform records stay
   unchecked above and block release until supplied by the manual workflow/device
   ceremony.
+
+### RR-009 — Trusted release ceremony
+
+- **RED:** `npx vitest run quality/release-ceremony.test.ts --reporter=dot`
+  failed at the owning documentation seam with `ENOENT` for the absent ceremony;
+  all 4 version/identity/evidence/authorization contracts were skipped.
+- **GREEN:** after making two line-wrap-sensitive assertions semantic, the
+  unchanged focused command passed 4/4. It requires monotonic cross-platform
+  versions, independently known publisher identities, clean/upgrade installs,
+  store validation, symbols/mappings, artifact-to-source hashes, independent
+  approval, forward-fix rollback, and the no-publish boundary.
+- **Design/security:** `docs/release-ceremony.md` names the current `1.3.0 (130)`
+  native version sources and exact verification commands without storing a key,
+  password, profile, store credential, or publishing permission. It treats
+  disposable CI artifacts as compile-only and requires protected ephemeral
+  signing plus an independent expected certificate/team record.
+- **Gates:** lint, typecheck, production build with bundle budgets, Prettier,
+  runtime/full dependency audits (zero vulnerabilities), hard button scan, and
+  configured staging integration (2 files / 13 tests) passed. The
+  threshold-enforced suite passed 114 files / 1,894 tests with 13 staging-only
+  skips; coverage remained 90.27% statements, 82.05% branches, 92.73% functions,
+  and 92.36% lines. MapLibre contracts remained green. The post-stage inventory
+  classified all 578 tracked files with no gaps or overlaps.
+- **External evidence:** no trusted key was accessed and no artifact was signed,
+  uploaded, installed, validated by a store, tagged, or published. Those actions
+  require separate authorization; until their hashes, installation matrices,
+  symbols, store receipts, and two-person approval exist, release remains blocked.

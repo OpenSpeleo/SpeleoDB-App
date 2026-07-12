@@ -81,6 +81,8 @@ behaviors.
   asset verification.
 - `release-device-evidence.md`: credential-safe Android/iOS E2E matrices,
   physical-device protocols, evidence fields, and release blocking rules.
+- `release-ceremony.md`: protected signing, versioning, artifact identity,
+  installation/store validation, hashes, approval, and rollback.
 - `settings.md`: Settings page sections (event-driven sync stats, map settings,
   tutorial, account), state ownership, progress lifecycle, and offline behavior.
 - `map-depth-and-scale.md`: dashboard distance scale, project/depth color mode
