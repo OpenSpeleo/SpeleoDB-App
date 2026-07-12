@@ -355,47 +355,49 @@ the Capacitor/plugin build graph and do not demonstrate a shipped defect.
       atomic, and single-flight.
 - [x] Phase 3: RR-006 and RR-007 — make GPS save and native transitions honest
       and race-safe.
-- [ ] Phase 4: RR-010 through RR-012 — enforce regression gates and align
+- [x] Phase 4: RR-010 through RR-012 — enforce regression gates and align
       shipped metadata/documentation.
-- [ ] Phase 5: RR-008 and RR-009 — run/record black-box, native-device, signing,
-      install, and store-validation evidence.
-- [ ] Reassess elegance and duplication after each phase; keep shared
+- [x] Phase 5 repository work: RR-008 and RR-009 — add credential-safe black-box
+      workflows and define the trusted signing/install/store ceremony.
+- [ ] Phase 5 external execution: run the supported app E2E/physical-device
+      matrices and trusted signing/install/store validation.
+- [x] Reassess elegance and duplication after each phase; keep shared
       cancellation, transaction, and command-lane ownership centralized.
 
 ## Verification matrix
 
 ### Every behavior-changing commit
 
-- [ ] Record the exact red focused command and its expected failing assertion.
-- [ ] Record the exact green focused command and result.
-- [ ] `npm run lint`
-- [ ] `npm run typecheck`
-- [ ] `npm run build`
-- [ ] `API_TEST_ENABLED=false npm run test:ci`
-- [ ] Live configured staging integration tests with approved network access.
-- [ ] `npm run quality:inventory`
-- [ ] `git diff --check` and explicit staged/unstaged inspection.
-- [ ] `rg -n 'app-btn[^\"]*bg-' src --glob '*.tsx'` returns no matches.
-- [ ] Production-like MapLibre source-injection contract tests pass.
-- [ ] Full dependency audit reports no runtime or development advisories.
+- [x] Record the exact red focused command and its expected failing assertion.
+- [x] Record the exact green focused command and result.
+- [x] `npm run lint`
+- [x] `npm run typecheck`
+- [x] `npm run build`
+- [x] `API_TEST_ENABLED=false npm run test:ci`
+- [x] Live configured staging integration tests with approved network access.
+- [x] `npm run quality:inventory`
+- [x] `git diff --check` and explicit staged/unstaged inspection.
+- [x] `rg -n 'app-btn[^\"]*bg-' src --glob '*.tsx'` returns no matches.
+- [x] Production-like MapLibre source-injection contract tests pass.
+- [x] Full dependency audit reports no runtime or development advisories.
 
 ### Persistence/concurrency-specific
 
-- [ ] Real fake-IndexedDB transaction completion/abort evidence.
-- [ ] Reopen-after-failure/force-quit tests, not only in-memory assertions.
-- [ ] Deferred transport/write/delete tests at the exact awaited boundary.
-- [ ] Logout cancellation tests settle ignored/late dependencies after purge.
-- [ ] Repeated covered suite runs remain deterministic and leak no timers,
+- [x] Real fake-IndexedDB transaction completion/abort evidence.
+- [x] Reopen-after-failure/force-quit tests, not only in-memory assertions.
+- [x] Deferred transport/write/delete tests at the exact awaited boundary.
+- [x] Logout cancellation tests settle ignored/late dependencies after purge.
+- [x] Repeated covered suite runs remain deterministic and leak no timers,
       listeners, transactions, or console output.
 
 ### Native/build-specific
 
-- [ ] `npx cap sync android` and `npx cap sync ios`; inspect every tracked diff.
-- [ ] Android unit tests, lint, Debug/Release APK, Release AAB, and
+- [x] `npx cap sync android` and `npx cap sync ios`; inspect every tracked diff.
+- [x] Android unit tests, lint, Debug/Release APK, Release AAB, and
       instrumentation-test compilation.
-- [ ] iOS signed simulator XCTest plus unsigned generic-device Debug and Release
+- [x] iOS signed simulator XCTest plus unsigned generic-device Debug and Release
       compilation.
-- [ ] Final merged Android manifest, iOS entitlements, privacy manifest,
+- [x] Final merged Android manifest, iOS entitlements, privacy manifest,
       background modes, version/build numbers, and bundle IDs inspected.
 - [ ] Trusted publisher-signed artifacts installed as both fresh and upgrade
       installs before distribution.
@@ -856,3 +858,117 @@ a commit cannot contain its own stable final hash.
   skips and unchanged 90.27% / 82.05% / 92.73% / 92.36% coverage. The hard
   button scan, MapLibre contracts, diff check, and 581-file tracked inventory
   passed.
+
+## Final remediation ledger (2026-07-12)
+
+### Repository outcome
+
+All 14 confirmed RR items have repository-owned remediation, regression
+evidence, documentation, and focused commits. RR-013 required one additional
+corrective commit when the final clean Release build forced plugin tasks that a
+debug audit had kept up to date; the correction remained scoped to warning
+attribution and audit tooling. No product change is hidden in this closing
+ledger.
+
+The repository remediation is green, but **distribution remains blocked** until
+the unchecked E2E/physical-device and trusted publisher signing, fresh/upgrade
+installation, store validation, symbol retention, hash, and independent approval
+gates are executed. Compilation artifacts below are disposable evidence and are
+not authorized release candidates.
+
+### Commit ledger
+
+| Scope | Commit | Subject |
+| --- | --- | --- |
+| Plan | `a6d12815b814be580d7f7f1744e078e0a6ac1056` | `[Docs] Add July 2026 release readiness plan` |
+| RR-001 | `1b2bf9dd9dc48997e01e8d488c64cf4e15e60130` | `[Fix] Make logout cache cleanup failure independent` |
+| RR-002 | `f13616632772fa3e5919a80aa0fa7c70eb4bc13f` | `[Fix] Cancel user operations during logout` |
+| RR-014 | `48a3a951623f6d88983dc81f6df333b37f30268c` | `[Feature] Warn before discarding pending offline operations` |
+| RR-003 | `224d522ea0a999e2d8df96e59c6fe2a06431cf5b` | `[Fix] Make confirmed cache mutations atomic` |
+| RR-004 | `8aeab96d9672ade69adb246fd07d7cfac2a8b3ce` | `[Fix] Serialize offline operation replay` |
+| RR-005 | `d18d70ebea9117f98b58bc27cf3d589172503346` | `[Fix] Make offline operation replacement atomic` |
+| RR-006 | `7cc6876e995b5b167d9cd5080470e40fc9c8f5c1` | `[Fix] Report GPS persistence failures` |
+| RR-007 | `422f6988a7b38df5edea24537b1b133098f1c30b` | `[Fix] Serialize GPS recording transitions` |
+| RR-010 | `6a2acf18cfcaf45c07c8cd612226ed0ed181047d` | `[Test] Enforce audited coverage thresholds` |
+| RR-011 | `09e7981e336259cf2f5e0a4a63d605a92d878011` | `[Fix] Correct SpeleoDB PWA metadata` |
+| RR-012 | `e8073b2cc722fd8fbf63b4ad9d2e32ee71559134` | `[Docs] Align release documentation with runtime behavior` |
+| RR-008 | `0db3ced6c5b7ddee994a3bd27bfc41259708454e` | `[Test] Add cross-platform release workflows` |
+| RR-009 | `5fc443778c6c218d26a1a1f1a867c14bc4e2b000` | `[Docs] Define trusted release ceremony` |
+| RR-013 | `f830602c08222a2eca3b3f6060db45c119257e75` | `[Chore] Audit Gradle deprecation warnings` |
+| RR-013 correction | `4efa69d31cb58052b09e8e4a7db8894d4da94db7` | `[Fix] Complete Gradle warning attribution` |
+
+The documentation-only closing commit cannot record its own stable hash; its
+subject is `[Docs] Record release remediation results` and it is verified after
+creation.
+
+### Final web and integration verification
+
+- `npm ci` installed the 726 locked packages, ran every deterministic native
+  compatibility patch from fresh package sources, and reported zero
+  vulnerabilities.
+- `npm run lint`, `npm run typecheck`, and `npm run build` passed; bundle budgets
+  remained enforced.
+- `API_TEST_ENABLED=false npm run test:ci` passed 115 files with 2 configured
+  staging files skipped: 1,896 passed / 13 skipped tests. Coverage was 90.27%
+  statements, 82.05% branches, 92.73% functions, and 92.36% lines; all global
+  and critical-module thresholds passed.
+- Configured staging integration passed 2 files / 13 tests with approved network
+  access.
+- `npm audit --omit=dev --audit-level=moderate` and
+  `npm audit --audit-level=moderate` both reported zero vulnerabilities.
+- `npm run quality:inventory` classified all 581 tracked files with no gap or
+  overlap. The hard button scan returned zero matches, the MapLibre owning-source
+  contracts passed in the complete suite, and `git diff --check` was clean.
+- RR-specific sections above preserve every exact RED/GREEN command, expected
+  failure, corrected result, performance consideration, and limitation.
+
+### Final native verification
+
+- `npx cap sync` completed for Android and iOS with all 14 Android and 13 iOS
+  plugins; inspection found no tracked native or generated-asset drift.
+- Android `./gradlew testDebugUnitTest lint assembleDebug assembleRelease
+  bundleRelease assembleDebugAndroidTest --warning-mode all --console=plain`
+  passed 1,845 tasks (1,158 executed / 687 up-to-date). It produced Debug and
+  unsigned Release APKs, a Release AAB, and the app instrumentation APK. All
+  remaining third-party/generated diagnostics are enumerated in
+  `docs/android-gradle-warnings.md` rather than suppressed.
+- Xcode 26.6 (17F113) XCTest passed all 10 tests on iPhone 17 Pro / iOS 26.4.
+  Unsigned generic-device Debug and Release builds both passed with
+  `CODE_SIGNING_ALLOWED=NO`.
+- The merged Android manifest identifies `org.speleodb.app` version `1.3.0`
+  (`130`), min SDK 24, target SDK 36, no cleartext traffic or backup, and the
+  required location/foreground-service declarations.
+- The built iOS Release Info.plist identifies `org.speleodb.app` version `1.3.0`
+  (`130`), minimum iOS 15.0, location-only background mode, HTTPS transport,
+  SpeleoDB deep-link scheme, and the expected location purpose strings.
+- Source and built plists passed `plutil -lint`. Associated-domain and complete-
+  until-first-authentication data-protection entitlements were present. The
+  built privacy manifest declares precise location, crash/diagnostic data, disk
+  space/file-timestamp accessed APIs, and no tracking.
+
+Disposable compile-artifact SHA-256 values (not release approval):
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Android Debug APK | `999ce4c47f76d7a4973135312c0db93e4cdd28b0c8b6d5d67597e722cc8562d6` |
+| Android unsigned Release APK | `bcec7560eadb0e6fbb369e0decbb1bde451554089faf7e4d8a76830f5eeeaf48` |
+| Android Release AAB | `1d1cfabeeb10b32f9907f1e4b23390cf7c8f542d353a8729dddbc7d96deb1dd1` |
+| Android instrumentation APK | `fc0df534bbb37785d3673ffe243ff6953108fe2da3f367f40a7497a7742e8b34` |
+| iOS generic-device Debug executable | `6af0188432046a6ad16c96bdfd70ff4e08009f6c477577dd1c2b5fc3e0ca5e89` |
+| iOS generic-device Release executable | `c9ba3b16730dfbf18805a39ba26991de7795af1243e5d2a06ebe8956ffb198a3` |
+
+### External blockers and authorization boundary
+
+- The dedicated `SPELEODB_E2E_*` environment, Android API 24/33/36 emulator
+  matrix, and true iOS 15.0 runtime are not available locally. The manual pinned
+  workflow and Maestro flows are committed and validated, but no app-flow result
+  is manufactured from missing infrastructure.
+- No physical Android or iOS device evidence exists for logout races,
+  force-quit/reopen storage, offline-map pressure, background/lock GPS,
+  notification denial, battery optimization, compass rotation, or performance
+  percentiles.
+- No trusted publisher key/profile was accessed. No publisher-signed artifact,
+  clean/upgrade install, Play/App Store validation, production symbol bundle,
+  trusted `SHA256SUMS`, independent approval, rollout, or rollback drill exists.
+- No commit was pushed; no PR, tag, GitHub release, store upload, release signing
+  change, credential change, or publication was created.
