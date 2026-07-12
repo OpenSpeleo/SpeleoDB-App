@@ -4,6 +4,7 @@ import type { MapOverlayGeoJsonRecord, MapOverlayId } from '../../types/mapOverl
 import type { Project } from '../../types/project';
 import type { ProjectGeoJSONMapData } from '../../types/projectGeoJSON';
 import {
+  createRenderingBatcher,
   useDashboardMapData,
   useVisibleDashboardOverlays,
   type DashboardMapDataSource,
@@ -99,6 +100,55 @@ afterEach(() => {
 });
 
 describe('useDashboardMapData', () => {
+  it('coalesces 60 ready records into one rendering turn', async () => {
+    const renderingTurn = deferred<void>();
+    const yieldWork = vi.fn(() => renderingTurn.promise);
+    const publish = vi.fn();
+    const queue = createRenderingBatcher(
+      () => false,
+      publish,
+      yieldWork,
+    );
+
+    const publications = Array.from({ length: 60 }, (_, index) => (
+      queue(`project-${index}`, index)
+    ));
+    expect(yieldWork).toHaveBeenCalledOnce();
+    expect(publish).not.toHaveBeenCalled();
+
+    renderingTurn.resolve();
+    await Promise.all(publications);
+
+    expect(publish).toHaveBeenCalledOnce();
+    expect(publish.mock.calls[0][0]).toBeInstanceOf(Map);
+    expect((publish.mock.calls[0][0] as ReadonlyMap<string, number>).size).toBe(60);
+  });
+
+  it('loads other overlays while the landmarks cache read is pending', async () => {
+    const landmarksRead = deferred<unknown | null>();
+    const source = createSource({
+      getOverlayGeoJSON: (overlayId) => (
+        overlayId === 'landmarks'
+          ? landmarksRead.promise
+          : Promise.resolve(collection(pointFeature(overlayId)))
+      ),
+    });
+    const projects: Project[] = [];
+    const { result } = renderHook(() => useDashboardMapData({
+      source,
+      projects,
+      mapDataRevision: 1,
+      landmarksRevision: 1,
+    }));
+
+    await waitFor(() => expect(source.getOverlayGeoJSON).toHaveBeenCalledTimes(5));
+    await waitFor(() => (
+      expect(result.current.overlayGeoJsonData.surfaceStations).toBeDefined()
+    ));
+
+    landmarksRead.resolve(null);
+  });
+
   it('reuses depth-enriched project data across revision-only reloads', async () => {
     const project = createProject('project');
     const projects = [project];
@@ -328,7 +378,7 @@ describe('useDashboardMapData', () => {
     });
     expect(warn).not.toHaveBeenCalled();
     expect(source.getProjectMapData).toHaveBeenCalledOnce();
-    expect(source.getOverlayGeoJSON).toHaveBeenCalledOnce();
+    expect(source.getOverlayGeoJSON).toHaveBeenCalledTimes(5);
   });
 
   it('suppresses stale project completions and overlay failures after unmount', async () => {

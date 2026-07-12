@@ -49,16 +49,16 @@ MapLibre source updates, so it is not the first optimization target.
 
 ### PERF-004 — Batch ready map-data publication
 
-- [ ] Add a hook regression proving independently ready records coalesce into
+- [x] Add a hook regression proving independently ready records coalesce into
   one publication turn while a slow record cannot block the first batch.
-- [ ] Execute and record the expected failure.
-- [ ] Coalesce ready project and overlay records per cooperative rendering turn
+- [x] Execute and record the expected failure.
+- [x] Coalesce ready project and overlay records per cooperative rendering turn
   without delaying the first available data or weakening stale-generation
   checks.
-- [ ] Preserve per-project commit gating and failure isolation.
-- [ ] Measure render/publication count with 60 immediate records.
-- [ ] Update Dashboard map-data performance documentation and verification.
-- [ ] Commit as `[Fix] Batch dashboard map publication`; inspect the commit and
+- [x] Preserve per-project commit gating and failure isolation.
+- [x] Measure render/publication count with 60 immediate records.
+- [x] Update Dashboard map-data performance documentation and verification.
+- [x] Commit as `[Fix] Batch dashboard map publication`; inspect the commit and
   clean status before PERF-005. Do not push.
 
 ### PERF-005 — Parallelize independent foreground metadata sync
@@ -157,3 +157,48 @@ storage—is still dominant.
 - No native source or generated native asset changed, so native compilation is
   inapplicable to this TypeScript/cache delivery. Physical-device timings after
   installation remain the authoritative performance measurement.
+
+### PERF-004 TDD evidence
+
+- Red command: `npx vitest run
+  src/pages/dashboard/useDashboardMapData.test.ts -t 'coalesces 60 ready
+  records|loads other overlays while the landmarks cache read is pending'`.
+- Red result: the production batcher did not exist, and the serial overlay
+  loader admitted only the landmarks read while it was pending instead of all
+  five overlay reads.
+- Green selected result: 3/3 pass including the existing progressive-project
+  invariant that a slow record cannot block an available project.
+- Green owning suites: `useDashboardMapData.test.ts` and `Dashboard.test.tsx` —
+  125/125 pass.
+
+### PERF-004 implementation result
+
+- A generation-aware rendering batcher accumulates ready entries in a `Map`
+  and publishes one immutable batch after a cooperative main-thread yield.
+- The four project readers keep bounded storage concurrency and progressive
+  first data. Immediately ready records coalesce by worker wave, reducing the
+  60-project worst case from 60 state/MapLibre publications to at most 15.
+- All five overlay reads are admitted independently. Ready overlays coalesce
+  and publish without waiting for a slow landmarks record.
+- Unmount/revision staleness is checked before normalization and batch
+  publication. Concurrent reads may settle, but cannot resurrect or warn about
+  stale data.
+
+### PERF-004 verification
+
+- Focused batch/progressive-loading regressions — 3/3 pass.
+- Owning Dashboard map-data suites — 125/125 pass.
+- `npm run lint` — pass.
+- `npm run typecheck` — pass.
+- `npm run build` — pass; 614 modules transformed.
+- `API_TEST_ENABLED=false npm run test:ci` — pass: 117 files passed, 2 skipped;
+  1,918 tests passed, 13 skipped. Coverage: 90.42% statements, 82.16%
+  branches, 92.85% functions, 92.52% lines.
+- `npm run quality:inventory` — pass; all 601 files classified.
+- Button background hard-rule scan — no matches.
+- MapLibre declarations were not changed; source-ownership coverage remains
+  green in the complete suite.
+- `git diff --check` — pass.
+- No native source or generated native asset changed, so native compilation is
+  inapplicable to this TypeScript/render-publication delivery. Physical-device
+  timings after installation remain the authoritative performance measurement.

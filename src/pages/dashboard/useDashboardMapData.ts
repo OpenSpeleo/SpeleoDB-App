@@ -23,6 +23,7 @@ type ProjectMapDataRecord = Record<string, ProjectGeoJSONMapData>;
 type StaleCheck = () => boolean;
 type WarningReporter = (message: string, error: unknown) => void;
 type MainThreadYield = () => Promise<void>;
+type BatchPublisher<T> = (batch: ReadonlyMap<string, T>) => void;
 
 interface ProjectMapLoadState {
   projects: readonly Project[];
@@ -80,15 +81,50 @@ function normalizeProjectMapData(
   };
 }
 
+export function createRenderingBatcher<T>(
+  isStale: StaleCheck,
+  publish: BatchPublisher<T>,
+  yieldWork: MainThreadYield,
+): (key: string, value: T) => Promise<void> {
+  const pending = new Map<string, T>();
+  let scheduled: Promise<void> | null = null;
+
+  const schedule = (): Promise<void> => {
+    if (scheduled) return scheduled;
+    scheduled = (async () => {
+      while (pending.size > 0) {
+        await yieldWork();
+        if (isStale()) {
+          pending.clear();
+          return;
+        }
+        const batch = new Map(pending);
+        pending.clear();
+        publish(batch);
+      }
+    })().finally(() => {
+      scheduled = null;
+    });
+    return scheduled;
+  };
+
+  return (key, value) => {
+    if (isStale()) return Promise.resolve();
+    pending.set(key, value);
+    return schedule();
+  };
+}
+
 async function loadProjectMapData(
   source: DashboardMapDataSource,
   projects: readonly Project[],
   isStale: StaleCheck,
   warn: WarningReporter,
-  publish: (projectId: string, data: ProjectGeoJSONMapData) => void,
+  publish: BatchPublisher<ProjectGeoJSONMapData>,
   yieldWork: MainThreadYield,
 ): Promise<void> {
   let cursor = 0;
+  const queuePublication = createRenderingBatcher(isStale, publish, yieldWork);
   const worker = async (): Promise<void> => {
     while (cursor < projects.length) {
       const index = cursor;
@@ -100,8 +136,7 @@ async function loadProjectMapData(
         await yieldWork();
         if (isStale()) return;
         const normalized = normalizeProjectMapData(project, mapData);
-        if (normalized) publish(project.id, normalized);
-        await yieldWork();
+        if (normalized) await queuePublication(project.id, normalized);
         if (isStale()) return;
       } catch (error) {
         if (isStale()) return;
@@ -131,24 +166,24 @@ async function loadOverlayMapData(
   source: DashboardMapDataSource,
   isStale: StaleCheck,
   warn: WarningReporter,
-  publish: (overlayId: MapOverlayId, data: GeoJSON.FeatureCollection) => void,
+  publish: BatchPublisher<GeoJSON.FeatureCollection>,
   yieldWork: MainThreadYield,
 ): Promise<void> {
-  for (const overlay of MAP_OVERLAYS) {
+  const queuePublication = createRenderingBatcher(isStale, publish, yieldWork);
+  await Promise.all(MAP_OVERLAYS.map(async (overlay) => {
     try {
       const raw = await source.getOverlayGeoJSON(overlay.id);
       if (isStale()) return;
       await yieldWork();
       if (isStale()) return;
       const normalized = normalizeOverlay(overlay.id, raw);
-      if (normalized) publish(overlay.id, normalized);
-      await yieldWork();
+      if (normalized) await queuePublication(overlay.id, normalized);
       if (isStale()) return;
     } catch (error) {
       if (isStale()) return;
       warn('Failed to load a cached overlay:', error);
     }
-  }
+  }));
 }
 
 function useProjectMapData(
@@ -170,16 +205,18 @@ function useProjectMapData(
       projects,
       () => stale,
       warn,
-      (projectId, data) => {
+      (batch) => {
         if (stale) return;
         setLoadState((current) => {
           const currentData = current.projects === projects && current.revision === mapDataRevision
             ? current.data
             : {};
+          const nextData = { ...currentData };
+          for (const [projectId, data] of batch) nextData[projectId] = data;
           return {
             projects,
             revision: mapDataRevision,
-            data: { ...currentData, [projectId]: data },
+            data: nextData,
           };
         });
       },
@@ -210,17 +247,21 @@ function useOverlayMapData(
       source,
       () => stale,
       warn,
-      (overlayId, data) => {
+      (batch) => {
         if (stale) return;
         setLoadState((current) => {
           const currentData = current.mapRevision === mapDataRevision
             && current.landmarksRevision === landmarksRevision
             ? current.data
             : {};
+          const nextData = { ...currentData };
+          for (const [overlayId, data] of batch) {
+            nextData[overlayId as MapOverlayId] = data;
+          }
           return {
             mapRevision: mapDataRevision,
             landmarksRevision,
-            data: { ...currentData, [overlayId]: data },
+            data: nextData,
           };
         });
       },

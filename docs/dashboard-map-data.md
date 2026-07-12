@@ -55,14 +55,21 @@ mutations without re-reading project map records.
 
 ## Performance
 
-Project cache reads use a four-worker pool and publish independently, so one
-slow project cannot hide an earlier ready project. Each record yields the
-WebView thread before CPU normalization/depth attachment and after publication,
-allowing input, React, and MapLibre work between records. Overlay reads publish
-independently with the same cooperative-yield boundary. Derived project records,
-GeoJSON, bounds, colors, landmark groups, and visible overlays remain memoized.
-Project zoom and initial fit continue to use prevalidated bounds and never
-rescan coordinates.
+Project cache reads use a four-worker pool, so one slow project cannot hide an
+earlier ready project. Each record yields the WebView thread before CPU
+normalization/depth attachment. Ready records accumulate in a `Map` and publish
+once on the next cooperative rendering turn. With 60 immediately available
+records, the four-worker admission pattern needs at most 15 project publication
+turns rather than 60 individual React/MapLibre reconciliations.
+
+The five overlay cache reads start together instead of waiting serially for the
+previous overlay. Their ready records use the same rendering batcher, so a slow
+landmarks record cannot hide surface stations, subsurface stations, exploration
+leads, or cylinder installs. Stale-generation checks run before normalization
+and publication; already-admitted reads may settle after unmount but cannot
+publish or report stale noise. Derived project records, GeoJSON, bounds, colors,
+landmark groups, and visible overlays remain memoized. Project zoom and initial
+fit continue to use prevalidated bounds and never rescan coordinates.
 
 The project cache returns the same immutable validated-record object to
 reconciliation and Dashboard consumers within a bounded session LRU. Depth
@@ -75,6 +82,8 @@ the bounded service cache and mounted UI.
 
 `useDashboardMapData.test.ts` directly covers zero-revision cache publication,
 project eligibility, progressive publication behind a deferred record,
+60-record rendering-turn coalescing, concurrent overlay admission behind a
+deferred landmarks record,
 valid/empty/malformed/stale commits, depth attachment,
 every overlay shape, failure containment, default diagnostics, revision
 clearing, commit replacement, and all late-success/late-failure cancellation
