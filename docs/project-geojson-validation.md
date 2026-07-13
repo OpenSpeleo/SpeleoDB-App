@@ -194,14 +194,13 @@ façade atomically as `{ commitId, featureCollection, bounds }`. It returns null
 for legacy, quarantined, session-disabled, missing, or non-current commits. A
 stable `mapDataRevision` is published as soon as the GeoJSON phase reaches its
 durable boundary, before overlay, GPS, or offline-map work. Initial/offline and
-Settings-triggered paths use the same boundary. `useDashboardMapData` reloads
-on that revision, progressively publishes each project map-data record, and
-requires each loaded `commitId` to equal the project's
-`latest_commit.id`. It immediately filters an old commit when the project list
-advances, before a replacement cache read resolves. If a sync or consumer read
-is superseded, stale success and failure completions cannot publish; the
-replacement publishes the next terminal revision. See
-`docs/dashboard-map-data.md`.
+Settings-triggered paths use the same boundary. `useDashboardMapData` reloads on
+that revision, progressively publishes each project map-data record, and
+requires each loaded `commitId` to equal the project's `latest_commit.id`. It
+immediately filters an old commit when the project list advances, before a
+replacement cache read resolves. If a sync or consumer read is superseded, stale
+success and failure completions cannot publish; the replacement publishes the
+next terminal revision. See `docs/dashboard-map-data.md`.
 
 Dashboard uses stored bounds for project zoom and combined initial fit; it does
 not walk project coordinates. Combined fit unions complete directed longitude

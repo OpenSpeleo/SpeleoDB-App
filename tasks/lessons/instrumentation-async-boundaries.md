@@ -1,9 +1,9 @@
 # Instrumentation must preserve async boundaries
 
 Timing, tracing, and logging are behavior changes when they wrap an existing
-`await` in another async function. The extra promise settlement adds a
-microtask boundary, which can change admission, cancellation, and supersession
-ordering even when the measured duration is negligible.
+`await` in another async function. The extra promise settlement adds a microtask
+boundary, which can change admission, cancellation, and supersession ordering
+even when the measured duration is negligible.
 
 For concurrency-sensitive orchestration, record the monotonic start time
 synchronously before the existing `await` and record completion synchronously

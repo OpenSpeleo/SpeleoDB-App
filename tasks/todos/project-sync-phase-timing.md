@@ -24,16 +24,16 @@ work without logging user data.
 ## TDD checklist
 
 - [x] Add a public-facade regression test for ordered per-phase and total timing
-  records using a deterministic monotonic clock.
-- [x] Add regression evidence that overlapping syncs retain distinct run IDs
-  and that the superseded run receives an aborted terminal record.
+      records using a deterministic monotonic clock.
+- [x] Add regression evidence that overlapping syncs retain distinct run IDs and
+      that the superseded run receives an aborted terminal record.
 - [x] Run the focused tests and record the expected red result.
 - [x] Add coordinator-owned timing measurement and structured console output.
 - [x] Document the log schema, phase boundaries, privacy boundary, and how to
-  interpret slow offline-map scheduling.
+      interpret slow offline-map scheduling.
 - [x] Rerun focused tests and record the green result.
 - [x] Run lint, typecheck, build, the complete CI test suite, quality inventory,
-  button/MapLibre hard-rule checks, and `git diff --check`.
+      button/MapLibre hard-rule checks, and `git diff --check`.
 - [x] Inspect explicit staged and unstaged diffs.
 - [x] Commit as `[Feature] Log project sync phase timings` without pushing.
 - [x] Inspect the commit and confirm no unintended worktree changes.
@@ -43,19 +43,18 @@ work without logging user data.
 ### TDD evidence
 
 - Red coordinator seam:
-  `npm run test.unit -- --run src/controllers/SpeleoDBController.test.ts -t
-  "logs ordered phase timings|aborts an older sync run"` failed both selected
-  tests because zero `[project-sync:timing]` records existed.
+  `npm run test.unit -- --run src/controllers/SpeleoDBController.test.ts -t "logs ordered phase timings|aborts an older sync run"`
+  failed both selected tests because zero `[project-sync:timing]` records
+  existed.
 - Red offline-map seam:
-  `npm run test.unit -- --run src/controllers/TileCoordinator.test.ts -t
-  "logs source collection and plan scheduling"` failed because zero
-  `[offline-map:timing]` records existed.
+  `npm run test.unit -- --run src/controllers/TileCoordinator.test.ts -t "logs source collection and plan scheduling"`
+  failed because zero `[offline-map:timing]` records existed.
 - Green timing seams: the combined command selecting those three regressions
   passed all 3 tests.
 - Authoritative controller/coordinator suites:
-  `npm run test.unit -- --run src/controllers/TileCoordinator.test.ts
-  src/controllers/SpeleoDBController.test.ts` passed all 204 tests after timing
-  bookkeeping was changed to preserve the original await topology.
+  `npm run test.unit -- --run src/controllers/TileCoordinator.test.ts src/controllers/SpeleoDBController.test.ts`
+  passed all 204 tests after timing bookkeeping was changed to preserve the
+  original await topology.
 - A later system-loaded run timed out in the unrelated real-IndexedDB GPS
   recovery test during a slow test environment startup. Its isolated rerun
   passed (test body 446 ms). No retry, timeout, or assertion was added.
@@ -77,21 +76,21 @@ work without logging user data.
   harness-only warning. This task does not suppress or weaken an unrelated
   release test diagnostic.
 - Native/device runtime — not required for the TypeScript-only diagnostic
-  behavior. The production web bundle compiled; actual device-console capture
-  is intentionally left for the reported 60-project dataset.
+  behavior. The production web bundle compiled; actual device-console capture is
+  intentionally left for the reported 60-project dataset.
 
 ### Design and correction
 
-The coordinator emits bounded structured records for every admitted project
-sync phase and one terminal record. Offline-map admission adds source-collection
-and plan-scheduling subphase records. Logs contain no credentials, instance
-URLs, project identity, or payload data. The first implementation used a
-generic async measurement wrapper; existing cancellation/concurrency tests
-proved that its extra promise settlement changed scheduling. The final design
-uses synchronous timing bookkeeping around the original awaits. The reusable
-rule is recorded in `tasks/lessons/instrumentation-async-boundaries.md`.
+The coordinator emits bounded structured records for every admitted project sync
+phase and one terminal record. Offline-map admission adds source-collection and
+plan-scheduling subphase records. Logs contain no credentials, instance URLs,
+project identity, or payload data. The first implementation used a generic async
+measurement wrapper; existing cancellation/concurrency tests proved that its
+extra promise settlement changed scheduling. The final design uses synchronous
+timing bookkeeping around the original awaits. The reusable rule is recorded in
+`tasks/lessons/instrumentation-async-boundaries.md`.
 
 Concurrent user changes in `src/pages/Settings.tsx`,
 `src/pages/Settings.test.tsx`, and
-`tasks/todos/pending-logout-single-confirmation.md` are explicitly excluded
-from this task's staging and commit.
+`tasks/todos/pending-logout-single-confirmation.md` are explicitly excluded from
+this task's staging and commit.

@@ -70,8 +70,8 @@ and replacement therefore serialize at the IndexedDB store instead of using a
 split `get`/`set` sequence that can lose concurrent results. Storage, schema,
 and cancellation failures propagate to the mutation owner; no revision is
 published and no durable offline operation is removed until the transaction
-completes. This costs one transaction per confirmed mutation and adds no
-network request.
+completes. This costs one transaction per confirmed mutation and adds no network
+request.
 
 ```mermaid
 flowchart TD
@@ -216,9 +216,9 @@ command rejects.
 
 - **landmark create** -> first identity-match the freshly pulled snapshot and
   adopt an existing result (covers a prior server success followed by local
-  transaction failure); otherwise POST. A 2xx captures id + upserts; a `400
-  duplicate` triggers one fresh pull, then identity-match + adopt; other 4xx ->
-  `error`; 5xx/transport -> abort rest.
+  transaction failure); otherwise POST. A 2xx captures id + upserts; a
+  `400 duplicate` triggers one fresh pull, then identity-match + adopt; other
+  4xx -> `error`; 5xx/transport -> abort rest.
 - **landmark update/delete** -> idempotent short-circuit, then baseline compare,
   then PATCH/DELETE (404 on delete = success).
 - **gps create** -> `uploadGpsTrack(localId)` builds the GPX and PUTs it to

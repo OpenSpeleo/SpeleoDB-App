@@ -41,8 +41,8 @@ does not attempt offline reconnect. `syncProjects()` returns after cache load,
 project refresh, validated GeoJSON, overlays, and GPS have durably published.
 Its tile phase reports that offline-map preparation was queued; source
 collection, plan construction, and downloads continue independently. Errors are
-caught locally; cache statistics and map progress
-continue through the dedicated event stream rather than a follow-up query.
+caught locally; cache statistics and map progress continue through the dedicated
+event stream rather than a follow-up query.
 
 The button is **disabled while offline-locked** (`isOfflineLocked`): syncing is
 an online-only action, and going back online is handled by the dedicated **Go

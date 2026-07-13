@@ -8,13 +8,14 @@ store declarations needed for background GPS recording, GPX sharing, and upload.
 
 Run the repository's lint, typecheck, covered web suite, production build, and
 documentation-contract tests before starting this checklist. Automated tests own
-deterministic failure paths such as rejected IndexedDB writes, serialized recorder
-commands, notification-denial admission, explicit queue replay, and logout
-cancellation. This checklist owns behavior only a packaged native runtime or
-physical device can prove: permission sheets, visible/hidden OS indicators,
+deterministic failure paths such as rejected IndexedDB writes, serialized
+recorder commands, notification-denial admission, explicit queue replay, and
+logout cancellation. This checklist owns behavior only a packaged native runtime
+or physical device can prove: permission sheets, visible/hidden OS indicators,
 background and lock-screen delivery, OEM battery policy, share sheets, and store
 declarations. Record the device model, OS version, build identifier, and outcome
-for each executed device case; an unchecked case remains an external release gate.
+for each executed device case; an unchecked case remains an external release
+gate.
 
 ## Android Device Testing
 
@@ -65,7 +66,8 @@ Test on at least:
 3. Grant location permission but deny notification permission.
 4. Expected:
    - Recording starts and continues to accept points.
-   - The foreground-service notification may be hidden while permission is denied.
+   - The foreground-service notification may be hidden while permission is
+     denied.
    - Pause, Resume, and Stop & Save remain usable.
 
 Notification permission is best-effort on Android 13+. Location authorization

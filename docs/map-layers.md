@@ -127,8 +127,8 @@ consistent while mounted.
 
 - Projects, landmarks, stations, and GPS paths are unioned into one immutable,
   layer-independent `{z,x,y}` plan. Tiles remain keyed by full provider URL.
-- The worker packs and deduplicates coordinates in memory with a hard ceiling
-  of 1,000,000 unique tiles. It sorts the final keys and transfers at most 2,048
+- The worker packs and deduplicates coordinates in memory with a hard ceiling of
+  1,000,000 unique tiles. It sorts the final keys and transfers at most 2,048
   final coordinates at a time, waiting for each compact plan-chunk write before
   continuing. The stable `N*M` total is published only after final chunks are
   durable.
@@ -194,8 +194,8 @@ layers compete for the same pinned budget and honor the user's override.
 - IndexedDB `speleo_tiles` is v8. Payloads, v7 manifests, generations, and
   memberships are preserved. The former v8 coordinate-staging store remains
   schema-compatible and is cleared during recovery, but current planners write
-  only final compact chunks. The incremental, payload-preserving v6 migration
-  is described in `docs/tile-cache-architecture.md`.
+  only final compact chunks. The incremental, payload-preserving v6 migration is
+  described in `docs/tile-cache-architecture.md`.
 
 ## Source code
 
@@ -221,8 +221,8 @@ layers compete for the same pinned budget and honor the user's override.
   separation, hash-miss passthrough, empty-list bypass, and
   `getCachedLayerStyle` rewrite.
 - `src/services/tileCache/TileCacheRepository.test.ts`: payload-preserving
-  migration, legacy v8 staging recovery/GC, layer generations, transaction aborts,
-  atomic concurrent eviction, and statistics.
+  migration, legacy v8 staging recovery/GC, layer generations, transaction
+  aborts, atomic concurrent eviction, and statistics.
 - `src/services/OfflineMapSyncEngine.test.ts`: six-worker scheduling, manifest
   fast path, per-tile progress, and retry head-of-line avoidance.
 - `src/services/OfflineMapSyncEngine.repository.test.ts`: real fake-IndexedDB

@@ -44,9 +44,9 @@ retained for one day only as intra-workflow compilation input.
 
 The pinned Maestro 2.4.0 archive is SHA-256 verified. Every GitHub Action,
 including the Android emulator runner, is pinned to an immutable commit. Network
-loss uses emulator airplane mode on Android and temporary host routes for the iOS
-simulator; an exit trap restores connectivity on success or failure. Reconnect
-and replay remain separate user actions in the flow.
+loss uses emulator airplane mode on Android and temporary host routes for the
+iOS simulator; an exit trap restores connectivity on success or failure.
+Reconnect and replay remain separate user actions in the flow.
 
 ## Physical-device protocols
 
@@ -81,10 +81,11 @@ state appears.
 
 ### Storage pressure and offline-map replacement
 
-Fill the device near its practical storage limit, retain an existing offline map,
-and request replacement. Verify a failed replacement keeps the old generation
-readable after relaunch, exposes the error, and leaves no partially published
-generation. Repeat once with sufficient storage and prove atomic replacement.
+Fill the device near its practical storage limit, retain an existing offline
+map, and request replacement. Verify a failed replacement keeps the old
+generation readable after relaunch, exposes the error, and leaves no partially
+published generation. Repeat once with sufficient storage and prove atomic
+replacement.
 
 ### WebView rendering and cached-map p95
 
@@ -98,7 +99,7 @@ retain the raw samples plus calculated p50/p95.
 
 For each automated lane, retain the workflow URL, commit SHA, exact matrix
 value, result, and timestamp. For physical runs, retain the completed table and
-evidence links. Missing Android API 24/33/36, latest iOS, true iOS 15.0, or either
-physical-platform protocol set blocks release approval. Compilation, a newer
-simulator substituted for iOS 15.0, or an undocumented manual statement does not
-satisfy the gate.
+evidence links. Missing Android API 24/33/36, latest iOS, true iOS 15.0, or
+either physical-platform protocol set blocks release approval. Compilation, a
+newer simulator substituted for iOS 15.0, or an undocumented manual statement
+does not satisfy the gate.

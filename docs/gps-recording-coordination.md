@@ -17,14 +17,14 @@ silently lose accepted points or leave a watcher running.
 - the live point buffer and incremental crash-recovery writes;
 - stop, discard, fatal-permission finalization, and logout teardown.
 
-All native/state transitions enter one coordinator-owned promise lane.
-Admission is synchronous: compatible overlapping commands with the same key
-(start, pause, resume, same-name stop, discard, fatal callback, or logout) share
-the exact in-flight promise/result, while incompatible commands execute in
-invocation order and validate state only when admitted. Commands outside their
-allowed state reject with `GpsRecordingTransitionError` instead of silently
-doing nothing. The lane absorbs prior rejection for scheduling purposes, so one
-native failure cannot poison later recovery.
+All native/state transitions enter one coordinator-owned promise lane. Admission
+is synchronous: compatible overlapping commands with the same key (start, pause,
+resume, same-name stop, discard, fatal callback, or logout) share the exact
+in-flight promise/result, while incompatible commands execute in invocation
+order and validate state only when admitted. Commands outside their allowed
+state reject with `GpsRecordingTransitionError` instead of silently doing
+nothing. The lane absorbs prior rejection for scheduling purposes, so one native
+failure cannot poison later recovery.
 
 `GpsTrackCoordinator` supplies narrow ports for persistence serialization,
 completed-track publication, and revision notification; the controller supplies

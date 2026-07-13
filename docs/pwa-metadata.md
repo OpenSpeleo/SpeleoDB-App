@@ -26,8 +26,8 @@ surfaces, not by application JavaScript.
 
 ## Verification
 
-`quality/pwa-metadata.test.ts` performs an isolated production Vite build, parses
-the emitted HTML and manifest, resolves every local `link[href]` and
+`quality/pwa-metadata.test.ts` performs an isolated production Vite build,
+parses the emitted HTML and manifest, resolves every local `link[href]` and
 `script[src]`, validates SpeleoDB titles/colors, checks PNG signatures, and
 compares encoded icon dimensions with declared sizes. The in-process build
 disables only bundle-budget enforcement because Vitest instrumentation inflates

@@ -38,8 +38,8 @@ GPX document is never replayed automatically to a redirect target.
 Capacitor native logging is disabled because bridge debug logs include plugin
 arguments. The first-party `PerformanceDiagnostics` plugin does not weaken that
 boundary: it accepts only allowlisted sync scope, run ID, phase, duration, and
-status values and rejects every malformed or unknown record. It never accepts
-or logs reasons, URLs, project data, coordinates, request/response content, or
+status values and rejects every malformed or unknown record. It never accepts or
+logs reasons, URLs, project data, coordinates, request/response content, or
 credentials. Native store failures return stable error codes and never include
 tokens, ciphertext, coordinates, or operating-system error details.
 

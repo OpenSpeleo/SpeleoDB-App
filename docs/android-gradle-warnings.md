@@ -40,8 +40,8 @@ and Sentry native-library strip notices that up-to-date debug tasks do not emit:
 |     1 | `node_modules/@capacitor/filesystem/android/src/main/kotlin/.../LegacyFilesystemImplementation.kt` (`String?` to `String`)           | Third-party Capacitor plugin                                                                | Retained in the plugin's unused legacy download path; exact line 66 is listed below.                                              |
 |     2 | Sentry native libraries in app Release and Sentry instrumentation packaging                                                          | Third-party prebuilt Sentry native objects                                                  | Gradle packages the libraries unchanged; trusted symbol/archive validation remains a release-ceremony gate.                       |
 
-After the compatible syntax patch, the full matrix completes with six
-attributed third-party/generated warning categories:
+After the compatible syntax patch, the full matrix completes with six attributed
+third-party/generated warning categories:
 
 ```text
 WARNING: Using flatDir should be avoided because it doesn't support any meta-data formats.
@@ -55,10 +55,10 @@ BUILD SUCCESSFUL
 
 The postinstall patch is intentionally fail-closed. If either plugin stops
 containing the known deprecated form and does not contain the compatible form,
-installation fails with a version-change diagnostic instead of silently
-applying an unreviewed transformation. The owning quality test reads the
-installed plugin scripts, so a clean `npm ci` proves the patch actually ran at
-the production dependency seam.
+installation fails with a version-change diagnostic instead of silently applying
+an unreviewed transformation. The owning quality test reads the installed plugin
+scripts, so a clean `npm ci` proves the patch actually ran at the production
+dependency seam.
 
 ## Remaining third-party/generated warnings
 
@@ -67,8 +67,8 @@ the production dependency seam.
 Capacitor 8.4.1 generates the Cordova compatibility project and its `flatDir`
 repository during `cap sync`. This application currently has no JAR or AAR in
 that project's `libs` or `src/main/libs` directories, so the declaration does
-not resolve a shipped dependency. Removing it from the checked-in generated
-file would be temporary: the next sync would restore it and create native drift.
+not resolve a shipped dependency. Removing it from the checked-in generated file
+would be temporary: the next sync would restore it and create native drift.
 
 Remove this exception only when one of these conditions is proven:
 
@@ -79,7 +79,8 @@ Remove this exception only when one of these conditions is proven:
 
 Until then, any additional Gradle warning is a release failure and must be
 attributed independently. Do not suppress warnings, add a global warning
-allowlist, or upgrade Gradle/AGP/Capacitor solely to make this message disappear.
+allowlist, or upgrade Gradle/AGP/Capacitor solely to make this message
+disappear.
 
 ### Sentry `PackageInfo.versionCode`
 
@@ -103,8 +104,9 @@ removes the compatibility path or when the Filesystem dependency is reviewed.
 The same unused legacy download implementation also passes nullable
 `call.getString("url", "")` output to a Java method that expects a non-null
 `String` (`LegacyFilesystemImplementation.kt:66`). Kotlin reports this as a Java
-type mismatch, but the app does not invoke the legacy download method. It remains
-owned by the same upstream migration; it is neither suppressed nor patched.
+type mismatch, but the app does not invoke the legacy download method. It
+remains owned by the same upstream migration; it is neither suppressed nor
+patched.
 
 ### Background-geolocation Android APIs
 
@@ -115,8 +117,8 @@ deprecations when Release compilation is forced with `-Xlint:deprecation`:
   `Notification.Builder.setPriority(int)`;
 - `Settings.Secure.LOCATION_MODE`, `Location.isFromMockProvider()`, and
   `Intent.getParcelableExtra(String)`;
-- the legacy `LocationRequest()` constructor plus `setMaxWaitTime`, `setInterval`,
-  `LocationRequest.PRIORITY_HIGH_ACCURACY`, `setPriority`, and
+- the legacy `LocationRequest()` constructor plus `setMaxWaitTime`,
+  `setInterval`, `LocationRequest.PRIORITY_HIGH_ACCURACY`, `setPriority`, and
   `setSmallestDisplacement`; and
 - `Service.stopForeground(boolean)`.
 
@@ -137,9 +139,9 @@ trusted release ceremony must retain/validate the corresponding Sentry symbols
 and inspect final publisher-signed artifact size and contents.
 
 Gradle also prints `Note: Some input files use unchecked or unsafe operations`
-for Capacitor core. This is a compiler note rather than a warning; it is recorded
-here so future audits do not confuse it with an unclassified warning. The
-`uses or overrides a deprecated API` summaries are expanded by the committed
+for Capacitor core. This is a compiler note rather than a warning; it is
+recorded here so future audits do not confuse it with an unclassified warning.
+The `uses or overrides a deprecated API` summaries are expanded by the committed
 `-Xlint:deprecation` init script above.
 
 ## Verification and performance

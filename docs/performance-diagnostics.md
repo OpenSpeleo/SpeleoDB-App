@@ -55,16 +55,15 @@ plan, only six final chunk transactions are required. A large value therefore
 points to planner computation or final plan persistence rather than temporary
 per-coordinate staging, which is not part of the current planner path.
 
-The `project-geojson` scope splits the local work hidden inside
-`geojson_sync`:
+The `project-geojson` scope splits the local work hidden inside `geojson_sync`:
 
-| Phase | Measured boundary |
-| --- | --- |
-| `cache_read_work` | Sum of authoritative project-record IndexedDB reads. |
-| `download_work` | Sum of project response download and JSON decoding waits. |
-| `normalization_work` | Sum of synchronous GeoJSON shape normalization. |
-| `validation_work` | Sum of worker startup, structured-clone, bounds validation, and worker response waits. |
-| `cache_write_work` | Sum of validated or quarantined durable IndexedDB writes. |
+| Phase                | Measured boundary                                                                      |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| `cache_read_work`    | Sum of authoritative project-record IndexedDB reads.                                   |
+| `download_work`      | Sum of project response download and JSON decoding waits.                              |
+| `normalization_work` | Sum of synchronous GeoJSON shape normalization.                                        |
+| `validation_work`    | Sum of worker startup, structured-clone, bounds validation, and worker response waits. |
+| `cache_write_work`   | Sum of validated or quarantined durable IndexedDB writes.                              |
 
 These values are aggregate work totals across the bounded three-worker pool, so
 their sum can exceed the wall-clock `geojson_sync` duration. That distinction is

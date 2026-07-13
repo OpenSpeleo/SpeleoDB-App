@@ -31,13 +31,12 @@ simultaneous overall 100% and per-layer 99% display.
 Worker placement alone does not make planning bounded. If physical-device
 timings show that per-coordinate durable deduplication dominates, a worker-local
 packed `Set<number>` is appropriate only with an explicit unique-coordinate
-ceiling and a documented memory envelope. Finish deduplication before
-publishing the denominator, sort in a typed array, transfer final chunks with
-one-chunk durable acknowledgement, and commit the immutable manifest last.
-Never replace storage amplification with an unbounded set, ordinary-object
-coordinate array, or unacknowledged message backlog. Bound downstream ready and
-delayed work separately from active workers and record their measured
-high-water marks.
+ceiling and a documented memory envelope. Finish deduplication before publishing
+the denominator, sort in a typed array, transfer final chunks with one-chunk
+durable acknowledgement, and commit the immutable manifest last. Never replace
+storage amplification with an unbounded set, ordinary-object coordinate array,
+or unacknowledged message backlog. Bound downstream ready and delayed work
+separately from active workers and record their measured high-water marks.
 
 Worker fallbacks do not prove the production message protocol. A test suite can
 exercise all planning math while the real worker silently rejects an

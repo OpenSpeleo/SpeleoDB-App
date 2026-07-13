@@ -80,11 +80,11 @@ responsibilities formerly in `AppDelegate.swift`.
 `src/App.tsx` registers a Capacitor `App.addListener('appUrlOpen', ...)`
 handler. Both `speleodb://` and `https://www.speleodb.org/app/...` URLs arrive
 through this single callback. The listener writes only the fixed event label
-`[DeepLink] URL received.` and never writes the URL value or its query parameters
-because signed paths, reset tokens, and user data may be present. No destination
-routing is currently performed. Add validated URL parsing and router navigation
-when destination routing is implemented, while preserving the diagnostic privacy
-contract.
+`[DeepLink] URL received.` and never writes the URL value or its query
+parameters because signed paths, reset tokens, and user data may be present. No
+destination routing is currently performed. Add validated URL parsing and router
+navigation when destination routing is implemented, while preserving the
+diagnostic privacy contract.
 
 ## Server-side `.well-known/` files
 

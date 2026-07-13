@@ -254,10 +254,10 @@ exactly `N * enabled layer count`; the denominator never comes from partial
 work. The additive v8 schema preserves existing payloads, metadata, v7 plans,
 generations, and memberships; legacy coordinate staging is cleared during
 recovery. Its incremental v6 migration retains URL-keyed payloads and treats
-unknown fetch dates as fresh from migration time.
-Disabling an optional layer cancels the current session, releases the layer,
-then evicts its namespace and resumes remaining layers from the active plan; a
-release failure never evicts payloads.
+unknown fetch dates as fresh from migration time. Disabling an optional layer
+cancels the current session, releases the layer, then evicts its namespace and
+resumes remaining layers from the active plan; a release failure never evicts
+payloads.
 
 Changed or quarantined geometry creates a replacement plan revision. Prior
 active generations remain usable until replacement succeeds; failed or aborted

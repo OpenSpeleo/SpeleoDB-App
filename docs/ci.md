@@ -45,8 +45,8 @@ on a target device. Accordingly:
   validate symbols/mappings, and require the physical-device release checklist.
 
 The authorized trusted-signing, artifact, installation, store-validation,
-approval, and rollback protocol is defined in `docs/release-ceremony.md`. It is a
-manual authorization boundary; this CI workflow does not implement publishing.
+approval, and rollback protocol is defined in `docs/release-ceremony.md`. It is
+a manual authorization boundary; this CI workflow does not implement publishing.
 
 ## Vitest Wrapper
 
@@ -65,15 +65,16 @@ preserved.
 
 ## Coverage Enforcement
 
-The covered suite is a blocking gate, not a report-only artifact. `vite.config.ts`
-sets audited July 2026 global floors of 90% statements, 82% branches, 92%
-functions, and 92% lines. Critical ownership seams also have file-specific
-floors so the global aggregate cannot hide regression in session authority, GPS
-recording transitions, offline replay, or IndexedDB transaction handling:
+The covered suite is a blocking gate, not a report-only artifact.
+`vite.config.ts` sets audited July 2026 global floors of 90% statements, 82%
+branches, 92% functions, and 92% lines. Critical ownership seams also have
+file-specific floors so the global aggregate cannot hide regression in session
+authority, GPS recording transitions, offline replay, or IndexedDB transaction
+handling:
 
 - `SessionCoordinator.ts`: 100% for all four metrics;
-- `GpsRecordingCoordinator.ts`: 97% statements, 91% branches, 100% functions
-  and lines;
+- `GpsRecordingCoordinator.ts`: 97% statements, 91% branches, 100% functions and
+  lines;
 - `OfflineOpQueue.ts`: 82% statements, 65% branches, 93% functions, 83% lines;
 - `CacheStore.ts`: 81% statements, 69% branches, 88% functions, 81% lines.
 
@@ -109,26 +110,27 @@ checklist and deep-link documentation aligned with five tested runtime rules:
   credential-invalidating logout is non-interactive;
 - GPS save success is published only after durable persistence.
 
-This contract detects contradictory instructions; it is not a substitute for
-the owning component, coordinator, fake-IndexedDB, native, or physical-device
-tests. `GPS_NATIVE_RELEASE_CHECKLIST.md` defines that evidence boundary and
-requires device/build identity for each manual result.
+This contract detects contradictory instructions; it is not a substitute for the
+owning component, coordinator, fake-IndexedDB, native, or physical-device tests.
+`GPS_NATIVE_RELEASE_CHECKLIST.md` defines that evidence boundary and requires
+device/build identity for each manual result.
 
 ## Release E2E Workflow
 
-`.github/workflows/release-e2e.yml` is a manual, credential-gated workflow rather
-than a pull-request check. It builds a credential-free debug package, then injects
-a dedicated staging OAuth token only into the Maestro execution steps. Android
-runs API 24/33/36 sequentially; iOS runs latest plus a required iOS 15.0 lane on
-an explicitly named compatible runner. The workflow has only `contents: read`
-permission, does not push or publish, and does not retain credential-bearing UI
-reports.
+`.github/workflows/release-e2e.yml` is a manual, credential-gated workflow
+rather than a pull-request check. It builds a credential-free debug package,
+then injects a dedicated staging OAuth token only into the Maestro execution
+steps. Android runs API 24/33/36 sequentially; iOS runs latest plus a required
+iOS 15.0 lane on an explicitly named compatible runner. The workflow has only
+`contents: read` permission, does not push or publish, and does not retain
+credential-bearing UI reports.
 
 The cross-platform flow owns fresh login, cached relaunch, Map/GPS navigation,
-pending-operation force-quit persistence, explicit replay, server-fixture cleanup,
-conditional sign-out warning, destructive purge, and signed-out relaunch. See
-`docs/release-device-evidence.md` for configuration, architecture, physical-only
-protocols, and the rule that missing matrix/device evidence blocks release.
+pending-operation force-quit persistence, explicit replay, server-fixture
+cleanup, conditional sign-out warning, destructive purge, and signed-out
+relaunch. See `docs/release-device-evidence.md` for configuration, architecture,
+physical-only protocols, and the rule that missing matrix/device evidence blocks
+release.
 
 ## Secrets
 

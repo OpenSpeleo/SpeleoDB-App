@@ -16,7 +16,8 @@ The hook owns:
 - immediate validated-cache reads plus revision-driven refreshes;
 - normalization of cached GeoJSON and landmark property identifiers;
 - attachment of the precomputed depth property used by map layers;
-- incremental project/overlay publication as each commit-consistent record is ready;
+- incremental project/overlay publication as each commit-consistent record is
+  ready;
 - immediate commit gating while replacement data is still loading;
 - cancellation of stale success and failure completions;
 - projection of current GeoJSON and prevalidated bounds from the same record;
@@ -80,22 +81,20 @@ the bounded service cache and mounted UI.
 
 Every project-data generation emits three sanitized aggregate timings under
 `[dashboard-map:timing]`: cache-read work, normalization/depth work, and wall
-clock from reader admission through the animation frame after final
-publication. The last value includes the device-only React/MapLibre
-commit-to-paint delay that fake IndexedDB and jsdom cannot reproduce. Logging
-retains no project identifiers, names, coordinates, or GeoJSON.
+clock from reader admission through the animation frame after final publication.
+The last value includes the device-only React/MapLibre commit-to-paint delay
+that fake IndexedDB and jsdom cannot reproduce. Logging retains no project
+identifiers, names, coordinates, or GeoJSON.
 
 ## Verification
 
 `useDashboardMapData.test.ts` directly covers zero-revision cache publication,
-project eligibility, progressive publication behind a deferred record,
-60-record rendering-turn coalescing, concurrent overlay admission behind a
-deferred landmarks record,
-valid/empty/malformed/stale commits, depth attachment,
-every overlay shape, failure containment, default diagnostics, revision
-clearing, commit replacement, and all late-success/late-failure cancellation
-pairings. It also covers global and project-linked overlay visibility. The
-module has 100% statement, branch, function, and line coverage.
-`Dashboard.test.tsx` remains the integration characterization seam for
-controller revisions, quarantine transitions, panels, layers, overlays, and fit
-behavior.
+project eligibility, progressive publication behind a deferred record, 60-record
+rendering-turn coalescing, concurrent overlay admission behind a deferred
+landmarks record, valid/empty/malformed/stale commits, depth attachment, every
+overlay shape, failure containment, default diagnostics, revision clearing,
+commit replacement, and all late-success/late-failure cancellation pairings. It
+also covers global and project-linked overlay visibility. The module has 100%
+statement, branch, function, and line coverage. `Dashboard.test.tsx` remains the
+integration characterization seam for controller revisions, quarantine
+transitions, panels, layers, overlays, and fit behavior.

@@ -7,8 +7,8 @@
 2. `mapDataRevision` publishes only at terminal completion, so newly durable
    project GeoJSON is not reread while later overlay, GPS, and tile phases run.
 3. Dashboard project-map loading reads every project sequentially and publishes
-   only the final aggregate. One slow record prevents every earlier project
-   from becoming visible.
+   only the final aggregate. One slow record prevents every earlier project from
+   becoming visible.
 4. Offline-map source collection rereads eligible project records sequentially
    and performs source conversion on the WebView thread before the planner
    worker can start.
@@ -22,41 +22,42 @@
 ### PERF-001 — Responsive data publication and background map preparation
 
 - [x] Add a coordinator regression proving the foreground sync resolves and
-  publishes remote data while offline-map preparation remains deferred.
+      publishes remote data while offline-map preparation remains deferred.
 - [x] Add a Dashboard regression proving the first durable project becomes
-  visible while a later project read remains pending.
+      visible while a later project read remains pending.
 - [x] Add a TileCoordinator regression proving project-sync map preparation is
-  admitted after the foreground completion/paint boundary and remains
-  cancellable on logout or supersession.
+      admitted after the foreground completion/paint boundary and remains
+      cancellable on logout or supersession.
 - [x] Execute the focused tests and record the expected failures.
 - [x] Publish map revisions after durable project GeoJSON completion.
 - [x] Complete foreground sync after project GeoJSON, overlays, and GPS have
-  durably published; queue offline-map preparation on its own cancellable
-  lifecycle without awaiting it.
+      durably published; queue offline-map preparation on its own cancellable
+      lifecycle without awaiting it.
 - [x] Incrementally publish Dashboard project records and cooperatively yield
-  between records so React/MapLibre can paint and accept input.
+      between records so React/MapLibre can paint and accept input.
 - [x] Replace serialized offline-map project-record reads with bounded
-  concurrency and yield before CPU-heavy source conversion.
-- [x] Update project-sync, Settings, map-data, and offline-map architecture docs.
+      concurrency and yield before CPU-heavy source conversion.
+- [x] Update project-sync, Settings, map-data, and offline-map architecture
+      docs.
 - [x] Run focused concurrency/storage/UI tests and repository verification.
 - [x] Commit as `[Fix] Keep synchronization responsive` and inspect it before
-  starting PERF-002. Do not push.
+      starting PERF-002. Do not push.
 
 ### PERF-002 — Safe native timing visibility
 
 - [x] Add TypeScript contract tests proving timing diagnostics contain only the
-  fixed allowlisted fields and still reach the browser console.
+      fixed allowlisted fields and still reach the browser console.
 - [x] Add iOS and Android native tests for rejecting unknown phases/statuses and
-  formatting accepted timing records.
+      formatting accepted timing records.
 - [x] Execute the focused tests and record the expected failures.
 - [x] Add a narrow first-party native performance-diagnostic plugin that writes
-  only validated sync timing fields to OS logging while global Capacitor bridge
-  logging remains disabled.
+      only validated sync timing fields to OS logging while global Capacitor
+      bridge logging remains disabled.
 - [x] Route project-sync and offline-map timings through the shared diagnostic
-  reporter and document Xcode/Logcat filtering instructions.
+      reporter and document Xcode/Logcat filtering instructions.
 - [x] Run web, Android, and iOS verification applicable to the new bridge.
 - [x] Commit as `[Fix] Surface sync timings in native logs` and inspect it. Do
-  not push.
+      not push.
 
 ## Verification gates
 
@@ -77,23 +78,15 @@
 ### PERF-001 TDD evidence
 
 - Red command:
-  `npm run test.unit -- --run src/controllers/SpeleoDBController.test.ts
-  src/pages/dashboard/useDashboardMapData.test.ts
-  src/controllers/TileCoordinator.test.ts -t "publishes validated project map
-  data before later remote phases finish|completes foreground sync before
-  offline-map preparation starts|publishes an available project while a later
-  project cache read is pending|reads project coverage records with bounded
-  concurrency"`.
+  `npm run test.unit -- --run src/controllers/SpeleoDBController.test.ts src/pages/dashboard/useDashboardMapData.test.ts src/controllers/TileCoordinator.test.ts -t "publishes validated project map data before later remote phases finish|completes foreground sync before offline-map preparation starts|publishes an available project while a later project cache read is pending|reads project coverage records with bounded concurrency"`.
 - Red result: all 4 selected tests failed at the owning seam. Map revision was
   still `0`, planning observed an unsettled foreground promise, the first
   project remained hidden, and source collection admitted `1` read instead of
   the bounded `4`.
 - Green selected result: 4/4 pass.
 - Green affected suites:
-  `npm run test.unit -- --run --no-file-parallelism
-  src/controllers/SpeleoDBController.test.ts
-  src/pages/dashboard/useDashboardMapData.test.ts
-  src/controllers/TileCoordinator.test.ts` — 218/218 pass.
+  `npm run test.unit -- --run --no-file-parallelism src/controllers/SpeleoDBController.test.ts src/pages/dashboard/useDashboardMapData.test.ts src/controllers/TileCoordinator.test.ts`
+  — 218/218 pass.
 
 ### PERF-001 implementation result
 
@@ -134,14 +127,14 @@
 
 - TypeScript red command: `npx vitest run src/utils/performanceTiming.test.ts`.
   Result: 3/3 failed because `createPerformanceTimingLogger` did not exist.
-- Android red command: `./gradlew testDebugUnitTest --tests
-  org.speleodb.app.PerformanceTimingLogFormatterTest`. Result: Java compilation
-  failed with seven missing `PerformanceTimingLogFormatter` symbols.
-- iOS red command: `xcodebuild -project ios/App/App.xcodeproj -scheme App
-  -destination 'generic/platform=iOS Simulator' -derivedDataPath
-  /tmp/speleodb-perf-diagnostics-red build-for-testing
-  CODE_SIGNING_ALLOWED=NO`. Result: the new XCTest target failed to compile
-  because `PerformanceTimingLogFormatter` did not exist.
+- Android red command:
+  `./gradlew testDebugUnitTest --tests org.speleodb.app.PerformanceTimingLogFormatterTest`.
+  Result: Java compilation failed with seven missing
+  `PerformanceTimingLogFormatter` symbols.
+- iOS red command:
+  `xcodebuild -project ios/App/App.xcodeproj -scheme App -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/speleodb-perf-diagnostics-red build-for-testing CODE_SIGNING_ALLOWED=NO`.
+  Result: the new XCTest target failed to compile because
+  `PerformanceTimingLogFormatter` did not exist.
 - iOS bridge red command: focused simulator execution of
   `AppBridgeViewControllerTests/testPerformanceDiagnosticsPluginIsRegisteredWithLoadedBridge`.
   Result: the assertion failed because compiling the plugin did not register it
@@ -149,9 +142,9 @@
 - Green focused web result: 3/3 pass. The native record excludes `reason`, the
   browser path avoids the plugin, and a rejected native diagnostic cannot fail
   synchronization.
-- Green Android result: 3/3 formatter tests pass through
-  `testDebugUnitTest`; accepted and skipped durations format consistently and
-  unknown/invalid fields are rejected.
+- Green Android result: 3/3 formatter tests pass through `testDebugUnitTest`;
+  accepted and skipped durations format consistently and unknown/invalid fields
+  are rejected.
 - Green iOS result: the app and XCTest bundle compile, then 3/3 focused tests
   pass on the iOS 26.5 iPhone 17 Pro simulator. The simulator spent 138 seconds
   booting/installing; the three tests executed in 0.004 seconds.
@@ -169,8 +162,8 @@
 - Capacitor `loggingBehavior` remains `none`; broad bridge logging was not
   enabled.
 
-The iOS registration correction exposed a reusable native-boundary pattern;
-see `tasks/lessons/native-plugin-registration.md`.
+The iOS registration correction exposed a reusable native-boundary pattern; see
+`tasks/lessons/native-plugin-registration.md`.
 
 ### PERF-002 verification
 
@@ -178,20 +171,19 @@ see `tasks/lessons/native-plugin-registration.md`.
 - `npm run typecheck` — pass.
 - `npm run build` — pass; 613 modules transformed.
 - `API_TEST_ENABLED=false npm run test:ci` — pass: 116 files passed, 2 skipped;
-  1,906 tests passed, 13 skipped. Coverage: 90.34% statements, 82.09%
-  branches, 92.79% functions, 92.43% lines.
+  1,906 tests passed, 13 skipped. Coverage: 90.34% statements, 82.09% branches,
+  92.79% functions, 92.43% lines.
 - `npm run quality:inventory` — pass; all 589 tracked files classified.
-- `./gradlew testDebugUnitTest lintDebug assembleDebug` — pass; 739 Gradle
-  tasks completed or were up to date.
+- `./gradlew testDebugUnitTest lintDebug assembleDebug` — pass; 739 Gradle tasks
+  completed or were up to date.
 - iOS generic-simulator `build-for-testing` — pass for the app and XCTest
   bundle.
 - iOS formatter XCTest — 3/3 pass on iOS 26.5 iPhone 17 Pro simulator.
 - iOS production-bridge registration XCTest — 1/1 pass on the same simulator.
 - Button background hard-rule scan — no matches.
-- MapLibre code was not changed; source-ownership tests pass in the complete
-  web suite.
-- Generated Android/iOS web assets were inspected and produced no tracked
-  diffs.
+- MapLibre code was not changed; source-ownership tests pass in the complete web
+  suite.
+- Generated Android/iOS web assets were inspected and produced no tracked diffs.
 - `git diff --check` — pass.
 - Physical-device receipt of an OSLog/Logcat line remains the final device
   evidence gate. The compiled formatter, plugin registration, and live iOS

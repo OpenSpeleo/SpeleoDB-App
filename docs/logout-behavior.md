@@ -51,10 +51,10 @@ checks the loss acknowledgement.
 
 The acknowledgement resets when the modal closes or the live pending count
 changes. A failed cleanup keeps an unchanged acknowledgement available for an
-in-place retry, while the busy state disables acknowledgement, cancellation,
-and duplicate submission. This consent applies only to voluntary Settings
-sign-out. A forced logout after `401`/`403` remains non-interactive because
-security revocation and local purge must not depend on UI availability.
+in-place retry, while the busy state disables acknowledgement, cancellation, and
+duplicate submission. This consent applies only to voluntary Settings sign-out.
+A forced logout after `401`/`403` remains non-interactive because security
+revocation and local purge must not depend on UI availability.
 
 Implementation notes:
 

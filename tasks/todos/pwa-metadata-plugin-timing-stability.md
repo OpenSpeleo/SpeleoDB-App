@@ -13,7 +13,8 @@ in-process build; production builds retain the diagnostic.
 - [x] Run the focused metadata test repeatedly.
 - [x] Run lint, typecheck, build, and the complete coverage suite.
 - [x] Update the planner task review with the restored green result.
-- [x] Inspect, commit independently as `[Test]`, verify, and confirm clean status.
+- [x] Inspect, commit independently as `[Test]`, verify, and confirm clean
+      status.
 
 ## Review
 

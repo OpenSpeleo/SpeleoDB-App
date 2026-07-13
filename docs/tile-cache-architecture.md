@@ -59,29 +59,29 @@ parts. `TileCoordinator` assigns every request a monotonic ownership version, so
 an older source read cannot supersede newer geometry, layer preferences, or a
 refresh even when the older dependency ignores cancellation.
 
-Project-sync preparation is queued on a later WebView task after foreground
-data publication. Project cache records are read through a four-worker bounded
-pool rather than one serial chain. Source conversion yields between local
-batches, and cancellation is rechecked after every yield. The planner remains a
-dedicated worker; these boundaries prevent offline preparation from owning the
-Settings spinner or monopolizing rendering/input on the WebView thread.
+Project-sync preparation is queued on a later WebView task after foreground data
+publication. Project cache records are read through a four-worker bounded pool
+rather than one serial chain. Source conversion yields between local batches,
+and cancellation is rechecked after every yield. The planner remains a dedicated
+worker; these boundaries prevent offline preparation from owning the Settings
+spinner or monopolizing rendering/input on the WebView thread.
 
 ## Bounded in-memory plan construction
 
 The dedicated worker packs each `{z,x,y}` coordinate into one safe integer and
 deduplicates it in a worker-local `Set<number>`. The plan has a hard ceiling of
-1,000,000 unique coordinates; exceeding it fails planning before any final
-chunk or manifest is published. The final keys are copied into a
-`Float64Array`, sorted in place, decoded into compact `Uint32Array` chunks of at
-most 2,048 coordinates, and transferred one chunk at a time.
+1,000,000 unique coordinates; exceeding it fails planning before any final chunk
+or manifest is published. The final keys are copied into a `Float64Array`,
+sorted in place, decoded into compact `Uint32Array` chunks of at most 2,048
+coordinates, and transferred one chunk at a time.
 
-The worker waits for explicit consumer acknowledgement before producing the
-next final chunk. Acknowledgement follows the chunk's durable IndexedDB write,
-so the plan path performs one transaction per final chunk rather than one
-object-store write per raw coordinate. Requests and acknowledgements use
-discriminated `plan` and `ack` messages; the production-worker protocol is
-tested directly rather than only through the test-only main-thread fallback.
-The immutable manifest is committed last. Therefore:
+The worker waits for explicit consumer acknowledgement before producing the next
+final chunk. Acknowledgement follows the chunk's durable IndexedDB write, so the
+plan path performs one transaction per final chunk rather than one object-store
+write per raw coordinate. Requests and acknowledgements use discriminated `plan`
+and `ack` messages; the production-worker protocol is tested directly rather
+than only through the test-only main-thread fallback. The immutable manifest is
+committed last. Therefore:
 
 `expected tiles = unique coordinates (N) * enabled layers (M)`
 
@@ -171,10 +171,10 @@ completion.
 
 Authoritative automated seams include planner deduplication/limit enforcement,
 acknowledgement/final-chunk bounds, legacy v8 staging recovery/GC, real
-fake-IndexedDB aborts, payload/tombstone statistics,
-six-way concurrency and queue high-water marks, retry classes, deadline phases,
-late refresh/logout races, request supersession, paint scheduler hostility,
-context isolation, and Settings failure presentation.
+fake-IndexedDB aborts, payload/tombstone statistics, six-way concurrency and
+queue high-water marks, retry classes, deadline phases, late refresh/logout
+races, request supersession, paint scheduler hostility, context isolation, and
+Settings failure presentation.
 
 Deterministic fake-time evidence establishes six active workers, dispatch gaps
 no greater than 100 ms under controlled 100 ms latency, completion faster than

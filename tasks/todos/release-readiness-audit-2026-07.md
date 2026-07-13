@@ -12,15 +12,15 @@ every confirmed release-relevant defect with test-driven development:
 4. rerun the focused test and record the green result;
 5. run the applicable integration, full-suite, native, and device gates.
 
-The ignored backend checkout is out of scope. Its HTTP contracts remain in
-scope through service/controller tests and the configured staging integration
-tests. No release, tag, push, store submission, or credential change is
-authorized by this task.
+The ignored backend checkout is out of scope. Its HTTP contracts remain in scope
+through service/controller tests and the configured staging integration tests.
+No release, tag, push, store submission, or credential change is authorized by
+this task.
 
 ## Commit discipline
 
-Each RR item is an independent, green delivery unit. For every item: add and
-run the red regression test, implement the root-cause fix, run the focused and
+Each RR item is an independent, green delivery unit. For every item: add and run
+the red regression test, implement the root-cause fix, run the focused and
 applicable repository gates, update its documentation/review evidence, inspect
 staged and unstaged changes, commit explicit paths, and verify the resulting
 commit and worktree before beginning the next RR item. Red tests are evidence,
@@ -58,8 +58,8 @@ squash, rebase, push, open a PR, tag, publish, or submit an artifact.
   claim, native lifecycle race, stuck/crashing user flow, or a missing test gate
   for a critical supported-platform behavior.
 - **P2 — release hardening:** material test, metadata, documentation,
-  performance, or maintainability defect that should be resolved in this
-  release program but does not itself expose or destroy user data.
+  performance, or maintainability defect that should be resolved in this release
+  program but does not itself expose or destroy user data.
 - **P3 — follow-up:** low-risk ecosystem/tooling debt with no demonstrated
   current product failure.
 
@@ -70,9 +70,9 @@ squash, rebase, push, open a PR, tag, publish, or submit an artifact.
 - [x] Classify all 557 tracked files and inspect the production/test/native
       inventory.
 - [x] Review the 62-commit range after `d556d235...`, with detailed attention to
-      session hardening, controller extraction, offline-map replacement,
-      GeoJSON validation, MapLibre composition, GPS/live heading, CI, and the
-      final dependency updates.
+      session hardening, controller extraction, offline-map replacement, GeoJSON
+      validation, MapLibre composition, GPS/live heading, CI, and the final
+      dependency updates.
 - [x] Inspect current auth/session, networking, cache/persistence, offline
       mutation, offline-map, GPS recording/track, dashboard/map, monitoring,
       PWA, Android, iOS, build, and release-documentation seams.
@@ -118,8 +118,8 @@ abort signal. A request admitted before logout can settle afterward, publish a
 revision, or write user data into the freshly cleared cache. An old queue object
 also remains live after `OfflineMutationCoordinator.reset()`.
 
-Owning seams: controller user-operation lifetime, mutation coordinators,
-offline replay port, and service request `AbortSignal` forwarding.
+Owning seams: controller user-operation lifetime, mutation coordinators, offline
+replay port, and service request `AbortSignal` forwarding.
 
 - [x] **RED:** add deferred controller tests for in-flight landmark create,
       landmark/GPS edit/delete, collection/geometry load, and offline replay.
@@ -128,10 +128,11 @@ offline replay port, and service request `AbortSignal` forwarding.
       work, no cache write occurs, no revision publishes, no op is removed, and
       no old-session data reappears.
 - [x] Run the focused tests and record every stale publication/write.
-- [x] **GREEN:** create one controller-owned cancellable user-operation lifetime,
-      track admitted mutations/replays, pass its signal through every service
-      wrapper and replay port, recheck authority after each awaited persistence
-      boundary, and abort/reset it during logout before cache deletion.
+- [x] **GREEN:** create one controller-owned cancellable user-operation
+      lifetime, track admitted mutations/replays, pass its signal through every
+      service wrapper and replay port, recheck authority after each awaited
+      persistence boundary, and abort/reset it during logout before cache
+      deletion.
 - [x] Rerun the focused tests, auth/logout suites, and real staging auth tests.
 
 ### P1 — release blockers
@@ -147,9 +148,10 @@ cannot be blocked by UI.
 Owning seam: the voluntary Settings sign-out confirmation using the existing
 live `pendingOpsCount` context value.
 
-- [x] **RED:** add Settings tests for zero, one, and multiple pending operations;
-      assert the current modal lacks the conditional warning and required
-      acknowledgement and permits destructive sign-out without agreement.
+- [x] **RED:** add Settings tests for zero, one, and multiple pending
+      operations; assert the current modal lacks the conditional warning and
+      required acknowledgement and permits destructive sign-out without
+      agreement.
 - [x] **GREEN:** when the count is positive, show “Pending offline operations
       will be lost,” the exact singular/plural count, and the statement that the
       operations cannot be recovered or synchronized later. Require the user to
@@ -164,12 +166,12 @@ live `pendingOpsCount` context value.
 #### RR-003 — Confirmed mutations can corrupt or silently fail ground-truth cache publication
 
 Landmark and remote-GPS cache updates use separate best-effort read/write calls.
-Read errors are converted to `null`/`[]`, so a later successful write can replace
-the complete collection with one item (or empty it). Write methods return
-`false`, but mutation callers ignore that result, publish success, and offline
-replay removes the durable op. Concurrent read/modify/write calls can also lose
-one another. The visible marker/track can disappear or revert immediately even
-though the server accepted the user's mutation.
+Read errors are converted to `null`/`[]`, so a later successful write can
+replace the complete collection with one item (or empty it). Write methods
+return `false`, but mutation callers ignore that result, publish success, and
+offline replay removes the durable op. Concurrent read/modify/write calls can
+also lose one another. The visible marker/track can disappear or revert
+immediately even though the server accepted the user's mutation.
 
 Owning seams: `CacheStore.update()`, strict project-cache mutation APIs,
 controller landmark apply, and GPS remote apply.
@@ -179,10 +181,10 @@ controller landmark apply, and GPS remote apply.
       finalization. Assert unrelated ground truth is preserved and the op is
       retained until the confirmed server result is durably reflected.
 - [x] Run the focused tests and record the lost-update/failure-opaque results.
-- [x] **GREEN:** replace best-effort split read/write mutation paths with strict,
-      atomic single-transaction cache mutations. Only publish revisions and
-      remove offline ops after transaction completion. Keep best-effort cache
-      APIs only for genuinely optional snapshots.
+- [x] **GREEN:** replace best-effort split read/write mutation paths with
+      strict, atomic single-transaction cache mutations. Only publish revisions
+      and remove offline ops after transaction completion. Keep best-effort
+      cache APIs only for genuinely optional snapshots.
 - [x] For create replay, preflight the freshly pulled server snapshot by stable
       identity before POST so retry after a local commit failure cannot create a
       duplicate remote landmark.
@@ -223,11 +225,11 @@ append, violating the documented one-subject/one-op invariant.
 #### RR-006 — GPS recording reports durable success after storage rejection
 
 `GpsTrackCoordinator.persist()` catches IndexedDB failure and resolves.
-`GpsRecordingCoordinator.stop()` then returns a track, the Dashboard says
-“Track saved,” and fatal permission loss says captured points “were saved.” A
-force quit can lose the accepted track despite the explicit durability
-contract. Local delete failures are also hidden while the item is removed from
-memory, allowing deleted tracks to reappear after restart.
+`GpsRecordingCoordinator.stop()` then returns a track, the Dashboard says “Track
+saved,” and fatal permission loss says captured points “were saved.” A force
+quit can lose the accepted track despite the explicit durability contract. Local
+delete failures are also hidden while the item is removed from memory, allowing
+deleted tracks to reappear after restart.
 
 - [x] **RED:** reject the final/incremental `GpsTrackStore.put()` and local
       delete ports. Assert stop/fatal finalization currently claims success and
@@ -422,8 +424,8 @@ the Capacitor/plugin build graph and do not demonstrate a shipped defect.
 
 - Worktree was clean at audit start; `main` contained the current dependency
   update and no user edits.
-- 557 tracked files: 162 production TypeScript, 114 TypeScript tests, 86 Android,
-  34 iOS, 98 documentation, plus styles/assets/tooling/declarations.
+- 557 tracked files: 162 production TypeScript, 114 TypeScript tests, 86
+  Android, 34 iOS, 98 documentation, plus styles/assets/tooling/declarations.
 - Reviewed range: 62 commits after `d556d235...` through `3d0307e`, including
   the prior security hardening and adversarial offline-map correction records.
 
@@ -434,21 +436,21 @@ the Capacitor/plugin build graph and do not demonstrate a shipped defect.
 - `npm run typecheck` — pass.
 - `npm run build` — pass; bundle budgets enforced.
 - `API_TEST_ENABLED=false npm run test:ci` — 109 files passed, 2 integration
-  files intentionally skipped; 1,830 passed / 13 skipped tests. Coverage:
-  90.02% statements, 82.13% branches, 92.29% functions, 92.01% lines.
+  files intentionally skipped; 1,830 passed / 13 skipped tests. Coverage: 90.02%
+  statements, 82.13% branches, 92.29% functions, 92.01% lines.
 - Configured staging integration tests with network access — 2 files / 13 tests
   passed.
 - `npm audit --omit=dev --audit-level=moderate` — zero vulnerabilities.
 - `npm audit --audit-level=moderate` — zero vulnerabilities.
-- Android `./gradlew testDebugUnitTest lintDebug assembleDebug
-assembleDebugAndroidTest` — pass, 1,200 tasks; no tracked native drift.
-- iOS `xcodebuild -project ios/App/App.xcodeproj -scheme App -destination
-'platform=iOS Simulator,id=5B3096E9-8E15-4699-958A-BA72C99D5AD7'
--derivedDataPath /tmp/speleodb-release-audit-ios test` — pass, all 10 native
-  tests on an iPhone 17 Pro / iOS 26.4 simulator.
+- Android
+  `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`
+  — pass, 1,200 tasks; no tracked native drift.
+- iOS
+  `xcodebuild -project ios/App/App.xcodeproj -scheme App -destination 'platform=iOS Simulator,id=5B3096E9-8E15-4699-958A-BA72C99D5AD7' -derivedDataPath /tmp/speleodb-release-audit-ios test`
+  — pass, all 10 native tests on an iPhone 17 Pro / iOS 26.4 simulator.
 - Hard button scan — zero forbidden matches.
-- No `.skip`, `.only`, focused tests, TODO/FIXME/HACK markers, or dirty generated
-  native output found.
+- No `.skip`, `.only`, focused tests, TODO/FIXME/HACK markers, or dirty
+  generated native output found.
 
 ### Baseline limitations
 
@@ -481,10 +483,11 @@ a commit cannot contain its own stable final hash.
   covers both first-store and second-store rejection; controller coverage reads
   the durable offline/GPS stores after the rejected logout.
 - **Gates:** `npm run lint`, `npm run typecheck`, `npm run build`,
-  `API_TEST_ENABLED=false npm run test:ci` (109 files, 1,833 passed, 13 skipped),
-  live staging integration (2 files, 13 passed), `npm run quality:inventory`,
-  runtime/full `npm audit`, and the hard button scan passed. The full suite also
-  includes the MapLibre source-injection contracts.
+  `API_TEST_ENABLED=false npm run test:ci` (109 files, 1,833 passed, 13
+  skipped), live staging integration (2 files, 13 passed),
+  `npm run quality:inventory`, runtime/full `npm audit`, and the hard button
+  scan passed. The full suite also includes the MapLibre source-injection
+  contracts.
 - **Limitations:** native projects and generated assets are unchanged, so native
   compilation is deferred to the final cross-platform gate. Physical-device
   evidence remains an explicit RR-008 release gate.
@@ -501,8 +504,8 @@ a commit cannot contain its own stable final hash.
   logout waited for settlement while every late mutation, cache write, revision
   publication, and offline-op removal remained blocked.
 - **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
-  hard button scan, and live staging integration (2 files, 13 tests) passed.
-  The deterministic covered suite passed 109 files / 1,841 tests with 13 tests
+  hard button scan, and live staging integration (2 files, 13 tests) passed. The
+  deterministic covered suite passed 109 files / 1,841 tests with 13 tests
   skipped only because staging was disabled for that command. MapLibre contract
   tests are included in that suite.
 - **Design/performance:** one generation-scoped cancellation context is shared
@@ -537,22 +540,21 @@ a commit cannot contain its own stable final hash.
 
 ### RR-003 — Atomic confirmed ground-truth mutations
 
-- **RED:** `npx vitest run src/services/ProjectCacheService.test.ts
-  src/controllers/SpeleoDBController.test.ts src/offline/OfflineOpQueue.test.ts
-  src/controllers/GpsTrackCoordinator.test.ts` — 5 expected failures proved
-  the strict cache APIs did not exist, confirmed landmark/GPS mutations reported
-  success after cache failure, and create replay posted despite a matching fresh
-  server result.
+- **RED:**
+  `npx vitest run src/services/ProjectCacheService.test.ts src/controllers/SpeleoDBController.test.ts src/offline/OfflineOpQueue.test.ts src/controllers/GpsTrackCoordinator.test.ts`
+  — 5 expected failures proved the strict cache APIs did not exist, confirmed
+  landmark/GPS mutations reported success after cache failure, and create replay
+  posted despite a matching fresh server result.
 - **GREEN:** the unchanged focused command passed 295/295 tests. Real
-  fake-IndexedDB coverage proves concurrent collection mutations serialize and
-  a transaction abort preserves the previous record; owning-seam tests prove
+  fake-IndexedDB coverage proves concurrent collection mutations serialize and a
+  transaction abort preserves the previous record; owning-seam tests prove
   storage errors block revision publication and offline-op removal. Create
   replay preflights stable identity and refreshes again after a duplicate
   response.
 - **Design/performance:** landmark and GPS ground truth now use one strict
   `CacheStore.update()` transaction per confirmation. This removes split-read
-  lost updates without polling, additional network traffic, or collection
-  copies beyond the required immutable update.
+  lost updates without polling, additional network traffic, or collection copies
+  beyond the required immutable update.
 - **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
   hard button scan, and configured staging integration (2 files / 13 tests)
   passed. The final deterministic covered suite passed 109 files / 1,854 tests
@@ -565,8 +567,8 @@ a commit cannot contain its own stable final hash.
 ### RR-004 — Serialized offline replay commands
 
 - **RED:** `npx vitest run src/offline/OfflineOpQueue.test.ts` — 3 expected
-  failures proved overlapping full replay, full-plus-single replay, and duplicate
-  conflict resolution each issued the same remote POST/PATCH twice.
+  failures proved overlapping full replay, full-plus-single replay, and
+  duplicate conflict resolution each issued the same remote POST/PATCH twice.
 - **GREEN:** the unchanged focused command passed 47/47 tests. Compatible full
   replay callers share the exact promise/summary; incompatible per-op and
   conflict commands serialize and re-read the queue after admission. A rejected
@@ -576,69 +578,71 @@ a commit cannot contain its own stable final hash.
   persistence, or network requests and prevents redundant snapshot pulls.
 - **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
   hard button scan, and configured staging integration (2 files / 13 tests)
-  passed. The deterministic covered suite passed 109 files / 1,858 tests with
-  13 staging-only skips; coverage was 90.09% statements, 81.98% branches,
-  92.51% functions, and 92.12% lines. MapLibre contract tests remain green.
+  passed. The deterministic covered suite passed 109 files / 1,858 tests with 13
+  staging-only skips; coverage was 90.09% statements, 81.98% branches, 92.51%
+  functions, and 92.12% lines. MapLibre contract tests remain green.
 - **Limitations:** queue persistence replacement is intentionally deferred to
   RR-005. Native source and generated projects are unchanged; native compilation
   remains in the final cross-platform gate.
 
 ### RR-005 — Atomic offline-operation replacement
 
-- **RED:** `npx vitest run src/offline/OfflineOpStore.test.ts
-  src/offline/OfflineOpQueue.test.ts` — 7 expected failures proved both missing
-  store-level atomic replacement/rollback and all four landmark/GPS
-  update↔delete failure windows. Reopening showed a lost old intent or duplicate
-  records, while simultaneous same-subject enqueues produced two durable ops.
+- **RED:**
+  `npx vitest run src/offline/OfflineOpStore.test.ts src/offline/OfflineOpQueue.test.ts`
+  — 7 expected failures proved both missing store-level atomic
+  replacement/rollback and all four landmark/GPS update↔delete failure windows.
+  Reopening showed a lost old intent or duplicate records, while simultaneous
+  same-subject enqueues produced two durable ops.
 - **GREEN:** the unchanged focused command passed 59/59 tests. Real
   fake-IndexedDB abort coverage reopens the old record after rollback; all four
   queue replacement directions retain the prior in-memory and durable intent on
-  failure. Simultaneous enqueues deterministically coalesce to the latest intent.
+  failure. Simultaneous enqueues deterministically coalesce to the latest
+  intent.
 - **Design/performance:** every public queue mutation now shares the serialized
   command lane. `CacheStore.replace()` removes the old key and writes the new
   record in one transaction, while memory/sequence/revision publication occurs
   only after commit. This adds no reads, polling, or network work.
 - **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
   hard button scan, and configured staging integration (2 files / 13 tests)
-  passed. The deterministic covered suite passed 109 files / 1,865 tests with
-  13 staging-only skips; coverage was 90.25% statements, 82.16% branches,
-  92.65% functions, and 92.30% lines. MapLibre contract tests remain green.
+  passed. The deterministic covered suite passed 109 files / 1,865 tests with 13
+  staging-only skips; coverage was 90.25% statements, 82.16% branches, 92.65%
+  functions, and 92.30% lines. MapLibre contract tests remain green.
 - **Limitations:** native source and generated projects are unchanged; native
   compilation remains in the final cross-platform gate.
 
 ### RR-006 — Honest GPS persistence results
 
-- **RED:** `npx vitest run src/controllers/GpsTrackCoordinator.test.ts
-  src/controllers/GpsRecordingCoordinator.test.ts
-  src/pages/dashboard/useDashboardGpsRecordingActions.test.ts` — 7 expected
-  failures plus one unhandled rejection proved incremental/final write errors
-  were hidden or unhandled, failed deletions disappeared in memory, fatal
-  recovery claimed “saved” early, and Dashboard stop had no rejection path.
+- **RED:**
+  `npx vitest run src/controllers/GpsTrackCoordinator.test.ts src/controllers/GpsRecordingCoordinator.test.ts src/pages/dashboard/useDashboardGpsRecordingActions.test.ts`
+  — 7 expected failures plus one unhandled rejection proved incremental/final
+  write errors were hidden or unhandled, failed deletions disappeared in memory,
+  fatal recovery claimed “saved” early, and Dashboard stop had no rejection
+  path.
 - **GREEN:** the focused GPS coordinator/recording/Dashboard action matrix
   passed 58/58 tests; the expanded public-controller/global-toast matrix passed
-  256/256. Coverage proves incremental error reporting, final-save
-  retry with all points retained, fatal-callback success/failure publication,
-  strict local deletion, failed discard retention, command-lane recovery, and a
-  fixed actionable stop error that keeps the recorder open.
+  256/256. Coverage proves incremental error reporting, final-save retry with
+  all points retained, fatal-callback success/failure publication, strict local
+  deletion, failed discard retention, command-lane recovery, and a fixed
+  actionable stop error that keeps the recorder open.
 - **Design/performance:** the existing serialized write lane now propagates its
   tracked promise. State publication follows durable completion; failures retain
   the authoritative in-memory buffer/row. No extra writes, reads, polling, or
   point copies were added.
 - **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
   hard button scan, and configured staging integration (2 files / 13 tests)
-  passed. The deterministic covered suite passed 109 files / 1,870 tests with
-  13 staging-only skips; coverage was 90.23% statements, 82.12% branches,
-  92.66% functions, and 92.33% lines. MapLibre contract tests remain green.
+  passed. The deterministic covered suite passed 109 files / 1,870 tests with 13
+  staging-only skips; coverage was 90.23% statements, 82.12% branches, 92.66%
+  functions, and 92.33% lines. MapLibre contract tests remain green.
 - **Limitations:** physical background/permission-loss behavior remains an
   RR-008 device protocol. Native source and generated projects are unchanged.
 
 ### RR-007 — Serialized GPS recording transitions
 
-- **RED:** `npx vitest run src/controllers/GpsRecordingCoordinator.test.ts
-  src/pages/dashboard/useDashboardGpsRecordingActions.test.ts` — 6 expected
-  failures plus one unhandled rejection proved overlapping commands returned
-  independent promises, invalid states resolved silently, pause/resume errors
-  disappeared, and battery-optimization failures escaped the UI.
+- **RED:**
+  `npx vitest run src/controllers/GpsRecordingCoordinator.test.ts src/pages/dashboard/useDashboardGpsRecordingActions.test.ts`
+  — 6 expected failures plus one unhandled rejection proved overlapping commands
+  returned independent promises, invalid states resolved silently, pause/resume
+  errors disappeared, and battery-optimization failures escaped the UI.
 - **GREEN:** the unchanged owning-seam command passed 37/37 tests. The expanded
   coordinator/controller/Dashboard/native-watcher/session matrix passed 321/321,
   including duplicate start/pause/resume/stop/discard, incompatible start→pause,
@@ -649,9 +653,9 @@ a commit cannot contain its own stable final hash.
   timers, polling, extra persistence, or duplicate native work.
 - **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
   hard button scan, and configured staging integration (2 files / 13 tests)
-  passed. The deterministic covered suite passed 109 files / 1,878 tests with
-  13 staging-only skips; coverage was 90.27% statements, 82.05% branches,
-  92.73% functions, and 92.36% lines. MapLibre contract tests remain green.
+  passed. The deterministic covered suite passed 109 files / 1,878 tests with 13
+  staging-only skips; coverage was 90.27% statements, 82.05% branches, 92.73%
+  functions, and 92.36% lines. MapLibre contract tests remain green.
 - **Limitations:** physical repeated-tap/background/lifecycle behavior remains
   an RR-008 device protocol. Native source and generated projects are unchanged.
 
@@ -659,19 +663,22 @@ a commit cannot contain its own stable final hash.
 
 - **RED:** `npx vitest run src/coverageThresholds.test.ts` — 2 expected failures
   proved `vite.config.ts` exposed no global or critical-module thresholds. The
-  contract test was then placed in the `quality/` tooling boundary so application
-  TypeScript does not import the separately compiled Vite config project.
+  contract test was then placed in the `quality/` tooling boundary so
+  application TypeScript does not import the separately compiled Vite config
+  project.
 - **GREEN:** `npx vitest run quality/coverage-thresholds.test.ts` passed 2/2.
   `API_TEST_ENABLED=false npm run test:ci` passed 110 files / 1,880 tests with
   13 staging-only skips while enforcing every threshold. Coverage was 90.27%
   statements, 82.05% branches, 92.73% functions, and 92.36% lines.
 - **Negative control:** a one-off 100% CLI override ran the same coverage engine
-  against the contract test and exited 1 with explicit statement/branch/function/
-  line threshold failures, proving enforcement is active rather than report-only.
+  against the contract test and exited 1 with explicit
+  statement/branch/function/ line threshold failures, proving enforcement is
+  active rather than report-only.
 - **Design:** global floors preserve the audited repository baseline; stronger
-  exact-file floors protect session, GPS-transition, replay, and IndexedDB seams.
-  `autoUpdate` and `perFile` are intentionally false. No application exclusions
-  were added; the staged 100%-per-file path is documented in `docs/ci.md`.
+  exact-file floors protect session, GPS-transition, replay, and IndexedDB
+  seams. `autoUpdate` and `perFile` are intentionally false. No application
+  exclusions were added; the staged 100%-per-file path is documented in
+  `docs/ci.md`.
 - **Gates:** lint, typecheck, build, inventory, runtime/full dependency audits,
   hard button scan, and configured staging integration (2 files / 13 tests)
   passed. The covered suite is now itself the blocking threshold gate; MapLibre
@@ -705,11 +712,12 @@ a commit cannot contain its own stable final hash.
 
 ### RR-012 — Runtime-aligned release documentation
 
-- **RED:** `npx vitest run quality/release-documentation-contract.test.ts
-  --reporter=dot` — after removing one line-wrap-sensitive harness assertion,
-  3 expected failures proved that the native checklist still required automatic
-  replay, rejected recording after notification denial, and claimed deep-link
-  URL payloads were logged. The existing logout and durable GPS-save contracts
+- **RED:**
+  `npx vitest run quality/release-documentation-contract.test.ts --reporter=dot`
+  — after removing one line-wrap-sensitive harness assertion, 3 expected
+  failures proved that the native checklist still required automatic replay,
+  rejected recording after notification denial, and claimed deep-link URL
+  payloads were logged. The existing logout and durable GPS-save contracts
   passed in the same run.
 - **GREEN:** the unchanged focused command passed 4/4. The persistent contract
   scopes assertions to the owning checklist sections and tolerates Markdown line
@@ -744,18 +752,19 @@ a commit cannot contain its own stable final hash.
 - **Toolchain proof:** actionlint 1.7.12 reported no workflow findings; Ruby
   parsed all five YAML files; `bash -n` and `node --check` passed. The published
   Maestro 2.4.0 archive matched SHA-256
-  `aea22ce67ab6718997ec990c58652ede0c2be8f10ac4799039ca3dce3390d634`.
-  That exact CLI accepted all four flows and stopped only at the expected
+  `aea22ce67ab6718997ec990c58652ede0c2be8f10ac4799039ca3dce3390d634`. That exact
+  CLI accepted all four flows and stopped only at the expected
   no-connected-device boundary. The environment guard passed valid dummy input,
   rejected missing configuration, and rejected a non-HTTPS/path-bearing origin.
   Every GitHub Action reference resolves to an audited immutable commit.
-- **Design/security/performance:** only E2E execution steps receive the dedicated
-  OAuth token; packages and build steps do not. Reports/debug screenshots live in
-  an exit-trapped temp directory and are never uploaded. Runs are manual,
-  read-only at the GitHub permission boundary, sequential for the shared staging
-  fixture within each platform matrix, and delete the replayed server landmark
-  before the logout/purge case. No production JavaScript, native source,
-  dependency, application polling, or shipped asset was added.
+- **Design/security/performance:** only E2E execution steps receive the
+  dedicated OAuth token; packages and build steps do not. Reports/debug
+  screenshots live in an exit-trapped temp directory and are never uploaded.
+  Runs are manual, read-only at the GitHub permission boundary, sequential for
+  the shared staging fixture within each platform matrix, and delete the
+  replayed server landmark before the logout/purge case. No production
+  JavaScript, native source, dependency, application polling, or shipped asset
+  was added.
 - **Gates:** lint, typecheck, production build with bundle budgets, actionlint,
   shell/Node/YAML syntax, Prettier for all new artifacts, hard button scan,
   runtime/full dependency audits (zero vulnerabilities), and configured staging
@@ -768,9 +777,9 @@ a commit cannot contain its own stable final hash.
   the selector correctly failed closed because iOS 15.0 is unavailable. The
   dedicated `SPELEODB_E2E_*` token/instance/project configuration and an Android
   emulator are not present locally, so no app-flow matrix result is claimed.
-  Android 24/33/36, true iOS 15.0/latest, and both physical-platform records stay
-  unchecked above and block release until supplied by the manual workflow/device
-  ceremony.
+  Android 24/33/36, true iOS 15.0/latest, and both physical-platform records
+  stay unchecked above and block release until supplied by the manual
+  workflow/device ceremony.
 
 ### RR-009 — Trusted release ceremony
 
@@ -782,11 +791,11 @@ a commit cannot contain its own stable final hash.
   versions, independently known publisher identities, clean/upgrade installs,
   store validation, symbols/mappings, artifact-to-source hashes, independent
   approval, forward-fix rollback, and the no-publish boundary.
-- **Design/security:** `docs/release-ceremony.md` names the current `1.3.0 (130)`
-  native version sources and exact verification commands without storing a key,
-  password, profile, store credential, or publishing permission. It treats
-  disposable CI artifacts as compile-only and requires protected ephemeral
-  signing plus an independent expected certificate/team record.
+- **Design/security:** `docs/release-ceremony.md` names the current
+  `1.3.0 (130)` native version sources and exact verification commands without
+  storing a key, password, profile, store credential, or publishing permission.
+  It treats disposable CI artifacts as compile-only and requires protected
+  ephemeral signing plus an independent expected certificate/team record.
 - **Gates:** lint, typecheck, production build with bundle budgets, Prettier,
   runtime/full dependency audits (zero vulnerabilities), hard button scan, and
   configured staging integration (2 files / 13 tests) passed. The
@@ -797,41 +806,41 @@ a commit cannot contain its own stable final hash.
 - **External evidence:** no trusted key was accessed and no artifact was signed,
   uploaded, installed, validated by a store, tagged, or published. Those actions
   require separate authorization; until their hashes, installation matrices,
-  symbols, store receipts, and two-person approval exist, release remains blocked.
+  symbols, store receipts, and two-person approval exist, release remains
+  blocked.
 
 ### RR-013 — Audited Android Gradle deprecations
 
-- **RED:** `npm run test.unit -- --run
-  quality/gradle-deprecation-audit.test.ts` failed 1/1 because both installed
-  Android plugins still used Gradle's deprecated Groovy space-assignment syntax
-  for `namespace` and `abortOnError`.
+- **RED:** `npm run test.unit -- --run quality/gradle-deprecation-audit.test.ts`
+  failed 1/1 because both installed Android plugins still used Gradle's
+  deprecated Groovy space-assignment syntax for `namespace` and `abortOnError`.
 - **GREEN:** the unchanged focused command passed after extending the existing
   deterministic native-package postinstall hook. The hook converts all four
   assignments to explicit `=` syntax and fails closed if a future plugin version
   contains neither the audited legacy form nor the compatible form.
-- **Warning audit:** `./gradlew :app:testDebugUnitTest :app:lintDebug
-  :app:assembleDebug --warning-mode all --console=plain` initially identified
-  exactly four plugin syntax warnings and one Capacitor-generated `flatDir`
-  warning. A clean dependency install/non-cached compile additionally exposed
-  Sentry's `PackageInfo.versionCode` use and Capacitor Filesystem's internal
-  deprecated `downloadFile` compatibility call. The unchanged command remained
-  green with those three attributed third-party/generated categories.
-  `docs/android-gradle-warnings.md` records owner, impact, exact source, and
-  removal conditions for every finding.
-- **Design/performance:** no dependency or Gradle version changed. The compatible
-  correction reuses the repository's existing postinstall compatibility seam;
-  it performs two small install-time rewrites and adds no shipped runtime work.
-  Capacitor's generated Cordova build file remains unmodified so `cap sync`
-  remains reproducible.
+- **Warning audit:**
+  `./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --warning-mode all --console=plain`
+  initially identified exactly four plugin syntax warnings and one
+  Capacitor-generated `flatDir` warning. A clean dependency install/non-cached
+  compile additionally exposed Sentry's `PackageInfo.versionCode` use and
+  Capacitor Filesystem's internal deprecated `downloadFile` compatibility call.
+  The unchanged command remained green with those three attributed
+  third-party/generated categories. `docs/android-gradle-warnings.md` records
+  owner, impact, exact source, and removal conditions for every finding.
+- **Design/performance:** no dependency or Gradle version changed. The
+  compatible correction reuses the repository's existing postinstall
+  compatibility seam; it performs two small install-time rewrites and adds no
+  shipped runtime work. Capacitor's generated Cordova build file remains
+  unmodified so `cap sync` remains reproducible.
 - **Gates:** lint, typecheck, production build with bundle budgets, focused
   postinstall idempotence, hard button scan, and the MapLibre contracts passed.
   A clean `npm ci` applied the compatibility transforms from unmodified locked
-  packages and reported zero dependency vulnerabilities.
-  The threshold-enforced suite passed 115 files / 1,896 tests with 13
-  staging-only skips; coverage remained 90.27% statements, 82.05% branches,
-  92.73% functions, and 92.36% lines. `npx cap sync android` completed with no
-  tracked native drift, and the post-sync Android unit/lint/debug build remained
-  green with only the documented warning categories.
+  packages and reported zero dependency vulnerabilities. The threshold-enforced
+  suite passed 115 files / 1,896 tests with 13 staging-only skips; coverage
+  remained 90.27% statements, 82.05% branches, 92.73% functions, and 92.36%
+  lines. `npx cap sync android` completed with no tracked native drift, and the
+  post-sync Android unit/lint/debug build remained green with only the
+  documented warning categories.
 - **Limitations:** the remaining `flatDir` declaration is Capacitor 8.4.1
   generated output and currently resolves no local JAR/AAR. Sentry's deprecated
   release-version read is upstream runtime logic; Filesystem's deprecated method
@@ -847,12 +856,12 @@ a commit cannot contain its own stable final hash.
   audit documented every API/line/owner and added a reusable Java
   `-Xlint:deprecation` init script. No warning was suppressed and no dependency
   or native runtime implementation changed.
-- **Corrective native gate:** `./gradlew testDebugUnitTest lint assembleDebug
-  assembleRelease bundleRelease assembleDebugAndroidTest --warning-mode all
-  --console=plain` passed 1,845 tasks (1,158 executed / 687 up-to-date), producing
-  Debug and unsigned Release APKs, a Release AAB, and the app instrumentation
-  APK. The remaining warning classes are the documented third-party/generated
-  exceptions; the worktree remained free of generated native drift.
+- **Corrective native gate:**
+  `./gradlew testDebugUnitTest lint assembleDebug assembleRelease bundleRelease assembleDebugAndroidTest --warning-mode all --console=plain`
+  passed 1,845 tasks (1,158 executed / 687 up-to-date), producing Debug and
+  unsigned Release APKs, a Release AAB, and the app instrumentation APK. The
+  remaining warning classes are the documented third-party/generated exceptions;
+  the worktree remained free of generated native drift.
 - **Corrective repository gates:** lint and typecheck passed. The complete
   threshold-enforced suite passed 115 files / 1,896 tests with 13 staging-only
   skips and unchanged 90.27% / 82.05% / 92.73% / 92.36% coverage. The hard
@@ -878,24 +887,24 @@ not authorized release candidates.
 
 ### Commit ledger
 
-| Scope | Commit | Subject |
-| --- | --- | --- |
-| Plan | `a6d12815b814be580d7f7f1744e078e0a6ac1056` | `[Docs] Add July 2026 release readiness plan` |
-| RR-001 | `1b2bf9dd9dc48997e01e8d488c64cf4e15e60130` | `[Fix] Make logout cache cleanup failure independent` |
-| RR-002 | `f13616632772fa3e5919a80aa0fa7c70eb4bc13f` | `[Fix] Cancel user operations during logout` |
-| RR-014 | `48a3a951623f6d88983dc81f6df333b37f30268c` | `[Feature] Warn before discarding pending offline operations` |
-| RR-003 | `224d522ea0a999e2d8df96e59c6fe2a06431cf5b` | `[Fix] Make confirmed cache mutations atomic` |
-| RR-004 | `8aeab96d9672ade69adb246fd07d7cfac2a8b3ce` | `[Fix] Serialize offline operation replay` |
-| RR-005 | `d18d70ebea9117f98b58bc27cf3d589172503346` | `[Fix] Make offline operation replacement atomic` |
-| RR-006 | `7cc6876e995b5b167d9cd5080470e40fc9c8f5c1` | `[Fix] Report GPS persistence failures` |
-| RR-007 | `422f6988a7b38df5edea24537b1b133098f1c30b` | `[Fix] Serialize GPS recording transitions` |
-| RR-010 | `6a2acf18cfcaf45c07c8cd612226ed0ed181047d` | `[Test] Enforce audited coverage thresholds` |
-| RR-011 | `09e7981e336259cf2f5e0a4a63d605a92d878011` | `[Fix] Correct SpeleoDB PWA metadata` |
-| RR-012 | `e8073b2cc722fd8fbf63b4ad9d2e32ee71559134` | `[Docs] Align release documentation with runtime behavior` |
-| RR-008 | `0db3ced6c5b7ddee994a3bd27bfc41259708454e` | `[Test] Add cross-platform release workflows` |
-| RR-009 | `5fc443778c6c218d26a1a1f1a867c14bc4e2b000` | `[Docs] Define trusted release ceremony` |
-| RR-013 | `f830602c08222a2eca3b3f6060db45c119257e75` | `[Chore] Audit Gradle deprecation warnings` |
-| RR-013 correction | `4efa69d31cb58052b09e8e4a7db8894d4da94db7` | `[Fix] Complete Gradle warning attribution` |
+| Scope             | Commit                                     | Subject                                                       |
+| ----------------- | ------------------------------------------ | ------------------------------------------------------------- |
+| Plan              | `a6d12815b814be580d7f7f1744e078e0a6ac1056` | `[Docs] Add July 2026 release readiness plan`                 |
+| RR-001            | `1b2bf9dd9dc48997e01e8d488c64cf4e15e60130` | `[Fix] Make logout cache cleanup failure independent`         |
+| RR-002            | `f13616632772fa3e5919a80aa0fa7c70eb4bc13f` | `[Fix] Cancel user operations during logout`                  |
+| RR-014            | `48a3a951623f6d88983dc81f6df333b37f30268c` | `[Feature] Warn before discarding pending offline operations` |
+| RR-003            | `224d522ea0a999e2d8df96e59c6fe2a06431cf5b` | `[Fix] Make confirmed cache mutations atomic`                 |
+| RR-004            | `8aeab96d9672ade69adb246fd07d7cfac2a8b3ce` | `[Fix] Serialize offline operation replay`                    |
+| RR-005            | `d18d70ebea9117f98b58bc27cf3d589172503346` | `[Fix] Make offline operation replacement atomic`             |
+| RR-006            | `7cc6876e995b5b167d9cd5080470e40fc9c8f5c1` | `[Fix] Report GPS persistence failures`                       |
+| RR-007            | `422f6988a7b38df5edea24537b1b133098f1c30b` | `[Fix] Serialize GPS recording transitions`                   |
+| RR-010            | `6a2acf18cfcaf45c07c8cd612226ed0ed181047d` | `[Test] Enforce audited coverage thresholds`                  |
+| RR-011            | `09e7981e336259cf2f5e0a4a63d605a92d878011` | `[Fix] Correct SpeleoDB PWA metadata`                         |
+| RR-012            | `e8073b2cc722fd8fbf63b4ad9d2e32ee71559134` | `[Docs] Align release documentation with runtime behavior`    |
+| RR-008            | `0db3ced6c5b7ddee994a3bd27bfc41259708454e` | `[Test] Add cross-platform release workflows`                 |
+| RR-009            | `5fc443778c6c218d26a1a1f1a867c14bc4e2b000` | `[Docs] Define trusted release ceremony`                      |
+| RR-013            | `f830602c08222a2eca3b3f6060db45c119257e75` | `[Chore] Audit Gradle deprecation warnings`                   |
+| RR-013 correction | `4efa69d31cb58052b09e8e4a7db8894d4da94db7` | `[Fix] Complete Gradle warning attribution`                   |
 
 The documentation-only closing commit cannot record its own stable hash; its
 subject is `[Docs] Record release remediation results` and it is verified after
@@ -906,8 +915,8 @@ creation.
 - `npm ci` installed the 726 locked packages, ran every deterministic native
   compatibility patch from fresh package sources, and reported zero
   vulnerabilities.
-- `npm run lint`, `npm run typecheck`, and `npm run build` passed; bundle budgets
-  remained enforced.
+- `npm run lint`, `npm run typecheck`, and `npm run build` passed; bundle
+  budgets remained enforced.
 - `API_TEST_ENABLED=false npm run test:ci` passed 115 files with 2 configured
   staging files skipped: 1,896 passed / 13 skipped tests. Coverage was 90.27%
   statements, 82.05% branches, 92.73% functions, and 92.36% lines; all global
@@ -917,8 +926,9 @@ creation.
 - `npm audit --omit=dev --audit-level=moderate` and
   `npm audit --audit-level=moderate` both reported zero vulnerabilities.
 - `npm run quality:inventory` classified all 581 tracked files with no gap or
-  overlap. The hard button scan returned zero matches, the MapLibre owning-source
-  contracts passed in the complete suite, and `git diff --check` was clean.
+  overlap. The hard button scan returned zero matches, the MapLibre
+  owning-source contracts passed in the complete suite, and `git diff --check`
+  was clean.
 - RR-specific sections above preserve every exact RED/GREEN command, expected
   failure, corrected result, performance consideration, and limitation.
 
@@ -926,8 +936,8 @@ creation.
 
 - `npx cap sync` completed for Android and iOS with all 14 Android and 13 iOS
   plugins; inspection found no tracked native or generated-asset drift.
-- Android `./gradlew testDebugUnitTest lint assembleDebug assembleRelease
-  bundleRelease assembleDebugAndroidTest --warning-mode all --console=plain`
+- Android
+  `./gradlew testDebugUnitTest lint assembleDebug assembleRelease bundleRelease assembleDebugAndroidTest --warning-mode all --console=plain`
   passed 1,845 tasks (1,158 executed / 687 up-to-date). It produced Debug and
   unsigned Release APKs, a Release AAB, and the app instrumentation APK. All
   remaining third-party/generated diagnostics are enumerated in
@@ -948,13 +958,13 @@ creation.
 
 Disposable compile-artifact SHA-256 values (not release approval):
 
-| Artifact | SHA-256 |
-| --- | --- |
-| Android Debug APK | `999ce4c47f76d7a4973135312c0db93e4cdd28b0c8b6d5d67597e722cc8562d6` |
-| Android unsigned Release APK | `bcec7560eadb0e6fbb369e0decbb1bde451554089faf7e4d8a76830f5eeeaf48` |
-| Android Release AAB | `1d1cfabeeb10b32f9907f1e4b23390cf7c8f542d353a8729dddbc7d96deb1dd1` |
-| Android instrumentation APK | `fc0df534bbb37785d3673ffe243ff6953108fe2da3f367f40a7497a7742e8b34` |
-| iOS generic-device Debug executable | `6af0188432046a6ad16c96bdfd70ff4e08009f6c477577dd1c2b5fc3e0ca5e89` |
+| Artifact                              | SHA-256                                                            |
+| ------------------------------------- | ------------------------------------------------------------------ |
+| Android Debug APK                     | `999ce4c47f76d7a4973135312c0db93e4cdd28b0c8b6d5d67597e722cc8562d6` |
+| Android unsigned Release APK          | `bcec7560eadb0e6fbb369e0decbb1bde451554089faf7e4d8a76830f5eeeaf48` |
+| Android Release AAB                   | `1d1cfabeeb10b32f9907f1e4b23390cf7c8f542d353a8729dddbc7d96deb1dd1` |
+| Android instrumentation APK           | `fc0df534bbb37785d3673ffe243ff6953108fe2da3f367f40a7497a7742e8b34` |
+| iOS generic-device Debug executable   | `6af0188432046a6ad16c96bdfd70ff4e08009f6c477577dd1c2b5fc3e0ca5e89` |
 | iOS generic-device Release executable | `c9ba3b16730dfbf18805a39ba26991de7795af1243e5d2a06ebe8956ffb198a3` |
 
 ### External blockers and authorization boundary
@@ -970,5 +980,5 @@ Disposable compile-artifact SHA-256 values (not release approval):
 - No trusted publisher key/profile was accessed. No publisher-signed artifact,
   clean/upgrade install, Play/App Store validation, production symbol bundle,
   trusted `SHA256SUMS`, independent approval, rollout, or rollback drill exists.
-- No commit was pushed; no PR, tag, GitHub release, store upload, release signing
-  change, credential change, or publication was created.
+- No commit was pushed; no PR, tag, GitHub release, store upload, release
+  signing change, credential change, or publication was created.

@@ -22,8 +22,9 @@ release approver accepts the complete evidence record.
   passwords, App Store Connect credentials, Google Play credentials, API keys,
   and provisioning profiles are never committed, copied into issue comments, or
   retained in ordinary CI artifacts.
-- The **independent release approver** verifies identities, hashes, test results,
-  store validation, and rollback readiness. The owner cannot self-approve.
+- The **independent release approver** verifies identities, hashes, test
+  results, store validation, and rollback readiness. The owner cannot
+  self-approve.
 
 Record the expected Android signing-certificate SHA-256 fingerprint and expected
 Apple Team ID (`UDUF7J66TN` for the current project) from an independently
@@ -54,15 +55,15 @@ submitted to either store. Never reuse an Android `versionCode` or iOS
 Before signing, run the complete web suite, production build, dependency audits,
 Android/iOS unit and native configuration tests, release E2E matrices, physical
 device protocols, and `npx cap sync android && npx cap sync ios`. Inspect every
-tracked native diff after sync. The candidate is frozen only when these gates are
-green, the worktree is clean, and the exact commit is approved for signing.
+tracked native diff after sync. The candidate is frozen only when these gates
+are green, the worktree is clean, and the exact commit is approved for signing.
 
 ## 2. Build with trusted identities
 
-Use a fresh protected runner with command tracing/history disabled. Inject secret
-values from the protected secret store into the process environment for the
-single build, then destroy the runner/keychain and revoke leases after evidence
-collection. Never print secret variables.
+Use a fresh protected runner with command tracing/history disabled. Inject
+secret values from the protected secret store into the process environment for
+the single build, then destroy the runner/keychain and revoke leases after
+evidence collection. Never print secret variables.
 
 ### Android
 
@@ -88,14 +89,14 @@ On an isolated runner, brief command-line exposure is still sensitive; do not
 use a shared host, shell tracing, or persisted process telemetry. Verify the APK
 with `apksigner verify --verbose --print-certs <apk>` and compare its signer
 SHA-256 to the independently recorded fingerprint. Verify the AAB with
-`jarsigner -verify -verbose -certs <aab>` and record its signer chain. Reject the
-candidate on any mismatch.
+`jarsigner -verify -verbose -certs <aab>` and record its signer chain. Reject
+the candidate on any mismatch.
 
-Retain `mapping.txt`, `seeds.txt`, `usage.txt`, native debug-symbol archives, and
-dependency/license reports when produced. Android currently has `minifyEnabled
-false`, so an absent R8 `mapping.txt` must be recorded as **not generated**, not
-invented or silently omitted. If minification is enabled later, `mapping.txt`
-becomes mandatory and must match the submitted AAB.
+Retain `mapping.txt`, `seeds.txt`, `usage.txt`, native debug-symbol archives,
+and dependency/license reports when produced. Android currently has
+`minifyEnabled false`, so an absent R8 `mapping.txt` must be recorded as **not
+generated**, not invented or silently omitted. If minification is enabled later,
+`mapping.txt` becomes mandatory and must match the submitted AAB.
 
 ### iOS
 
@@ -105,23 +106,24 @@ and production entitlements. Export the IPA with the release organization's
 reviewed export-options file using `xcodebuild -exportArchive`; do not reuse the
 temporary identity or entitlement-stripped archive from CI.
 
-Verify the exported application with `codesign --verify --deep --strict
-<App.app>` and inspect `codesign -d --verbose=4 <App.app>`. Decode
-`embedded.mobileprovision` with `security cms -D -i
-<App.app/embedded.mobileprovision>` and verify team, application identifier,
-expiration, distribution method, associated domains, and entitlements against
-the approved record. Reject wildcard identifiers or unexpected entitlements.
+Verify the exported application with
+`codesign --verify --deep --strict <App.app>` and inspect
+`codesign -d --verbose=4 <App.app>`. Decode `embedded.mobileprovision` with
+`security cms -D -i <App.app/embedded.mobileprovision>` and verify team,
+application identifier, expiration, distribution method, associated domains, and
+entitlements against the approved record. Reject wildcard identifiers or
+unexpected entitlements.
 
 Retain the `.xcarchive`, exported IPA, export options, export/validation logs,
-and every `.dSYM`. Use `dwarfdump --uuid` on the app binary and `.dSYM` and record
-the matching UUIDs. Preserve any Sentry/debug-symbol upload receipt without
-placing its authentication token in the evidence bundle.
+and every `.dSYM`. Use `dwarfdump --uuid` on the app binary and `.dSYM` and
+record the matching UUIDs. Preserve any Sentry/debug-symbol upload receipt
+without placing its authentication token in the evidence bundle.
 
 ## 3. Hash and bind every artifact
 
 Place distributable artifacts, symbols/mappings, validation logs, and the
-machine-readable evidence manifest in a write-protected candidate directory.
-The manifest binds every artifact to the source commit, native versions, build
+machine-readable evidence manifest in a write-protected candidate directory. The
+manifest binds every artifact to the source commit, native versions, build
 tools, signing fingerprints/team, entitlements, and test evidence URLs.
 
 Generate `SHA256SUMS` only after the directory is final:
@@ -148,7 +150,8 @@ logs/video for every case.
 - Install the candidate, log in, sync, exercise Map/GPS/Pending/Settings, create
   local durable state, sign out, and prove purge after relaunch.
 - Confirm identifiers, version display, permissions, privacy prompts, deep
-  links, background declarations, and crash/symbol reporting match the candidate.
+  links, background declarations, and crash/symbol reporting match the
+  candidate.
 
 ### Upgrade installation
 
@@ -164,10 +167,11 @@ logs/video for every case.
 ## 5. Store validation without publication
 
 - In Google Play Console, upload the trusted AAB only to an authorized draft or
-  internal-validation surface. Verify package, version code, signing certificate/
-  Play App Signing relationship, target SDK, merged permissions, Data Safety,
-  foreground-service declarations, pre-launch report, symbol/mapping association,
-  and upgrade compatibility. Do not promote or roll out.
+  internal-validation surface. Verify package, version code, signing
+  certificate/ Play App Signing relationship, target SDK, merged permissions,
+  Data Safety, foreground-service declarations, pre-launch report,
+  symbol/mapping association, and upgrade compatibility. Do not promote or roll
+  out.
 - In Xcode Organizer, run **Validate App** on the trusted archive. Verify bundle
   identifier, version/build, distribution certificate/team, provisioning,
   entitlements, privacy manifest, associated domains, export compliance, and
@@ -192,8 +196,8 @@ owners and explicit stop thresholds for authentication, data loss, crash rate,
 sync/replay, GPS persistence, and map readiness. If a threshold trips, stop the
 staged rollout immediately. Mobile stores generally cannot downgrade installed
 clients: rollback means halt distribution and prepare a forward-fix build with a
-new, higher `versionCode` and `CURRENT_PROJECT_VERSION`. Never overwrite or reuse
-the failed build identity.
+new, higher `versionCode` and `CURRENT_PROJECT_VERSION`. Never overwrite or
+reuse the failed build identity.
 
 Preserve the rejected/rolled-back artifact, hashes, symbols, store reports, and
 incident decision. Resume only from a new immutable candidate that repeats the
