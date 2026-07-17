@@ -48,7 +48,7 @@ repos:
         # package-lock.json are out of sync, without touching node_modules.
         # Only runs when a manifest actually changed in the commit.
         name: package-lock.json matches package.json
-        entry: npm ci --dry-run --no-audit --no-fund --ignore-scripts
+        entry: npm ci --dry-run --no-audit --no-fund --ignore-scripts --workspaces=false
         language: system
         files: ^(package\.json|package-lock\.json)$
         pass_filenames: false

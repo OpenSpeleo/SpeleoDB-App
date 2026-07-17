@@ -17,6 +17,10 @@ function markdownSection(document: string, heading: string): string {
   return nextHeading < 0 ? content : content.slice(0, nextHeading);
 }
 
+function normalizedMarkdown(document: string): string {
+  return document.replace(/\s+/g, " ");
+}
+
 describe("release documentation behavior contracts", () => {
   let documents: ReleaseDocuments;
 
@@ -62,10 +66,10 @@ describe("release documentation behavior contracts", () => {
       documents.gpsChecklist,
       "### Notification Permission Denial",
     );
-    expect(notificationDenial).toContain(
+    expect(normalizedMarkdown(notificationDenial)).toContain(
       "Recording starts and continues to accept points.",
     );
-    expect(notificationDenial).toContain(
+    expect(normalizedMarkdown(notificationDenial)).toContain(
       "The foreground-service notification may be hidden while permission is denied.",
     );
     expect(notificationDenial).not.toContain("Recording does not start.");
@@ -75,7 +79,7 @@ describe("release documentation behavior contracts", () => {
     expect(documents.deepLinking).toMatch(
       /writes only the fixed event label\s+`\[DeepLink\] URL received\.`/,
     );
-    expect(documents.deepLinking).toMatch(
+    expect(normalizedMarkdown(documents.deepLinking)).toMatch(
       /never writes the URL value or its query parameters/,
     );
     expect(documents.deepLinking).not.toContain("currently logs the URL");

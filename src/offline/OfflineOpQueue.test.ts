@@ -478,6 +478,24 @@ describe('OfflineOpQueue replay', () => {
 });
 
 describe('OfflineOpQueue persistence failures', () => {
+  it('clears a failed load so persisted operations can be retried', async () => {
+    const list = vi
+      .fn<() => Promise<SerializedOfflineOp[]>>()
+      .mockRejectedValueOnce(new Error('storage unavailable'))
+      .mockResolvedValueOnce([]);
+    const store = {
+      list,
+      put: vi.fn(async () => true),
+      remove: vi.fn(async () => true),
+      clear: vi.fn(async () => {}),
+    } as unknown as OfflineOpStore;
+    const queue = new OfflineOpQueue(store, createPort());
+
+    await expect(queue.load()).rejects.toBeInstanceOf(OfflineOpPersistenceError);
+    await expect(queue.load()).resolves.toBeUndefined();
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
   it('does not accept an enqueue when the durable put fails', async () => {
     const failingStore = {
       list: vi.fn(async () => []),
