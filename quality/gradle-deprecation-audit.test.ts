@@ -9,16 +9,11 @@ const pluginBuildFiles = [
 describe("Android Gradle deprecation audit", () => {
   let pluginBuildScripts: string[];
   let audit: string;
-  let generatedCordovaBuild: string;
 
   beforeAll(async () => {
-    [pluginBuildScripts, audit, generatedCordovaBuild] = await Promise.all([
+    [pluginBuildScripts, audit] = await Promise.all([
       Promise.all(pluginBuildFiles.map((file) => readFile(file, "utf8"))),
       readFile("docs/android-gradle-warnings.md", "utf8"),
-      readFile(
-        "android/capacitor-cordova-android-plugins/build.gradle",
-        "utf8",
-      ),
     ]);
   });
 
@@ -32,7 +27,6 @@ describe("Android Gradle deprecation audit", () => {
   });
 
   it("attributes every accepted generated and third-party warning", () => {
-    expect(generatedCordovaBuild).toMatch(/\bflatDir\s*\{/);
     expect(audit).toContain(
       "android/capacitor-cordova-android-plugins/build.gradle",
     );

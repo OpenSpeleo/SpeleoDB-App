@@ -147,9 +147,13 @@ The `uses or overrides a deprecated API` summaries are expanded by the committed
 ## Verification and performance
 
 - `quality/gradle-deprecation-audit.test.ts` enforces Gradle-10-compatible
-  property assignment in both installed plugins.
+  property assignment in both installed plugins and requires this ledger to
+  attribute every accepted warning. It intentionally does not read ignored
+  Capacitor-generated output: a clean unit-test checkout has not run `cap sync`
+  yet.
 - The Android unit, lint, Debug/Release APK, Release AAB, and instrumentation
-  compilation tasks run with all warnings shown.
+  compilation tasks run after `npx cap sync android` with all warnings shown;
+  that native gate owns verification of the generated Cordova `flatDir` warning.
 - `quality/gradle-deprecation.init.gradle` expands Java deprecation summaries
   into exact source/API diagnostics without changing normal production builds.
 - A clean dependency install/non-cached build is required when refreshing this
