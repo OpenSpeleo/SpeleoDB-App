@@ -134,137 +134,142 @@ jobs:
           path: android/app/build/outputs/bundle/release/*.aab
           retention-days: 7
 
-  build-ios:
-    name: iOS Release Compile Smoke
-    needs: [web-build]
-    runs-on: macos-latest
-    timeout-minutes: 35
-    env:
-      SENTRY_DSN_IOS: ${{ secrets.SENTRY_DSN_IOS || 'https://public@example.invalid/1' }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist/
-      - run: npm ci
-      - run: npx cap sync ios
-      - name: Generate temporary iOS signing key
-        run: |
-          set -euo pipefail
-
-          WORK_DIR="$RUNNER_TEMP/ios-signing"
-          CERT_KEY="$WORK_DIR/ci-ios.key"
-          CERT_CRT="$WORK_DIR/ci-ios.crt"
-          CERT_P12="$WORK_DIR/ci-ios.p12"
-          OPENSSL_CFG="$WORK_DIR/openssl-codesign.cnf"
-          KEYCHAIN_PATH="$RUNNER_TEMP/ci-ios-signing.keychain-db"
-          KEYCHAIN_PASSWORD="ci-ios-keychain-pass"
-          P12_PASSWORD="ci-ios-p12-pass"
-
-          mkdir -p "$WORK_DIR"
-
-          cat > "$OPENSSL_CFG" <<'EOF'
-          [ req ]
-          default_bits = 2048
-          prompt = no
-          default_md = sha256
-          x509_extensions = codesign_ext
-          distinguished_name = dn
-
-          [ dn ]
-          CN = SpeleoDB CI iOS Signing
-
-          [ codesign_ext ]
-          basicConstraints = critical,CA:false
-          keyUsage = critical,digitalSignature
-          extendedKeyUsage = critical,codeSigning
-          subjectKeyIdentifier = hash
-          authorityKeyIdentifier = keyid,issuer
-          EOF
-
-          openssl req -new -newkey rsa:2048 -nodes -x509 \
-            -days 3650 \
-            -config "$OPENSSL_CFG" \
-            -keyout "$CERT_KEY" \
-            -out "$CERT_CRT"
-          openssl pkcs12 -export \
-            -inkey "$CERT_KEY" \
-            -in "$CERT_CRT" \
-            -out "$CERT_P12" \
-            -passout pass:"$P12_PASSWORD"
-
-          echo "[ios-signing] create keychain"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          echo "[ios-signing] configure keychain timeout"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          echo "[ios-signing] unlock keychain"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          echo "[ios-signing] set default keychain"
-          security default-keychain -d user -s "$KEYCHAIN_PATH"
-          echo "[ios-signing] set keychain search list"
-          security list-keychains -d user -s "$KEYCHAIN_PATH"
-          echo "[ios-signing] import temporary certificate"
-          security import "$CERT_P12" -k "$KEYCHAIN_PATH" -P "$P12_PASSWORD" -A -T /usr/bin/codesign -T /usr/bin/security
-
-          echo "[ios-signing] resolve signing identity fingerprint"
-          IOS_SIGNING_IDENTITY=$(openssl x509 -in "$CERT_CRT" -noout -fingerprint -sha1 | awk -F= '{print $2}' | tr -d ':')
-          if [ -z "$IOS_SIGNING_IDENTITY" ]; then
-            echo "Failed to resolve temporary iOS signing identity fingerprint from $CERT_CRT."
-            exit 1
-          fi
-
-          {
-            echo "IOS_SIGNING_IDENTITY=$IOS_SIGNING_IDENTITY"
-            echo "IOS_SIGNING_KEYCHAIN=$KEYCHAIN_PATH"
-            echo "IOS_SIGNING_KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD"
-          } >> "$GITHUB_ENV"
-      - name: iOS CI smoke archive (temporary identity)
-        run: |
-          set -euo pipefail
-
-          cd ios/App
-          xcodebuild \
-            -project App.xcodeproj \
-            -scheme App \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath App.xcarchive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_ENTITLEMENTS="" \
-            archive
-
-          APP_PATH="App.xcarchive/Products/Applications/App.app"
-          if [ ! -d "$APP_PATH" ]; then
-            echo "Expected app bundle not found at $APP_PATH"
-            exit 1
-          fi
-
-          rm -rf output
-          mkdir -p output/Payload
-          cp -R "$APP_PATH" output/Payload/
-          security unlock-keychain -p "$IOS_SIGNING_KEYCHAIN_PASSWORD" "$IOS_SIGNING_KEYCHAIN"
-          codesign --force --deep --keychain "$IOS_SIGNING_KEYCHAIN" --sign "$IOS_SIGNING_IDENTITY" --timestamp=none output/Payload/App.app
-          codesign --verify --deep --strict output/Payload/App.app
-          cd output
-          zip -r App-ci-smoke-temporary-signed.ipa Payload
-      - uses: actions/upload-artifact@v7
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          name: ios-ci-smoke-ipa
-          path: ios/App/output/*.ipa
-          retention-days: 7
+  # Temporarily disabled until the iOS signing workflow uses a supported Apple
+  # signing identity and provisioning flow.
+  # build-ios:
+  #   name: iOS Release Compile Smoke
+  #   needs: [web-build]
+  #   runs-on: macos-latest
+  #   timeout-minutes: 35
+  #   env:
+  #     SENTRY_DSN_IOS: ${{ secrets.SENTRY_DSN_IOS || 'https://public@example.invalid/1' }}
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #     - uses: actions/setup-node@v6
+  #       with:
+  #         node-version: 22
+  #         cache: npm
+  #     - uses: actions/download-artifact@v8
+  #       with:
+  #         name: dist
+  #         path: dist/
+  #     - run: npm ci
+  #     - run: npx cap sync ios
+  #     - name: Generate temporary iOS signing key
+  #       run: |
+  #         set -euo pipefail
+  #
+  #         WORK_DIR="$RUNNER_TEMP/ios-signing"
+  #         CERT_KEY="$WORK_DIR/ci-ios.key"
+  #         CERT_CRT="$WORK_DIR/ci-ios.crt"
+  #         CERT_P12="$WORK_DIR/ci-ios.p12"
+  #         OPENSSL_CFG="$WORK_DIR/openssl-codesign.cnf"
+  #         KEYCHAIN_PATH="$RUNNER_TEMP/ci-ios-signing.keychain-db"
+  #         KEYCHAIN_PASSWORD="ci-ios-keychain-pass"
+  #         P12_PASSWORD="ci-ios-p12-pass"
+  #
+  #         mkdir -p "$WORK_DIR"
+  #
+  #         cat > "$OPENSSL_CFG" <<'EOF'
+  #         [ req ]
+  #         default_bits = 2048
+  #         prompt = no
+  #         default_md = sha256
+  #         x509_extensions = codesign_ext
+  #         distinguished_name = dn
+  #
+  #         [ dn ]
+  #         CN = SpeleoDB CI iOS Signing
+  #
+  #         [ codesign_ext ]
+  #         basicConstraints = critical,CA:false
+  #         keyUsage = critical,digitalSignature
+  #         extendedKeyUsage = critical,codeSigning
+  #         subjectKeyIdentifier = hash
+  #         authorityKeyIdentifier = keyid,issuer
+  #         EOF
+  #
+  #         openssl req -new -newkey rsa:2048 -nodes -x509 \
+  #           -days 3650 \
+  #           -config "$OPENSSL_CFG" \
+  #           -keyout "$CERT_KEY" \
+  #           -out "$CERT_CRT"
+  #         openssl pkcs12 -export \
+  #           -inkey "$CERT_KEY" \
+  #           -in "$CERT_CRT" \
+  #           -out "$CERT_P12" \
+  #           -passout pass:"$P12_PASSWORD"
+  #
+  #         echo "[ios-signing] create keychain"
+  #         security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+  #         echo "[ios-signing] configure keychain timeout"
+  #         security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+  #         echo "[ios-signing] unlock keychain"
+  #         security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+  #         echo "[ios-signing] set default keychain"
+  #         security default-keychain -d user -s "$KEYCHAIN_PATH"
+  #         echo "[ios-signing] set keychain search list"
+  #         security list-keychains -d user -s "$KEYCHAIN_PATH"
+  #         echo "[ios-signing] import temporary certificate"
+  #         security import "$CERT_P12" -k "$KEYCHAIN_PATH" -P "$P12_PASSWORD" -A -T /usr/bin/codesign -T /usr/bin/security
+  #
+  #         echo "[ios-signing] resolve signing identity fingerprint"
+  #         IOS_SIGNING_IDENTITY=$(openssl x509 -in "$CERT_CRT" -noout -fingerprint -sha1 | awk -F= '{print $2}' | tr -d ':')
+  #         if [ -z "$IOS_SIGNING_IDENTITY" ]; then
+  #           echo "Failed to resolve temporary iOS signing identity fingerprint from $CERT_CRT."
+  #           exit 1
+  #         fi
+  #
+  #         {
+  #           echo "IOS_SIGNING_IDENTITY=$IOS_SIGNING_IDENTITY"
+  #           echo "IOS_SIGNING_KEYCHAIN=$KEYCHAIN_PATH"
+  #           echo "IOS_SIGNING_KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD"
+  #         } >> "$GITHUB_ENV"
+  #     - name: iOS CI smoke archive (temporary identity)
+  #       run: |
+  #         set -euo pipefail
+  #
+  #         cd ios/App
+  #         xcodebuild \
+  #           -project App.xcodeproj \
+  #           -scheme App \
+  #           -configuration Release \
+  #           -destination 'generic/platform=iOS' \
+  #           -archivePath App.xcarchive \
+  #           CODE_SIGN_IDENTITY="" \
+  #           CODE_SIGNING_REQUIRED=NO \
+  #           CODE_SIGNING_ALLOWED=NO \
+  #           CODE_SIGN_ENTITLEMENTS="" \
+  #           archive
+  #
+  #         APP_PATH="App.xcarchive/Products/Applications/App.app"
+  #         if [ ! -d "$APP_PATH" ]; then
+  #           echo "Expected app bundle not found at $APP_PATH"
+  #           exit 1
+  #         fi
+  #
+  #         rm -rf output
+  #         mkdir -p output/Payload
+  #         cp -R "$APP_PATH" output/Payload/
+  #         security unlock-keychain -p "$IOS_SIGNING_KEYCHAIN_PASSWORD" "$IOS_SIGNING_KEYCHAIN"
+  #         codesign --force --deep --keychain "$IOS_SIGNING_KEYCHAIN" --sign "$IOS_SIGNING_IDENTITY" --timestamp=none output/Payload/App.app
+  #         codesign --verify --deep --strict output/Payload/App.app
+  #         cd output
+  #         zip -r App-ci-smoke-temporary-signed.ipa Payload
+  #     - uses: actions/upload-artifact@v7
+  #       if: startsWith(github.ref, 'refs/tags/')
+  #       with:
+  #         name: ios-ci-smoke-ipa
+  #         path: ios/App/output/*.ipa
+  #         retention-days: 7
 
   release-integrity:
     name: Confirm Tag Artifacts Are Smoke-Only
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [unit-tests, build-android, build-ios]
+    needs:
+      - unit-tests
+      - build-android
+      # - build-ios # Temporarily disabled with the iOS job above.
     runs-on: ubuntu-latest
     steps:
       - name: Record release-integrity boundary
@@ -272,7 +277,8 @@ jobs:
           {
             echo "## Release integrity"
             echo
-            echo "This tag passed Android and iOS release-configuration compile smoke checks."
+            echo "This tag passed the Android release-configuration compile smoke check."
+            echo "The iOS release-configuration compile smoke check is temporarily disabled."
             echo "The retained workflow artifacts use disposable CI signing credentials."
             echo "They are not distributable releases and are not attached to a GitHub release."
             echo "Publishing requires a separate trusted-signing workflow plus installation verification."
