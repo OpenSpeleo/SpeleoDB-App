@@ -959,6 +959,19 @@ describe('Dashboard', () => {
     });
   });
 
+  it('disables discrete tap zoom while preserving pinch zoom', async () => {
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('map')).toBeInTheDocument();
+      expect(mapPropsRef.current).not.toBeNull();
+    });
+
+    const mapProps = mapPropsRef.current as Record<string, unknown>;
+    expect(mapProps.doubleClickZoom).toBe(false);
+    expect(mapProps.touchZoomRotate).toBe(true);
+  });
+
   it('renders distance scale overlay', async () => {
     renderDashboard();
     await waitFor(() => {

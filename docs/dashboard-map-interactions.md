@@ -34,6 +34,25 @@ centralized in the existing map utility and marker-detail modules.
 - Timer handles are cleared on every terminal gesture and hook unmount.
 - Depth probing samples touch/pen movement and clears on terminal gestures.
 
+## Map navigation gestures
+
+The Dashboard constructs MapLibre with `doubleClickZoom={false}`. This disables
+MapLibre's complete discrete tap/click zoom handler: mouse double-click,
+one-finger double-tap zoom-in, and two-finger tap zoom-out. Triple, quadruple,
+and longer tap sequences cannot change the map zoom because their repeated
+double-tap subsequences are handled by the same disabled handler. MapLibre does
+not assign discrete zoom actions to taps with three or more fingers.
+
+`touchZoomRotate` remains enabled so deliberate two-finger pinch zoom continues
+to work. Rotation is still disabled independently by the north-up orientation
+policy. The app does not install a competing DOM or native tap recognizer, which
+preserves pointer cancellation, marker taps, long press, panning, and platform
+accessibility handling.
+
+This policy owns the MapLibre camera only. System accessibility magnification,
+including iOS Accessibility Zoom gestures, remains system-owned and does not
+change the map's stored zoom level.
+
 ## Verification and performance
 
 `useDashboardMapInteractions.test.tsx` plus the Dashboard characterization suite
@@ -42,5 +61,12 @@ timer races, missing map capabilities, low/invalid zoom, query failures,
 movement and duration limits, touch/pen/mouse separation, multi-touch,
 cancellation, marker parsing, coordinate conversion, and rejected haptics.
 
+The Dashboard production-seam test also asserts that discrete tap zoom is
+disabled in the props used to construct MapLibre while pinch zoom remains
+enabled. Device verification should cover one-finger double/triple/quadruple
+taps, two-finger taps, and three-or-more-finger taps, then confirm that
+two-finger pinch, one-finger pan, marker tap, and long press still work.
+
 The hook registers no global listener. It allocates at most two timers during a
-single eligible pointer gesture and clears both at the first terminal event.
+single eligible pointer gesture and clears both at the first terminal event. The
+MapLibre gesture policy adds no listener or per-event application work.
