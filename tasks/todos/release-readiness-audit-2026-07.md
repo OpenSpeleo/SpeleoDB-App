@@ -402,7 +402,7 @@ the Capacitor/plugin build graph and do not demonstrate a shipped defect.
 
 ### Repository and history
 
-- Worktree was clean at audit start; `main` contained the current dependency
+- Worktree was clean at audit start; `master` contained the current dependency
   update and no user edits.
 - 557 tracked files: 162 production TypeScript, 114 TypeScript tests, 86
   Android, 34 iOS, 98 documentation, plus styles/assets/tooling/declarations.

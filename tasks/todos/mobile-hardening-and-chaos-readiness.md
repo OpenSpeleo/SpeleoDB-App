@@ -13,7 +13,7 @@ pushed by the agent.
 
 ## Baseline (2026-06-28)
 
-- Clean `main` with 409 tracked files before this task.
+- Clean `master` with 409 tracked files before this task.
 - `npm run lint`: pass.
 - `npm run build`: pass.
 - Vitest: 80 files and 1,443 tests pass.

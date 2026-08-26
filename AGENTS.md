@@ -76,7 +76,7 @@ correct changes without re-discovering architecture every session.
 ### 4. Verification Before Done
 
 - Never mark a task complete without proving it works
-- Diff behavior between main and your changes when relevant
+- Diff behavior between master branch and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
 - Run lint, type checking/build, focused tests, and the complete automated
   suite.

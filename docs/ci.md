@@ -25,9 +25,17 @@ builds. The workflow lives in `.github/workflows/ci.yml`.
    archives the Xcode project, then verifies an IPA signed by a disposable CI
    identity.
 
-Pull requests and pushes to `main` run all five stages. Version tags retain the
-explicitly named `*-ci-smoke-*` workflow artifacts for seven days. They are
+Pull requests and pushes to `master` run all five stages. Version tags retain
+the explicitly named `*-ci-smoke-*` workflow artifacts for seven days. They are
 compile evidence only and are never attached to a GitHub release.
+
+## Default Branch Contract
+
+`master` is the repository-owned default branch. The workflow's push filter and
+its concurrency exception must change together: pushes to the default branch run
+CI, and an in-progress default-branch run is preserved while superseded
+feature-branch runs may be cancelled. Pull-request targeting remains independent
+and accepts every branch.
 
 ## Release Integrity
 

@@ -2,10 +2,10 @@
 
 ## Goal
 
-Expand GitHub Actions so pull requests and `main` pushes run the repository hook
-contract, the full one-shot Vitest suite, the web production build, and native
-Android/iOS build verification. Fix the existing CI Vitest wrapper failure on
-Node versions that do not support `--no-webstorage`.
+Expand GitHub Actions so pull requests and `master` pushes run the repository
+hook contract, the full one-shot Vitest suite, the web production build, and
+native Android/iOS build verification. Fix the existing CI Vitest wrapper
+failure on Node versions that do not support `--no-webstorage`.
 
 ## Plan
 
