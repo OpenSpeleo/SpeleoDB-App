@@ -3577,7 +3577,15 @@ describe('SpeleoDBController landmark CRUD', () => {
 
       // The optimistic view folds the pending create over the (empty) ground truth.
       const folded = (await controller.getOverlayGeoJSON('landmarks')) as GeoJSON.FeatureCollection;
-      expect(folded.features.map((f) => f.properties?.name)).toContain('Camp');
+      expect(folded.features).toContainEqual(expect.objectContaining({
+        geometry: { type: 'Point', coordinates: [2, 1] },
+        properties: expect.objectContaining({
+          name: 'Camp',
+          collection: '',
+          collection_color: '',
+          is_personal_collection: true,
+        }),
+      }));
     });
 
     it('rejects with a permission error when credentials are missing', async () => {

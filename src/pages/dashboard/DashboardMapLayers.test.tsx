@@ -1,6 +1,9 @@
 import React from 'react';
 import { render } from '@testing-library/react';
+import { createExpression, latest } from '@maplibre/maplibre-gl-style-spec';
+import type { StylePropertySpecification } from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it, vi } from 'vitest';
+import { COLORS } from '../../constants';
 import type { Project } from '../../types/project';
 import type { OverlayIconAvailability } from './dashboardMapUtils';
 import { GpsMapLayers } from './GpsMapLayers';
@@ -23,8 +26,16 @@ vi.mock('react-map-gl/maplibre', () => ({
       ))}
     </div>
   ),
-  Layer: ({ id, source }: { id: string; source?: string }) => (
-    <div data-layer-id={id} data-layer-source-id={source} />
+  Layer: ({ id, source, paint }: {
+    id: string;
+    source?: string;
+    paint?: Record<string, unknown>;
+  }) => (
+    <div
+      data-layer-id={id}
+      data-layer-source-id={source}
+      data-text-color-expression={JSON.stringify(paint?.['text-color'])}
+    />
   ),
 }));
 
@@ -182,5 +193,54 @@ describe('Dashboard map layers', () => {
 
     expect(container.querySelector('[data-layer-id="subsurface-stations-circles"]')).not.toBeNull();
     expect(container.querySelector('[data-layer-id$="-icons"]')).toBeNull();
+  });
+
+  it('renders pending personal landmarks with a valid fallback color', () => {
+    const pendingPersonalLandmark: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        id: 'local:averaged-point',
+        properties: {
+          name: 'High-accuracy point',
+          collection: '',
+          collection_color: '',
+          is_personal_collection: true,
+        },
+        geometry: { type: 'Point', coordinates: [-73, 45] },
+      }],
+    };
+    const { container } = render(
+      <OverlayMapLayers
+        visibleOverlayGeoJsonData={{ landmarks: pendingPersonalLandmark }}
+        visibleLandmarksGeoJSON={pendingPersonalLandmark}
+        showLandmarks
+        iconsLoaded
+        iconAvailability={NO_ICONS}
+      />,
+    );
+    const layer = container.querySelector('[data-layer-id="landmarks-layer"]');
+    const expression = JSON.parse(
+      layer?.getAttribute('data-text-color-expression') ?? 'null',
+    );
+    expect(expression).toEqual([
+      'to-color',
+      ['get', 'collection_color'],
+      COLORS.FALLBACK,
+    ]);
+    const compiled = createExpression(
+      expression,
+      'text-color',
+      latest.paint_symbol['text-color'] as StylePropertySpecification,
+    );
+    expect(compiled.result).toBe('success');
+    if (compiled.result !== 'success') throw new Error('Landmark color expression is invalid.');
+
+    const color = compiled.value.evaluateWithoutErrorHandling(
+      { zoom: 15 },
+      pendingPersonalLandmark.features[0] as never,
+      {},
+    );
+    expect(color.toString()).toBe('rgba(148,163,184,1)');
   });
 });

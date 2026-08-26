@@ -12,7 +12,9 @@ import type {
 } from './dashboardMapUtils';
 
 const LANDMARK_COLLECTION_COLOR_EXPRESSION = [
-  'coalesce',
+  // Offline personal landmarks have no server-assigned collection color yet.
+  // `to-color` skips blank/malformed values and keeps their symbols renderable.
+  'to-color',
   ['get', 'collection_color'],
   COLORS.FALLBACK,
 ] as ExpressionSpecification;

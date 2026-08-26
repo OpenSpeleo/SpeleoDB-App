@@ -42,6 +42,10 @@ heading provider only while its explicit `headingActive` input is true.
   are present.
 - Overlay icon layers mount only after icon loading completes. Exploration and
   cylinder fallbacks remain mutually exclusive with their icon layers.
+- Landmark marker and label colors use MapLibre `to-color` with the app
+  fallback. This is required for queued personal-landmark creates, whose
+  collection color is empty until the server assigns the personal collection
+  during replay.
 - Saved and active GPS tracks are separate sources; the active line is absent
   when recording is idle or has no points.
 - `user-location-dot` remains a direct child of `user-location-source`; its ID
@@ -54,7 +58,9 @@ heading provider only while its explicit `headingActive` input is true.
 
 `DashboardMapLayers.test.tsx` models `react-map-gl` source injection with
 `Children.map`/`cloneElement` and proves that every project geometry layer,
-subsurface icon, and GPS line receives its owning source ID.
+subsurface icon, and GPS line receives its owning source ID. It also compiles
+the production landmark color expression with MapLibre's style engine and proves
+an empty pending-personal collection color resolves to a valid fallback.
 `UserLocationIndicator.test.tsx` proves the same direct source-injection
 contract for the dot plus its fixed SVG geometry and dot-only fallback. The
 Dashboard characterization suite verifies surrounding source selection,

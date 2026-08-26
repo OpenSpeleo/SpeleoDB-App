@@ -1722,7 +1722,7 @@ describe('Dashboard', () => {
     );
     // Collection-driven color (mirrors the web map viewer), not a hardcoded hex.
     expect(layer?.getAttribute('data-layer-text-color')).toBe('');
-    expect(expression).toEqual(['coalesce', ['get', 'collection_color'], '#94a3b8']);
+    expect(expression).toEqual(['to-color', ['get', 'collection_color'], '#94a3b8']);
   });
 
   it('flies to a landmark from the panel without opening the details modal', async () => {
@@ -3141,6 +3141,7 @@ describe('Dashboard -- Landmark CRUD', () => {
             description: 'Created offline',
             collection: '',
             collection_name: 'Personal Landmarks',
+            collection_color: '',
             is_personal_collection: true,
             can_write: true,
             can_delete: true,

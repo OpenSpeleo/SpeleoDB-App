@@ -358,7 +358,11 @@ Constants live in the `GPS` block of `src/constants.ts` (`AVERAGING_MIN_MS=60s`,
 Saving an averaged point **reuses** the shared `LandmarkFormModal` +
 `controller.createLandmark` seam, so it works online (POST) and offline (queued
 `CreateLandmarkOp`) with zero extra wiring. See `docs/landmark-crud.md` and
-`docs/offline-op-queue.md`.
+`docs/offline-op-queue.md`. A queued create in the personal collection has no
+server-assigned `collection_color` yet and therefore carries an empty color. The
+shared landmark MapLibre paint expression uses `to-color` with the app fallback
+so that blank or malformed colors cannot suppress the optimistic map marker (or
+its label) while the point is pending.
 
 ### Session controls (stopwatch semantics)
 
