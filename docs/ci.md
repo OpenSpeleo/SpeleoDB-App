@@ -137,7 +137,10 @@ The password-login endpoint can return `403` from GitHub-hosted runners even
 when the same credentials work locally. When that happens, integration tests
 accept the runner-side password-auth block only after validating
 `SPELEODB_OAUTH_TOKEN` against the same instance. Local runs remain strict for
-password login.
+password login. The live tests use the production `HttpClient` transport, whose
+Node-backed API requests identify as `SpeleoDB-Web`; do not substitute a
+test-only user agent because production edge security may challenge it before
+the request reaches SpeleoDB.
 
 Native compile-smoke builds use `SENTRY_DSN_ANDROID` and `SENTRY_DSN_IOS` when
 the secrets are available. Pull requests from forks cannot read repository

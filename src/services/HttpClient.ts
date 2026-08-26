@@ -216,7 +216,7 @@ export function assertSafeRequestUrl(url: string, isProduction: boolean): void {
 }
 
 function getWebUserAgent(): string {
-  return 'SpeleoDB-Unittest';
+  return 'SpeleoDB-Web';
 }
 
 interface RequestAbortContext {

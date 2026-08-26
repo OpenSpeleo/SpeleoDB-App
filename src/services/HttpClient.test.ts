@@ -196,7 +196,7 @@ describe('HttpClient (web transport)', () => {
     expect(init.redirect).toBe('manual');
   });
 
-  it('injects web app User-Agent for current instance URLs', async () => {
+  it('identifies Node-backed API requests as the web app, not test automation', async () => {
     setPreferences({ instance: 'https://api.test' });
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       status: 200,
@@ -207,7 +207,7 @@ describe('HttpClient (web transport)', () => {
 
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     const headersObject = (init.headers ?? {}) as Record<string, string>;
-    expect(headersObject['User-Agent']).toBe('SpeleoDB-Unittest');
+    expect(headersObject['User-Agent']).toBe('SpeleoDB-Web');
   });
 
   it('injects web app User-Agent for auth endpoint even without saved instance', async () => {
@@ -220,7 +220,7 @@ describe('HttpClient (web transport)', () => {
 
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     const headersObject = (init.headers ?? {}) as Record<string, string>;
-    expect(headersObject['User-Agent']).toBe('SpeleoDB-Unittest');
+    expect(headersObject['User-Agent']).toBe('SpeleoDB-Web');
   });
 
   it('injects web app User-Agent for API endpoint even when host differs from current instance', async () => {
@@ -234,7 +234,7 @@ describe('HttpClient (web transport)', () => {
 
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
     const headersObject = (init.headers ?? {}) as Record<string, string>;
-    expect(headersObject['User-Agent']).toBe('SpeleoDB-Unittest');
+    expect(headersObject['User-Agent']).toBe('SpeleoDB-Web');
   });
 
   it('preserves caller-provided User-Agent on web transport', async () => {

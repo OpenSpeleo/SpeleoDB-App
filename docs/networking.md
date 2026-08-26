@@ -159,6 +159,11 @@ from a passive connectivity event:
 - Requests carrying authorization/cookies or any body disable automatic
   redirects in fetch and CapacitorHttp. This prevents credential and payload
   replay to same-origin or cross-origin redirect targets.
+- Node-backed web transport identifies SpeleoDB API requests as `SpeleoDB-Web`.
+  Browsers retain their browser-managed user agent, while native transport uses
+  the platform-specific `SpeleoDB-iOS` or `SpeleoDB-Android` identity. Test-only
+  identities must not be sent to production edge security because they can be
+  classified as automated traffic before the request reaches the API.
 - External account links apply the same HTTPS/userinfo policy before opening a
   browser surface.
 
