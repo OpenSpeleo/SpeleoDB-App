@@ -53,10 +53,10 @@ submitted to either store. Never reuse an Android `versionCode` or iOS
 `CURRENT_PROJECT_VERSION`, including after a rejected upload or rollback.
 
 Before signing, run the complete web suite, production build, dependency audits,
-Android/iOS unit and native configuration tests, release E2E matrices, physical
-device protocols, and `npx cap sync android && npx cap sync ios`. Inspect every
-tracked native diff after sync. The candidate is frozen only when these gates
-are green, the worktree is clean, and the exact commit is approved for signing.
+Android/iOS unit and native configuration tests, physical-device protocols, and
+`npx cap sync android && npx cap sync ios`. Inspect every tracked native diff
+after sync. The candidate is frozen only when these gates are green, the
+worktree is clean, and the exact commit is approved for signing.
 
 ## 2. Build with trusted identities
 

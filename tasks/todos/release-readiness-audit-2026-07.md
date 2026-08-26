@@ -40,10 +40,9 @@ Commit subjects use `[Type] Message`. The planned sequence is:
 10. `[Test] Enforce audited coverage thresholds` — RR-010
 11. `[Fix] Correct SpeleoDB PWA metadata` — RR-011
 12. `[Docs] Align release documentation with runtime behavior` — RR-012
-13. `[Test] Add cross-platform release workflows` — RR-008
-14. `[Docs] Define trusted release ceremony` — RR-009
-15. `[Chore] Audit Gradle deprecation warnings` — RR-013
-16. `[Docs] Record release remediation results`
+13. `[Docs] Define trusted release ceremony` — RR-009
+14. `[Chore] Audit Gradle deprecation warnings` — RR-013
+15. `[Docs] Record release remediation results`
 
 No commit may combine RR items. Corrections discovered before advancing remain
 associated with the current RR in a separate `[Fix]` commit. Do not amend,
@@ -259,25 +258,6 @@ fires stop/discard/pause/resume promises without complete rejection handling.
       error feedback for every async command.
 - [x] Rerun recording, Dashboard action, native watcher, and lifecycle suites.
 
-#### RR-008 — Critical device/E2E release evidence remains absent
-
-The repository still has no cross-platform end-to-end app suite. Native tests
-cover secure storage, scene/deep-link behavior, and screen-awake configuration,
-but do not drive authentication, offline/online transitions, persistence across
-force-quit, background GPS, offline-map replacement, or the new compass cone.
-The existing task ledgers explicitly leave physical Android/iOS gates open.
-
-- [x] Define the smallest maintainable black-box harness that can run against
-      Android and iOS without embedding production credentials in artifacts.
-- [x] Automate fresh-install login, cached relaunch, logout purge, pending-op
-      persistence/replay, and basic map/GPS navigation on emulators/simulators.
-- [x] Keep background/lock, heading orientation, notification denial, storage
-      pressure, and WebView performance as named physical-device protocols where
-      automation cannot prove behavior.
-- [ ] Record Android API 24/33/36 and minimum/latest iOS results. A release
-      remains blocked until the required physical Android and iOS runs are
-      supplied; the agent must not infer them from compilation.
-
 #### RR-009 — Current CI artifacts are compile smoke, not distributable releases
 
 CI intentionally signs Android/iOS tag artifacts with disposable identities.
@@ -359,10 +339,10 @@ the Capacitor/plugin build graph and do not demonstrate a shipped defect.
       and race-safe.
 - [x] Phase 4: RR-010 through RR-012 — enforce regression gates and align
       shipped metadata/documentation.
-- [x] Phase 5 repository work: RR-008 and RR-009 — add credential-safe black-box
-      workflows and define the trusted signing/install/store ceremony.
-- [ ] Phase 5 external execution: run the supported app E2E/physical-device
-      matrices and trusted signing/install/store validation.
+- [x] Phase 5 repository work: RR-009 — define the trusted signing/install/store
+      ceremony.
+- [ ] Phase 5 external execution: run the supported physical-device checks and
+      trusted signing/install/store validation.
 - [x] Reassess elegance and duplication after each phase; keep shared
       cancellation, transaction, and command-lane ownership centralized.
 
@@ -490,7 +470,7 @@ a commit cannot contain its own stable final hash.
   contracts.
 - **Limitations:** native projects and generated assets are unchanged, so native
   compilation is deferred to the final cross-platform gate. Physical-device
-  evidence remains an explicit RR-008 release gate.
+  evidence remains an explicit physical-device release gate.
 
 ### RR-002 — Cancellable user-operation lifetime
 
@@ -514,7 +494,7 @@ a commit cannot contain its own stable final hash.
   stale callbacks.
 - **Limitations:** native source and generated projects are unchanged; native
   compilation remains in the final cross-platform gate. Physical-device logout
-  races remain an explicit RR-008 release protocol.
+  races remain an explicit physical-device release protocol.
 
 ### RR-014 — Pending-operation loss acknowledgement
 
@@ -536,7 +516,7 @@ a commit cannot contain its own stable final hash.
 - **Limitations:** staging transport, native projects, and generated assets are
   unchanged, so live API and native compilation are inapplicable to this UI-only
   RR item and remain covered by RR-002/final gates. Physical interaction remains
-  part of RR-008.
+  part of the physical-device release checks.
 
 ### RR-003 — Atomic confirmed ground-truth mutations
 
@@ -562,7 +542,7 @@ a commit cannot contain its own stable final hash.
   92.44% functions, and 92.06% lines. MapLibre contract tests remain green.
 - **Limitations:** native source and generated projects are unchanged; native
   compilation remains in the final cross-platform gate. Physical-device storage
-  interruption remains an RR-008 protocol.
+  interruption remains a physical-device protocol.
 
 ### RR-004 — Serialized offline replay commands
 
@@ -634,7 +614,7 @@ a commit cannot contain its own stable final hash.
   staging-only skips; coverage was 90.23% statements, 82.12% branches, 92.66%
   functions, and 92.33% lines. MapLibre contract tests remain green.
 - **Limitations:** physical background/permission-loss behavior remains an
-  RR-008 device protocol. Native source and generated projects are unchanged.
+  physical-device protocol. Native source and generated projects are unchanged.
 
 ### RR-007 — Serialized GPS recording transitions
 
@@ -656,8 +636,8 @@ a commit cannot contain its own stable final hash.
   passed. The deterministic covered suite passed 109 files / 1,878 tests with 13
   staging-only skips; coverage was 90.27% statements, 82.05% branches, 92.73%
   functions, and 92.36% lines. MapLibre contract tests remain green.
-- **Limitations:** physical repeated-tap/background/lifecycle behavior remains
-  an RR-008 device protocol. Native source and generated projects are unchanged.
+- **Limitations:** physical repeated-tap/background/lifecycle behavior remains a
+  physical-device protocol. Native source and generated projects are unchanged.
 
 ### RR-010 — Audited coverage enforcement
 
@@ -736,50 +716,7 @@ a commit cannot contain its own stable final hash.
   MapLibre contracts remained green within the complete suite.
 - **Limitations:** this correction makes the protocols truthful; it does not
   manufacture emulator, physical-device, store-console, or trusted-signing
-  evidence. Those remain RR-008/RR-009 gates.
-
-### RR-008 — Cross-platform release E2E workflows
-
-- **RED:** `npx vitest run quality/release-e2e-workflow.test.ts --reporter=dot`
-  failed at the owning repository seam with `ENOENT` for the absent manual
-  workflow; all 4 behavior/credential/device contracts were skipped. A second
-  focused red run passed 3/4 and proved the new `.maestro/` files were not yet
-  owned by the tracked-file quality inventory.
-- **GREEN:** the unchanged focused command passed 4/4 after adding one shared
-  four-phase Maestro suite, a credential-scoped runner, pinned/checksummed CLI
-  installer, Android API 24/33/36 and iOS minimum/latest lanes, and the physical
-  evidence protocol.
-- **Toolchain proof:** actionlint 1.7.12 reported no workflow findings; Ruby
-  parsed all five YAML files; `bash -n` and `node --check` passed. The published
-  Maestro 2.4.0 archive matched SHA-256
-  `aea22ce67ab6718997ec990c58652ede0c2be8f10ac4799039ca3dce3390d634`. That exact
-  CLI accepted all four flows and stopped only at the expected
-  no-connected-device boundary. The environment guard passed valid dummy input,
-  rejected missing configuration, and rejected a non-HTTPS/path-bearing origin.
-  Every GitHub Action reference resolves to an audited immutable commit.
-- **Design/security/performance:** only E2E execution steps receive the
-  dedicated OAuth token; packages and build steps do not. Reports/debug
-  screenshots live in an exit-trapped temp directory and are never uploaded.
-  Runs are manual, read-only at the GitHub permission boundary, sequential for
-  the shared staging fixture within each platform matrix, and delete the
-  replayed server landmark before the logout/purge case. No production
-  JavaScript, native source, dependency, application polling, or shipped asset
-  was added.
-- **Gates:** lint, typecheck, production build with bundle budgets, actionlint,
-  shell/Node/YAML syntax, Prettier for all new artifacts, hard button scan,
-  runtime/full dependency audits (zero vulnerabilities), and configured staging
-  integration (2 files / 13 tests) passed. The threshold-enforced suite passed
-  113 files / 1,890 tests with 13 staging-only skips; coverage remained 90.27%
-  statements, 82.05% branches, 92.73% functions, and 92.36% lines. MapLibre
-  contracts remained green. The post-stage inventory classified all 576 tracked
-  files (42 build/quality-tooling files) with no gaps or overlaps.
-- **External evidence:** local CoreSimulator selected iOS 26.5 for `latest` and
-  the selector correctly failed closed because iOS 15.0 is unavailable. The
-  dedicated `SPELEODB_E2E_*` token/instance/project configuration and an Android
-  emulator are not present locally, so no app-flow matrix result is claimed.
-  Android 24/33/36, true iOS 15.0/latest, and both physical-platform records
-  stay unchecked above and block release until supplied by the manual
-  workflow/device ceremony.
+  evidence. Those remain physical-device and RR-009 gates.
 
 ### RR-009 — Trusted release ceremony
 
@@ -880,7 +817,7 @@ attribution and audit tooling. No product change is hidden in this closing
 ledger.
 
 The repository remediation is green, but **distribution remains blocked** until
-the unchecked E2E/physical-device and trusted publisher signing, fresh/upgrade
+the unchecked physical-device and trusted publisher signing, fresh/upgrade
 installation, store validation, symbol retention, hash, and independent approval
 gates are executed. Compilation artifacts below are disposable evidence and are
 not authorized release candidates.
@@ -901,7 +838,6 @@ not authorized release candidates.
 | RR-010            | `6a2acf18cfcaf45c07c8cd612226ed0ed181047d` | `[Test] Enforce audited coverage thresholds`                  |
 | RR-011            | `09e7981e336259cf2f5e0a4a63d605a92d878011` | `[Fix] Correct SpeleoDB PWA metadata`                         |
 | RR-012            | `e8073b2cc722fd8fbf63b4ad9d2e32ee71559134` | `[Docs] Align release documentation with runtime behavior`    |
-| RR-008            | `0db3ced6c5b7ddee994a3bd27bfc41259708454e` | `[Test] Add cross-platform release workflows`                 |
 | RR-009            | `5fc443778c6c218d26a1a1f1a867c14bc4e2b000` | `[Docs] Define trusted release ceremony`                      |
 | RR-013            | `f830602c08222a2eca3b3f6060db45c119257e75` | `[Chore] Audit Gradle deprecation warnings`                   |
 | RR-013 correction | `4efa69d31cb58052b09e8e4a7db8894d4da94db7` | `[Fix] Complete Gradle warning attribution`                   |
@@ -969,10 +905,6 @@ Disposable compile-artifact SHA-256 values (not release approval):
 
 ### External blockers and authorization boundary
 
-- The dedicated `SPELEODB_E2E_*` environment, Android API 24/33/36 emulator
-  matrix, and true iOS 15.0 runtime are not available locally. The manual pinned
-  workflow and Maestro flows are committed and validated, but no app-flow result
-  is manufactured from missing infrastructure.
 - No physical Android or iOS device evidence exists for logout races,
   force-quit/reopen storage, offline-map pressure, background/lock GPS,
   notification denial, battery optimization, compass rotation, or performance

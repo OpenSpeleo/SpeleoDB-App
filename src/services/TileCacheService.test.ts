@@ -2,13 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock maplibre-gl before importing the module under test
 vi.mock('maplibre-gl', () => ({
-  default: {
-    addProtocol: vi.fn(),
-    setWorkerUrl: vi.fn(),
-  },
+  addProtocol: vi.fn(),
+  setWorkerUrl: vi.fn(),
 }));
 
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
 import {
   clearCachedTiles,
   registerTileCacheProtocol,

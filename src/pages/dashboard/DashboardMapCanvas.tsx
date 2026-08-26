@@ -1,4 +1,5 @@
 import { useCallback, type PointerEventHandler, type RefObject } from 'react';
+import type { StyleSpecification } from 'maplibre-gl';
 import Map from 'react-map-gl/maplibre';
 import type { MapLayerMouseEvent, MapRef } from 'react-map-gl/maplibre';
 import { MAP, MAP_LAYERS } from '../../constants';
@@ -90,7 +91,7 @@ function MapViewport({
       maxZoom={MAP.MAX_ZOOM}
       {...MAP.ROTATION_LOCK_INTERACTIONS}
       style={{ width: '100%', height: '100%' }}
-      mapStyle={mapStyle as maplibregl.StyleSpecification}
+      mapStyle={mapStyle as StyleSpecification}
       attributionControl={{ compact: true }}
       onLoad={onLoad}
       onMove={onMove}

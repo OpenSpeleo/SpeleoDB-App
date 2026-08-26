@@ -1,10 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('maplibre-gl', () => ({
-  default: {
-    addProtocol: vi.fn(),
-    setWorkerUrl: vi.fn(),
-  },
+  addProtocol: vi.fn(),
+  setWorkerUrl: vi.fn(),
 }));
 
 // Empty the missing-tile hash list so the magic-hash check must short-circuit

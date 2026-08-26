@@ -12,8 +12,8 @@
  *   5. Fetch a missing entry with a deadline and atomically cache it.
  */
 
-import maplibregl from 'maplibre-gl';
-import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker.js?url';
+import { addProtocol, setWorkerUrl } from 'maplibre-gl';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { MAP } from '../constants';
 import type { TileMetadataRecord } from '../types/tileCache';
 import {
@@ -47,7 +47,7 @@ let cacheLifecycleController = new AbortController();
 
 // Use explicit worker URL instead of inline/blob worker bootstrap.
 // This avoids worker bootstrap runtime issues on some iOS devices.
-maplibregl.setWorkerUrl(maplibreWorkerUrl);
+setWorkerUrl(maplibreWorkerUrl);
 
 function throwIfSignalAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
@@ -477,7 +477,7 @@ export function registerTileCacheProtocol(): void {
   if (protocolRegistered) return;
   protocolRegistered = true;
 
-  maplibregl.addProtocol('cached-https', (params, abortController) => {
+  addProtocol('cached-https', (params, abortController) => {
     // Strip the custom protocol prefix to get the real URL
     const realUrl = params.url.replace('cached-https://', 'https://');
 

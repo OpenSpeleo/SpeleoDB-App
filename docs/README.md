@@ -81,8 +81,6 @@ behaviors.
   lifecycle.
 - `pwa-metadata.md`: built web branding, manifest/icon ownership, and emitted
   asset verification.
-- `release-device-evidence.md`: credential-safe Android/iOS E2E matrices,
-  physical-device protocols, evidence fields, and release blocking rules.
 - `release-ceremony.md`: protected signing, versioning, artifact identity,
   installation/store validation, hashes, approval, and rollback.
 - `settings.md`: Settings page sections (event-driven sync stats, map settings,

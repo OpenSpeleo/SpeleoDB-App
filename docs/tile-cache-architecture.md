@@ -17,6 +17,12 @@ coverage until every required source and tile in its replacement is valid.
 - `TileCoordinator` owns source completeness, request supersession, layer
   enable/disable orchestration, storage consent, and logout integration.
 
+MapLibre GL JS is consumed through its v6 named ESM API. Vite bundles the
+published module worker with `?worker&url` before `TileCacheService` supplies
+that URL to MapLibre. This keeps the worker self-contained for Capacitor
+WebViews while preserving the explicit worker URL required by the mobile
+runtime.
+
 ## Runtime cache contract
 
 `cached-https` reads payload and metadata together in one readonly transaction.

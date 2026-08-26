@@ -109,6 +109,13 @@ correct changes without re-discovering architecture every session.
   work is never captured accidentally.
 - Do not run blanket dependency upgrades or dependency swaps without a diagnosed
   need, compatibility review, lockfile inspection, and focused verification.
+- **GitHub Actions version tags (hard rule):** never replace a human-readable
+  action version tag (for example, `actions/checkout@v7.0.1`) with a commit SHA.
+  Preserve the tag selected by the user or dependency updater. If a test or
+  document requires converting that tag to a hash, the contract is stale and
+  must be updated instead. Leave pre-existing hash-pinned actions unchanged
+  unless the user explicitly asks to change them. See
+  `tasks/lessons/github-actions-version-tags.md`.
 - Treat Capacitor-generated native files as reviewable output. After `cap sync`,
   inspect every tracked native diff and keep only changes owned by the task.
 - Do not hide flaky tests with retries, sleeps, skipped tests, or relaxed
