@@ -9,6 +9,47 @@ removal condition. This is an attribution ledger, not permission for a blanket
 Gradle or dependency upgrade. Do not perform a blanket upgrade to clear these
 warnings.
 
+## August 2026 Gradle 10 readiness
+
+Gradle 10 has not been released as of August 26, 2026. The supported migration
+baseline is therefore Android Gradle Plugin (AGP) 9.3.2 with Gradle 9.5.0: AGP
+9.3 declares Gradle 9.5.0 as both its minimum and default version. Gradle 9.5's
+`--warning-mode all` output is the forward-compatibility gate until a Gradle 10
+distribution and a supporting AGP release are available. Do not put an
+unreleased Gradle distribution URL in the wrapper.
+
+Capacitor 8's Filesystem and Geolocation plugins request a Java 21 Kotlin
+toolchain. A build that happened to find a JDK previously downloaded into the
+Gradle user home configured successfully on Gradle 9, but Gradle 9.5 reported
+that using an auto-provisioned toolchain without a declared download repository
+becomes an error in Gradle 10. `android/settings.gradle` now applies Gradle's
+Foojay resolver convention settings plugin. This makes Java 21 provisioning an
+explicit, reproducible build contract instead of relying on developer-machine
+cache state. The resolver performs no download when a matching local toolchain
+is available.
+
+The VS Code Gradle Build Server must import the application through
+`android/settings.gradle`. Capacitor plugin directories under `node_modules` are
+modules of that build, not standalone Gradle roots. When VS Code probes those
+directories independently, their own legacy wrappers run and references such as
+`project(':capacitor-android')` fail because only the application settings file
+declares that project. The workspace configuration therefore:
+
+- limits `gradle.nestedProjects` to `android`; and
+- excludes `node_modules` from Java project import discovery.
+
+Errors reported while independently opening `node_modules/@capacitor/*/android`,
+`@sentry/capacitor/android`, or other plugin Android directories do not
+establish a failure of the application build. Reproduce any native failure from
+`android/` with `./gradlew` before changing a plugin or dependency.
+
+The owning primary references are Gradle's
+[Java toolchain documentation](https://docs.gradle.org/9.5.0/userguide/toolchains.html#sub:download_repositories),
+the Android Developers
+[AGP/Gradle compatibility table](https://developer.android.com/build/releases/about-agp),
+and the VS Code Gradle extension's
+[project discovery contract](https://github.com/microsoft/vscode-gradle#project-discovery).
+
 ## July 2026 audit
 
 The audited clean-build commands are:
@@ -147,10 +188,11 @@ The `uses or overrides a deprecated API` summaries are expanded by the committed
 ## Verification and performance
 
 - `quality/gradle-deprecation-audit.test.ts` enforces Gradle-10-compatible
-  property assignment in both installed plugins and requires this ledger to
-  attribute every accepted warning. It intentionally does not read ignored
-  Capacitor-generated output: a clean unit-test checkout has not run `cap sync`
-  yet.
+  property assignment in both installed plugins, the settings-level Java
+  toolchain resolver, and the single-root VS Code discovery configuration. It
+  also requires this ledger to attribute every accepted warning. It
+  intentionally does not read ignored Capacitor-generated output: a clean
+  unit-test checkout has not run `cap sync` yet.
 - The Android unit, lint, Debug/Release APK, Release AAB, and instrumentation
   compilation tasks run after `npx cap sync android` with all warnings shown;
   that native gate owns verification of the generated Cordova `flatDir` warning.
@@ -162,6 +204,8 @@ The `uses or overrides a deprecated API` summaries are expanded by the committed
 - Dependency upgrades require their own compatibility review and full native
   matrix.
 
-The patch runs once during dependency installation and performs two small file
-rewrites. It adds no application code, startup work, network request, persistent
-storage, or runtime performance cost on Android or iOS.
+The dependency patch runs once during installation and performs two small file
+rewrites. The settings plugin adds configuration-only work and reaches the
+toolchain resolver only when Java 21 is unavailable locally. Neither change adds
+application code, startup work, persistent storage, or runtime performance cost
+on Android or iOS.

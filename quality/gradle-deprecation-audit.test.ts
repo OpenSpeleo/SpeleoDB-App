@@ -9,12 +9,29 @@ const pluginBuildFiles = [
 describe("Android Gradle deprecation audit", () => {
   let pluginBuildScripts: string[];
   let audit: string;
+  let androidSettings: string;
+  let vscodeSettings: Record<string, unknown>;
 
   beforeAll(async () => {
-    [pluginBuildScripts, audit] = await Promise.all([
+    [pluginBuildScripts, audit, androidSettings, vscodeSettings] = await Promise.all([
       Promise.all(pluginBuildFiles.map((file) => readFile(file, "utf8"))),
       readFile("docs/android-gradle-warnings.md", "utf8"),
+      readFile("android/settings.gradle", "utf8"),
+      readFile(".vscode/settings.json", "utf8").then((content) => JSON.parse(content)),
     ]);
+  });
+
+  it("declares a Gradle 10-compatible Java toolchain download repository", () => {
+    expect(androidSettings).toMatch(
+      /id\s+["']org\.gradle\.toolchains\.foojay-resolver-convention["']\s+version\s+["']1\.0\.0["']/,
+    );
+  });
+
+  it("limits VS Code Gradle discovery to the authoritative Android build", () => {
+    expect(vscodeSettings["gradle.nestedProjects"]).toEqual(["android"]);
+    expect(vscodeSettings["java.import.exclusions"]).toEqual(
+      expect.arrayContaining(["**/node_modules/**"]),
+    );
   });
 
   it("patches installed plugin property assignments to Gradle 10 syntax", () => {
