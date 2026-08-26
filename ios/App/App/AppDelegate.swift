@@ -5,6 +5,10 @@ import Capacitor
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // WebView typing undo state can outlive the visible input and present a
+        // shake-to-undo alert over non-editing screens such as the map.
+        application.applicationSupportsShakeToEdit = false
+
         do {
             try SensitiveDataProtection.apply()
             return true

@@ -93,6 +93,9 @@ behaviors.
   guarantees, and purpose strings for iOS and Android.
 - `screen-awake.md`: native Android/iOS foreground screen-awake ownership,
   lifecycle behavior, design boundaries, power impact, and device verification.
+- `ios-webview-editing.md`: iOS WebView editing ownership, the app-wide
+  shake-to-edit policy, unresolved three-finger responder boundaries, and
+  verification.
 - `android-safe-area.md`: why `env(safe-area-inset-bottom)` fails on Android,
   the `initAndroidSafeArea()` fallback, and which components consume the CSS
   variable.

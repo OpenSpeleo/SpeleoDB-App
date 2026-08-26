@@ -28,6 +28,7 @@
 		B10000000000000000000003 /* AppBridgeViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* AppBridgeViewControllerTests.swift */; };
 		B10000000000000000000004 /* SceneDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* SceneDelegateTests.swift */; };
 		B10000000000000000000005 /* PerformanceTimingLogFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* PerformanceTimingLogFormatterTests.swift */; };
+		B10000000000000000000006 /* AppDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* AppDelegateTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -65,6 +66,7 @@
 		B10000000000000000000013 /* AppBridgeViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBridgeViewControllerTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000014 /* SceneDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegateTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000015 /* PerformanceTimingLogFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTimingLogFormatterTests.swift; sourceTree = "<group>"; };
+		B10000000000000000000016 /* AppDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -131,6 +133,7 @@
 		B10000000000000000000041 /* AppTests */ = {
 			isa = PBXGroup;
 			children = (
+				B10000000000000000000016 /* AppDelegateTests.swift */,
 				B10000000000000000000013 /* AppBridgeViewControllerTests.swift */,
 				B10000000000000000000014 /* SceneDelegateTests.swift */,
 				B10000000000000000000011 /* KeychainCredentialStoreTests.swift */,
@@ -298,6 +301,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B10000000000000000000006 /* AppDelegateTests.swift in Sources */,
 				B10000000000000000000001 /* KeychainCredentialStoreTests.swift in Sources */,
 				B10000000000000000000002 /* SensitiveDataProtectionTests.swift in Sources */,
 				B10000000000000000000003 /* AppBridgeViewControllerTests.swift in Sources */,
