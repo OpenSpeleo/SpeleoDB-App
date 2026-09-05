@@ -37,7 +37,7 @@
     "@ionic/react": "^8.8.13",
     "@ionic/react-router": "^8.8.13",
     "@sentry/capacitor": "^4.3.0",
-    "@sentry/react": "10.69.0",
+    "@sentry/react": "10.73.0",
     "@turf/helpers": "^7.4.0",
     "@types/react-router": "^5.1.20",
     "@types/react-router-dom": "^5.3.3",
