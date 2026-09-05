@@ -49,7 +49,7 @@
     "react-dom": "19.2.8",
     "react-map-gl": "^8.1.2",
     "react-router": "^5.3.4",
-    "react-router-dom": "^5.3.4"
+    "react-router-dom": "^7.18.3"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",
