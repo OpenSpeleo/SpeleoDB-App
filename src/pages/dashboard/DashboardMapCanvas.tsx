@@ -1,3 +1,5 @@
+import { DownloadAreaMapLayers } from './DownloadAreaMapLayers';
+import type { DownloadArea } from '../../types/downloadArea';
 import { useCallback, type PointerEventHandler, type RefObject } from 'react';
 import type { StyleSpecification } from 'maplibre-gl';
 import Map from 'react-map-gl/maplibre';
@@ -31,6 +33,9 @@ interface DashboardMapGestures {
 }
 
 interface DashboardMapCanvasProps {
+  downloadAreas?: readonly DownloadArea[];
+  editingArea?: boolean;
+  onOpenOfflineMaps?: () => void;
   mapRef: RefObject<MapRef | null>;
   selectedMapLayerId: MapLayerId;
   onSelectedMapLayerIdChange: (layerId: MapLayerId) => void;
@@ -50,6 +55,7 @@ interface DashboardMapCanvasProps {
 }
 
 interface MapViewportProps {
+  downloadAreas?: readonly DownloadArea[];
   mapRef: RefObject<MapRef | null>;
   mapStyle: Record<string, unknown> | null;
   projectLayers: ProjectMapLayersProps;
@@ -65,6 +71,7 @@ interface MapViewportProps {
 }
 
 function MapViewport({
+  downloadAreas = [],
   mapRef,
   mapStyle,
   projectLayers,
@@ -100,6 +107,7 @@ function MapViewport({
       onMouseMove={gestures.onMouseMove}
       onMouseLeave={gestures.onMouseLeave}
     >
+      <DownloadAreaMapLayers areas={downloadAreas} mapRef={mapRef} />
       <ProjectMapLayers {...projectLayers} />
       <OverlayMapLayers
         {...overlayLayers}
@@ -126,13 +134,7 @@ function MyLocationButton({
     <button
       onClick={onClick}
       aria-pressed={engaged}
-      className={`absolute right-3 z-10 w-11 h-11 flex items-center justify-center
-                 rounded-full backdrop-blur-sm border text-slate-100
-                 transition-colors shadow-lg shadow-black/40
-                 ${engaged
-                   ? 'bg-blue-600 border-blue-400 hover:bg-blue-500'
-                   : 'bg-slate-900/80 border-slate-600/60 hover:bg-slate-800/90'}`}
-      style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 12px)' }}
+      className={`map-control-button${engaged ? ' map-control-button--active' : ''}`}
       aria-label={engaged ? 'Turn off live location' : 'Turn on live location'}
       data-testid="my-location-button"
     >
@@ -158,23 +160,21 @@ function MapChrome({
   isLocating,
   isLocationModeActive,
   onLocate,
-}: Pick<DashboardMapCanvasProps, 'selectedMapLayerId' | 'isOfflineLocked' | 'layerOfflineSync'> & {
+  onOpenOfflineMaps,
+}: Pick<DashboardMapCanvasProps, 'selectedMapLayerId' | 'isOfflineLocked' | 'layerOfflineSync' | 'onOpenOfflineMaps'> & {
   onSelectLayer: (layerId: string) => void;
   isLocating: boolean;
   isLocationModeActive: boolean;
   onLocate: () => void;
 }) {
   return (
-    <>
+    <div className="map-control-stack">
       <MyLocationButton
         isLocating={isLocating}
         isActive={isLocationModeActive}
         onClick={onLocate}
       />
-      <div
-        className="absolute right-3 z-10"
-        style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 64px)' }}
-      >
+      <div className="map-layer-control-slot">
         <MapLayerControl
           layers={MAP_LAYERS}
           selectedLayerId={selectedMapLayerId}
@@ -183,11 +183,19 @@ function MapChrome({
           onSelectLayer={onSelectLayer}
         />
       </div>
-    </>
+      {onOpenOfflineMaps && (
+        <button type="button" className="map-control-button" onClick={onOpenOfflineMaps} aria-label="Offline Maps">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" /></svg>
+        </button>
+      )}
+    </div>
   );
 }
 
 export function DashboardMapCanvas({
+  downloadAreas,
+  editingArea = false,
+  onOpenOfflineMaps,
   mapRef,
   selectedMapLayerId,
   onSelectedMapLayerIdChange,
@@ -227,12 +235,13 @@ export function DashboardMapCanvas({
     <>
       <div
         className="relative w-full h-full dashboard-map-touch-surface"
-        onPointerDownCapture={gestures.onStart}
-        onPointerMoveCapture={gestures.onMove}
-        onPointerUpCapture={gestures.onEnd}
-        onPointerCancelCapture={gestures.onEnd}
+        onPointerDownCapture={editingArea ? undefined : gestures.onStart}
+        onPointerMoveCapture={editingArea ? undefined : gestures.onMove}
+        onPointerUpCapture={editingArea ? undefined : gestures.onEnd}
+        onPointerCancelCapture={editingArea ? undefined : gestures.onEnd}
       >
         <MapViewport
+          downloadAreas={downloadAreas}
           mapRef={mapRef}
           mapStyle={shell.mapStyle}
           projectLayers={projectLayers}
@@ -266,7 +275,7 @@ export function DashboardMapCanvas({
           </div>
         )}
       </div>
-      <MapChrome
+      {!editingArea && <MapChrome
         selectedMapLayerId={selectedMapLayerId}
         isOfflineLocked={isOfflineLocked}
         layerOfflineSync={layerOfflineSync}
@@ -274,7 +283,9 @@ export function DashboardMapCanvas({
         isLocating={shell.isLocating}
         isLocationModeActive={shell.locationModeActive}
         onLocate={shell.toggleLocationMode}
-      />
+        onOpenOfflineMaps={onOpenOfflineMaps}
+      />}
+
       <GeolocationErrorModal error={shell.geoError} onDismiss={shell.dismissGeoError} />
       {!shell.mapStyle && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-900">

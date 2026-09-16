@@ -68,7 +68,7 @@ interface SettingsProps {
   measurementUnit: MeasurementUnit;
   onMeasurementUnitChange: (unit: MeasurementUnit) => void;
   layerOfflineSync: Record<string, boolean>;
-  onLayerOfflineSyncChange: (next: Record<string, boolean>) => void;
+  onLayerOfflineSyncChange: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   activeDashboardPanel: DashboardPanel;
   onDashboardPanelChange: DashboardPanelChange;
 }
@@ -152,13 +152,13 @@ const Settings: React.FC<SettingsProps> = ({
     async (layerId: string, enabled: boolean) => {
       try {
         await controller.setLayerOfflineSync(layerId, enabled);
-        onLayerOfflineSyncChange({ ...layerOfflineSync, [layerId]: enabled });
+        onLayerOfflineSyncChange((current) => ({ ...current, [layerId]: enabled }));
         Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
       } catch {
         // Keep the controlled toggle at its previous value when release/eviction fails.
       }
     },
-    [controller, layerOfflineSync, onLayerOfflineSyncChange],
+    [controller, onLayerOfflineSyncChange],
   );
 
   const handleSelectColorMode = useCallback(
@@ -467,10 +467,15 @@ const Settings: React.FC<SettingsProps> = ({
           </IonItem>
         </IonList>
 
+        <IonList inset>
+          <IonItem button onClick={() => { onDashboardPanelChange('offline-maps'); history.push('/dashboard'); }} detail>
+            <IonLabel><span className="block">Offline Maps</span><span className="block text-sm text-slate-400">Choose and manage downloaded areas</span></IonLabel>
+          </IonItem>
+        </IonList>
         {/* Map Layers */}
         <IonList inset>
           <IonListHeader>
-            <IonLabel>Map Layers (offline sync)</IonLabel>
+            <IonLabel>Map layers (offline sync)</IonLabel>
           </IonListHeader>
 
           {MAP_LAYERS.map((layer) => {

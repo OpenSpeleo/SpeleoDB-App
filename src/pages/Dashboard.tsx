@@ -1,3 +1,5 @@
+import { OfflineMapsPanel } from '../components/map/OfflineMapsPanel';
+import { useDownloadAreas } from '../context/useSpeleoDB';
 /**
  * Dashboard -- full-screen map with per-project GeoJSON layers.
  *
@@ -6,7 +8,7 @@
  * can be toggled on/off via the ProjectPanel.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import {
   IonPage,
@@ -72,6 +74,9 @@ const Dashboard: React.FC<DashboardProps> = ({
   onSelectedMapLayerIdChange,
   layerOfflineSync,
 }) => {
+  const downloadAreas = useDownloadAreas();
+  const [editingArea, setEditingArea] = useState(false);
+  const effectiveLayerSync = useMemo(() => ({ ...layerOfflineSync, ...Object.fromEntries(downloadAreas.availableLayerIds.map((id) => [id, true])) }), [layerOfflineSync, downloadAreas.availableLayerIds]);
   const history = useHistory();
   const {
     controller,
@@ -342,7 +347,10 @@ const Dashboard: React.FC<DashboardProps> = ({
             selectedMapLayerId={selectedMapLayerId}
             onSelectedMapLayerIdChange={onSelectedMapLayerIdChange}
             isOfflineLocked={isOfflineLocked}
-            layerOfflineSync={layerOfflineSync}
+            layerOfflineSync={effectiveLayerSync}
+            downloadAreas={downloadAreas.areas}
+            editingArea={editingArea}
+            onOpenOfflineMaps={() => onDashboardPanelChange('offline-maps')}
             projectLayers={{
               projects: sortedProjects,
               activeProjectIds: effectiveActiveProjectIds,
@@ -375,6 +383,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             onMapReady={fitInitialProjectBounds}
           />
 
+          {activeDashboardPanel === 'offline-maps' && isActive && <OfflineMapsPanel controller={controller} snapshot={downloadAreas} mapRef={mapRef} offline={isOfflineLocked} onClose={() => onDashboardPanelChange(null)} onEditingChange={setEditingArea} />}
           {/* ---- Project panel ---- */}
           <ProjectPanel
             projects={panelProjects}
@@ -512,13 +521,13 @@ const Dashboard: React.FC<DashboardProps> = ({
           <DashboardLandmarkFeedback toast={landmarkToast} longPressRing={longPressRing} />
 
           </div>
-          <AppTabBar
+          {!editingArea && <AppTabBar
             activeDashboardPanel={activeDashboardPanel}
             onDashboardPanelChange={onDashboardPanelChange}
             isGpsRecording={gpsRecordingState !== 'idle'}
             onTabPress={closeGpsOverlays}
             pendingOpsCount={pendingOpsCount}
-          />
+          />}
         </div>
       </IonContent>
     </IonPage>

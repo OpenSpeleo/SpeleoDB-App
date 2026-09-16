@@ -1,3 +1,5 @@
+import { parseDownloadAreaCatalog } from '../downloadAreaGeometry';
+import { coverageIsCurrent } from '../downloadCoverage';
 import type {
   TileCacheEntry,
   TileCacheEvictionResult,
@@ -14,7 +16,8 @@ import type {
 } from '../../types/offlineMapSync';
 
 export const TILE_DB_NAME = 'speleo_tiles';
-export const TILE_DB_VERSION = 8;
+export const TILE_DB_VERSION = 9;
+export const DOWNLOAD_AREA_SETTINGS_STORE = 'offline_map_settings';
 export const TILE_STORE = 'tiles';
 export const PREFETCH_JOB_STORE = 'prefetch_jobs';
 export const TILE_METADATA_STORE = 'tile_metadata';
@@ -172,6 +175,7 @@ export async function openTileDB(): Promise<IDBDatabase> {
       if (!tx) return;
       const oldVersion = event.oldVersion;
 
+      if (!db.objectStoreNames.contains(DOWNLOAD_AREA_SETTINGS_STORE)) db.createObjectStore(DOWNLOAD_AREA_SETTINGS_STORE);
       if (!db.objectStoreNames.contains(TILE_STORE)) db.createObjectStore(TILE_STORE);
       const metadataStore = db.objectStoreNames.contains(TILE_METADATA_STORE)
         ? tx.objectStore(TILE_METADATA_STORE)
@@ -341,6 +345,7 @@ export async function clearCachedTiles(now = Date.now()): Promise<void> {
     const db = await openTileDB();
     const tx = db.transaction(
       [
+        DOWNLOAD_AREA_SETTINGS_STORE,
         TILE_STORE,
         TILE_METADATA_STORE,
         TILE_STATS_STORE,
@@ -353,6 +358,7 @@ export async function clearCachedTiles(now = Date.now()): Promise<void> {
       ],
       'readwrite',
     );
+    tx.objectStore(DOWNLOAD_AREA_SETTINGS_STORE).clear();
     tx.objectStore(TILE_STORE).clear();
     tx.objectStore(TILE_METADATA_STORE).clear();
     tx.objectStore(TILE_OWNER_STORE).clear();
@@ -655,23 +661,37 @@ export async function setOfflineMapGeneration(
   generation: OfflineMapGenerationRecord,
 ): Promise<void> {
   const db = await openTileDB();
-  const tx = db.transaction(OFFLINE_MAP_GENERATION_STORE, 'readwrite');
-  await requestToPromise(
-    tx.objectStore(OFFLINE_MAP_GENERATION_STORE).put(generation, generation.id),
-  );
+  const tx = db.transaction([OFFLINE_MAP_GENERATION_STORE, DOWNLOAD_AREA_SETTINGS_STORE], 'readwrite');
+  const store = tx.objectStore(OFFLINE_MAP_GENERATION_STORE);
+  const previous = await requestToPromise(store.get(generation.id)) as OfflineMapGenerationRecord | undefined;
+  if (generation.coverageKey) {
+    if (previous?.status === 'releasing') throw new DOMException('Offline coverage changed', 'AbortError');
+    if (!previous) {
+      const catalog = parseDownloadAreaCatalog(await requestToPromise(tx.objectStore(DOWNLOAD_AREA_SETTINGS_STORE).get('download-areas')));
+      if (!coverageIsCurrent(catalog, generation.coverageKey, generation.layerId)) {
+        throw new DOMException('Offline coverage changed', 'AbortError');
+      }
+    }
+  }
+  if (generation.areaId) {
+    if (previous?.status === 'releasing') throw new DOMException('Offline area changed', 'AbortError');
+    if (!previous) {
+      const catalog = parseDownloadAreaCatalog(await requestToPromise(tx.objectStore(DOWNLOAD_AREA_SETTINGS_STORE).get('download-areas')));
+      if (!catalog.areas.some((area) => area.areaId === generation.areaId && area.revision === generation.areaRevision)) {
+        throw new DOMException('Offline area changed', 'AbortError');
+      }
+    }
+  }
+  store.put(generation, generation.id);
   await transactionDone(tx);
 }
 
 export async function getOfflineMapGenerations(): Promise<OfflineMapGenerationRecord[]> {
-  try {
-    const db = await openTileDB();
-    const tx = db.transaction(OFFLINE_MAP_GENERATION_STORE, 'readonly');
-    return await requestToPromise(
-      tx.objectStore(OFFLINE_MAP_GENERATION_STORE).getAll(),
-    ) as OfflineMapGenerationRecord[];
-  } catch {
-    return [];
-  }
+  const db = await openTileDB();
+  const tx = db.transaction(OFFLINE_MAP_GENERATION_STORE, 'readonly');
+  return await requestToPromise(
+    tx.objectStore(OFFLINE_MAP_GENERATION_STORE).getAll(),
+  ) as OfflineMapGenerationRecord[];
 }
 
 /** Persist only corrupt counters; valid manifest reads remain write-free. */
@@ -870,7 +890,7 @@ export async function activateOfflineMapGeneration(
   ) as OfflineMapGenerationRecord[];
   const previousActiveIds: string[] = [];
   for (const generation of layerGenerations) {
-    if (generation.id === generationId) continue;
+    if (generation.id === generationId || generation.areaId !== next.areaId) continue;
     if (generation.status === 'active') {
       generation.status = 'releasing';
       generation.updatedAt = now;

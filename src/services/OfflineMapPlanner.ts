@@ -2,10 +2,7 @@ import workerUrl from '../workers/offlineMapPlanner.worker.ts?worker&url';
 import type { OfflineMapPlanningInput } from '../types/offlineMapSync';
 import { createAbortError } from '../utils/abort';
 import {
-  collectUniqueOfflineMapCoordinateKeys,
-  encodePackedOfflineMapCoordinateChunk,
-  iterateRawOfflineMapCoordinates,
-  OFFLINE_MAP_PLAN_CHUNK_SIZE,
+  iterateOfflineMapPlanChunks,
 } from './offlineMapPlanCore';
 
 export {
@@ -49,19 +46,14 @@ export function planOfflineMapInWorker(
 
   if (import.meta.env.MODE === 'test' && typeof Worker === 'undefined') {
     return (async () => {
-      const keys = collectUniqueOfflineMapCoordinateKeys(
-        iterateRawOfflineMapCoordinates(input),
-      );
-      for (
-        let start = 0, chunkIndex = 0;
-        start < keys.length;
-        start += OFFLINE_MAP_PLAN_CHUNK_SIZE, chunkIndex += 1
-      ) {
+      let count = 0;
+      let chunkIndex = 0;
+      for (const chunk of iterateOfflineMapPlanChunks(input)) {
         if (signal?.aborted) throw createAbortError('Offline-map planning aborted');
-        const end = Math.min(keys.length, start + OFFLINE_MAP_PLAN_CHUNK_SIZE);
-        await consume(encodePackedOfflineMapCoordinateChunk(keys, start, end), chunkIndex);
+        await consume(chunk, chunkIndex++);
+        count += chunk.length / 3;
       }
-      return keys.length;
+      return count;
     })();
   }
 

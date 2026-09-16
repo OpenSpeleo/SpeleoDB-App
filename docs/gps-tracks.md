@@ -253,16 +253,18 @@ GeoJSON with **`@turf/helpers`**:
 
 Server tracks are delivered as a pre-signed GeoJSON URL (`file`). Geometry is
 downloaded lazily for display and eagerly with bounded concurrency during full
-sync for offline tile planning. The cached FeatureCollection carries the server
-SHA-256 identity, so changed server bytes cannot reuse stale geometry
-(`getGpsTrackGeoJSONRecord`). Ordinary display deliberately accepts valid legacy
-cached geometry even when it lacks that SHA, preserving existing offline maps.
-Planning is stricter: it requires the current non-empty server SHA and a
-matching valid cache record, or refreshes up to three server tracks
-concurrently. A missing SHA/URL, unavailable network, invalid response, or
-failed cache write aborts the whole rolling replacement so partial GPS coverage
-cannot replace the active generations. GPX remains an interchange/export/upload
-format generated on demand from `RecordedPoint[]`.
+sync for offline tile planning. Every track becomes one padded rectangular
+download area around all points; it shares the manual/automatic area scheduler
+and URL-keyed tile storage (see `offline-download-areas.md`). The cached
+FeatureCollection carries the server SHA-256 identity, so changed server bytes
+cannot reuse stale geometry (`getGpsTrackGeoJSONRecord`). Ordinary display
+deliberately accepts valid legacy cached geometry even when it lacks that SHA,
+preserving existing offline maps. Planning is stricter: it requires the current
+non-empty server SHA and a matching valid cache record, or refreshes up to three
+server tracks concurrently. A missing SHA/URL, unavailable network, invalid
+response, or failed cache write aborts the whole rolling replacement so partial
+GPS coverage cannot replace the active generations. GPX remains an
+interchange/export/upload format generated on demand from `RecordedPoint[]`.
 
 ## Server contracts (SpeleoDB)
 

@@ -16,8 +16,11 @@ cleared.
   its serialized operation format is unchanged.
 - `TileCoordinator` owns engine lifecycle, source collection, storage consent,
   per-layer settings, cancellation, and logout cleanup.
-- `OfflineMapSyncEngine` owns immutable plans, layer generations, the six-worker
-  queue, retries, checkpoints, and the dedicated progress store.
+- `DownloadAreaService` owns the persisted manual/automatic catalog, shared
+  union plan, serial layer queue, foreground lifecycle, and per-area progress.
+  See `offline-download-areas.md`.
+- `OfflineMapSyncEngine` owns immutable plans, coverage/layer generations, the
+  six-worker queue, retries, checkpoints, and the dedicated progress store.
 
 The controller supplies the narrow `OfflineReplayPort` because confirmed replay
 results update landmark/GPS ground-truth caches owned by their domain seams.
@@ -39,13 +42,21 @@ results update landmark/GPS ground-truth caches owned by their domain seams.
 - Matching current quarantines are intentional empty inputs. Every other
   required project, overlay, or current-SHA GPS input must resolve; a transient
   omission fails planning and leaves all prior active coverage intact.
-- Each source-collection/layer request owns a monotonic version in addition to
-  its cancellation context. A dependency that ignores abort still cannot let an
-  older request supersede newer geometry or settings.
-- Manual layer enable reuses the active satellite plan. Layer disable cancels
-  the multi-layer run, releases successfully before payload eviction, updates
-  cache statistics, and resumes remaining layers. Logout cancels all manual
-  work.
+- Source collection owns a monotonic version and cancellation context. Layer
+  switches do not supersede source reads; the catalog transaction uses the
+  latest shared preference when it commits geometry. A late preference failure
+  cannot roll back a newer switch.
+- Every area contributes its rectangle to one deduplicated coordinate plan.
+  Layer switches reuse it and only add/remove that provider’s work and claims.
+  Manual, project, landmark and GPS areas use the same enabled layers. Cached
+  payloads survive disabled ownership without prefix eviction.
+- Pending landmark mutations are folded before rectangle conversion. Landmark
+  changes schedule preparation; hidden source objects remain eligible.
+- Completed standalone GPS uploads, deletions and list refreshes schedule the
+  same source reconciliation after the complete operation and cancellation
+  check. Full sync schedules after all source caches are ready. Intermediate
+  upload state and individual recording fixes do not schedule additional
+  preparation.
 - Storage approval and acknowledgement are non-secret preferences. Runtime cap
   state is updated at the same transition and the paused queue resumes only
   after approval.
@@ -64,6 +75,6 @@ the public façade. `OfflineOpQueue`, canonical planner, sync engine/store, and
 tile repository retain focused unit and race tests.
 
 Settings performs no polling. Project GeoJSON is read once per full sync and all
-enabled layers reuse one coordinate plan. Source planning may re-read a required
-record after validation to prove current-commit completeness. Tile cleanup
-remains concurrent with the main cache purge.
+areas contribute to one union plan reused across enabled layers. Source planning
+may re-read a required record after validation to prove current-commit
+completeness. Tile cleanup remains concurrent with the main cache purge.

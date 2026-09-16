@@ -1092,6 +1092,24 @@ describe('Settings page', () => {
       expect(mockSetLayerOfflineSync).toHaveBeenCalledWith('esri-world-hillshade', true);
     });
 
+    it('retains both layer switches when concurrent saves finish in reverse order', async () => {
+      let finishHill!: () => void;
+      let finishDark!: () => void;
+      mockSetLayerOfflineSync.mockImplementationOnce(() => new Promise<void>((resolve) => { finishHill = resolve; }))
+        .mockImplementationOnce(() => new Promise<void>((resolve) => { finishDark = resolve; }));
+      const user = userEvent.setup();
+      renderSettings();
+      const hill = screen.getByTestId('layer-toggle-esri-world-hillshade');
+      const dark = screen.getByTestId('layer-toggle-esri-world-hillshade-dark');
+      await user.click(hill);
+      await user.click(dark);
+      await act(async () => { finishDark(); });
+      expect(dark).toBeChecked();
+      await act(async () => { finishHill(); });
+      expect(hill).toBeChecked();
+      expect(dark).toBeChecked();
+    });
+
     it('disables extra-layer toggles while offline-locked', () => {
       mockIsOfflineLocked.current = true;
       renderSettings();

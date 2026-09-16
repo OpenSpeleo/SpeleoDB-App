@@ -14,6 +14,9 @@ coverage until every required source and tile in its replacement is valid.
   and download work, retries, checkpoints, and the progress store.
 - `TileCacheRepository` owns IndexedDB schema, transactions, migration,
   activation/release, statistics, recovery, and garbage collection.
+- `DownloadAreaService` and `DownloadAreaRepository` own rectangular download
+  intent, area lifecycle, and atomic activation of all requested layers. See
+  [Offline download areas](offline-download-areas.md).
 - `TileCoordinator` owns source completeness, request supersession, layer
   enable/disable orchestration, storage consent, and logout integration.
 
@@ -62,8 +65,9 @@ SHA, URL, valid response, or successful cache write fails the whole replacement.
 
 Source identity is an asynchronous SHA-256 over sorted, length-delimited input
 parts. `TileCoordinator` assigns every request a monotonic ownership version, so
-an older source read cannot supersede newer geometry, layer preferences, or a
-refresh even when the older dependency ignores cancellation.
+an older source read cannot supersede newer geometry or a refresh even when the
+older dependency ignores cancellation. Layer preference commits are ordered
+separately and do not invalidate geometry reads.
 
 Project-sync preparation is queued on a later WebView task after foreground data
 publication. Project cache records are read through a four-worker bounded pool
@@ -74,12 +78,14 @@ spinner or monopolizing rendering/input on the WebView thread.
 
 ## Bounded in-memory plan construction
 
-The dedicated worker packs each `{z,x,y}` coordinate into one safe integer and
-deduplicates it in a worker-local `Set<number>`. The plan has a hard ceiling of
-1,000,000 unique coordinates; exceeding it fails planning before any final chunk
-or manifest is published. The final keys are copied into a `Float64Array`,
-sorted in place, decoded into compact `Uint32Array` chunks of at most 2,048
-coordinates, and transferred one chunk at a time.
+The dedicated worker computes the union of rectangle tile ranges by vertical
+strips, merging overlapping y intervals only at x-boundary events. Coordinates
+are emitted directly in sorted z/x/y order, without a set or array proportional
+to the full tile count. Memory scales with area count plus a `Uint32Array` chunk
+of at most 2,048 coordinates. Each area retains its 1,000,000-coordinate
+preflight limit; multiple valid areas may exceed that count in aggregate. The
+compatibility planner for pre-area point/path inputs retains its bounded
+packed-key set.
 
 The worker waits for explicit consumer acknowledgement before producing the next
 final chunk. Acknowledgement follows the chunk's durable IndexedDB write, so the
@@ -87,7 +93,7 @@ plan path performs one transaction per final chunk rather than one object-store
 write per raw coordinate. Requests and acknowledgements use discriminated `plan`
 and `ack` messages; the production-worker protocol is tested directly rather
 than only through the test-only main-thread fallback. The immutable manifest is
-committed last. Therefore:
+committed last. For the shared union, therefore:
 
 `expected tiles = unique coordinates (N) * enabled layers (M)`
 
@@ -97,22 +103,22 @@ staging rows and chunk-only builds. Structurally corrupt manifests are deleted
 and rebuilt. Old unreferenced manifests and chunks are collected in bounded
 batches after a grace period.
 
-The temporary memory envelope is intentionally bounded. At the 1,000,000-tile
-ceiling, the JavaScript hash set plus sorted typed array is expected to consume
-roughly 43-69 MiB depending on the WebView engine; a typical 12,000-tile plan is
-well below 1 MiB. Output chunks are transferred and released incrementally.
+Only the next final chunk can be in transit. Rectangle ranges and x events are
+bounded by area count at one zoom level; completed zoom levels are discarded. No
+layer switch rebuilds or transfers the coordinate union.
 
-## IndexedDB v8 and migration
+## IndexedDB v9 and migration
 
-`speleo_tiles` v8 is additive to v7 payload, metadata, generation, and
-membership data:
+`speleo_tiles` v9 adds local area settings to the existing payload, metadata,
+generation and membership stores without rewriting bytes:
 
 | Store                          | Purpose                                              |
 | ------------------------------ | ---------------------------------------------------- |
 | `offline_map_plans`            | immutable manifest and unique cryptographic revision |
 | `offline_map_plan_chunks`      | sorted compact coordinate chunks                     |
 | `offline_map_plan_coordinates` | legacy v8 crash staging; cleared during recovery     |
-| `offline_map_generations`      | pending/active/failed/releasing layer state          |
+| `offline_map_settings`         | one versioned JSON-compatible download-area catalog  |
+| `offline_map_generations`      | pending/active/failed/releasing area/layer state     |
 | `offline_map_memberships`      | generation claim per provider URL                    |
 
 The resumable v6 ownership migration remains private repository machinery. It
@@ -142,15 +148,16 @@ layers.
   transaction and recheck signal/generation before final metadata/statistics.
 - Payload↔tombstone replacement, shared membership, concurrent capacity writes,
   release, and prefix eviction update aggregate statistics transactionally.
-- Activation returns every prior active generation. A failed replacement never
-  activates and releases only its pending memberships.
+- Activation returns prior active generations for the shared coverage and
+  layers. A failed replacement never activates and releases only its pending
+  memberships.
 
-Enabling an optional layer uses a discriminated active-plan reuse request. Only
-`OfflineMapPlanUnavailableError` permits fallback to full source planning.
-Disabling cancels the multi-layer session, releases that layer successfully,
-then evicts its URL namespace, refreshes statistics, and resumes remaining
-layers from the active satellite plan. Release failure prevents eviction and
-rolls back the preference.
+Layer changes update one shared catalog preference for every area. They never
+change area geometry revisions or rebuild the coordinate list. Disabling
+releases only that layer’s claims, never a provider URL namespace. All required
+replacement layers activate in one transaction after verifying catalog geometry
+and enabled layers; failure preserves previous active coverage. Legacy pins
+remain until complete automatic replacement.
 
 ## Progress and Settings
 

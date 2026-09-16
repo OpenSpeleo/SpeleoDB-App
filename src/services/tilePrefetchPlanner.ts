@@ -128,7 +128,7 @@ function latitudeToTileY(lat: number, zoom: number): number {
   return clamp(y, 0, tilesPerAxis - 1);
 }
 
-function tileRangesForZoom(bounds: Bounds, zoom: number): TileRange[] {
+export function tileRangesForZoom(bounds: Bounds, zoom: number): TileRange[] {
   const tilesPerAxis = 2 ** zoom;
   const yMin = latitudeToTileY(bounds.north, zoom);
   const yMax = latitudeToTileY(bounds.south, zoom);
@@ -220,18 +220,22 @@ export function* iterateRawTileUrlsForProjectBounds(
   projectBounds: ProjectGeoJSONBounds,
   request: TilePrefetchRequest,
 ): Generator<string> {
-  const latPad = metersToLatitudeDegrees(request.padMeters);
+  yield* iterateTileUrlsForBounds(padTileBounds(projectBounds, request.padMeters), request);
+}
+
+/** Shared directed-bounds normalization for URL and streaming union planners. */
+export function padTileBounds(projectBounds: ProjectGeoJSONBounds, padMeters: number): Bounds {
+  const latPad = metersToLatitudeDegrees(padMeters);
   const south = clampWebMercatorLatitude(projectBounds.south - latPad);
   const north = clampWebMercatorLatitude(projectBounds.north + latPad);
   const centerLat = (south + north) / 2;
-  const lngPad = metersToLongitudeDegrees(request.padMeters, centerLat);
+  const lngPad = metersToLongitudeDegrees(padMeters, centerLat);
   const expandedLng = expandLongitudeInterval(projectBounds, lngPad);
-  const bounds: Bounds = {
+  return {
     ...expandedLng,
     south,
     north,
   };
-  yield* iterateTileUrlsForBounds(bounds, request);
 }
 
 // ==================== Point collectors (landmarks) ====================

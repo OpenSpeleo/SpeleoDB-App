@@ -1,3 +1,4 @@
+import { useAppForeground } from './hooks/useAppForeground'
 import { Suspense, lazy, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { IonApp, setupIonicReact } from '@ionic/react'
@@ -36,7 +37,9 @@ function AuthenticatedRoutes(): ReactNode {
   )
   const [gpsErrorToast, setGpsErrorToast] = useState<string | null>(null)
   const gpsRecordingError = speleo?.gpsRecordingError ?? null
+  const foreground = useAppForeground()
   const controller = speleo?.controller
+  useEffect(() => { controller?.setOfflineDownloadsForeground?.(foreground) }, [controller, foreground])
 
   useEffect(() => {
     if (!gpsRecordingError || !controller) return

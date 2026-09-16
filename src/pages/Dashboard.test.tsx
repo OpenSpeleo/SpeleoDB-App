@@ -1,3 +1,5 @@
+import { EMPTY_DOWNLOAD_AREAS } from '../types/downloadArea';
+import { EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT } from '../services/OfflineMapSyncStore';
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -108,6 +110,9 @@ const {
     touchZoomRotate: { disableRotation: mockDisableTouchRotation },
     setBearing: mockSetBearing,
     setPitch: mockSetPitch,
+    isStyleLoaded: () => true,
+    on: vi.fn(),
+    off: vi.fn(),
     hasImage: mockMapHasImage,
     addImage: mockMapAddImage,
     loadImage: mockMapLoadImage,
@@ -520,6 +525,8 @@ const mockController = {
 };
 
 vi.mock('../context/useSpeleoDB', () => ({
+  useDownloadAreas: () => EMPTY_DOWNLOAD_AREAS,
+  useOfflineMapSync: () => EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT,
   useSpeleoDB: () => ({
     controller: mockController,
     projects: mockProjects,

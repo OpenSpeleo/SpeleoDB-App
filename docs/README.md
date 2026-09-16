@@ -12,6 +12,8 @@ behaviors.
   persistence, identity handling, security boundaries, and offline behavior.
 - `offline-mode.md`: how offline mode works, startup auth timeout behavior,
   logout rules, and test expectations.
+- `offline-download-areas.md`: unified manual/automatic rectangles, selection
+  UX, transactional settings, area ownership, migration, and verification.
 - `tile-cache-architecture.md`: cache-first tile serving, 180-day freshness,
   fail-closed bounded in-memory planning, compact IndexedDB plans/layer
   generations, six-worker downloads, paint-cadence progress, refresh, and

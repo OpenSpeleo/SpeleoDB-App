@@ -1,0 +1,219 @@
+.offline-map-sheet {
+  position: absolute;
+  z-index: 30;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  max-height: 64%;
+  overflow: auto;
+  padding: 16px;
+  border-radius: 20px;
+  color: var(--color-slate-100);
+  background: var(--color-slate-900);
+  border: 1px solid var(--color-slate-700);
+  box-shadow: 0 4px 20px #0003;
+  overscroll-behavior: contain;
+}
+.offline-map-sheet h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.offline-map-sheet p {
+  margin: 12px 0;
+}
+.offline-map-heading,
+.offline-map-actions,
+.offline-map-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.offline-map-heading {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.offline-map-actions {
+  margin-top: 12px;
+}
+.offline-map-actions > .app-btn {
+  flex: 1;
+}
+.offline-map-primary {
+  width: 100%;
+  margin-top: 4px;
+  min-height: 44px;
+}
+.offline-map-sheet .app-btn {
+  min-height: 44px;
+}
+.offline-map-secondary {
+  color: var(--color-slate-300);
+  font-size: 0.875rem;
+}
+.offline-map-item {
+  border-bottom: 1px solid var(--color-slate-700);
+}
+.offline-map-item:last-child {
+  border-bottom: 0;
+}
+.offline-map-row {
+  padding: 12px 0;
+}
+.offline-map-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.offline-map-row-main strong,
+.offline-map-row-main span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.offline-map-row-main strong {
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+.offline-map-row-main span {
+  font-size: 0.75rem;
+  color: var(--color-slate-400);
+  margin-top: 2px;
+}
+.offline-map-row-actions {
+  display: flex;
+  flex-shrink: 0;
+}
+.offline-map-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.offline-map-confirm {
+  padding: 0 0 12px;
+}
+.offline-editor-top {
+  position: absolute;
+  z-index: 31;
+  top: calc(var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) + 12px);
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: white;
+  text-shadow: 0 1px 4px #000;
+}
+.offline-selection-frame {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  border: 2px solid white;
+  box-shadow: 0 0 0 9999px #0005;
+}
+.offline-selection-handle {
+  position: absolute;
+  pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  border: 0;
+  touch-action: none;
+}
+.offline-selection-handle::after {
+  content: '';
+  position: absolute;
+  inset: 13px;
+  background: white;
+  border: 2px solid var(--color-cyan-600);
+  border-radius: 50%;
+}
+.offline-selection-handle.top-left {
+  top: -23px;
+  left: -23px;
+}
+.offline-selection-handle.top-right {
+  top: -23px;
+  right: -23px;
+}
+.offline-selection-handle.bottom-left {
+  bottom: -23px;
+  left: -23px;
+}
+.offline-selection-handle.bottom-right {
+  bottom: -23px;
+  right: -23px;
+}
+.offline-editor-sheet {
+  max-height: 44%;
+}
+@media (min-width: 768px) {
+  .offline-map-sheet {
+    left: 20px;
+    right: auto;
+    width: 360px;
+    max-height: 65%;
+  }
+  .offline-editor-sheet {
+    left: 50%;
+    transform: translateX(-50%);
+    width: 420px;
+    max-height: 42%;
+  }
+}
+
+.app-btn.offline-map-icon {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-slate-900);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.offline-map-heading .offline-map-icon {
+  background: var(--color-slate-800);
+}
+.app-btn.offline-map-delete {
+  color: var(--color-red-400);
+}
+.offline-editor-top small {
+  display: block;
+  font-size: 0.75rem;
+}
+.offline-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+.offline-editor-footer > .app-btn {
+  flex: 1;
+}
+.offline-editor-copy {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  line-height: 1.3;
+}
+.offline-editor-copy p {
+  margin: 0;
+}
+.offline-editor-copy span {
+  font-size: 0.75rem;
+  color: var(--color-slate-400);
+}
+@media (max-height: 420px) {
+  .offline-editor-sheet {
+    padding: 10px 12px;
+  }
+  .offline-editor-top small {
+    display: none;
+  }
+}

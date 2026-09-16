@@ -199,29 +199,24 @@ The authoritative cache/read/storage design is in
 `docs/tile-cache-architecture.md`.
 
 During `syncProjects()`, after project/overlay/GPS data is cached,
-`TileCoordinator.scheduleSyncPhase` builds one layer-independent coordinate plan
-and schedules it in `speleo_tiles` so the map renders offline:
+`TileCoordinator.scheduleSyncPhase` reconciles automatic rectangular download
+areas. Manual rectangles share the same queue and storage lifecycle. See
+[Offline download areas](offline-download-areas.md) for the model and UX.
 
-- Projects: persisted, validated survey bounds are unioned into the plan. Raw
-  project GeoJSON never enters the tile planner. Oversized/invalid/slow files
-  are quarantined per commit and their jobs are cancelled; see
-  `docs/project-geojson-validation.md`.
-- Landmarks and stations: independently padded points are unioned without a
-  world-spanning bounding box.
-- GPS tracks: durable local and SHA-identified server paths are planned along
-  their segments rather than a world-scale bounding box.
-- Zoom/pad policy lives in `TILE_PREFETCH` in `src/constants.ts` (projects and
-  landmarks both use zoom 0-18, 50 m pad).
-- The reusable collector that turns validated project bounds or landmark points
-  plus a zoom range into `{z,x,y}` tile URLs is
-  `src/services/tilePrefetchPlanner.ts` (`buildTileUrlsForProjectBounds`,
-  `extractPointCoordinates`, `buildTileUrlsForPoints`,
-  `computeTilePrefetchSignature`). Tiles are deduped by URL across all jobs, so
-  shared low-zoom and overlapping dateline ranges download once. Project bounds
-  retain their directed antimeridian interval, padding is applied in meters, and
-  latitude is clamped to Web Mercator before tile conversion.
-- The combined source revision is stable, so an unchanged coordinate plan is
-  loaded with one manifest read; enabling a layer reuses it without replanning.
+- Projects use validated current-commit survey bounds. Raw project GeoJSON never
+  enters the tile planner; matching quarantines are intentional empty inputs.
+- Each landmark or point overlay gets its own padded rectangle, regardless of
+  display visibility. Pending landmark operations are folded before conversion.
+- Each durable local or current-SHA remote GPS track uses one bounding rectangle
+  around all its points, replacing the previous segment corridor.
+- Automatic bounds get 50 m padding; manual bounds are exact. Every area uses
+  zoom 0–18 and one immutable plan shared across its requested layers.
+- Manual areas request satellite and both hillshades; automatic areas follow the
+  layer preferences with satellite required. Overlapping areas share URL-keyed
+  bytes but own independent pinning claims.
+- The planner preserves directed antimeridian intervals, deduplicates root
+  ranges, and clamps latitude to Web Mercator. Geometry-identical plans and
+  fresh tile payloads are reused without network requests.
 - Replacement collection fails closed. Matching validated project records, valid
   empty overlays, and matching current quarantines are resolved inputs;
   transient reads, missing current commits, invalid/missing overlays, absent
@@ -245,19 +240,19 @@ examples.
 
 ### Multi-layer synchronization (satellite first)
 
-The dedicated worker packs and deduplicates coordinates in memory, rejects more
-than 1,000,000 unique tiles, sorts the final keys, and transfers at most 2,048
-final coordinates per acknowledged IndexedDB plan-chunk write. It commits the
-manifest only after every compact chunk is durable. The immutable count `N` is
-expanded satellite first, followed by opted-in layers. Expected coverage is
-exactly `N * enabled layer count`; the denominator never comes from partial
-work. The additive v8 schema preserves existing payloads, metadata, v7 plans,
-generations, and memberships; legacy coordinate staging is cleared during
-recovery. Its incremental v6 migration retains URL-keyed payloads and treats
-unknown fetch dates as fresh from migration time. Disabling an optional layer
-cancels the current session, releases the layer, then evicts its namespace and
-resumes remaining layers from the active plan; a release failure never evicts
-payloads.
+The dedicated worker merges rectangle tile ranges into sorted, duplicate-free
+coordinates with memory bounded by area count. Each area retains its existing
+1,000,000-coordinate limit; the combined union may be larger. It transfers at
+most 2,048 final coordinates per acknowledged IndexedDB plan-chunk write. It
+commits the manifest only after every compact chunk is durable. The immutable
+count `N` is expanded satellite first, followed by enabled layers. Every area
+contributes to the same deduplicated union; coverage is exactly
+`N * enabled layer count`. Schema v9 adds the area catalog while preserving
+payloads, metadata, plans and memberships. Legacy coordinate staging is cleared
+during recovery; legacy pins retire only after complete automatic replacements.
+Disabling a layer releases its claims for every area without evicting cached
+browsing bytes. Layer switches reuse the immutable geometry plan and do not
+restart unrelated providers.
 
 Changed or quarantined geometry creates a replacement plan revision. Prior
 active generations remain usable until replacement succeeds; failed or aborted

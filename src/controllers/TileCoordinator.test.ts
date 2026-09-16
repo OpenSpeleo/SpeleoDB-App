@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { MAP_OVERLAYS } from '../constants';
+import { clearCachedTiles } from '../services/tileCache/TileCacheRepository';
+import { DownloadAreaType } from '../types/downloadArea';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import type { OfflineMapSyncEngineLike } from '../services/OfflineMapSyncEngine';
 import { EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT } from '../services/OfflineMapSyncStore';
@@ -76,6 +79,10 @@ function projectFixture(id: string): Project {
   };
 }
 
+const coordinators: TileCoordinator[] = [];
+beforeEach(async () => { await clearCachedTiles(); });
+afterEach(async () => { for (const coordinator of coordinators.splice(0)) { coordinator.cancel(); await coordinator.stopForLogout(); } });
+
 function createHarness(options: { deferWork?: (work: () => void) => void } = {}) {
   let progressListener: () => void = () => {};
   const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
@@ -105,7 +112,7 @@ function createHarness(options: { deferWork?: (work: () => void) => void } = {})
       if (id === 'landmarks') return pointCollection(1, 1);
       if (id === 'surfaceStations') return pointCollection(2, 2);
       if (id === 'subsurfaceStations') return pointCollection(3, 3);
-      return null;
+      return { type: 'FeatureCollection', features: [] };
     }),
   } as unknown as ProjectCacheService;
   const gpsSources: GpsTrackPrefetchSource[] = [
@@ -124,11 +131,12 @@ function createHarness(options: { deferWork?: (work: () => void) => void } = {})
   ];
   const getGpsPrefetchSources = vi.fn(async () => gpsSources);
   const notifyStateChanged = vi.fn();
+  let layerOfflineSync: Record<string, boolean> = {};
   const coordinator = new TileCoordinator({
     cache,
     preferences: {
-      get: () => ({ layerOfflineSync: {} }),
-      set: vi.fn(),
+      get: () => ({ layerOfflineSync }),
+      set: vi.fn((value) => { if (value.layerOfflineSync) layerOfflineSync = value.layerOfflineSync; }),
     },
     hasNetworkAccess: () => true,
     getProjects: () => [],
@@ -137,6 +145,7 @@ function createHarness(options: { deferWork?: (work: () => void) => void } = {})
     deferWork: options.deferWork ?? ((work) => work()),
     yieldToMainThread: async () => {},
   }, service);
+  coordinators.push(coordinator);
   return {
     coordinator,
     schedule,
@@ -234,25 +243,28 @@ describe('TileCoordinator offline coverage', () => {
     ]);
   });
 
-  it('schedules landmarks, combined stations, local GPS, and server GPS', async () => {
+  it('schedules each landmark, station, and saved GPS track through the rectangle path', async () => {
     const { coordinator, schedule } = createHarness();
     await coordinator.scheduleSyncPhase(new CancellationContext(1, 'test'), []);
-
-    expect(schedule).toHaveBeenCalledOnce();
-    const request = schedule.mock.calls[0][0];
-    expectRebuildRequest(request);
-    expect(request.plan.maxZoom).toBe(18);
-    expect(request.plan.points).toEqual(expect.arrayContaining([[1, 1], [2, 2], [3, 3]]));
-    expect(request.plan.paths).toHaveLength(2);
+    await coordinator.areas.waitForIdle();
+    expect(schedule).toHaveBeenCalledTimes(1);
+    for (const [request] of schedule.mock.calls) {
+      expectRebuildRequest(request);
+      expect(request.coverageKey).toBeTruthy();
+      expect(request.plan.projects).toHaveLength(5);
+      expect(request.plan.points).toEqual([]);
+      expect(request.plan.paths).toEqual([]);
+      expect(request.plan.maxZoom).toBe(18);
+    }
+    expect(coordinator.areas.getSnapshot().areas.map((area) => area.type)).toEqual(expect.arrayContaining([DownloadAreaType.Landmark, DownloadAreaType.Track]));
   });
 
-  it('forces every enabled target and remains active through downloader idle', async () => {
+  it('forces the shared union and remains active through downloader idle', async () => {
     const { coordinator, schedule, waitForIdle } = createHarness();
     await coordinator.refreshOfflineMaps();
-
-    expect(schedule).toHaveBeenCalledOnce();
-    expect(schedule.mock.calls[0][0].forceRefresh).toBe(true);
-    expect(waitForIdle).toHaveBeenCalledOnce();
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(schedule.mock.calls.every(([request]) => request.forceRefresh)).toBe(true);
+    expect(waitForIdle).toHaveBeenCalledTimes(1);
     expect(coordinator.isRefreshActive).toBe(false);
   });
 
@@ -278,15 +290,10 @@ describe('TileCoordinator offline coverage', () => {
     expect(schedule).not.toHaveBeenCalled();
   });
 
-  it('does not evict a disabled layer when generation release fails', async () => {
+  it('does not perform layer-wide eviction when automatic sync is disabled', async () => {
     const { coordinator, releaseLayer } = createHarness();
-    releaseLayer.mockRejectedValueOnce(new Error('release failed'));
-
-    await expect(coordinator.setLayerOfflineSync(
-      'esri-world-hillshade',
-      false,
-    )).rejects.toThrow('release failed');
-
+    await coordinator.setLayerOfflineSync('esri-world-hillshade', false);
+    expect(releaseLayer).not.toHaveBeenCalled();
     expect(evictLayerTilesRuntime).not.toHaveBeenCalled();
   });
 
@@ -303,18 +310,50 @@ describe('TileCoordinator offline coverage', () => {
     resolveFirst(gpsSources);
 
     await expect(first).rejects.toMatchObject({ name: 'AbortError' });
-    expect(schedule).toHaveBeenCalledOnce();
+    await coordinator.areas.waitForIdle();
+    expect(schedule).toHaveBeenCalledTimes(1);
   });
 
-  it('enables a layer by reusing the active satellite plan', async () => {
+  it('enables a layer without inventing geometry when the catalog is empty', async () => {
     const { coordinator, schedule } = createHarness();
-
     await coordinator.setLayerOfflineSync('esri-world-hillshade', true);
-
-    expect(schedule).toHaveBeenCalledOnce();
-    expect(schedule.mock.calls[0][0]).toMatchObject({
-      mode: 'reuse-active-plan',
-      referenceLayerId: 'esri-satellite',
-    });
+    expect(schedule).not.toHaveBeenCalled();
+    expect(coordinator.areas.getSnapshot().areas).toEqual([]);
   });
+  it('layer toggles do not supersede or repeat an in-flight source collection', async () => {
+    const { coordinator, schedule, getGpsPrefetchSources, gpsSources, cache } = createHarness();
+    const gate = deferred<GpsTrackPrefetchSource[]>();
+    getGpsPrefetchSources.mockImplementationOnce(() => gate.promise);
+    const pending = coordinator.scheduleSyncPhase(new CancellationContext(1, 'source read'), []);
+    await vi.waitFor(() => expect(getGpsPrefetchSources).toHaveBeenCalledOnce());
+    await coordinator.setLayerOfflineSync('esri-world-hillshade', true);
+    await coordinator.setLayerOfflineSync('esri-world-hillshade-dark', true);
+    await coordinator.setLayerOfflineSync('esri-world-hillshade', false);
+    gate.resolve(gpsSources);
+    expect((await pending).status).toBe('applied');
+    await coordinator.areas.waitForIdle();
+    expect(getGpsPrefetchSources).toHaveBeenCalledOnce();
+    expect(cache.getOverlayGeoJSONForOfflineMap).toHaveBeenCalledTimes(MAP_OVERLAYS.length);
+    expect(schedule.mock.calls.map(([request]) => request.layers[0].id)).toEqual(['esri-satellite', 'esri-world-hillshade-dark']);
+    expect(new Set(schedule.mock.calls.map(([request]) => request.coverageKey)).size).toBe(1);
+    expect(coordinator.areas.getSnapshot().areas.every((area) => area.layerIds.join(',') === 'esri-satellite,esri-world-hillshade-dark')).toBe(true);
+  });
+
+  it('a failed layer preference commit cannot contaminate the next switch', async () => {
+    const { coordinator } = createHarness();
+    await coordinator.preload();
+    const failure = deferred<void>();
+    const original = coordinator.areas.setLayers.bind(coordinator.areas);
+    const writes = vi.spyOn(coordinator.areas, 'setLayers').mockImplementationOnce(() => failure.promise).mockImplementation(original);
+    const first = coordinator.setLayerOfflineSync('esri-world-hillshade', true);
+    const failed = expect(first).rejects.toThrow('Storage failed');
+    const second = coordinator.setLayerOfflineSync('esri-world-hillshade-dark', true);
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledOnce());
+    failure.reject(new Error('Storage failed'));
+    await failed;
+    await second;
+    expect(writes.mock.calls[1][0]).toEqual(['esri-satellite', 'esri-world-hillshade-dark']);
+    expect(coordinator.areas.getSnapshot().enabledLayerIds).toEqual(['esri-satellite', 'esri-world-hillshade-dark']);
+  });
+
 });

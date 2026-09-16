@@ -1,3 +1,4 @@
+import { EMPTY_DOWNLOAD_AREAS } from '../types/downloadArea';
 import { createContext, useCallback, useContext, useSyncExternalStore } from 'react';
 import type { SpeleoDBController } from '../controllers/SpeleoDBController';
 import type { SyncStatus } from '../controllers/SpeleoDBController';
@@ -70,5 +71,12 @@ export function useOfflineMapSync(): OfflineMapSyncSnapshot {
     () => controller.offlineMapSyncSnapshot,
     [controller],
   );
+  return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+export function useDownloadAreas() {
+  const { controller } = useSpeleoDB();
+  const subscribe = useCallback((listener: () => void) => controller.subscribeDownloadAreas?.(listener) ?? (() => {}), [controller]);
+  const getSnapshot = useCallback(() => controller.downloadAreasSnapshot ?? EMPTY_DOWNLOAD_AREAS, [controller]);
   return useSyncExternalStore(subscribe, getSnapshot);
 }

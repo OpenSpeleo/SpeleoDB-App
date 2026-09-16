@@ -1,16 +1,17 @@
-import { MAP_LAYERS, TILE_PREFETCH } from '../constants';
+import { MAP_LAYERS, MAP_OVERLAYS } from '../constants';
 import type { OfflineMapSyncEngineLike } from '../services/OfflineMapSyncEngine';
 import { LazyOfflineMapSyncEngine } from '../services/LazyOfflineMapSyncEngine';
-import { computeOfflineMapSourceRevision } from '../services/OfflineMapPlanner';
+import { DownloadAreaService } from '../services/DownloadAreaService';
+import { automaticAreaInputs } from '../services/downloadAreaSources';
+import { countAreaCoordinates } from '../services/downloadAreaGeometry';
+import type { DownloadAreaInput } from '../types/downloadArea';
 import { getMapLayerById } from '../services/MapLayersService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import {
   clearCachedTilesRuntime,
-  evictLayerTilesRuntime,
   setTileCacheOverLimitApprovedRuntime,
 } from '../services/TileCacheRuntime';
-import { computeTilePrefetchSignature, extractPointCoordinates } from '../services/tilePrefetchPlanner';
-import type { OfflineMapPlanningInput, OfflineMapSyncSnapshot } from '../types/offlineMapSync';
+import type { OfflineMapSyncSnapshot } from '../types/offlineMapSync';
 import type { LocalGpsTrack } from '../types/gpsTrack';
 import type { MapLayerDefinition } from '../types/mapLayer';
 import type { MapOverlayId } from '../types/mapOverlay';
@@ -43,6 +44,7 @@ interface TileCoordinatorDependencies {
   hasNetworkAccess(): boolean;
   getProjects(): Project[];
   getGpsPrefetchSources(signal?: AbortSignal): Promise<GpsTrackPrefetchSource[]>;
+  foldLandmarks?(collection: GeoJSON.FeatureCollection): Promise<GeoJSON.FeatureCollection>;
   notifyStateChanged(): void;
   deferWork?(work: () => void): void;
   yieldToMainThread?(): Promise<void>;
@@ -55,7 +57,7 @@ interface BuiltProjectInputs {
 }
 
 interface CoverageSources {
-  planning: OfflineMapPlanningInput;
+  areas: DownloadAreaInput[];
   eligibleProjectCount: number;
   scheduledProjectCount: number;
   failedProjectCount: number;
@@ -65,6 +67,7 @@ interface CoverageSources {
 /** Owns offline-map lifecycle, consent, layer settings, and source collection. */
 export class TileCoordinator {
   private engine: OfflineMapSyncEngineLike;
+  areas: DownloadAreaService;
   private overflowApproved = false;
   private promptAcknowledged = false;
   private consentRequested = false;
@@ -75,18 +78,20 @@ export class TileCoordinator {
   private warnedBlockedWhileApproved = false;
   private readonly progressListeners = new Set<() => void>();
   private coverageRequestVersion = 0;
+  private layerSettingsTail: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly dependencies: TileCoordinatorDependencies,
     engine?: OfflineMapSyncEngineLike,
   ) {
     this.engine = engine ?? this.createEngine();
+    this.areas = new DownloadAreaService(this.engine, () => this.dependencies.hasNetworkAccess(), () => this.getEnabledLayers().map((layer) => layer.id));
     this.attachEngineDiagnostics();
     this.restoreConsent();
   }
 
   get snapshot(): OfflineMapSyncSnapshot {
-    return this.engine.getSnapshot();
+    return this.areas.getSyncSnapshot();
   }
 
   subscribe(listener: () => void): () => void {
@@ -119,7 +124,8 @@ export class TileCoordinator {
   }
 
   async preload(): Promise<void> {
-    await this.engine.preload();
+    await this.areas.preload();
+    this.areas.resume();
   }
 
   requestConsent(): void {
@@ -161,28 +167,25 @@ export class TileCoordinator {
   async setLayerOfflineSync(layerId: string, enabled: boolean): Promise<void> {
     const layer = getMapLayerById(layerId);
     if (!layer || layer.forcedOffline) return;
-    this.supersedeCoverageRequests();
-    const current = this.dependencies.preferences.get().layerOfflineSync ?? {};
-    this.dependencies.preferences.set({
-      layerOfflineSync: { ...current, [layerId]: enabled },
-    });
-    this.dependencies.notifyStateChanged();
-    try {
-      if (!enabled) {
-        await this.removeLayerData(layer);
-        if (this.dependencies.hasNetworkAccess()) {
-          await this.scheduleFromActivePlanOrRebuild('Layer offline-map removal');
-        }
-        return;
-      }
-      if (this.dependencies.hasNetworkAccess()) {
-        await this.scheduleFromActivePlanOrRebuild('Layer offline-map sync');
-      }
-    } catch (error) {
-      this.dependencies.preferences.set({ layerOfflineSync: current });
+    const areas = this.areas;
+    // Serialize only preference commits, never downloads or tile cleanup.
+    // A failed switch then rolls back its own state before the next one reads it.
+    const operation = this.layerSettingsTail.then(async () => {
+      const current = this.dependencies.preferences.get().layerOfflineSync ?? {};
+      this.dependencies.preferences.set({
+        layerOfflineSync: { ...current, [layerId]: enabled },
+      });
       this.dependencies.notifyStateChanged();
-      throw error;
-    }
+      try {
+        await areas.setLayers(this.getEnabledLayers().map((value) => value.id));
+      } catch (error) {
+        this.dependencies.preferences.set({ layerOfflineSync: current });
+        this.dependencies.notifyStateChanged();
+        throw error;
+      }
+    });
+    this.layerSettingsTail = operation.catch(() => {});
+    return operation;
   }
 
   async scheduleSyncPhase(
@@ -206,16 +209,8 @@ export class TileCoordinator {
       this.assertCoverageRequestCurrent(requestVersion, context);
       await this.yieldForRendering(context);
       activeTiming = { phase: 'plan_schedule', startedAt: performance.now() };
-      const result = await this.engine.schedule({
-        mode: 'rebuild',
-        plan: sources.planning,
-        layers: this.getEnabledLayers().map((layer) => ({
-          id: layer.id,
-          tileUrlTemplate: layer.tileUrlTemplate,
-        })),
-        forceRefresh,
-        signal: context.signal,
-      });
+      await this.areas.reconcileAutomatic(sources.areas, () => this.assertCoverageRequestCurrent(requestVersion, context), forceRefresh);
+      const coordinateCount = sources.areas.reduce((count, area) => count + countAreaCoordinates(area), 0);
       context.throwIfAborted();
       logElapsedPerformanceTiming('offline-map', context.runId, activeTiming, 'applied');
       activeTiming = null;
@@ -228,7 +223,7 @@ export class TileCoordinator {
         eligibleProjectCount: sources.eligibleProjectCount,
         scheduledProjectCount: sources.scheduledProjectCount,
         failedProjectCount: sources.failedProjectCount,
-        landmarkTileCount: sources.landmarkCount > 0 ? result.coordinateCount : 0,
+        landmarkTileCount: sources.landmarkCount > 0 ? coordinateCount : 0,
         landmarkScheduled: sources.landmarkCount > 0,
       };
     } catch (error) {
@@ -241,6 +236,7 @@ export class TileCoordinator {
         );
       }
       if (isAbortError(error)) throw error;
+      if (requestVersion === this.coverageRequestVersion && !context.signal.aborted) this.areas.reportAutomaticError();
       return {
         phase: 'tile_prefetch',
         status: 'failed',
@@ -253,6 +249,7 @@ export class TileCoordinator {
   }
 
   queueProjectSync(projects: Project[], runId: number): void {
+    this.areas.resumeManual();
     const context = this.beginContext('Project sync offline-map preparation', runId);
     const run = () => {
       if (context.signal.aborted) {
@@ -279,7 +276,7 @@ export class TileCoordinator {
       const context = this.beginContext('Offline map refresh');
       try {
         await this.scheduleSyncPhase(context, this.dependencies.getProjects(), true);
-        await this.engine.waitForIdle();
+        await this.areas.waitForIdle();
       } finally {
         this.activeContexts.delete(context);
       }
@@ -308,11 +305,13 @@ export class TileCoordinator {
     this.supersedeCoverageRequests();
     for (const context of this.activeContexts) context.abort('Async operations invalidated');
     this.activeContexts.clear();
+    this.areas.cancel();
     this.engine.cancel();
   }
 
   stopForLogout(): Promise<void> | void {
     const current = this.engine;
+    this.areas.dispose();
     current.dispose();
     this.engineUnsubscribe?.();
     this.engineUnsubscribe = null;
@@ -320,7 +319,7 @@ export class TileCoordinator {
     this.promptAcknowledged = false;
     this.consentRequested = false;
     setTileCacheOverLimitApprovedRuntime(false);
-    return current.waitForIdle();
+    return Promise.all([current.waitForIdle(), this.areas.waitForIdle(), this.layerSettingsTail]).then(() => {});
   }
 
   persistentCleanupTasks(): Promise<void>[] {
@@ -329,6 +328,7 @@ export class TileCoordinator {
 
   restartAfterLogout(): void {
     this.engine = this.createEngine();
+    this.areas = new DownloadAreaService(this.engine, () => this.dependencies.hasNetworkAccess(), () => this.getEnabledLayers().map((layer) => layer.id));
     this.attachEngineDiagnostics();
   }
 
@@ -341,7 +341,6 @@ export class TileCoordinator {
   private beginContext(label: string, runId?: number): CancellationContext {
     for (const context of this.activeContexts) context.abort('Superseded offline-map request');
     this.activeContexts.clear();
-    this.engine.cancel();
     const context = new CancellationContext(runId ?? this.nextRunId, label);
     if (runId === undefined) this.nextRunId += 1;
     this.activeContexts.add(context);
@@ -354,37 +353,6 @@ export class TileCoordinator {
       await this.scheduleSyncPhase(context, this.dependencies.getProjects());
     } catch (error) {
       if (!isAbortError(error)) throw error;
-    } finally {
-      this.activeContexts.delete(context);
-    }
-  }
-
-  private async scheduleFromActivePlanOrRebuild(label: string): Promise<void> {
-    const context = this.beginContext(label);
-    const requestVersion = this.supersedeCoverageRequests();
-    try {
-      try {
-        await this.engine.schedule({
-          mode: 'reuse-active-plan',
-          layers: this.getEnabledLayers().map((layer) => ({
-            id: layer.id,
-            tileUrlTemplate: layer.tileUrlTemplate,
-          })),
-          referenceLayerId: 'esri-satellite',
-          signal: context.signal,
-        });
-        this.assertCoverageRequestCurrent(requestVersion, context);
-      } catch (error) {
-        if (isAbortError(error)) throw error;
-        if (!(error instanceof Error) || error.name !== 'OfflineMapPlanUnavailableError') {
-          throw error;
-        }
-        this.assertCoverageRequestCurrent(requestVersion, context);
-        const result = await this.scheduleSyncPhase(context, this.dependencies.getProjects());
-        if (result.status === 'failed') {
-          throw new Error('Offline-map planning inputs are incomplete');
-        }
-      }
     } finally {
       this.activeContexts.delete(context);
     }
@@ -410,89 +378,33 @@ export class TileCoordinator {
     }
   }
 
-  private async removeLayerData(layer: MapLayerDefinition): Promise<void> {
-    await this.engine.releaseLayer(layer.id);
-    const prefix = layer.tileUrlTemplate.split('{z}')[0];
-    if (prefix) await evictLayerTilesRuntime([prefix]);
-    await this.engine.refreshCacheStats?.();
-  }
-
   private async collectCoverageSources(
     context: CancellationContext,
     projects: Project[],
   ): Promise<CoverageSources> {
-    const [landmarks, stations, gpsSources, built] = await Promise.all([
-      this.loadOverlayPoints(context, ['landmarks']),
-      this.loadOverlayPoints(context, ['subsurfaceStations', 'surfaceStations']),
+    const [overlays, gpsSources, built] = await Promise.all([
+      Promise.all(MAP_OVERLAYS.map(async (overlay) => ({ id: overlay.id, collection: await this.loadOverlay(context, overlay.id) }))),
       this.dependencies.getGpsPrefetchSources(context.signal),
       this.buildProjectInputs(context, projects),
     ]);
     context.throwIfAborted();
     await this.yieldForRendering(context);
-    const enabledLayers = this.getEnabledLayers();
-    const maxZoom = Math.min(
-      TILE_PREFETCH.PROJECT_REQUEST.maxZoom,
-      ...enabledLayers.map((layer) => layer.maxZoom),
-    );
-    const revisionParts = [
-      `coverage:${COVERAGE_REVISION}`,
-      `zoom:${TILE_PREFETCH.PROJECT_REQUEST.minZoom}-${maxZoom}`,
-      `padding:${TILE_PREFETCH.PROJECT_REQUEST.padMeters}`,
-      `landmarks:${computeTilePrefetchSignature(landmarks)}`,
-      `stations:${computeTilePrefetchSignature(stations)}`,
-      ...built.inputs.map((input) => (
-        `project:${input.projectId}:${input.commitId}:${JSON.stringify(input.bounds)}`
-      )),
-      ...gpsSources.map((source) => (
-        `gps:${source.targetKind}:${source.targetId}:${source.sourceRevision}`
-      )),
-    ];
-    const sourceRevision = await computeOfflineMapSourceRevision(revisionParts);
-    context.throwIfAborted();
     return {
-      planning: {
-        sourceRevision,
-        projects: built.inputs.map((input) => input.bounds),
-        points: [...landmarks, ...stations],
-        paths: gpsSources.flatMap((source) => source.paths),
-        minZoom: TILE_PREFETCH.PROJECT_REQUEST.minZoom,
-        maxZoom,
-        padMeters: TILE_PREFETCH.PROJECT_REQUEST.padMeters,
-      },
+      areas: automaticAreaInputs(built.inputs, overlays, gpsSources, this.getEnabledLayers().map((layer) => layer.id)),
       eligibleProjectCount: built.eligibleCount,
       scheduledProjectCount: built.inputs.length,
       failedProjectCount: built.failedCount,
-      landmarkCount: landmarks.length,
+      landmarkCount: overlays.find((overlay) => overlay.id === 'landmarks')?.collection.features.length ?? 0,
     };
   }
 
-  private async loadOverlayPoints(
-    context: CancellationContext,
-    overlayIds: MapOverlayId[],
-  ): Promise<[number, number][]> {
-    try {
-      const points: [number, number][] = [];
-      for (const overlayId of overlayIds) {
-        const raw = await this.dependencies.cache.getOverlayGeoJSONForOfflineMap(
-          overlayId,
-          { signal: context.signal },
-        );
-        context.throwIfAborted();
-        if (raw === null) {
-          throw new Error(`Required offline-map overlay is not cached: ${overlayId}`);
-        }
-        const collection = normalizeGeoJSON(raw);
-        if (!collection) {
-          throw new Error(`Required offline-map overlay is invalid: ${overlayId}`);
-        }
-        await this.yieldForRendering(context);
-        points.push(...extractPointCoordinates(collection));
-      }
-      return points;
-    } catch (error) {
-      if (isAbortError(error)) throw error;
-      throw error;
-    }
+  private async loadOverlay(context: CancellationContext, id: MapOverlayId): Promise<GeoJSON.FeatureCollection> {
+    const raw = await this.dependencies.cache.getOverlayGeoJSONForOfflineMap(id, { signal: context.signal });
+    context.throwIfAborted();
+    const collection = normalizeGeoJSON(raw);
+    if (!collection) throw new Error(`Required offline-map overlay is unavailable: ${id}`);
+    return id === 'landmarks' && this.dependencies.foldLandmarks
+      ? this.dependencies.foldLandmarks(collection) : collection;
   }
 
   private async buildProjectInputs(
@@ -575,9 +487,9 @@ export class TileCoordinator {
 
   private attachEngineDiagnostics(): void {
     this.engineUnsubscribe?.();
-    this.engineUnsubscribe = this.engine.subscribe(() => {
+    this.engineUnsubscribe = this.areas.subscribeSync(() => {
       for (const listener of this.progressListeners) listener();
-      const stuck = this.overflowApproved && this.engine.getSnapshot().blockedByStorage;
+      const stuck = this.overflowApproved && this.snapshot.blockedByStorage;
       if (!stuck) {
         this.warnedBlockedWhileApproved = false;
         return;
@@ -590,5 +502,3 @@ export class TileCoordinator {
     });
   }
 }
-
-const COVERAGE_REVISION = 1;

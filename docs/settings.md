@@ -32,7 +32,7 @@ Displays live sync statistics and a manual sync trigger.
 | Synced projects | `projects` from `useSpeleoDB()`, filtered to those with GeoJSON                                                        | Reactive (context update)                                                |
 | Cache size      | `OfflineMapSyncSnapshot.cacheBytes`                                                                                    | Event-driven after durable writes                                        |
 | Sync progress   | Current operation completion from the offline-map store                                                                | Paint cadence                                                            |
-| Tiles synced    | `completed / (canonical coordinate count × enabled layer count)`                                                       | Paint cadence                                                            |
+| Tiles synced    | `completed / (current area coordinate count × requested layer count)`                                                  | Paint cadence                                                            |
 | Download speed  | Tiles/second plus a compact ETA (`h`, `m`, or `s`)                                                                     | Paint cadence                                                            |
 
 The **Resync button** (compact success variant with the circular-arrow
@@ -116,7 +116,7 @@ replacements commit.
   `meters`. Changes propagate to Dashboard in real time via shared React state
   in `App.tsx`.
 
-### Map Layers
+### Map layers
 
 Lists every map tile layer (`MAP_LAYERS`) with an offline-sync toggle and a
 per-layer sync percentage. The layer name renders in white with a smaller muted
@@ -128,17 +128,17 @@ otherwise override Tailwind's color/size and add asymmetric top margin. See
 - The satellite layer toggle is forced ON and disabled (satellite is always
   synced).
 - Other layers (ESRI Hillshade light/dark) are opt-in. Toggling calls
-  `controller.setLayerOfflineSync(layerId, enabled)`. Enabling reuses the active
-  satellite plan and falls back to full planning only when no valid plan exists.
-  Disabling releases successfully before eviction, refreshes statistics, and
-  resumes remaining layers from that plan. Failure rolls the toggle back.
+  `controller.setLayerOfflineSync(layerId, enabled)`. Changes reconcile the
+  enabled layers of every area, including manual rectangles. Disabling releases
+  that provider’s claims while preserving cached bytes and other layers. A
+  catalog write failure rolls the preference back.
 - Extra-layer toggles are disabled while the app is offline-locked
   (`isOfflineLocked`): enabling needs the network to prefetch and disabling
   reconciles cached tiles, so neither is allowed offline. Such rows show
   "Offline sync off (unavailable offline)".
-- Every layer uses the same immutable coordinate count `N`; overall expected
-  coverage is exactly `N * enabled layer count`. Enabling a layer changes the
-  total once and never reconstructs it from streamed jobs.
+- Every enabled layer uses the same immutable, deduplicated union coordinate
+  count `N`; expected coverage is `N * enabled layer count`. Switches reuse this
+  plan and leave unrelated providers’ progress and downloads untouched.
 - Current-operation progress and last committed usable coverage are separate.
   Rolling refresh can restart its replacement counter without making usable
   coverage move backward.
@@ -272,3 +272,16 @@ checkpoints continue without a hidden page timer.
 10. Run `npx vitest run src/pages/Settings.test.tsx`.
 11. Update this document if sections, state ownership, or offline behavior
     changes.
+
+## Offline Maps manager
+
+**Offline Maps** opens the shared dashboard manager described in
+[Offline download areas](offline-download-areas.md). Manual and automatic areas
+use the same enabled **Map layers**. Layer switches reuse the shared tile plan;
+only area geometry changes trigger planning. Disabling a provider releases its
+offline claims while preserving other layers and reusable cached bytes. Offline
+saving is local; **Go Online** resumes waiting areas. The overall progress row
+describes the shared union across enabled layers; the manager lists colored
+areas with per-area completion states and direct show/hide, edit, and delete
+icons. **Add new offline area** opens boundary selection with Cancel/Save and no
+name entry.

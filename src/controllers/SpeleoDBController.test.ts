@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { SpeleoDBController, type PreferencesPort } from './SpeleoDBController';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
@@ -8,7 +8,7 @@ import type { OfflineMapSyncEngineLike } from '../services/OfflineMapSyncEngine'
 import { EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT } from '../services/OfflineMapSyncStore';
 import type { OfflineMapSyncRequest } from '../types/offlineMapSync';
 import type { Project } from '../types/project';
-import { __seedTileCacheEntryForTests, getTile } from '../services/tileCache/TileCacheRepository';
+import { clearCachedTiles, __seedTileCacheEntryForTests, getTile } from '../services/tileCache/TileCacheRepository';
 import { allowConsoleWarn } from '../test/consoleGuard';
 import { createAbortError } from '../utils/abort';
 import { OfflineOpStore } from '../offline/OfflineOpStore';
@@ -397,13 +397,19 @@ describe('SpeleoDBController', () => {
   let cache: ReturnType<typeof createMockCache>;
   let controller: SpeleoDBController;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await clearCachedTiles();
     localStorage.clear();
     service = createMockService();
     prefs = createMockPrefs();
     cache = createMockCache();
     controller = new SpeleoDBController(service, prefs, cache, createMockTilePrefetch());
     vi.restoreAllMocks();
+  });
+
+  afterEach(async () => {
+    controller.setOfflineDownloadsForeground(false);
+    await controller.waitForOfflineMapsIdle();
   });
 
   // ---- login (online) -------------------------------------------------------
@@ -1892,10 +1898,10 @@ describe('SpeleoDBController', () => {
       );
 
       const first = await quarantineController.syncProjects();
-      await vi.waitFor(() => expect(quarantineTile.schedule).toHaveBeenCalledTimes(1));
+      await quarantineController.waitForOfflineMapsIdle();
       const warningSnapshot = quarantineController.projectGeoJSONWarnings;
       const second = await quarantineController.syncProjects();
-      await vi.waitFor(() => expect(quarantineTile.schedule).toHaveBeenCalledTimes(2));
+      await quarantineController.waitForOfflineMapsIdle();
 
       expect(first.phases.geojsonSync).toMatchObject({
         status: 'failed', quarantinedProjectCount: 1, validatedProjectCount: 0,
@@ -1903,7 +1909,7 @@ describe('SpeleoDBController', () => {
       expect(second.phases.geojsonSync).toMatchObject({ quarantinedProjectCount: 1 });
       expect(downloadJSON).toHaveBeenCalledOnce();
       expect(quarantineCache.setQuarantinedProjectGeoJSON).toHaveBeenCalledOnce();
-      expect(quarantineTile.schedule).toHaveBeenCalled();
+      expect(quarantineTile.schedule).not.toHaveBeenCalled();
       expect(vi.mocked(quarantineTile.schedule).mock.calls.every(
         ([request]) => request.mode === 'rebuild' && request.plan.projects.length === 0,
       )).toBe(true);
@@ -2383,10 +2389,11 @@ describe('SpeleoDBController', () => {
       expect(request.plan.projects).toHaveLength(1);
       expect(request.plan.minZoom).toBe(0);
       expect(request.plan.maxZoom).toBe(18);
-      expect(request.plan.padMeters).toBe(50);
+      expect(request.plan.padMeters).toBe(0);
+      expect(request.plan.projects[0].north).toBeGreaterThan(46.6);
     });
 
-    it('enqueues a combined landmarks tile prefetch job from cached landmark points', async () => {
+    it('enqueues one rectangle for each cached landmark and project', async () => {
       const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
         coordinateCount: 7,
         scheduledTileCount: 7,
@@ -2414,13 +2421,11 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       const result = await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(1));
 
-      const request = schedule.mock.calls[0][0];
-      expectRebuildRequest(request);
-      expect(request.plan.points).toEqual(
-        expect.arrayContaining([[10.4, 45.3], [-73.9, 40.7]]),
-      );
+      const landmarkAreas = controller.downloadAreasSnapshot.areas.filter((area) => area.type === 'landmark');
+      expect(landmarkAreas).toHaveLength(2);
+      expect(landmarkAreas.map((area) => area.topLeft[0])).toEqual([expect.closeTo(10.4, 2), expect.closeTo(-73.9, 2)]);
       expect(result.phases.tilePrefetch.reason).toBe('tile_prefetch_queued');
     });
 
@@ -2469,7 +2474,7 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(1));
       await controller.syncProjects();
       await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(2));
 
@@ -2501,15 +2506,15 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(2));
 
       const request = schedule.mock.calls[0][0];
       expectRebuildRequest(request);
-      const layerIds = request.layers.map((layer) => layer.id);
+      const layerIds = schedule.mock.calls.map(([scheduled]) => scheduled.layers[0].id);
       expect(layerIds[0]).toBe('esri-satellite');
       expect(layerIds).toContain('esri-world-hillshade');
       expect(request.plan.maxZoom).toBe(18);
-      expect(request.layers.find((layer) => layer.id === 'esri-world-hillshade')?.tileUrlTemplate)
+      expect(schedule.mock.calls[1][0].layers.find((layer) => layer.id === 'esri-world-hillshade')?.tileUrlTemplate)
         .toContain('World_Hillshade');
     });
 
@@ -2558,12 +2563,12 @@ describe('SpeleoDBController', () => {
       await controller.setLayerOfflineSync('esri-world-hillshade', true);
 
       expect(prefs.getPreferences().layerOfflineSync?.['esri-world-hillshade']).toBe(true);
-      expect(schedule).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
       expect(schedule.mock.calls[0][0].layers.map((layer) => layer.id))
         .toContain('esri-world-hillshade');
     });
 
-    it('setLayerOfflineSync(false) removes jobs and evicts the layer tiles', async () => {
+    it('setLayerOfflineSync(false) preserves the browsing cache', async () => {
       const releaseLayer = vi.fn(async () => {});
       const mockTilePrefetch = createMockTilePrefetch({ releaseLayer });
 
@@ -2584,8 +2589,8 @@ describe('SpeleoDBController', () => {
       await controller.setLayerOfflineSync('esri-world-hillshade', false);
 
       expect(prefs.getPreferences().layerOfflineSync?.['esri-world-hillshade']).toBe(false);
-      expect(releaseLayer).toHaveBeenCalledWith('esri-world-hillshade');
-      expect(await getTile(hillTileUrl)).toBeNull();
+      expect(releaseLayer).not.toHaveBeenCalled();
+      expect(await getTile(hillTileUrl)).not.toBeNull();
     });
 
     it('setLayerOfflineSync ignores the forced satellite layer', async () => {
@@ -2637,16 +2642,16 @@ describe('SpeleoDBController', () => {
       schedule.mockImplementationOnce(() => deferred.promise);
 
       const pending = controller.setLayerOfflineSync('esri-world-hillshade', true);
-      await flushPromises(3);
+      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
       const layerRequest = schedule.mock.calls[0][0];
 
       // Logging out aborts the layer request even if the engine settles late.
-      await controller.logout();
-
+      const logout = controller.logout();
+      await vi.waitFor(() => expect(layerRequest.signal?.aborted).toBe(true));
       deferred.resolve({ coordinateCount: 1, scheduledTileCount: 2, failedTileCount: 0 });
-
-      await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
-      expect(layerRequest.mode).toBe('reuse-active-plan');
+      await logout;
+      await pending;
+      expect(layerRequest.mode).toBe('rebuild');
       expect(layerRequest.signal?.aborted).toBe(true);
     });
 
@@ -3492,6 +3497,20 @@ describe('SpeleoDBController landmark CRUD', () => {
     return { service, prefs, cache, controller };
   }
 
+  it('prepares restored pending landmark intent without requiring a ground-truth feature', async () => {
+    const opStore = createMemoryOpStore();
+    await opStore.put({ id: 'area-pending-create', entityType: 'landmark', kind: 'create', seq: 1, createdAt: Date.now(), status: 'pending', created: { id: 'local:area-pending-create', name: 'Future camp', description: '', latitude: 1, longitude: 2, collection: '' } });
+    const { controller } = onlineController(undefined, undefined, opStore);
+    await vi.waitFor(() => expect(controller.downloadAreasSnapshot.areas).toEqual(expect.arrayContaining([
+      expect.objectContaining({ objectId: 'local:area-pending-create', type: 'landmark', visible: false }),
+    ])));
+    const area = controller.downloadAreasSnapshot.areas.find((value) => value.objectId === 'local:area-pending-create')!;
+    expect(area.topLeft[0]).toBeLessThan(2);
+    expect(area.topLeft[1]).toBeGreaterThan(1);
+    expect(area.bottomRight[0]).toBeGreaterThan(2);
+    expect(area.bottomRight[1]).toBeLessThan(1);
+  });
+
   // ---- createLandmark -------------------------------------------------------
 
   describe('createLandmark', () => {
@@ -3520,6 +3539,9 @@ describe('SpeleoDBController landmark CRUD', () => {
       const written = setCalls[0][1] as GeoJSON.FeatureCollection;
       expect(written.features.map((f) => f.id)).toContain('lm-1');
       expect(controller.landmarksRevision).toBe(1);
+      await vi.waitFor(() => expect(controller.downloadAreasSnapshot.areas).toEqual(expect.arrayContaining([
+        expect.objectContaining({ objectId: 'lm-1', type: 'landmark', visible: false }),
+      ])));
     });
 
     it('merges into the existing cached landmarks collection', async () => {
@@ -4862,10 +4884,11 @@ describe('SpeleoDBController GPS tracks', () => {
       expect(cache.setGpsTracks).not.toHaveBeenCalled();
       expect(cache.removeGpsTrackGeoJSON).not.toHaveBeenCalled();
       expect(controller.gpsTracks).toEqual([]);
+      expect(controller.downloadAreasSnapshot.areas).toEqual([]);
     },
   );
 
-  it('aborts a lazy server GPS geometry load before it can repopulate cache after logout', async () => {
+  it('aborts display and offline GPS geometry loads before they can repopulate cache after logout', async () => {
     const pendingResponse = deferred<{ status: number; data: unknown }>();
     const { controller, service, cache } = gpsControllerWith();
     await seedRemoteTrack(controller, service);
@@ -4877,11 +4900,13 @@ describe('SpeleoDBController GPS tracks', () => {
     vi.mocked(cache.setGpsTrackGeoJSON).mockClear();
 
     const load = controller.getGpsTrackGeoJSON('srv-1');
-    await vi.waitFor(() => expect(downloadJSON).toHaveBeenCalledOnce());
+    // Standalone list refresh also prepares offline coverage; both owners must
+    // cancel their independently requested geometry when the session ends.
+    await vi.waitFor(() => expect(downloadJSON).toHaveBeenCalledTimes(2));
     let logoutSettled = false;
     const logout = controller.logout().then(() => { logoutSettled = true; });
     await flushPromises(3);
-    const options = downloadJSON.mock.calls[0]?.[1];
+    const options = downloadJSON.mock.calls.map((call) => call[1]);
     const logoutSettledBeforeResponse = logoutSettled;
 
     pendingResponse.resolve({
@@ -4897,7 +4922,7 @@ describe('SpeleoDBController GPS tracks', () => {
     });
     const [loadResult, logoutResult] = await Promise.allSettled([load, logout]);
 
-    expect(options?.signal?.aborted).toBe(true);
+    expect(options.every((option) => option?.signal?.aborted)).toBe(true);
     expect(logoutSettledBeforeResponse).toBe(false);
     expect(loadResult).toMatchObject({
       status: 'rejected',
@@ -4989,6 +5014,35 @@ describe('SpeleoDBController GPS tracks', () => {
   });
 
   describe('edit + delete (server tracks)', () => {
+    it.each(['delete', 'refresh'] as const)('removes obsolete server download areas after a standalone %s', async (operation) => {
+      const { controller, service } = gpsControllerWith();
+      vi.mocked(service.downloadJSON).mockResolvedValue({ status: 200, data: {
+        type: 'FeatureCollection', features: [{ type: 'Feature', properties: {},
+          geometry: { type: 'LineString', coordinates: [[2, 1], [2.001, 1.001]] } }],
+      } } as never);
+      await seedRemoteTrack(controller, service);
+      await controller.refreshOfflineMaps();
+      await vi.waitFor(() => expect(controller.downloadAreasSnapshot.areas.some((area) => area.objectId === 'srv-1')).toBe(true));
+
+      if (operation === 'delete') await controller.removeGpsTrack('srv-1');
+      else {
+        vi.mocked(service.getGpsTracks).mockResolvedValue({ status: 200, data: [] } as never);
+        await controller.syncGpsTracks();
+      }
+
+      await vi.waitFor(() => expect(controller.downloadAreasSnapshot.areas.some((area) => area.objectId === 'srv-1')).toBe(false));
+    });
+
+    it('removes a deleted local recording from download areas without a full sync', async () => {
+      const { controller, watcher } = gpsControllerWith();
+      const track = await recordTrack(controller, watcher, [point(1, 2, 0), point(1.001, 2, 15_000)]);
+      await vi.waitFor(() => expect(controller.downloadAreasSnapshot.areas.some((area) => area.objectId === track!.id)).toBe(true));
+
+      await controller.removeGpsTrack(track!.id);
+
+      await vi.waitFor(() => expect(controller.downloadAreasSnapshot.areas.some((area) => area.objectId === track!.id)).toBe(false));
+    });
+
     it('lists a synced server track as a remote item', async () => {
       const { controller, service } = gpsControllerWith();
       await seedRemoteTrack(controller, service);
@@ -5060,6 +5114,23 @@ describe('SpeleoDBController GPS tracks', () => {
   });
 
   describe('upload (create op)', () => {
+    it('keeps local download coverage until the complete upload replacement is published', async () => {
+      const { controller, watcher, service } = gpsControllerWith();
+      const track = await recordTrack(controller, watcher, [point(1, 2, 0)]);
+      await vi.waitFor(() => expect(controller.downloadAreasSnapshot.areas.some((area) => area.objectId === track!.id)).toBe(true));
+      const pendingList = deferred<{ status: number; data: unknown }>();
+      vi.mocked(service.getGpsTracks).mockReturnValueOnce(pendingList.promise as never);
+
+      const upload = controller.uploadGpsTrack(track!.id);
+      await vi.waitFor(() => expect(service.getGpsTracks).toHaveBeenCalledOnce());
+      expect(controller.gpsTracks.some((item) => item.id === track!.id)).toBe(false);
+      expect(controller.downloadAreasSnapshot.areas.some((area) => area.objectId === track!.id)).toBe(true);
+
+      pendingList.resolve({ status: 200, data: [] });
+      await upload;
+      await vi.waitFor(() => expect(controller.downloadAreasSnapshot.areas.some((area) => area.objectId === track!.id)).toBe(false));
+    });
+
     async function recordedTrack(uploadGpx: SpeleoDBService['uploadGpx']) {
       const ctx = gpsControllerWith({ uploadGpx });
       const track = await recordTrack(ctx.controller, ctx.watcher, [point(1, 2, 0), point(1.001, 2, 15_000)]);

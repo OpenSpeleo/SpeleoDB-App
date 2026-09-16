@@ -1,9 +1,6 @@
 import type { OfflineMapPlanningInput } from '../types/offlineMapSync';
 import {
-  collectUniqueOfflineMapCoordinateKeys,
-  encodePackedOfflineMapCoordinateChunk,
-  iterateRawOfflineMapCoordinates,
-  OFFLINE_MAP_PLAN_CHUNK_SIZE,
+  iterateOfflineMapPlanChunks,
 } from '../services/offlineMapPlanCore';
 
 type WorkerResponse =
@@ -41,16 +38,8 @@ workerScope.onmessage = (event) => {
   const { id, input } = event.data;
   void (async () => {
     try {
-      const keys = collectUniqueOfflineMapCoordinateKeys(
-        iterateRawOfflineMapCoordinates(input),
-      );
-      for (
-        let start = 0, index = 0;
-        start < keys.length;
-        start += OFFLINE_MAP_PLAN_CHUNK_SIZE, index += 1
-      ) {
-        const end = Math.min(keys.length, start + OFFLINE_MAP_PLAN_CHUNK_SIZE);
-        const encoded = encodePackedOfflineMapCoordinateChunk(keys, start, end);
+      let index = 0;
+      for (const encoded of iterateOfflineMapPlanChunks(input)) {
         const ack = new Promise<void>((resolve) => {
           acknowledge = (ackIndex) => {
             if (ackIndex !== index) return;
@@ -60,6 +49,7 @@ workerScope.onmessage = (event) => {
         });
         workerScope.postMessage({ id, type: 'chunk', index, coordinates: encoded }, [encoded.buffer]);
         await ack;
+        index++;
       }
       workerScope.postMessage({ id, type: 'done' });
     } catch (error) {

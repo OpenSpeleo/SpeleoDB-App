@@ -32,6 +32,10 @@ export type OfflineMapGenerationStatus =
   | 'releasing';
 
 export interface OfflineMapGenerationRecord {
+  /** Canonical union of all current download rectangles, independent of layers. */
+  coverageKey?: string;
+  areaId?: string;
+  areaRevision?: number;
   id: string;
   planId: string;
   layerId: string;
@@ -77,6 +81,8 @@ export interface OfflineMapLayerProgress {
 }
 
 export interface OfflineMapSyncSnapshot {
+  coverageKey?: string;
+  areaId?: string;
   sessionId: string | null;
   phase: OfflineMapSyncPhase;
   coordinateCount: number | null;
@@ -121,6 +127,9 @@ export interface OfflineMapLayerInput {
 }
 
 interface OfflineMapSyncRequestBase {
+  coverageKey?: string;
+  areaId?: string;
+  areaRevision?: number;
   layers: OfflineMapLayerInput[];
   forceRefresh?: boolean;
   signal?: AbortSignal;

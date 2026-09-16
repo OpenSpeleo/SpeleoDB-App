@@ -37,7 +37,8 @@ Logout must not be triggered by transient network conditions:
 - pending landmark/GPS operations in the `offline_ops` IndexedDB store,
 - local GPS recordings, cached remote GPS metadata, and cached GPS geometry,
 - cached map tiles,
-- persisted offline-map plans, generations, memberships, and cached tiles.
+- persisted offline-map area settings, plans, generations, memberships, and
+  cached tiles.
 
 ## Voluntary sign-out confirmation
 

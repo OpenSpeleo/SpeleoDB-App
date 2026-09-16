@@ -7,6 +7,8 @@ import {
   iterateRawTileUrlsForPaths,
   iterateRawTileUrlsForPoints,
   iterateRawTileUrlsForProjectBounds,
+  tileRangesForZoom,
+  padTileBounds,
 } from './tilePrefetchPlanner';
 
 export const OFFLINE_MAP_PLAN_CHUNK_SIZE = 2_048;
@@ -157,4 +159,73 @@ export function decodeOfflineMapCoordinateChunk(
     coordinates.push({ z: encoded[index], x: encoded[index + 1], y: encoded[index + 2] });
   }
   return coordinates;
+}
+
+/**
+ * Rectangle union by vertical strips. Memory scales with rectangle count, not
+ * tile count: merge y intervals only at x boundaries, then emit sorted triples.
+ * This preserves the per-area size limit without imposing a new aggregate cap.
+ */
+function* iterateRectangleUnion(input: OfflineMapPlanningInput): Generator<OfflineMapCoordinate> {
+  const bounds = input.projects.map((project) => padTileBounds(project, 0));
+  for (let z = input.minZoom; z <= input.maxZoom; z++) {
+    const ranges = bounds.flatMap((rectangle) => tileRangesForZoom(rectangle, z));
+    const events = new Map<number, Array<{ index: number; add: boolean }>>();
+    const event = (x: number, index: number, add: boolean) => {
+      const values = events.get(x) ?? [];
+      values.push({ index, add });
+      events.set(x, values);
+    };
+    ranges.forEach((range, index) => {
+      event(range.xMin, index, true);
+      event(range.xMax + 1, index, false);
+    });
+    const boundaries = [...events.keys()].sort((a, b) => a - b);
+    const active = new Set<number>();
+    for (let i = 0; i + 1 < boundaries.length; i++) {
+      const start = boundaries[i];
+      for (const change of events.get(start)!) {
+        if (change.add) active.add(change.index);
+        else active.delete(change.index);
+      }
+      const intervals = [...active].map((index) => ranges[index]).sort((a, b) => a.yMin - b.yMin);
+      const merged: Array<{ min: number; max: number }> = [];
+      for (const interval of intervals) {
+        const last = merged.at(-1);
+        if (last && interval.yMin <= last.max + 1) last.max = Math.max(last.max, interval.yMax);
+        else merged.push({ min: interval.yMin, max: interval.yMax });
+      }
+      if (!merged.length) continue;
+      for (let x = start; x < boundaries[i + 1]; x++) {
+        for (const interval of merged) {
+          for (let y = interval.min; y <= interval.max; y++) yield { z, x, y };
+        }
+      }
+    }
+  }
+}
+
+/** Shared worker/test seam. Every emitted chunk is final, sorted and duplicate-free. */
+export function* iterateOfflineMapPlanChunks(input: OfflineMapPlanningInput): Generator<Uint32Array> {
+  if (!input.points.length && !input.paths.length && input.padMeters === 0) {
+    let chunk = new Uint32Array(OFFLINE_MAP_PLAN_CHUNK_SIZE * 3);
+    let cursor = 0;
+    for (const { z, x, y } of iterateRectangleUnion(input)) {
+      chunk[cursor++] = z;
+      chunk[cursor++] = x;
+      chunk[cursor++] = y;
+      if (cursor === chunk.length) {
+        yield chunk;
+        chunk = new Uint32Array(OFFLINE_MAP_PLAN_CHUNK_SIZE * 3);
+        cursor = 0;
+      }
+    }
+    if (cursor) yield chunk.slice(0, cursor);
+    return;
+  }
+  // Compatibility for pre-area callers. Production areas all use rectangles.
+  const keys = collectUniqueOfflineMapCoordinateKeys(iterateRawOfflineMapCoordinates(input));
+  for (let start = 0; start < keys.length; start += OFFLINE_MAP_PLAN_CHUNK_SIZE) {
+    yield encodePackedOfflineMapCoordinateChunk(keys, start, Math.min(keys.length, start + OFFLINE_MAP_PLAN_CHUNK_SIZE));
+  }
 }

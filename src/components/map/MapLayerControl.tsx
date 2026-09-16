@@ -91,12 +91,7 @@ const MapLayerControl: React.FC<MapLayerControlProps> = ({
       <button
         type="button"
         onClick={() => setIsOpen((open) => !open)}
-        className={`relative z-20 w-11 h-11 flex items-center justify-center
-                   rounded-full backdrop-blur-sm border
-                   transition-colors shadow-lg shadow-black/40
-                   ${isOpen
-                     ? 'bg-cyan-500/90 border-cyan-300/70 text-white'
-                     : 'bg-slate-900/80 border-slate-600/60 text-slate-200 hover:bg-slate-800/90'}`}
+        className={`map-control-button${isOpen ? ' map-control-button--active' : ''}`}
         aria-label="Map layer"
         aria-expanded={isOpen}
         aria-haspopup="true"

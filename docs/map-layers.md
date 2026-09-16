@@ -82,17 +82,11 @@ FAB styling. Tapping opens a radio menu of layers. Selecting a layer persists
 `selectedMapLayerId` (`PreferencesService`) and updates shared shell state
 (`AuthenticatedAppShell`), which rebuilds the style.
 
-`isLayerSelectable(layer, isOfflineLocked, layerOfflineSync)` (in
-`MapLayersService`) gates selection: when offline-locked, only the forced
-satellite layer and opted-in (synced) layers are selectable; others are disabled
-with a "Not downloaded" hint, because their tiles are not cached and would
-render blank.
-
-> Gating is based on the **opt-in toggle**, not on actual cache coverage. A
-> layer that was toggled on but only partially synced (or whose tiles were
-> evicted) can still be selected offline and render blank for the un-cached
-> area. This is an accepted limitation; the toggle is the cheap proxy for
-> "intended to be available offline".
+`isLayerSelectable(layer, isOfflineLocked, layerOfflineSync)` gates selection.
+Dashboard combines shared layer preferences with committed download-layer
+availability during rolling replacement. All area types use those preferences.
+Satellite stays forced. Availability does not promise coverage at the current
+viewport; outside saved rectangles, tiles can still be absent.
 
 ## Per-layer offline sync (Settings "Map Layers")
 
@@ -107,14 +101,14 @@ and a per-layer sync percentage:
 - Toggling enters through `SpeleoDBController.setLayerOfflineSync` and is owned
   by `TileCoordinator.setLayerOfflineSync(layerId, enabled)`:
   - persists the opt-in (`layerOfflineSync` in `PreferencesService`),
-  - when enabling while online, reuses the persisted canonical coordinate plan
-    and schedules only the new layer URL namespace,
-  - falls back to complete fail-closed planning only when no valid active plan
-    exists,
-  - when disabling, cancels the multi-layer run, releases the layer's
-    active/pending generations, evicts its URL prefix, refreshes statistics, and
-    resumes remaining layers from the active plan. Release failure prevents
-    eviction and rolls the toggle back.
+  - updates the shared catalog preference and queues only newly enabled layers,
+  - reuses fresh tile payloads and the immutable deduplicated union plan without
+    enumerating geometry,
+  - releases only the disabled provider’s claims, preserving other layer work
+    and cached bytes without provider-prefix eviction.
+- Manual areas download the same enabled layers as projects, landmarks and
+  tracks. See [Offline download areas](offline-download-areas.md) for selection
+  and lifetime.
 - Per-layer percentage comes directly from `OfflineMapSyncSnapshot.layers`.
   Runtime browsing tiles are excluded because they have no generation
   membership.
@@ -125,18 +119,21 @@ consistent while mounted.
 
 ## Canonical plan, priority, and progress
 
-- Projects, landmarks, stations, and GPS paths are unioned into one immutable,
-  layer-independent `{z,x,y}` plan. Tiles remain keyed by full provider URL.
-- The worker packs and deduplicates coordinates in memory with a hard ceiling of
-  1,000,000 unique tiles. It sorts the final keys and transfers at most 2,048
-  final coordinates at a time, waiting for each compact plan-chunk write before
-  continuing. The stable `N*M` total is published only after final chunks are
-  durable.
+- Projects, landmarks, point overlays, GPS tracks and manual selections become
+  rectangular download areas. Their coordinate lists merge into one immutable
+  layer-independent `{z,x,y}` plan. Entire tracks use bounding rectangles. Tiles
+  remain keyed by full provider URL and overlapping areas share bytes.
+- The worker merges rectangle ranges by vertical strips and emits sorted,
+  duplicate-free coordinates in chunks of at most 2,048, waiting for each
+  durable chunk write. Memory scales with area count, not total coordinates.
+  Each area retains its existing 1M limit; the union has no additional limit.
+  The stable `N*M` total is published only after final chunks are durable.
 - **Priority**: coordinates expand satellite first, then enabled extra layers. A
   six-worker queue downloads ready URLs while 16-coordinate auditing continues.
   Outstanding coordinates are backpressured at 64.
 - Extra layers reuse the exact same coordinates; only the URL template differs.
-  All current layers use zoom 0-18, making `N*M` an enforced invariant.
+  All current layers use zoom 0-18, making `N*M` an invariant for the shared
+  union.
 - The planner accepts validated `ProjectGeoJSONBounds`, never raw project
   GeoJSON. It preserves the directed longitude arc across the antimeridian,
   deduplicates overlapping/root ranges, applies meter padding, preserves
@@ -191,11 +188,13 @@ layers compete for the same pinned budget and honor the user's override.
 
 ## Migration
 
-- IndexedDB `speleo_tiles` is v8. Payloads, v7 manifests, generations, and
-  memberships are preserved. The former v8 coordinate-staging store remains
-  schema-compatible and is cleared during recovery, but current planners write
-  only final compact chunks. The incremental, payload-preserving v6 migration is
-  described in `docs/tile-cache-architecture.md`.
+- IndexedDB `speleo_tiles` is v9. The additive `offline_map_settings` store
+  holds the area catalog. Payloads, manifests, generations, and memberships are
+  preserved. Legacy ownership remains until automatic area replacement succeeds.
+  The former v8 coordinate-staging store remains schema-compatible and is
+  cleared during recovery, but current planners write only final compact chunks.
+  The incremental, payload-preserving v6 migration is described in
+  `docs/tile-cache-architecture.md`.
 
 ## Source code
 
@@ -227,8 +226,9 @@ layers compete for the same pinned budget and honor the user's override.
   fast path, per-tile progress, and retry head-of-line avoidance.
 - `src/services/OfflineMapSyncEngine.repository.test.ts`: real fake-IndexedDB
   draining through payload and membership transactions.
-- `src/services/OfflineMapPlanner.test.ts`: canonical source union, packed
-  deduplication, the 1M limit, and final chunks.
+- `src/services/OfflineMapPlanner.test.ts`: canonical source union, streaming
+  rectangle deduplication beyond 1M total tiles, bounded final chunks and legacy
+  packed limits.
 - `src/services/tilePrefetchPlanner.test.ts`: meter padding, zoom ranges,
   dateline/root deduplication, zero-width bounds, and latitude clamping.
 - `src/services/PreferencesService.test.ts`: `selectedMapLayerId` +
@@ -262,8 +262,8 @@ devices before shipping:
   vertically centered (not top-heavy) on both platforms for single- and
   multi-line rows.
 - **Removal under load**: disable an optional layer during a multi-layer run;
-  verify release completes before prefix eviction, remaining layers resume from
-  the active plan, and an injected release failure preserves payloads/toggle.
+  verify its claims release for every area type, cached bytes remain, and other
+  enabled layers continue through the shared scheduler.
 
 ## Change checklist
 

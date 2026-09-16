@@ -1,3 +1,4 @@
+import type { ManualDownloadAreaInput } from '../types/downloadArea';
 /**
  * SpeleoDBController -- the "center of the app".
  *
@@ -263,6 +264,10 @@ export class SpeleoDBController {
       hasNetworkAccess: () => this.hasNetworkAccess(),
       getProjects: () => this.projectSyncCoordinator.projects,
       getGpsPrefetchSources: (signal) => this.gpsTrackCoordinator.getPrefetchSources(signal),
+      foldLandmarks: async (collection) => {
+        await this.offlineMutations.load();
+        return this.offlineMutations.foldLandmarks(collection);
+      },
       notifyStateChanged: () => this.notify(),
     }, offlineMapSync);
     this.projectSyncCoordinator = new ProjectSyncCoordinator({
@@ -405,6 +410,9 @@ export class SpeleoDBController {
     this._landmarksRevision += 1;
     this.gpsTrackCoordinator.offlineMutationChanged();
     this.notify();
+    if (this.tileCoordinator && this.hasNetworkAccess()) {
+      this.tileCoordinator.queueProjectSync(this.projects, 0);
+    }
   }
 
   // ---- State accessors (snapshot-based for useSyncExternalStore) -------------
@@ -443,6 +451,38 @@ export class SpeleoDBController {
 
   get mapDataRevision(): number {
     return this.projectSyncCoordinator.mapDataRevision;
+  }
+
+  waitForOfflineMapsIdle(): Promise<void> {
+    return this.tileCoordinator.areas.waitForIdle();
+  }
+
+  setOfflineDownloadsForeground(active: boolean): void {
+    this.tileCoordinator.areas.setForeground(active);
+  }
+
+  get downloadAreasSnapshot() {
+    return this.tileCoordinator.areas.getSnapshot();
+  }
+
+  subscribeDownloadAreas(listener: () => void): () => void {
+    return this.tileCoordinator.areas.subscribe(listener);
+  }
+
+  saveDownloadArea(input: ManualDownloadAreaInput, areaId?: string): Promise<string> {
+    return this.tileCoordinator.areas.saveManual(input, areaId);
+  }
+
+  deleteDownloadArea(areaId: string): Promise<void> {
+    return this.tileCoordinator.areas.deleteManual(areaId);
+  }
+
+  setDownloadAreaVisible(areaId: string, visible: boolean): Promise<void> {
+    return this.tileCoordinator.areas.setVisible(areaId, visible);
+  }
+
+  retryDownloadArea(areaId: string, forceRefresh = false): void {
+    this.tileCoordinator.areas.retry(areaId, forceRefresh);
   }
 
   get offlineMapSyncSnapshot(): OfflineMapSyncSnapshot {
@@ -1101,7 +1141,7 @@ export class SpeleoDBController {
    * `CreateGpsTrackOp` (drained from the Pending page); a definitive 4xx throws.
    */
   async uploadGpsTrack(id: string): Promise<void> {
-    await this.runUserOperation((context) => (
+    await this.runGpsSourceOperation((context) => (
       this.gpsTrackMutationCoordinator.upload(id, context.signal)
     ));
   }
@@ -1124,16 +1164,26 @@ export class SpeleoDBController {
    * (DELETE; enqueue on unreachable; throw on definitive 4xx).
    */
   async removeGpsTrack(id: string): Promise<void> {
-    await this.runUserOperation((context) => (
+    await this.runGpsSourceOperation((context) => (
       this.gpsTrackMutationCoordinator.remove(id, context.signal)
     ));
   }
 
   /** Refresh the server GPS-track list (used after an upload + standalone). */
   async syncGpsTracks(): Promise<void> {
-    await this.runUserOperation((context) => (
+    await this.runGpsSourceOperation((context) => (
       this.gpsTrackMutationCoordinator.sync(context.signal)
     ));
+  }
+
+  private runGpsSourceOperation(
+    operation: (context: CancellationContext) => Promise<void>,
+  ): Promise<void> {
+    return this.runUserOperation(async (context) => {
+      await operation(context);
+      context.throwIfAborted();
+      if (this.hasNetworkAccess()) this.tileCoordinator.queueProjectSync(this.projects, 0);
+    });
   }
 
   private defaultTrackName(timestamp: number): string {
@@ -1387,6 +1437,7 @@ export class SpeleoDBController {
   private bumpLandmarksRevision(): void {
     this._landmarksRevision += 1;
     this.notify();
+    if (this.hasNetworkAccess()) this.tileCoordinator.queueProjectSync(this.projects, 0);
   }
 
   /**

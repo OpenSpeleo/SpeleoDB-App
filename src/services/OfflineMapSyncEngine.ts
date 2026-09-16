@@ -1,3 +1,4 @@
+import { activateDownloadAreaGenerations, activateDownloadCoverage } from './tileCache/DownloadAreaRepository';
 import { MAP } from '../constants';
 import type {
   OfflineMapGenerationRecord,
@@ -312,7 +313,7 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
     this.activeCoverage = new Map(
       generations
         .filter((generation) => generation.status === 'active')
-        .map((generation) => [generation.layerId, generation]),
+        .map((generation) => [`${generation.areaId ?? 'legacy'}:${generation.layerId}`, generation]),
     );
     this.publishCoverageSnapshot();
     for (const generation of generations.filter((item) => item.status !== 'active')) {
@@ -331,7 +332,10 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
 
     const controller = new AbortController();
     this.activeController = controller;
-    const onExternalAbort = () => controller.abort(request.signal?.reason);
+    const onExternalAbort = () => {
+      controller.abort(request.signal?.reason);
+      if (this.activeController === controller) this.activeQueue?.cancel();
+    };
     request.signal?.addEventListener('abort', onExternalAbort, { once: true });
     if (request.signal?.aborted) controller.abort(request.signal.reason);
 
@@ -383,12 +387,17 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
     await Promise.all(generations
       .filter((generation) => generation.layerId === layerId)
       .map((generation) => this.dependencies.releaseGeneration(generation.id)));
-    this.activeCoverage.delete(layerId);
+    for (const [key, generation] of this.activeCoverage) {
+      if (generation.layerId === layerId) this.activeCoverage.delete(key);
+    }
     this.cacheBytes = (await this.dependencies.getCacheStats()).totalBytes;
     this.publishCoverageSnapshot();
   }
 
   async refreshCacheStats(): Promise<void> {
+    this.activeCoverage = new Map((await this.dependencies.getGenerations())
+      .filter((generation) => generation.status === 'active')
+      .map((generation) => [`${generation.areaId ?? 'legacy'}:${generation.layerId}`, generation]));
     this.cacheBytes = (await this.dependencies.getCacheStats()).totalBytes;
     this.publishCoverageSnapshot();
   }
@@ -446,6 +455,8 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
       const coverageValues = [...this.activeCoverage.values()];
       this.dependencies.store.publish({
         sessionId,
+        areaId: request.areaId,
+        coverageKey: request.coverageKey,
         phase,
         coordinateCount,
         enabledLayerCount: request.layers.length,
@@ -485,18 +496,19 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
 
       const existingGenerations = await this.dependencies.getGenerations();
       await Promise.all(existingGenerations
-        .filter((generation) => generation.status !== 'active')
+        .filter((generation) => generation.status !== 'active' && generation.areaId === request.areaId
+          && (!request.coverageKey || request.layers.some((layer) => layer.id === generation.layerId)))
         .map((generation) => this.dependencies.releaseGeneration(generation.id)));
       throwIfAborted(signal);
       const currentActive = new Map(
         existingGenerations
           .filter((generation) => generation.status === 'active')
-          .map((generation) => [generation.layerId, generation]),
+          .map((generation) => [`${generation.areaId ?? 'legacy'}:${generation.layerId}`, generation]),
       );
       this.activeCoverage = new Map(currentActive);
 
       for (const layer of request.layers) {
-        const active = currentActive.get(layer.id);
+        const active = currentActive.get(`${request.areaId ?? 'legacy'}:${layer.id}`);
         const usableTiles = active?.completedTiles ?? 0;
         const progress: MutableLayerProgress = {
           layerId: layer.id,
@@ -516,6 +528,8 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
         if (
           !request.forceRefresh
           && active?.planId === plan.id
+          && active.areaRevision === request.areaRevision
+          && active.coverageKey === request.coverageKey
           && active.completedTiles === plan.coordinateCount
           && active.failedTiles === 0
           && active.refreshAfter > this.dependencies.now()
@@ -527,6 +541,9 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
 
         const generation: OfflineMapGenerationRecord = {
           id: `${sessionId}:${layer.id}`,
+          areaId: request.areaId,
+          areaRevision: request.areaRevision,
+          coverageKey: request.coverageKey,
           planId: plan.id,
           layerId: layer.id,
           status: 'pending',
@@ -693,29 +710,53 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
 
       await this.writeCheckpoint(pendingGenerations, layers, true);
       throwIfAborted(signal);
-      let hasFailures = false;
+      const hasFailures = pendingGenerations.some((generation) => {
+        const layer = layers.get(generation.layerId)!;
+        return layer.failedTiles > 0 || layer.completedTiles !== layer.totalTiles;
+      });
       for (const generation of pendingGenerations) {
         const layer = layers.get(generation.layerId)!;
+        generation.completedTiles = layer.completedTiles;
+        generation.failedTiles = layer.failedTiles;
+        generation.bytesDownloaded = layer.bytesDownloaded;
+        generation.updatedAt = this.dependencies.now();
+        generation.refreshAfter = this.dependencies.now() + MAP.TILE_CACHE_MAX_AGE_MS;
+        if (hasFailures && request.areaId) continue;
         if (layer.failedTiles > 0 || layer.completedTiles !== layer.totalTiles) {
-          hasFailures = true;
           generation.status = 'failed';
-          generation.updatedAt = this.dependencies.now();
           await this.dependencies.setGeneration(generation);
           this.trackCleanup(this.dependencies.releaseGeneration(generation.id));
           continue;
         }
-        generation.completedTiles = layer.completedTiles;
-        generation.failedTiles = 0;
-        generation.bytesDownloaded = layer.bytesDownloaded;
-        generation.refreshAfter = this.dependencies.now() + MAP.TILE_CACHE_MAX_AGE_MS;
-        generation.updatedAt = this.dependencies.now();
         await this.dependencies.setGeneration(generation);
-        const previousActive = await this.dependencies.activateGeneration(generation.id);
-        generation.status = 'active';
-        this.activeCoverage.set(generation.layerId, { ...generation });
-        layer.usableTiles = layer.totalTiles;
-        for (const previousGenerationId of previousActive) {
-          this.trackCleanup(this.dependencies.releaseGeneration(previousGenerationId));
+        if (!request.areaId && !request.coverageKey) {
+          const previous = await this.dependencies.activateGeneration(generation.id);
+          generation.status = 'active';
+          this.activeCoverage.set(`legacy:${generation.layerId}`, { ...generation });
+          layer.usableTiles = layer.totalTiles;
+          for (const id of previous) this.trackCleanup(this.dependencies.releaseGeneration(id));
+        }
+      }
+      if (request.coverageKey && !hasFailures) {
+        throwIfAborted(signal);
+        const previous = await activateDownloadCoverage(request.coverageKey);
+        this.activeCoverage = new Map((await this.dependencies.getGenerations())
+          .filter((g) => g.status === 'active')
+          .map((g) => [`${g.areaId ?? 'legacy'}:${g.layerId}`, g]));
+        for (const id of previous) this.trackCleanup(this.dependencies.releaseGeneration(id));
+      }
+      if (request.areaId) {
+        if (hasFailures) {
+          for (const generation of pendingGenerations) this.trackCleanup(this.dependencies.releaseGeneration(generation.id));
+        } else {
+          throwIfAborted(signal);
+          const previous = await activateDownloadAreaGenerations(request.areaId, request.areaRevision!, pendingGenerations.map((g) => g.id));
+          for (const generation of pendingGenerations) {
+            generation.status = 'active';
+            this.activeCoverage.set(`${generation.areaId}:${generation.layerId}`, { ...generation });
+            layers.get(generation.layerId)!.usableTiles = generation.totalTiles;
+          }
+          for (const id of previous) this.trackCleanup(this.dependencies.releaseGeneration(id));
         }
       }
       this.trackCleanup(this.dependencies.garbageCollectPlans());
@@ -747,6 +788,7 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
     if (request.mode === 'reuse-active-plan') {
       const reference = (await this.dependencies.getGenerations()).find((generation) => (
         generation.layerId === request.referenceLayerId
+        && generation.areaId === request.areaId
         && generation.status === 'active'
       ));
       const reused = reference
@@ -871,8 +913,9 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
       }, true);
       return;
     }
-    const coordinateCount = Math.max(...generations.map((generation) => generation.totalTiles));
-    const layers: OfflineMapLayerProgress[] = generations.map((generation) => ({
+    const coordinateCount = generations.some((generation) => generation.areaId)
+      ? null : Math.max(...generations.map((generation) => generation.totalTiles));
+    const perGeneration: OfflineMapLayerProgress[] = generations.map((generation) => ({
       layerId: generation.layerId,
       totalTiles: generation.totalTiles,
       completedTiles: boundedProgress(generation.completedTiles, generation.totalTiles),
@@ -890,6 +933,20 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
       bytesDownloaded: 0,
       usableTiles: boundedProgress(generation.completedTiles, generation.totalTiles),
     }));
+    const byLayer = new Map<string, OfflineMapLayerProgress>();
+    for (const progress of perGeneration) {
+      const previous = byLayer.get(progress.layerId);
+      if (!previous) byLayer.set(progress.layerId, { ...progress });
+      else {
+        previous.totalTiles += progress.totalTiles;
+        previous.completedTiles += progress.completedTiles;
+        previous.failedTiles += progress.failedTiles;
+        previous.cachedFreshTiles += progress.cachedFreshTiles;
+        previous.auditedTiles += progress.auditedTiles;
+        previous.usableTiles += progress.usableTiles;
+      }
+    }
+    const layers = [...byLayer.values()];
     const completedTiles = layers.reduce((sum, layer) => sum + layer.completedTiles, 0);
     const totalTiles = layers.reduce((sum, layer) => sum + layer.totalTiles, 0);
     this.dependencies.store.publish({

@@ -102,27 +102,16 @@ flowchart TD
 
 ### Satellite tile pre-caching for landmarks
 
-So the map is usable offline around landmarks (not just projects),
-`syncProjects()` schedules a single combined `landmarks` tile prefetch job
-covering ALL landmarks, independent of the visibility toggles above. See
-`docs/offline-mode.md` for the full pipeline. Key points:
+All landmarks receive automatic rectangular download areas, independent of
+visibility toggles. Preparation folds pending landmark mutations into cached
+ground truth, and mutations schedule fresh preparation. Each point gets 50 m
+padding at zoom 0–18, with satellite required and other automatic layers opted
+in. Overlapping areas share URL payloads but own independent pinning claims. See
+[Offline download areas](offline-download-areas.md).
 
-- Tiles are collected as the deduped union of a padded box around each landmark
-  point via `src/services/tilePrefetchPlanner.ts` (`extractPointCoordinates` +
-  `buildTileUrlsForPoints`), avoiding a world-spanning bounding box.
-- Zoom/pad policy is `TILE_PREFETCH.LANDMARK_REQUEST` in `src/constants.ts`
-  (zoom 0-18, 50 m pad - parity with projects).
-- The job is idempotent: its `commitId` is a stable signature of the landmark
-  coordinates (`computeTilePrefetchSignature`), so unchanged landmarks are not
-  re-downloaded.
-
-#### Storage cap and user-approved overflow
-
-Prefetched (project + landmark) tiles are pinned and cannot be evicted. They
-share a single `MAP.TILE_CACHE_MAX_BYTES` (500 MB) cap. Because landmarks are
-global, a large set can fill the cap; when a pinned write can no longer fit and
-no unpinned tiles remain to evict, the tile cache raises
-`TileCacheCapacityError`.
+Pinned automatic and manual downloads share the existing 500 MB cache cap. When
+no unpinned bytes remain to evict and a pinned write cannot fit,
+`TileCacheCapacityError` pauses the shared downloader.
 
 The app then surfaces a one-time consent prompt instead of silently failing:
 
@@ -146,9 +135,8 @@ The app then surfaces a one-time consent prompt instead of silently failing:
   the gate clears.
 - Known caveat (by design): approved overflow is currently **unbounded** -- a
   large global landmark set at zoom 0-18 can grow the pinned cache to multiple
-  GB. A bounded guardrail (landmark `maxZoom` and/or a max-tiles ceiling) is a
-  tracked follow-up; today the landmark request keeps zoom/pad parity with
-  projects (see `TILE_PREFETCH.LANDMARK_REQUEST`).
+  GB across many areas. The 1,000,000-coordinate ceiling applies to each area,
+  not to the total catalog. Zoom/padding remain consistent with projects.
 
 ### Tap behavior
 

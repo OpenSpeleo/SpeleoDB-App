@@ -1,3 +1,5 @@
+import { countAreaCoordinates } from './downloadAreaGeometry';
+import type { OfflineMapPlanningInput } from '../types/offlineMapSync';
 import { describe, expect, it, vi } from 'vitest';
 import {
   collectOfflineMapCoordinates,
@@ -193,4 +195,49 @@ describe('OfflineMapPlanner', () => {
     expect(consume).toHaveBeenCalledWith(new Uint32Array([0, 0, 0]), 0);
     expect(terminate).toHaveBeenCalledOnce();
   });
+  it('streams the same deduplicated rectangle union for overlaps, disjoint regions, polar and dateline bounds', async () => {
+    const projects: OfflineMapPlanningInput['projects'] = [
+      { west: 170, east: -175, south: -10, north: 20, crossesDateline: true },
+      { west: 180, east: -179, south: 30, north: 40, crossesDateline: true },
+      { west: 180, east: 180, south: 20, north: 20, crossesDateline: false },
+      { west: -179, east: -160, south: 0, north: 30, crossesDateline: false },
+      { west: -20, east: 15, south: 80, north: 85, crossesDateline: false },
+      { west: -20, east: 15, south: 80, north: 85, crossesDateline: false },
+      { west: 170, east: 180, south: -80, north: -75, crossesDateline: false },
+    ];
+    for (const rectangles of [projects, [...projects].reverse(), [{ west: -180, east: 180, south: -85, north: 85, crossesDateline: false }]]) {
+      const input: OfflineMapPlanningInput = { sourceRevision: 'rectangles', projects: rectangles, points: [], paths: [], minZoom: 0, maxZoom: 5, padMeters: 0 };
+      const actual: Array<{ z: number; x: number; y: number }> = [];
+      const count = await planOfflineMapInWorker(input, (chunk) => { actual.push(...decodeOfflineMapCoordinateChunk(chunk)); });
+      expect(actual).toEqual(collectOfflineMapCoordinates(input));
+      expect(count).toBe(actual.length);
+    }
+  });
+
+  it('merges multiple valid areas beyond one million total tiles without a tile-sized working set', async () => {
+    const latitude = 0.001;
+    const projects: OfflineMapPlanningInput['projects'] = [
+      { west: -180, east: 0, south: 0, north: latitude, crossesDateline: false },
+      { west: 0, east: 180, south: 0, north: latitude, crossesDateline: false },
+    ];
+    for (const bounds of projects) {
+      expect(countAreaCoordinates({ topLeft: [bounds.west, bounds.north], bottomRight: [bounds.east, bounds.south] })).toBeLessThan(1_000_000);
+    }
+    let consumed = 0;
+    let previous = -1;
+    let maxChunk = 0;
+    const count = await planOfflineMapInWorker({ sourceRevision: 'large-union', projects, points: [], paths: [], minZoom: 0, maxZoom: 18, padMeters: 0 }, (chunk) => {
+      maxChunk = Math.max(maxChunk, chunk.length / 3);
+      for (let i = 0; i < chunk.length; i += 3) {
+        const key = chunk[i] * 2 ** 36 + chunk[i + 1] * 2 ** 18 + chunk[i + 2];
+        if (key <= previous) throw new Error('Duplicate or unsorted coordinate');
+        previous = key;
+      }
+      consumed += chunk.length / 3;
+    });
+    expect(count).toBe(2 ** 20 - 3);
+    expect(consumed).toBe(count);
+    expect(maxChunk).toBe(2048);
+  });
+
 });
