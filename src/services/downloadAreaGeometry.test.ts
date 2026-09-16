@@ -65,7 +65,7 @@ describe('download area geometry and validation', () => {
       countAreaCoordinates({ topLeft: [1, 1], bottomRight: [1, 0] }),
     ).toThrow();
   });
-  it('renders only visible manual rectangles and splits a dateline rectangle', () => {
+  it('renders every manual rectangle and splits a dateline rectangle', () => {
     const collection = areaFeatureCollection([
       area(),
       area({ areaId: 'hidden', visible: false }),
@@ -74,9 +74,10 @@ describe('download area geometry and validation', () => {
     ]);
     expect(collection.features.map((feature) => feature.id)).toEqual([
       'area-1',
+      'hidden',
       'wrapped',
     ]);
-    expect(collection.features[1].geometry).toEqual({
+    expect(collection.features[2].geometry).toEqual({
       type: 'MultiPolygon',
       coordinates: [
         [

@@ -7,7 +7,10 @@ import {
   type DownloadAreasSnapshot,
 } from '../../types/downloadArea';
 import { downloadAreaColor } from '../../services/downloadAreaColors';
+import { areaMapBounds } from '../../services/downloadAreaGeometry';
+import { zoomToMapBounds } from '../../utils/mapCamera';
 import { OfflineAreaEditor } from './OfflineAreaEditor';
+import { OfflineAreaList } from './OfflineAreaList';
 import './offlineMaps.css';
 
 const STATUS_LABELS = {
@@ -43,6 +46,7 @@ export function OfflineMapsPanel({
   );
   const [error, setError] = useState<string | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const manual = snapshot.areas.filter(
     (area) => area.type === DownloadAreaType.Manual,
   );
@@ -102,7 +106,8 @@ export function OfflineMapsPanel({
     );
   return (
     <section
-      className="offline-map-sheet"
+      ref={panelRef}
+      className="offline-map-sheet offline-map-manager"
       role="dialog"
       aria-label="Offline Maps"
       onKeyDown={(event) => {
@@ -124,9 +129,6 @@ export function OfflineMapsPanel({
           <AreaIcon kind="close" />
         </button>
       </div>
-      {(error || snapshot.error) && (
-        <p role="alert">{error ?? snapshot.error}</p>
-      )}
       <button
         className="app-btn app-btn--primary offline-map-primary"
         disabled={busy || confirmingDelete}
@@ -142,7 +144,10 @@ export function OfflineMapsPanel({
           Choose an area on the map to keep offline.
         </p>
       )}
-      <div className="offline-map-list">
+      <OfflineAreaList>
+        {(error || snapshot.error) && (
+          <p role="alert">{error ?? snapshot.error}</p>
+        )}
         {manual.map((area, index) => {
           const label = `Area ${index + 1}`;
           const progress = snapshot.progress[area.areaId];
@@ -155,37 +160,33 @@ export function OfflineMapsPanel({
               aria-label={label}
             >
               <div className="offline-map-row">
-                <span
-                  className="offline-map-color"
-                  style={{ backgroundColor: downloadAreaColor(area) }}
-                  aria-hidden="true"
-                />
-                <div className="offline-map-row-main">
-                  <strong>{label}</strong>
-                  <span aria-live="polite">
-                    {STATUS_LABELS[status]}
-                    {status === 'downloading' && progress?.totalTiles
-                      ? ` · ${Math.floor((progress.completedTiles / progress.totalTiles) * 100)}%`
-                      : ''}
+                <button
+                  type="button"
+                  className="offline-map-select"
+                  aria-label={`Zoom to ${label}`}
+                  disabled={busy || confirmingDelete}
+                  onClick={() => {
+                    const map = mapRef.current;
+                    if (!map) return;
+                    zoomToMapBounds(map, areaMapBounds(area), panelRef.current);
+                  }}
+                >
+                  <span
+                    className="offline-map-color"
+                    style={{ backgroundColor: downloadAreaColor(area) }}
+                    aria-hidden="true"
+                  />
+                  <span className="offline-map-row-main">
+                    <strong>{label}</strong>
+                    <span aria-live="polite">
+                      {STATUS_LABELS[status]}
+                      {status === 'downloading' && progress?.totalTiles
+                        ? ` · ${Math.floor((progress.completedTiles / progress.totalTiles) * 100)}%`
+                        : ''}
+                    </span>
                   </span>
-                </div>
+                </button>
                 <div className="offline-map-row-actions">
-                  <button
-                    className="app-btn app-btn--secondary offline-map-icon"
-                    aria-label={`${area.visible ? 'Hide' : 'Show'} ${label} on map`}
-                    aria-pressed={area.visible}
-                    disabled={busy || confirmingDelete}
-                    onClick={() =>
-                      void run(area.areaId, () =>
-                        controller.setDownloadAreaVisible(
-                          area.areaId,
-                          !area.visible,
-                        ),
-                      )
-                    }
-                  >
-                    <AreaIcon kind={area.visible ? 'view' : 'hidden'} />
-                  </button>
                   <button
                     className="app-btn app-btn--secondary offline-map-icon"
                     aria-label={`Edit ${label}`}
@@ -246,7 +247,7 @@ export function OfflineMapsPanel({
             </div>
           );
         })}
-      </div>
+      </OfflineAreaList>
     </section>
   );
 }
@@ -254,7 +255,7 @@ export function OfflineMapsPanel({
 function AreaIcon({
   kind,
 }: {
-  kind: 'view' | 'hidden' | 'edit' | 'delete' | 'close';
+  kind: 'edit' | 'delete' | 'close';
 }) {
   return (
     <svg
@@ -268,13 +269,7 @@ function AreaIcon({
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      {kind === 'view' || kind === 'hidden' ? (
-        <>
-          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
-          <circle cx="12" cy="12" r="3" />
-          {kind === 'hidden' && <path d="M3 3l18 18" />}
-        </>
-      ) : kind === 'edit' ? (
+      {kind === 'edit' ? (
         <>
           <path d="m15 5 4 4M4 20l5-1L20 8a2.8 2.8 0 0 0-4-4L5 15l-1 5Z" />
         </>

@@ -22,6 +22,7 @@ export interface DownloadArea {
   name?: string;
   /** Persisted manual-area color; optional for pre-color catalogs. */
   color?: string;
+  /** Legacy presentation flag; manual rectangles now follow menu visibility. */
   visible: boolean;
   layerIds: MapLayerId[];
   revision: number;

@@ -18,6 +18,9 @@ behaviors.
   fail-closed bounded in-memory planning, compact IndexedDB plans/layer
   generations, six-worker downloads, paint-cadence progress, refresh, and
   performance regression seams.
+- `indexeddb-migrations.md`: database and catalog versions, transactional and
+  resumable migrations, future-change workflow, compatibility and downgrade
+  limits.
 - `logout-behavior.md`: when logout/cache purge happens and what data is
   cleared.
 - `security-storage.md`: native credential storage, session migration ordering,

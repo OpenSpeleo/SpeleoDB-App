@@ -13,6 +13,7 @@ import type {
   ManualDownloadAreaInput,
 } from '../../types/downloadArea';
 import {
+  areaMapBounds,
   countAreaCoordinates,
   FALLBACK_TILE_BYTES,
   MAX_AREA_COORDINATES,
@@ -130,15 +131,8 @@ export function OfflineAreaEditor({
         validAreaCorners(bounds.topLeft, bounds.bottomRight) &&
         countAreaCoordinates(bounds) <= MAX_AREA_COORDINATES;
       if (preserveBounds) {
-        const east =
-          bounds.bottomRight[0] < bounds.topLeft[0]
-            ? bounds.bottomRight[0] + 360
-            : bounds.bottomRight[0];
         map.fitBounds(
-          [
-            [bounds.topLeft[0], bounds.bottomRight[1]],
-            [east, bounds.topLeft[1]],
-          ],
+          areaMapBounds(bounds),
           {
             padding: {
               left: next.left,

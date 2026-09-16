@@ -12,6 +12,7 @@ import { errorToLogDetails } from '../../utils/errorDiagnostics';
 import { trackPointsToLineStringFeature } from '../../utils/gpsTrackGeoJson';
 import { useMountedRef } from '../../hooks/useMountedRef';
 import { boundsFromPoints } from './dashboardMapUtils';
+import { zoomToMapBounds } from '../../utils/mapCamera';
 
 type TrackController = Pick<
   SpeleoDBController,
@@ -217,7 +218,7 @@ function useTrackVisibilityAndMap(options: {
       if (!mountedRef.current || !points || points.length === 0) return;
       const bounds = boundsFromPoints(points);
       if (!bounds || !mapRef.current) return;
-      mapRef.current.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 800 });
+      zoomToMapBounds(mapRef.current, bounds);
       onClosePanel();
     })();
   }, [loadTrackPoints, mapRef, mountedRef, onClosePanel, trackPoints, trackVisibility, writeVisibility]);

@@ -43,7 +43,7 @@ vi.mock('react-map-gl/maplibre', () => ({
   ),
 }));
 afterEach(cleanup);
-it('binds all layers directly, filters automatic/hidden areas, and reinstalls the pattern after style replacement', async () => {
+it('binds all layers directly, shows previously hidden manual areas and filters automatic areas, and reinstalls the pattern after style replacement', async () => {
   let styleLoaded = false;
   let hasImage = false;
   const map = {
@@ -85,7 +85,7 @@ it('binds all layers directly, filters automatic/hidden areas, and reinstalls th
   const data = JSON.parse(
     container.querySelector('[data-source]')!.getAttribute('data-geojson')!,
   );
-  expect(data.features).toHaveLength(1);
+  expect(data.features.map((feature: { id: string }) => feature.id)).toEqual(['manual', 'hidden']);
   expect(data.features[0].properties.color).toBe('#fb923c');
   expect(
     container.querySelector('[data-layer="download-areas-fill"]'),

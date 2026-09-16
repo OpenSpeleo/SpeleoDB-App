@@ -75,9 +75,11 @@ a green browser suite.
   tables and embedded JSON only; no TypeScript mutations.
 - Final `prek run -a`: passed every applicable hook, with no file mutations.
 - `git diff --check` and `git diff --cached --check`: passed. All 60 changed
-  files belong to the reviewed feature, its corrections, tests and documentation.
-- Commit subject: `Add unified offline map areas and stable shared tile planning`.
-  Resolve this review's commit with
+  files belong to the reviewed feature, its corrections, tests and
+  documentation.
+- Commit subject:
+  `Add unified offline map areas and stable shared tile planning`. Resolve this
+  review's commit with
   `git log -1 --format='%h %s' -- tasks/todos/offline-uncommitted-review.md`.
 
 The corrections change shared TypeScript geometry and controller completion

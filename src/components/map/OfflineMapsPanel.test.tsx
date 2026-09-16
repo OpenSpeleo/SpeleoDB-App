@@ -17,6 +17,7 @@ import {
   type Mock,
 } from 'vitest';
 import { Router } from 'react-router-dom';
+import userEvent from '@testing-library/user-event';
 import { createMemoryHistory } from 'history';
 import type { MapRef } from 'react-map-gl/maplibre';
 import type { SpeleoDBController } from '../../controllers/SpeleoDBController';
@@ -56,7 +57,6 @@ let mapRef: { current: MapRef | null };
 let controller: {
   saveDownloadArea: ReturnType<typeof vi.fn>;
   deleteDownloadArea: ReturnType<typeof vi.fn>;
-  setDownloadAreaVisible: ReturnType<typeof vi.fn>;
   retryDownloadArea: ReturnType<typeof vi.fn>;
 };
 let onClose: Mock<() => void>;
@@ -87,7 +87,6 @@ beforeEach(() => {
   controller = {
     saveDownloadArea: vi.fn(async () => area.areaId),
     deleteDownloadArea: vi.fn(async () => {}),
-    setDownloadAreaVisible: vi.fn(async () => {}),
     retryDownloadArea: vi.fn(),
   };
   onClose = vi.fn();
@@ -191,7 +190,7 @@ function editor(
   };
 }
 describe('offline map manager interactions', () => {
-  it('lists multiple areas with visibility, edit and delete in order, without names or detail actions', () => {
+  it('lists multiple areas with zoom, edit and delete in order, without names or detail actions', () => {
     const trigger = document.createElement('button');
     document.body.append(trigger);
     trigger.focus();
@@ -213,7 +212,7 @@ describe('offline map manager interactions', () => {
       within(screen.getByRole('group', { name: 'Area 1' }))
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label')),
-    ).toEqual(['Hide Area 1 on map', 'Edit Area 1', 'Delete Area 1']);
+    ).toEqual(['Zoom to Area 1', 'Edit Area 1', 'Delete Area 1']);
     expect(screen.getByRole('button', { name: 'Edit Area 2' })).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'Add new offline area' }),
@@ -231,18 +230,67 @@ describe('offline map manager interactions', () => {
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
   });
-  it('toggles one area without opening the editor', async () => {
+  it('keeps service errors in the scroll region without consuming the fixed controls', () => {
+    panel({
+      ...snapshot(),
+      error: 'Layer settings were saved. Download storage will be checked again on restart.',
+    });
+    const rows = screen.getByRole('region', { name: 'Offline areas' });
+    expect(within(rows).getByRole('alert')).toHaveTextContent('Download storage');
+    expect(within(rows).getByRole('button', { name: 'Edit Area 1' })).toBeEnabled();
+    expect(rows).not.toContainElement(screen.getByRole('heading', { name: 'Offline Maps' }));
+    expect(rows).not.toContainElement(screen.getByRole('button', { name: 'Add new offline area' }));
+  });
+  it.each(['{Enter}', ' '])('zooms to an area using the keyboard (%s)', async (key) => {
+    const user = userEvent.setup();
     panel();
-    fireEvent.click(screen.getByRole('button', { name: 'Hide Area 1 on map' }));
-    await waitFor(() =>
-      expect(controller.setDownloadAreaVisible).toHaveBeenCalledWith(
-        area.areaId,
-        false,
-      ),
+    screen.getByRole('button', { name: 'Zoom to Area 1' }).focus();
+    await user.keyboard(key);
+    expect(map.fitBounds).toHaveBeenCalledExactlyOnceWith(
+      [[2, 46], [2.001, 46.001]],
+      { padding: 60, maxZoom: 16, duration: 800 },
     );
-    expect(
-      screen.queryByLabelText('Selected map area'),
-    ).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Offline Maps' })).toBeVisible();
+    expect(controller.saveDownloadArea).not.toHaveBeenCalled();
+  });
+  it('keeps the menu open when the map is unavailable', () => {
+    mapRef.current = null;
+    panel();
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom to Area 1' }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(map.fitBounds).not.toHaveBeenCalled();
+  });
+  it('fits above the measured menu and remeasures after layout changes', () => {
+    panel();
+    const viewport = vi.spyOn(map.getContainer(), 'getBoundingClientRect');
+    const sheet = vi.spyOn(
+      screen.getByRole('dialog', { name: 'Offline Maps' }),
+      'getBoundingClientRect',
+    );
+    viewport.mockReturnValue(new DOMRect(0, 40, 390, 800));
+    sheet.mockReturnValue(new DOMRect(12, 540, 366, 288));
+    const select = () => fireEvent.click(screen.getByRole('button', { name: 'Zoom to Area 1' }));
+    select();
+    expect(map.fitBounds).toHaveBeenLastCalledWith(
+      [[2, 46], [2.001, 46.001]],
+      { padding: { top: 60, bottom: 360, left: 60, right: 60 }, maxZoom: 16, duration: 800 },
+    );
+    // A taller list moves the sheet upward without changing the viewport.
+    sheet.mockReturnValue(new DOMRect(12, 440, 366, 388));
+    select();
+    expect(map.fitBounds.mock.lastCall?.[1].padding).toEqual({
+      top: 60, bottom: 460, left: 60, right: 60,
+    });
+    // In landscape, shrink the margins to retain positive fitting space.
+    viewport.mockReturnValue(new DOMRect(0, 20, 568, 300));
+    sheet.mockReturnValue(new DOMRect(12, 100, 544, 208));
+    select();
+    expect(map.fitBounds.mock.lastCall?.[1].padding).toEqual({
+      top: 20, bottom: 240, left: 20, right: 20,
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(controller.saveDownloadArea).not.toHaveBeenCalled();
   });
   it('opens the boundary directly and saves edits to the same area', async () => {
     panel();
@@ -254,6 +302,7 @@ describe('offline map manager interactions', () => {
       map.resize.mock.invocationCallOrder[0],
     );
     expect(map.fitBounds).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
     expect(
       within(screen.getByRole('dialog'))
         .getAllByRole('button')
@@ -273,6 +322,9 @@ describe('offline map manager interactions', () => {
   it('requires confirmation to delete and leaves other areas untouched', async () => {
     panel({ ...snapshot(), areas: [area, { ...area, areaId: 'second' }] });
     fireEvent.click(screen.getByRole('button', { name: 'Delete Area 2' }));
+    expect(screen.getByRole('button', { name: 'Zoom to Area 1' })).toBeDisabled();
+    expect(map.fitBounds).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
     expect(controller.deleteDownloadArea).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(controller.deleteDownloadArea).not.toHaveBeenCalled();
@@ -320,9 +372,6 @@ describe('offline map manager interactions', () => {
         ).toBeEnabled();
         expect(
           screen.getByRole('button', { name: 'Edit Area 1' }),
-        ).toBeEnabled();
-        expect(
-          screen.getByRole('button', { name: 'Hide Area 1 on map' }),
         ).toBeEnabled();
         expect(
           screen.getByRole('button', { name: 'Add new offline area' }),
@@ -380,20 +429,6 @@ describe('offline map manager interactions', () => {
       ).not.toBeInTheDocument(),
     );
     expect(controller.deleteDownloadArea).toHaveBeenCalledTimes(2);
-  });
-  it('reports persistence errors and allows another attempt', async () => {
-    controller.setDownloadAreaVisible.mockRejectedValueOnce(
-      new Error('Storage unavailable'),
-    );
-    panel();
-    fireEvent.click(screen.getByRole('button', { name: 'Hide Area 1 on map' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Storage unavailable',
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Hide Area 1 on map' }));
-    await waitFor(() =>
-      expect(screen.queryByRole('alert')).not.toBeInTheDocument(),
-    );
   });
   it('returns to the list after saving a new unnamed area, ready to add another', async () => {
     panel(EMPTY_DOWNLOAD_AREAS);

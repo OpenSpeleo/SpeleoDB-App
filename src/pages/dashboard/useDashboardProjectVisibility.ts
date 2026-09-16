@@ -15,6 +15,7 @@ import {
 import type { Project } from '../../types/project';
 import type { ProjectBoundsRecord } from './dashboardMapUtils';
 import { computeBounds } from './dashboardMapUtils';
+import { zoomToMapBounds } from '../../utils/mapCamera';
 
 type VisibilityRecord = Record<string, boolean>;
 type PreferenceReader = () => VisibilityRecord;
@@ -247,7 +248,7 @@ function useProjectZoomAction(options: ZoomActionOptions) {
       const map = mapRef.current;
       if (!map) return;
       const bounds = computeBounds(projectBounds, new Set([projectId]));
-      if (bounds) map.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 800 });
+      if (bounds) zoomToMapBounds(map, bounds);
     });
   }, [countryVisibility, mapRef, onClosePanel, projectBounds, projects, schedule,
     setCountryVisibility, updateActiveProjectIds, writeCountryVisibility,

@@ -157,7 +157,7 @@ async function zoomToLocalArea(page: import('@playwright/test').Page) {
   await expect(page.getByRole('textbox')).toHaveCount(0);
 }
 
-test('multiple unnamed areas keep their colors through reload, visibility, editing and deletion', async ({
+test('multiple unnamed areas keep their colors through reload, menu reopening, editing and deletion', async ({
   page,
 }, testInfo) => {
   const errors: string[] = [];
@@ -201,7 +201,14 @@ test('multiple unnamed areas keep their colors through reload, visibility, editi
       .evaluateAll((buttons) =>
         buttons.map((button) => button.getAttribute('aria-label')),
       ),
-  ).toEqual(['Hide Area 1 on map', 'Edit Area 1', 'Delete Area 1']);
+  ).toEqual(['Zoom to Area 1', 'Edit Area 1', 'Delete Area 1']);
+  const row = first.locator('.offline-map-row');
+  // Preserve the existing 44 px actions plus 12 px top/bottom row spacing.
+  await expect(row).toHaveCSS('height', '68px');
+  const selection = first.getByRole('button', { name: 'Zoom to Area 1' });
+  await expect(selection).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(selection).toHaveCSS('border-top-width', '0px');
+  await expect(selection).toHaveCSS('padding-top', '0px');
   await expect(page.getByRole('button', { name: /Retry|Refresh/ })).toHaveCount(
     0,
   );
@@ -221,10 +228,34 @@ test('multiple unnamed areas keep their colors through reload, visibility, editi
         elements.map((element) => getComputedStyle(element).backgroundColor),
       ),
   ).toEqual(colors);
-  await page.getByRole('button', { name: 'Hide Area 1 on map' }).click();
-  await expect(
-    page.getByRole('button', { name: 'Show Area 1 on map' }),
-  ).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: /^(Show|Hide) Area/ })).toHaveCount(0);
+  const beforeZoom = await savedAreas(page);
+  // Reload starts at the default world view. Selecting the saved area must
+  // move the real MapLibre camera, keep the sheet open, and preserve the catalog.
+  // The row's top-left padding is outside the label button's layout box.
+  await row.tap({ position: { x: 2, y: 2 } });
+  await expect(page.getByTestId('distance-scale')).toHaveText(/^\d+ m$/);
+  await expect(page.getByRole('dialog', { name: 'Offline Maps' })).toBeVisible();
+  await second.getByRole('button', { name: 'Zoom to Area 2' }).tap();
+  await expect(page.getByRole('dialog', { name: 'Offline Maps' })).toBeVisible();
+  await expect(first).toBeVisible();
+  await expect(second).toBeVisible();
+  expect(await savedAreas(page)).toEqual(beforeZoom);
+  await testInfo.attach('offline-area-above-menu-portrait', {
+    body: await page.screenshot({ path: testInfo.outputPath('offline-area-above-menu-portrait.png') }),
+    contentType: 'image/png',
+  });
+  await page.setViewportSize({ width: 568, height: 320 });
+  await mapSizeSettled(page);
+  await first.getByRole('button', { name: 'Zoom to Area 1' }).tap();
+  await expect(page.getByRole('dialog', { name: 'Offline Maps' })).toBeVisible();
+  await testInfo.attach('offline-area-above-menu-landscape', {
+    body: await page.screenshot({ path: testInfo.outputPath('offline-area-above-menu-landscape.png') }),
+    contentType: 'image/png',
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mapSizeSettled(page);
+  await first.getByRole('button', { name: 'Zoom to Area 1' }).tap();
   await page.getByRole('button', { name: 'Edit Area 1' }).click();
   const corner = page.getByRole('button', { name: 'Resize top left corner' });
   await expect(corner).toBeInViewport();
@@ -256,7 +287,6 @@ test('multiple unnamed areas keep their colors through reload, visibility, editi
   // Check the committed list immediately; Playwright's click auto-wait must not
   // hide a disabled-controls gap between consecutive deletions.
   for (const label of [
-    'Hide Area 1 on map',
     'Edit Area 1',
     'Delete Area 1',
     'Add new offline area',
@@ -277,6 +307,125 @@ test('multiple unnamed areas keep their colors through reload, visibility, editi
     page.getByText('Choose an area on the map to keep offline.'),
   ).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test('long offline area lists scroll below fixed controls in a smaller sheet', async ({ page }, testInfo) => {
+  await fixture(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/dashboard');
+  await page.getByRole('button', { name: 'Offline Maps', exact: true }).click();
+  await page.getByRole('button', { name: 'Add new offline area' }).click();
+  await zoomToLocalArea(page);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByText('Downloaded', { exact: true })).toBeVisible();
+  // Expand a real saved catalog, keeping identical coverage to avoid unrelated
+  // network/planner work while exercising a long list after restart.
+  await expect(page.locator('.offline-map-scroll-rail')).toBeHidden();
+  await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('speleo_tiles');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('offline_map_settings', 'readwrite');
+        const store = tx.objectStore('offline_map_settings');
+        const request = store.get('download-areas');
+        request.onsuccess = () => {
+          const catalog = request.result;
+          const original = catalog.areas[0];
+          catalog.areas = Array.from({ length: 30 }, () => {
+            const areaId = crypto.randomUUID();
+            return { ...original, areaId, sourceKey: `manual:${areaId}` };
+          });
+          catalog.revision++;
+          store.put(catalog, 'download-areas');
+        };
+        tx.oncomplete = () => resolve();
+        tx.onabort = tx.onerror = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  });
+  await page.reload();
+  await page.getByRole('button', { name: 'Offline Maps', exact: true }).click();
+  const sheet = page.getByRole('dialog', { name: 'Offline Maps' });
+  const rows = page.getByRole('region', { name: 'Offline areas' });
+  const heading = sheet.getByRole('heading', { name: 'Offline Maps' });
+  const add = sheet.getByRole('button', { name: 'Add new offline area' });
+  const close = sheet.getByRole('button', { name: 'Close', exact: true });
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 844, height: 390 },
+    { width: 320, height: 300 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await mapSizeSettled(page);
+    await rows.evaluate((element) => { element.scrollTop = 0; });
+    const height = await sheet.evaluate((element) => ({
+      actual: element.getBoundingClientRect().height,
+      available: element.parentElement!.clientHeight,
+    }));
+    const cap = Math.min(height.available - 24, Math.max(242, height.available * (viewport.width >= 768 ? 0.429 : 0.4224)));
+    expect(height.actual).toBeCloseTo(cap, 0);
+    const rail = sheet.locator('.offline-map-scroll-rail');
+    const thumb = sheet.locator('.offline-map-scroll-thumb');
+    await expect(rail).toBeVisible();
+    const start = await thumb.boundingBox();
+    const addBox = await add.boundingBox();
+    const listBox = await rows.boundingBox();
+    expect(listBox!.y - (addBox!.y + addBox!.height)).toBe(8);
+    const fixedControls = [heading, add, close];
+    const positions = await Promise.all(fixedControls.map((control) => control.boundingBox()));
+    expect(await rows.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+    expect(await rows.evaluate((element) => element.clientHeight)).toBeGreaterThanOrEqual(68);
+    await rows.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    expect(await rows.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await expect.poll(async () => (await thumb.boundingBox())!.y).toBeGreaterThan(start!.y);
+    await expect(rail).toBeVisible();
+    expect(await sheet.evaluate((element) => element.scrollTop)).toBe(0);
+    const last = sheet.getByRole('group', { name: 'Area 30', exact: true });
+    await expect(last.getByRole('button', { name: 'Delete Area 30', exact: true })).toBeInViewport({ ratio: 1 });
+    await last.getByRole('button', { name: 'Delete Area 30', exact: true }).click();
+    await sheet.getByRole('button', { name: 'Cancel', exact: true }).click();
+    for (const [index, control] of fixedControls.entries()) {
+      await expect(control).toBeInViewport({ ratio: 1 });
+      expect(await control.boundingBox()).toEqual(positions[index]);
+    }
+    // Moving away from the scroller must not hide the persistent indicator.
+    await page.mouse.move(0, 0);
+    await expect(thumb).toBeVisible();
+    await testInfo.attach(`scrolling-areas-${viewport.width}x${viewport.height}`, {
+      body: await page.screenshot({ path: testInfo.outputPath(`scrolling-areas-${viewport.width}x${viewport.height}.png`) }),
+      contentType: 'image/png',
+    });
+  }
+  // A real persistence failure must not consume the fixed header and collapse
+  // the row viewport on the shortest layout. Fail one catalog write only.
+  const storageError = 'Offline map settings could not be saved because the device storage is unavailable. Free some space and try again; your saved areas have been kept.';
+  await page.evaluate((message) => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value: unknown, key?: IDBValidKey) {
+      if (this.name === 'offline_map_settings' && key === 'download-areas') {
+        IDBObjectStore.prototype.put = put;
+        throw new Error(message);
+      }
+      return put.call(this, value, key);
+    };
+  }, storageError);
+  await sheet.getByRole('button', { name: 'Delete Area 30', exact: true }).click();
+  await sheet.getByRole('button', { name: 'Delete area', exact: true }).click();
+  await expect(rows.getByRole('alert')).toHaveText(storageError);
+  expect(await rows.evaluate((element) => element.clientHeight)).toBeGreaterThanOrEqual(68);
+  await rows.getByRole('alert').scrollIntoViewIfNeeded();
+  await expect(rows.getByRole('alert')).toBeVisible();
+  await sheet.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const lastDelete = sheet.getByRole('button', { name: 'Delete Area 30', exact: true });
+  await lastDelete.scrollIntoViewIfNeeded();
+  await expect(lastDelete).toBeInViewport({ ratio: 1 });
+  await expect(sheet.getByRole('group', { name: /^Area \d+$/ })).toHaveCount(30);
+  await add.click();
+  await expect(page.getByRole('dialog', { name: 'Select offline area' })).toBeVisible();
 });
 
 for (const layout of [

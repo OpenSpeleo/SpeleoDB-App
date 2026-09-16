@@ -15,12 +15,12 @@ track. Two gaps were corrected: pending landmark changes are folded into source
 geometry, and landmark mutations now schedule preparation. Exploration leads and
 cylinder installs also pass through the shared point adapter.
 
-| Source                               | Rectangle                                      | Layers                        | User controls                         |
-| ------------------------------------ | ---------------------------------------------- | ----------------------------- | ------------------------------------- |
-| Manual                               | Exact selected corners                         | Satellite plus enabled layers | Add, show/hide, edit boundary, delete |
-| Project                              | Validated current-commit GeoJSON bounds + 50 m | Satellite plus enabled layers | Source-owned, hidden                  |
-| Landmark / station / lead / cylinder | Point bounds + 50 m                            | Same shared preferences       | Source-owned, hidden                  |
-| Local / remote GPS track             | Entire track bounds + 50 m                     | Same shared preferences       | Source-owned, hidden                  |
+| Source                               | Rectangle                                      | Layers                        | User controls              |
+| ------------------------------------ | ---------------------------------------------- | ----------------------------- | -------------------------- |
+| Manual                               | Exact selected corners                         | Satellite plus enabled layers | Add, edit boundary, delete |
+| Project                              | Validated current-commit GeoJSON bounds + 50 m | Satellite plus enabled layers | Source-owned, hidden       |
+| Landmark / station / lead / cylinder | Point bounds + 50 m                            | Same shared preferences       | Source-owned, hidden       |
+| Local / remote GPS track             | Entire track bounds + 50 m                     | Same shared preferences       | Source-owned, hidden       |
 
 Every area covers zoom levels 0–18. Longitude intervals can cross the dateline;
 latitude is limited to Web Mercator. A constant-space preflight rejects manual
@@ -40,11 +40,58 @@ the stack applies the safe-area inset once. The layer menu appears above the
 download control. This button and **Settings → Offline Maps** open the same
 bottom sheet. It is a single list with no detail screen. Each saved area has a
 persistent color, a short positional label (Area 1, Area 2, …), a download
-status, and three 44-pixel icon actions in order: **show/hide**, **edit
-boundary**, **delete**. Delete is red and opens an inline confirmation with
-Cancel/Delete. The labels are display positions, not user-entered names or
-identifiers. Colors and UUIDs remain stable when other areas are removed.
-Automatic areas stay out of this manual-area list.
+status, and two 44-pixel icon actions in order: **edit boundary**, **delete**.
+Delete is red and opens an inline confirmation with Cancel/Delete. The labels
+are display positions, not user-entered names or identifiers. Colors and UUIDs
+remain stable when other areas are removed. Automatic areas stay out of this
+manual-area list.
+
+The manager keeps its title, close control and **Add new offline area** button
+stationary; area rows, inline delete confirmations and error messages scroll
+together. Keeping errors in that region preserves reachable actions on short
+screens even when a storage failure needs a longer explanation. An 8 px gap
+separates the Add button from the rows. The height is content-sized up to 42.24%
+of the map height (42.9% at desktop widths), a 10% increase from the previous
+compact cap. Short screens retain up to a 242 px minimum cap for the fixed
+controls and a usable row, bounded by the available height minus 24 px. The
+manager uses a constrained flex column and shrinking scroll region; the boundary
+editor keeps its separate sheet layout.
+
+`OfflineAreaList` retains native touch, wheel and keyboard scrolling and adds a
+persistent position indicator whenever its content overflows. Its rail and thumb
+do not fade when scrolling stops or the pointer leaves. Native scrollbar visuals
+are hidden to avoid duplicates. ResizeObserver watches the viewport and content,
+including row deletion and inline confirmation changes; a passive scroll
+listener updates the thumb directly without rerendering rows. Both are cleaned
+up when the list unmounts. The indicator is decorative and does not replace
+native scrolling or keyboard focus. No catalog changes or tile recalculation
+occur.
+
+Browser tests load 30 saved areas and verify fixed control positions, the 8 px
+gap, overflow indicator, bottom-row actions and height cap in portrait,
+landscape and a short keyboard-sized viewport, including a failed catalog write
+with a long error message. Component tests cover overflow appearing or
+disappearing, thumb positioning, viewport changes and observer/listener cleanup.
+
+Tapping anywhere on an area's flat row zooms the map to its saved rectangle
+using the project/GPS camera behavior while keeping the menu and area outlines
+visible, so another area can be selected immediately. The native button also
+supports Enter/Space. Its hit target covers the row without adding a card,
+border, fill, or extra spacing. Edit and delete remain separate actions;
+selection is disabled while deletion is pending or awaiting confirmation.
+`zoomToMapBounds` owns the shared camera settings (60 px default padding,
+maximum zoom 16, 800 ms animation) for all three lists. Offline selection passes
+its open panel to that helper: it measures the current map and panel rectangles
+and adds bottom padding for the covered map region, fitting the entire area
+above the menu. Margins shrink on short viewports so fitting space stays
+positive. Each selection measures again, handling viewport and list-height
+changes without a resize listener or persistent camera padding. `areaMapBounds`
+converts saved corners to MapLibre bounds, including dateline wrapping, and is
+shared with the boundary editor. This presentation-only action reads the
+existing snapshot in constant time without catalog writes or download
+scheduling. Mounted panel/Dashboard tests verify camera bounds, keyboard
+activation, offline selection with the menu kept open, and edit/delete
+isolation; existing project/GPS tests protect their behavior.
 
 **Add new offline area** is always available in the list. It opens a crop frame
 over the live map. Pan/zoom beneath it or drag any of four 44-pixel corner
@@ -75,7 +122,14 @@ unused colors and balancing reuse after the palette is exhausted. The same color
 appears in the list, map fill/outline, and existing-area selection boundary. A
 shared neutral diagonal stripe texture adds contrast over the colored fill;
 there is no image or map source per area. Wrapped rectangles render as two
-polygons. Visibility changes presentation only, never download ownership.
+polygons. All saved manual rectangles appear while the Offline Maps menu is
+open, including while adding or editing a boundary. Closing the menu, selecting
+another panel, or leaving Dashboard hides them all. There are no per-area
+show/hide controls. Dashboard derives the rendered collection from the same
+active-panel state that mounts the menu, keeping navigation and map presentation
+in sync without catalog writes or download scheduling. Previously saved
+`visible` flags remain compatible storage metadata but no longer filter manual
+rectangles. Automatic source-owned rectangles remain outside this presentation.
 
 There are no Retry or Refresh buttons in the manager. Saving an incomplete area
 also resumes its existing download; unchanged complete areas do not redownload.
@@ -132,6 +186,12 @@ read/write transaction: assign missing colors, remove obsolete names, and
 persist once. Concurrent startup reads see the same colors. Schema version 1
 remains compatible, and catalog/area revisions, generation records and pins are
 unchanged.
+
+Database version 9 and catalog `schemaVersion: 1` have separate
+responsibilities; catalog/area revisions track data changes rather than schema
+upgrades. See [IndexedDB versioning and migrations](indexeddb-migrations.md) for
+supported upgrade paths, future format changes, transaction safety and downgrade
+limits.
 
 Coordinates are `[longitude, latitude]`. `objectId` holds the source's ID when
 available (anonymous GeoJSON points may lack one). `sourceKey` supplies stable
@@ -248,13 +308,17 @@ Automated evidence lives at the owning seams:
   stable identity, migration, foreground lifecycle and signout.
 - `downloadAreaGeometry.test.ts`: preflight/planner agreement, dateline/world
   bounds, catalog validation, source types and full-track rectangles.
+- `Dashboard.test.tsx`: actual map-source contents across menu open/close,
+  editor, panel replacement and inactive-route transitions, without changing
+  catalog data.
 - Controller tests: complete/current source inputs, stale collection rejection,
   automatic scheduling and layer preferences.
 - `OfflineMapsPanel.test.tsx`: manager/editor interactions, map-derived bounds
   and keyboard input, offline saving, direct cancellation, and persistence
   errors.
 - `DownloadAreaMapLayers.test.tsx`: actual Source prop injection, wrapped
-  geometry, hidden/automatic filtering and style pattern restoration.
+  geometry, legacy hidden manual areas, automatic filtering and style pattern
+  restoration.
 - `tests/browser/offline-maps.spec.ts`: shipped production UI, real IndexedDB,
   WebKit/Chromium, multiple areas and color stability, row action ordering,
   small-screen touch targets, fixture transport and a narrowly emulated native

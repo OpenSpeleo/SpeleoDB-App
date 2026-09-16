@@ -1,5 +1,6 @@
 import { OfflineMapsPanel } from '../components/map/OfflineMapsPanel';
 import { useDownloadAreas } from '../context/useSpeleoDB';
+import { EMPTY_DOWNLOAD_AREAS } from '../types/downloadArea';
 /**
  * Dashboard -- full-screen map with per-project GeoJSON layers.
  *
@@ -75,6 +76,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   layerOfflineSync,
 }) => {
   const downloadAreas = useDownloadAreas();
+  const offlineMapsOpen = isActive && activeDashboardPanel === 'offline-maps';
   const [editingArea, setEditingArea] = useState(false);
   const effectiveLayerSync = useMemo(() => ({ ...layerOfflineSync, ...Object.fromEntries(downloadAreas.availableLayerIds.map((id) => [id, true])) }), [layerOfflineSync, downloadAreas.availableLayerIds]);
   const history = useHistory();
@@ -348,7 +350,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             onSelectedMapLayerIdChange={onSelectedMapLayerIdChange}
             isOfflineLocked={isOfflineLocked}
             layerOfflineSync={effectiveLayerSync}
-            downloadAreas={downloadAreas.areas}
+            downloadAreas={offlineMapsOpen ? downloadAreas.areas : EMPTY_DOWNLOAD_AREAS.areas}
             editingArea={editingArea}
             onOpenOfflineMaps={() => onDashboardPanelChange('offline-maps')}
             projectLayers={{
@@ -383,7 +385,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             onMapReady={fitInitialProjectBounds}
           />
 
-          {activeDashboardPanel === 'offline-maps' && isActive && <OfflineMapsPanel controller={controller} snapshot={downloadAreas} mapRef={mapRef} offline={isOfflineLocked} onClose={() => onDashboardPanelChange(null)} onEditingChange={setEditingArea} />}
+          {offlineMapsOpen && <OfflineMapsPanel controller={controller} snapshot={downloadAreas} mapRef={mapRef} offline={isOfflineLocked} onClose={() => onDashboardPanelChange(null)} onEditingChange={setEditingArea} />}
           {/* ---- Project panel ---- */}
           <ProjectPanel
             projects={panelProjects}

@@ -20,6 +20,46 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+.offline-map-manager {
+  display: flex;
+  flex-direction: column;
+  max-height: min(calc(100% - 24px), max(242px, 42.24%));
+  overflow: hidden;
+}
+.offline-map-manager > :not(.offline-map-list-container) {
+  flex-shrink: 0;
+}
+.offline-map-list-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.offline-map-list {
+  min-height: 0;
+  padding-right: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.offline-map-list::-webkit-scrollbar {
+  display: none;
+}
+.offline-map-scroll-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 5px;
+  border-radius: 3px;
+  background: var(--color-slate-800);
+  pointer-events: none;
+}
+.offline-map-scroll-thumb {
+  width: 100%;
+  border-radius: inherit;
+  background: var(--color-slate-500);
+}
 .offline-map-sheet p {
   margin: 12px 0;
 }
@@ -43,6 +83,7 @@
 .offline-map-primary {
   width: 100%;
   margin-top: 4px;
+  margin-bottom: 8px;
   min-height: 44px;
 }
 .offline-map-sheet .app-btn {
@@ -59,11 +100,43 @@
   border-bottom: 0;
 }
 .offline-map-row {
+  position: relative;
   padding: 12px 0;
 }
 .offline-map-row-main {
   flex: 1;
   min-width: 0;
+}
+.offline-map-select {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+/* Extend the native button's hit target across the row, including its padding. */
+.offline-map-select::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+}
+.offline-map-select:disabled::after {
+  cursor: default;
+}
+.offline-map-select:focus-visible {
+  outline: none;
+}
+.offline-map-select:focus-visible::after {
+  outline: 2px solid var(--color-slate-300);
+  outline-offset: -2px;
 }
 .offline-map-row-main strong,
 .offline-map-row-main span {
@@ -80,6 +153,8 @@
   margin-top: 2px;
 }
 .offline-map-row-actions {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-shrink: 0;
 }
@@ -153,6 +228,9 @@
     right: auto;
     width: 360px;
     max-height: 65%;
+  }
+  .offline-map-manager {
+    max-height: min(calc(100% - 24px), max(242px, 42.9%));
   }
   .offline-editor-sheet {
     left: 50%;

@@ -32,6 +32,14 @@ export function areaBounds(
   };
 }
 
+/** MapLibre needs an unwrapped eastern longitude for dateline rectangles. */
+export function areaMapBounds(
+  area: Pick<DownloadArea, 'topLeft' | 'bottomRight'>,
+): [LngLat, LngLat] {
+  const { west, east, south, north, crossesDateline } = areaBounds(area);
+  return [[west, south], [crossesDateline ? east + 360 : east, north]];
+}
+
 export function cornersForBounds(
   bounds: ProjectGeoJSONBounds,
   padding = 0,
@@ -213,7 +221,7 @@ export function areaFeatureCollection(
   return {
     type: 'FeatureCollection',
     features: areas
-      .filter((area) => area.type === DownloadAreaType.Manual && area.visible)
+      .filter((area) => area.type === DownloadAreaType.Manual)
       .map((area) => {
         const b = areaBounds(area);
         return {

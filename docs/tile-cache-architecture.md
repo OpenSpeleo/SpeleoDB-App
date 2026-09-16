@@ -109,6 +109,10 @@ layer switch rebuilds or transfers the coordinate union.
 
 ## IndexedDB v9 and migration
 
+See [IndexedDB versioning and migrations](indexeddb-migrations.md) for the
+database/catalog version distinction, upgrade transactions, restart-safe data
+conversion, future migration workflow, and downgrade limitations.
+
 `speleo_tiles` v9 adds local area settings to the existing payload, metadata,
 generation and membership stores without rewriting bytes:
 

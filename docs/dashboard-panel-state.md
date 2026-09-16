@@ -63,4 +63,9 @@ page integration contract.
 
 Offline Maps opens from the map download button or Settings. Selection hides the
 tab bar and other map controls; dirty route departure is guarded by the editor.
-The persisted area catalog is separate from this ephemeral panel state.
+All manual area rectangles are shown while this panel is active on Dashboard,
+including its editor, and hidden when it closes, another panel opens, or
+Dashboard becomes inactive. Legacy per-area visibility flags do not control
+presentation. The persisted area catalog is separate from this ephemeral panel
+state; opening or closing the menu never changes download intent or recalculates
+tiles.

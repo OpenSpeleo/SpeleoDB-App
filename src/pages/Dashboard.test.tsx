@@ -1,7 +1,7 @@
-import { EMPTY_DOWNLOAD_AREAS } from '../types/downloadArea';
+import { DownloadAreaType, EMPTY_DOWNLOAD_AREAS, type DownloadArea, type DownloadAreasSnapshot } from '../types/downloadArea';
 import { EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT } from '../services/OfflineMapSyncStore';
 import React from 'react';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
@@ -283,6 +283,7 @@ vi.mock('react-map-gl/maplibre', () => {
 
       React.useImperativeHandle(ref, () => ({
         fitBounds: mockMapFitBounds,
+        getContainer: () => screen.getByTestId('map'),
         getMap: mockGetMap,
       }));
 
@@ -469,6 +470,12 @@ vi.mock('../onboarding/guidedTour/engine', () => ({
 }));
 
 // Mock SpeleoDBProvider
+let mockDownloadAreas: DownloadAreasSnapshot = EMPTY_DOWNLOAD_AREAS;
+vi.mock('../components/map/OfflineAreaEditor', () => ({
+  OfflineAreaEditor: ({ onCancel }: { onCancel(): void }) => (
+    <button onClick={onCancel}>Cancel area editing</button>
+  ),
+}));
 const mockSyncProjects = vi.fn().mockResolvedValue({ status: 'done' });
 const mockGetProjectGeoJSON = vi.fn().mockResolvedValue(null);
 const mockGetProjectMapData = vi.fn(async (projectId: string) => {
@@ -525,7 +532,7 @@ const mockController = {
 };
 
 vi.mock('../context/useSpeleoDB', () => ({
-  useDownloadAreas: () => EMPTY_DOWNLOAD_AREAS,
+  useDownloadAreas: () => mockDownloadAreas,
   useOfflineMapSync: () => EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT,
   useSpeleoDB: () => ({
     controller: mockController,
@@ -810,8 +817,14 @@ function mixedProjectFeatureCollection(): GeoJSON.FeatureCollection {
 // ==================== Tests ====================
 
 describe('Dashboard', () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    });
     vi.clearAllMocks();
+    mockDownloadAreas = EMPTY_DOWNLOAD_AREAS;
     mockGpsRecordingState = 'idle';
     mockGpsTracks = [];
     mockController.currentTrackPoints = [];
@@ -883,6 +896,79 @@ describe('Dashboard', () => {
     await waitFor(() => {
       expect(screen.getByTestId('map')).toBeInTheDocument();
     });
+  });
+
+  it('shows all manual rectangles only while Offline Maps is active, including editing', async () => {
+    const areas = [true, false].map<DownloadArea>((visible, index) => ({
+      areaId: `manual-${index}`, type: DownloadAreaType.Manual, objectId: null,
+      topLeft: [2, 46.001] as [number, number], bottomRight: [2.001, 46] as [number, number],
+      visible, revision: 1, sourceKey: `manual-${index}`, sourceRevision: null,
+      layerIds: ['esri-satellite'],
+    }));
+    const snapshot = { ...EMPTY_DOWNLOAD_AREAS, areas };
+    mockDownloadAreas = snapshot;
+    const view = renderDashboard();
+    await settleAsyncEffects();
+    const renderedIds = () => {
+      const source = document.querySelector('[data-source-id="download-areas"]');
+      expect(source).not.toBeNull();
+      return (JSON.parse(source!.getAttribute('data-source-data')!) as GeoJSON.FeatureCollection)
+        .features.map((feature) => feature.id);
+    };
+    const open = () => fireEvent.click(screen.getByRole('button', { name: 'Offline Maps' }));
+    expect(renderedIds()).toEqual([]);
+    open();
+    expect(renderedIds()).toEqual(['manual-0', 'manual-1']);
+    expect(screen.queryByRole('button', { name: /^(Show|Hide) Area/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Area 2' }));
+    expect(renderedIds()).toEqual(['manual-0', 'manual-1']);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel area editing' }));
+    expect(renderedIds()).toEqual(['manual-0', 'manual-1']);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(renderedIds()).toEqual([]);
+    open();
+    fireEvent.click(screen.getByTestId('projects-tab'));
+    expect(renderedIds()).toEqual([]);
+    open();
+    view.setDashboardActive(false);
+    expect(renderedIds()).toEqual([]);
+    view.setDashboardActive(true);
+    expect(renderedIds()).toEqual(['manual-0', 'manual-1']);
+    fireEvent.click(screen.getByTestId('map-tab'));
+    expect(renderedIds()).toEqual([]);
+    expect(mockDownloadAreas).toBe(snapshot);
+    expect(areas.map((area) => area.visible)).toEqual([true, false]);
+  });
+
+  it.each([
+    { west: 2, east: 2.001, fittedEast: 2.001, offline: false },
+    { west: 179.999, east: -179.999, fittedEast: 180.001, offline: true },
+  ])('zooms to an offline area and keeps its menu open ($west, offline=$offline)', async ({ west, east, fittedEast, offline }) => {
+    mockIsOfflineLocked = offline;
+    const area: DownloadArea = {
+      areaId: 'manual-zoom', type: DownloadAreaType.Manual, objectId: null,
+      topLeft: [west, 46.001], bottomRight: [east, 46],
+      visible: false, revision: 1, sourceKey: 'manual-zoom', sourceRevision: null,
+      layerIds: ['esri-satellite'],
+    };
+    const snapshot = { ...EMPTY_DOWNLOAD_AREAS, areas: [area] };
+    mockDownloadAreas = snapshot;
+    renderDashboard();
+    await settleAsyncEffects();
+    fireEvent.click(screen.getByRole('button', { name: 'Offline Maps' }));
+    vi.spyOn(screen.getByTestId('map'), 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(0, 0, 390, 800));
+    vi.spyOn(screen.getByRole('dialog', { name: 'Offline Maps' }), 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(12, 500, 366, 288));
+    fireEvent.click(screen.getByText('Area 1'));
+    expect(mockMapFitBounds).toHaveBeenCalledExactlyOnceWith(
+      [[west, 46], [fittedEast, 46.001]],
+      { padding: { top: 60, bottom: 360, left: 60, right: 60 }, maxZoom: 16, duration: 800 },
+    );
+    expect(screen.getByRole('dialog', { name: 'Offline Maps' })).toBeVisible();
+    const source = document.querySelector('[data-source-id="download-areas"]')!;
+    expect(JSON.parse(source.getAttribute('data-source-data')!).features).toHaveLength(1);
+    expect(mockDownloadAreas).toBe(snapshot);
   });
 
   it('publishes and fits validated GeoJSON when cache data precedes map readiness', async () => {
