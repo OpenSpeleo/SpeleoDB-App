@@ -23,6 +23,22 @@
 }
 
 /* Base styles */
+/*
+ * Ionic fixes body to the viewport and hides its overflow. Login is outside
+ * IonContent, so it must own scrolling when Display Zoom, a short screen, or
+ * the keyboard reduces the available space. Center its content inside a
+ * minimum-height child, never inside the bounded scroller itself: overflowing
+ * centered content can otherwise begin above the reachable scroll origin.
+ */
+.login-page {
+  position: fixed;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-left: var(--safe-area-inset-left, env(safe-area-inset-left));
+  padding-right: var(--safe-area-inset-right, env(safe-area-inset-right));
+}
+
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

@@ -10,9 +10,10 @@ vi.mock('@capacitor/browser', () => ({
 }));
 
 describe('INSTANCE_PATHS', () => {
-  it('exposes signup and password-reset paths', () => {
+  it('exposes signup, password-reset, and OAuth-token paths', () => {
     expect(INSTANCE_PATHS.SIGNUP).toBe('/signup/');
     expect(INSTANCE_PATHS.PASSWORD_RESET).toBe('/account/password/reset/');
+    expect(INSTANCE_PATHS.OAUTH_TOKEN).toBe('/private/auth-token/');
   });
 });
 

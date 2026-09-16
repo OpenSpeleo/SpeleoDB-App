@@ -80,12 +80,16 @@ describe('Login page', () => {
     expect(screen.getByLabelText(/speleodb instance/i)).toBeInTheDocument();
   });
 
-  it('documents secure session continuity instead of offline password sign-in', () => {
+  it('omits the offline access, native autofill, and token connection notes', async () => {
     renderLogin();
 
-    expect(screen.getByText(/offline access requires a previously validated secure session/i))
-      .toBeInTheDocument();
-    expect(screen.queryByText(/offline sign-in/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/offline access requires/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/native password autofill uses credentials/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/token sign-in requires a connection/i)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: /oauth token/i }));
+    expect(screen.queryByText(/offline access requires/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/native password autofill uses credentials/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/token sign-in requires a connection/i)).not.toBeInTheDocument();
   });
 
   it('renders accessible login tabs and switches credential fields', async () => {
@@ -104,7 +108,6 @@ describe('Login page', () => {
     expect(screen.queryByLabelText(/^email$/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/forgot\?/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/token sign-in requires a connection/i)).toBeInTheDocument();
   });
 
   it('supports keyboard navigation between login tabs', async () => {
@@ -152,9 +155,6 @@ describe('Login page', () => {
 
     expect(screen.getByLabelText(/^email$/i)).toHaveAttribute('autocomplete', 'username');
     expect(screen.getByLabelText(/^password$/i)).toHaveAttribute('autocomplete', 'current-password');
-    expect(
-      screen.getByText(/native password autofill uses credentials saved for www\.speleodb\.org\./i),
-    ).toBeInTheDocument();
   });
 
   it('pre-fills instance with DEFAULT_INSTANCE', () => {
@@ -376,6 +376,35 @@ describe('Login page', () => {
     });
   });
 
+  it('opens Get OAuth Token in the native browser for the currently selected instance', async () => {
+    renderLogin();
+    expect(screen.queryByRole('link', { name: 'Get OAuth Token' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: /oauth token/i }));
+
+    const link = screen.getByRole('link', { name: 'Get OAuth Token' });
+    expect(link).toHaveClass('app-btn', 'app-btn--secondary');
+    expect(link).not.toHaveAttribute('target');
+    expect(link).toHaveAttribute('href', `${PREFERENCES.DEFAULT_INSTANCE}/private/auth-token/`);
+    await userEvent.click(link);
+    expect(mockBrowserOpen).toHaveBeenLastCalledWith({
+      url: `${PREFERENCES.DEFAULT_INSTANCE}/private/auth-token/`,
+    });
+
+    fireEvent.change(screen.getByLabelText(/speleodb instance/i), {
+      target: { value: 'https://custom.speleodb.org/' },
+    });
+    expect(link).toHaveAttribute('href', 'https://custom.speleodb.org/private/auth-token/');
+    await userEvent.click(link);
+    expect(mockBrowserOpen).toHaveBeenLastCalledWith({
+      url: 'https://custom.speleodb.org/private/auth-token/',
+    });
+    expect(mockBrowserOpen).toHaveBeenCalledTimes(2);
+    expect(mockLoginWithToken).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('tab', { name: /email & password/i }));
+    expect(screen.queryByRole('link', { name: 'Get OAuth Token' })).not.toBeInTheDocument();
+  });
+
   it('opens sign-up link via Browser.open', async () => {
     renderLogin();
     await userEvent.click(screen.getByText(/sign up/i));
@@ -383,6 +412,52 @@ describe('Login page', () => {
     expect(mockBrowserOpen).toHaveBeenCalledWith({
       url: `${PREFERENCES.DEFAULT_INSTANCE}/signup/`,
     });
+  });
+
+  it.each([
+    { name: 'Forgot?', method: 'password' },
+    { name: 'Sign up', method: 'password' },
+    { name: 'Get OAuth Token', method: 'token' },
+  ])('reports a browser failure for $name and allows retry', async ({ name, method }) => {
+    mockBrowserOpen.mockRejectedValueOnce(new Error('Native browser unavailable: private URL details'));
+    renderLogin();
+    if (method === 'token') {
+      await userEvent.click(screen.getByRole('tab', { name: /oauth token/i }));
+    }
+
+    const link = screen.getByRole('link', { name });
+    await userEvent.click(link);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Unable to open the browser. Please try again.',
+    );
+    expect(screen.queryByText(/private URL details/)).not.toBeInTheDocument();
+
+    await userEvent.click(link);
+    expect(mockBrowserOpen).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(mockLogin).not.toHaveBeenCalled();
+    expect(mockLoginWithToken).not.toHaveBeenCalled();
+  });
+
+  it('handles a pending browser rejection after leaving Login', async () => {
+    let rejectBrowser!: (error: Error) => void;
+    mockBrowserOpen.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+      rejectBrowser = reject;
+    }));
+    const { unmount } = render(
+      <Router history={createMemoryHistory()}>
+        <Login />
+      </Router>,
+    );
+    await userEvent.click(screen.getByRole('tab', { name: /oauth token/i }));
+    await userEvent.click(screen.getByRole('link', { name: 'Get OAuth Token' }));
+    expect(mockBrowserOpen).toHaveBeenCalledTimes(1);
+    unmount();
+
+    await act(async () => {
+      rejectBrowser(new Error('Browser presentation failed'));
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('does not use target="_blank" on external links', () => {

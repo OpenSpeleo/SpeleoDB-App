@@ -17,6 +17,6 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src"],
+  "include": ["src", "playwright.config.ts", "tests/browser"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

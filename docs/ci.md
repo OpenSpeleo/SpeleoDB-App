@@ -17,17 +17,22 @@ builds. The workflow lives in `.github/workflows/ci.yml`.
    issuing concurrent password-login requests with the same account from a
    GitHub-hosted runner.
 3. **Production Web Build** runs `npm run build` and uploads `dist/` for native
-   jobs.
+   jobs. Before uploading, it installs Playwright Chromium and WebKit and runs
+   `npm run test:browser` against those built assets. The browser suite verifies
+   login scrolling and reachable actions at reduced viewport sizes and enlarged
+   text; it allows no retries or focused-only tests. Browser tests are separate
+   from Vitest because jsdom cannot prove layout or hit testing.
 4. **Android Release Compile Smoke** downloads `dist/`, runs
    `npx cap sync android`, and builds release-configuration APK/AAB files with a
    disposable CI keystore.
-5. **iOS Release Compile Smoke** downloads `dist/`, runs `npx cap sync ios`,
-   archives the Xcode project, then verifies an IPA signed by a disposable CI
-   identity.
+5. **iOS Release Compile Smoke** is currently commented out while its signing
+   workflow is being repaired. Its intended flow downloads `dist/`, runs
+   `npx cap sync ios`, archives the Xcode project, and verifies an IPA signed by
+   a disposable CI identity. It is not an active verification gate.
 
-Pull requests and pushes to `master` run all five stages. Version tags retain
-the explicitly named `*-ci-smoke-*` workflow artifacts for seven days. They are
-compile evidence only and are never attached to a GitHub release.
+Pull requests and pushes to `master` run the four enabled stages. Version tags
+retain the explicitly named `*-ci-smoke-*` workflow artifacts for seven days.
+They are compile evidence only and are never attached to a GitHub release.
 
 ## Default Branch Contract
 
@@ -159,6 +164,10 @@ PREK_HOME=/private/tmp/prek npx prek run -a --show-diff-on-failure
 
 `make ci` verifies the tracked-file quality inventory, lint, type checking, the
 full one-shot Vitest suite with coverage and serialized test files, and the
-production web build. Run Android Gradle and iOS `xcodebuild` locally when
-changing native configuration or platform-facing behavior. `make sync` updates
-both native projects; inspect every tracked Android/iOS diff after it runs.
+production web build. For the browser layout gate, additionally run
+`npx playwright install chromium webkit` once, then `npm run test:browser` after
+the build. Playwright is a development-only dependency and its browsers are not
+shipped in native/web bundles. Run Android Gradle and iOS `xcodebuild` locally
+when changing native configuration or platform-facing behavior. `make sync`
+updates both native projects; inspect every tracked Android/iOS diff after it
+runs.

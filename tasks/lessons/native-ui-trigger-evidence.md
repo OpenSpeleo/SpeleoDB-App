@@ -17,3 +17,7 @@ caused it to appear.
 - For WebView editing, inspect the active DOM input responder rather than
   assuming a public `WKWebView` or controller owns the responder property being
   configured. An ancestor property assertion is not gesture-behavior evidence.
+- Native UI presentation promises can reject even for a valid URL or valid
+  options. A click handler must consume the rejection at its UI boundary and
+  provide fixed, non-sensitive feedback while mounted. Test a rejected native
+  plugin call and a subsequent retry, not only a successful invocation.

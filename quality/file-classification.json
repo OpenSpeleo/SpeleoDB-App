@@ -86,6 +86,8 @@
         "^package(?:-lock)?\\.json$",
         "^postcss\\.config\\.js$",
         "^quality/",
+        "^playwright\\.config\\.ts$",
+        "^tests/browser/",
         "^scripts/",
         "^tailwind\\.config\\.js$",
         "^tsconfig(?:\\.node)?\\.json$",

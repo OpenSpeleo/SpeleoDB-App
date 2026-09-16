@@ -15,6 +15,15 @@ This document defines how the app creates and restores SpeleoDB sessions.
 
 ## Login methods
 
+Login owns a viewport-bounded scroll container so Sign In remains reachable when
+Display Zoom, larger text, or the keyboard reduces the available space. See
+[display scaling and scroll ownership](display-scaling.md) for layout boundaries
+and browser/device verification.
+
+The login page ends with the account sign-up link. It does not show offline
+access, native password-autofill, or token-connection notes. Secure
+offline-session, autofill, and token validation behavior are unchanged.
+
 The login page exposes two keyboard-accessible tabs that share the selected
 SpeleoDB instance. An instance is an origin only (scheme, hostname, and optional
 port); paths, queries, fragments, embedded credentials, and non-HTTP schemes are
@@ -37,6 +46,18 @@ synthetic offline token. Users who already have a securely restored session can
 continue through the normal startup offline-lock flow in `docs/offline-mode.md`.
 
 ### OAuth token
+
+The token tab includes a secondary **Get OAuth Token** button below the instance
+input. It opens `{instance}/private/auth-token/` through `openExternalUrl()` and
+Capacitor Browser (iOS Safari view / Android Custom Tabs), using the currently
+entered, normalized instance. Like the existing account links, it falls back to
+the default instance while the instance input is invalid. The action opens the
+account page without submitting the login form or reading/persisting a token. It
+adds no network or native bridge work until the user presses it.
+
+All three account links share a browser-launch handler. If the native browser
+cannot open, Login announces a generic retryable error without exposing plugin
+details or URLs. Pending failures cannot update an unmounted Login page.
 
 `SpeleoDBController.loginWithToken()` trims the token and instance, then calls
 the existing `SpeleoDBService.validateToken()` path:

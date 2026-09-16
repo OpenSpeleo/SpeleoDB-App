@@ -5,6 +5,9 @@ behaviors.
 
 ## Available docs
 
+- `display-scaling.md`: OS display-scaling boundaries, login scroll ownership,
+  the app-wide scroll-container audit, and browser/device verification.
+
 - `authentication.md`: email/password and OAuth-token login flows, session
   persistence, identity handling, security boundaries, and offline behavior.
 - `offline-mode.md`: how offline mode works, startup auth timeout behavior,

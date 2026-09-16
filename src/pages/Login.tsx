@@ -74,6 +74,17 @@ const Login: React.FC = () => {
     }
   };
 
+  const openAccountLink = async (url: string) => {
+    setError('');
+    try {
+      await openExternalUrl(url);
+    } catch {
+      if (mountedRef.current) {
+        setError('Unable to open the browser. Please try again.');
+      }
+    }
+  };
+
   const selectLoginMethod = (method: LoginMethod) => {
     if (isLoading || method === loginMethod) return;
     setLoginMethod(method);
@@ -109,10 +120,11 @@ const Login: React.FC = () => {
   }
   const signupUrl = instanceBase + INSTANCE_PATHS.SIGNUP;
   const forgotPasswordUrl = instanceBase + INSTANCE_PATHS.PASSWORD_RESET;
+  const oauthTokenUrl = instanceBase + INSTANCE_PATHS.OAUTH_TOKEN;
 
   return (
-    <div className="font-sans antialiased bg-slate-900 text-slate-100 tracking-tight min-h-screen flex flex-col justify-center">
-      <section className="relative w-full">
+    <div className="login-page font-sans antialiased bg-slate-900 text-slate-100 tracking-tight">
+      <section className="relative w-full min-h-full flex flex-col justify-center">
         {/* Illustration */}
         <div
           className="absolute left-1/2 -translate-x-1/2 -mt-36 blur-2xl opacity-70 pointer-events-none -z-10"
@@ -122,7 +134,7 @@ const Login: React.FC = () => {
         </div>
 
         <div className="relative max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="py-8 pt-[calc(2rem_+_var(--safe-area-inset-top,env(safe-area-inset-top)))]">
+          <div className="py-8 pt-[calc(2rem_+_var(--safe-area-inset-top,env(safe-area-inset-top)))] pb-[calc(2rem_+_var(--safe-area-inset-bottom,env(safe-area-inset-bottom)))]">
             {/* Page header */}
             <div className="max-w-3xl mx-auto text-center pb-12">
               {/* Logo */}
@@ -139,7 +151,7 @@ const Login: React.FC = () => {
             <div className="max-w-sm mx-auto">
               {/* Error message */}
               {error && (
-                <div className="mb-4 p-3 rounded-2xl border-2 border-red-500 text-center text-sm text-slate-300 font-medium">
+                <div role="alert" className="mb-4 p-3 rounded-2xl border-2 border-red-500 text-center text-sm text-slate-300 font-medium">
                   {error}
                 </div>
               )}
@@ -225,7 +237,7 @@ const Login: React.FC = () => {
                             href={forgotPasswordUrl}
                             onClick={(e) => {
                               e.preventDefault();
-                              openExternalUrl(forgotPasswordUrl);
+                              void openAccountLink(forgotPasswordUrl);
                             }}
                             className="text-sm font-medium text-purple-500 hover:text-purple-400 transition-colors"
                           >
@@ -282,14 +294,17 @@ const Login: React.FC = () => {
                       required
                       autoComplete="url"
                     />
-                    {loginMethod === 'password' ? (
-                      <p className="mt-2 text-xs text-slate-500">
-                        Native password autofill uses credentials saved for www.speleodb.org.
-                      </p>
-                    ) : (
-                      <p className="mt-2 text-xs text-slate-500">
-                        Token sign-in requires a connection so the token can be verified.
-                      </p>
+                    {loginMethod === 'token' && (
+                      <a
+                        href={oauthTokenUrl}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          void openAccountLink(oauthTokenUrl);
+                        }}
+                        className="app-btn app-btn--secondary w-full mt-4"
+                      >
+                        Get OAuth Token
+                      </a>
                     )}
                   </div>
                 </div>
@@ -318,7 +333,7 @@ const Login: React.FC = () => {
                     href={signupUrl}
                     onClick={(e) => {
                       e.preventDefault();
-                      openExternalUrl(signupUrl);
+                      void openAccountLink(signupUrl);
                     }}
                     className="font-medium text-purple-500 hover:text-purple-400 transition-colors"
                   >
@@ -326,15 +341,6 @@ const Login: React.FC = () => {
                   </a>
                 </p>
               </div>
-
-              {/* Offline session note */}
-              {loginMethod === 'password' && (
-                <div className="mt-8 text-center">
-                  <p className="text-xs text-slate-500">
-                    Offline access requires a previously validated secure session.
-                  </p>
-                </div>
-              )}
             </div>
           </div>
         </div>

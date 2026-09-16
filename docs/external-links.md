@@ -46,14 +46,16 @@ await openExternalUrl("https://example.com");
 ## Usage in components
 
 Keep the `<a>` tag for accessibility (right-click copy, hover preview), but
-intercept the click:
+intercept the click. Handle the rejected promise at the UI boundary so native
+browser launch failures produce user feedback without exposing plugin details or
+private URLs. Login shares one mounted-safe handler across its account links:
 
 ```tsx
 <a
   href={url}
   onClick={(e) => {
     e.preventDefault();
-    openExternalUrl(url);
+    void openAccountLink(url);
   }}
 >
   Link text
@@ -62,10 +64,11 @@ intercept the click:
 
 ## Current external links
 
-| Page  | Link    | URL pattern                          |
-| ----- | ------- | ------------------------------------ |
-| Login | Forgot? | `{instance}/account/password/reset/` |
-| Login | Sign up | `{instance}/signup/`                 |
+| Page              | Link            | URL pattern                          |
+| ----------------- | --------------- | ------------------------------------ |
+| Login             | Forgot?         | `{instance}/account/password/reset/` |
+| Login             | Sign up         | `{instance}/signup/`                 |
+| Login (OAuth tab) | Get OAuth Token | `{instance}/private/auth-token/`     |
 
 ## Rules
 
@@ -85,5 +88,6 @@ intercept the click:
 
 - `src/utils/url.test.ts`: unit tests for `openExternalUrl` delegation to
   `Browser.open`.
-- `src/pages/Login.test.tsx`: verifies both login-page links call `Browser.open`
-  with correct URLs and do not use `target="_blank"`.
+- `src/pages/Login.test.tsx`: verifies the login-page links call `Browser.open`
+  with correct URLs, do not use `target="_blank"`, and report browser-launch
+  failures without exposing native error details while allowing retry.

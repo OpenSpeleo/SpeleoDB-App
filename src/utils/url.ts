@@ -23,4 +23,5 @@ export async function openExternalUrl(url: string): Promise<void> {
 export const INSTANCE_PATHS = {
   SIGNUP: '/signup/',
   PASSWORD_RESET: '/account/password/reset/',
+  OAUTH_TOKEN: '/private/auth-token/',
 } as const;
