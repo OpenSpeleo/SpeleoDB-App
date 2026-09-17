@@ -50,18 +50,28 @@ runtime.
 Warm-tile and cached-viewport p95 values are release-device targets, not claims
 established by jsdom, fake IndexedDB, simulator builds, or fake timers.
 
-## Fail-closed source collection
+## Source authority and retained coverage
 
-A replacement plan is all-or-nothing. Validated current-commit project records,
-valid empty overlays, and matching current quarantines are resolved inputs.
-Transient storage reads, missing current project commits, invalid/missing
-overlay records, unavailable SHA-256, or server GPS geometry that cannot be
-matched to the current server SHA abort planning. The active generations remain
-untouched.
+Validated current-commit project records, valid empty overlays, and matching
+current quarantines are authoritative inputs. A failed source read is not an
+empty dataset: reconciliation preserves that source type's existing catalog rows
+while healthy types update and reach the shared planner. Each overlay type has
+independent authority. GIS additionally retains individual accessible records
+whose current detail could not be loaded. This keeps the union complete with
+respect to saved intent without blocking unrelated downloads.
 
 Ordinary map display may use legacy cached GPS geometry. Planning may not: stale
-server geometry is refreshed with three-way bounded concurrency, and a missing
-SHA, URL, valid response, or successful cache write fails the whole replacement.
+server geometry is refreshed with three-way bounded concurrency. Missing SHA,
+URL, valid response or successful cache write preserves saved track rectangles
+instead of replacing them with unverified geometry.
+
+GIS preparation runs concurrently. Ready core sources publish first when GIS is
+pending; the final GIS snapshot merges through the same catalog transaction,
+union planner and download queue. There are at most two publications per source
+collection. Explicit refresh retries failed GIS metadata. Source freshness is
+checked inside the catalog transaction, so revocation can remove its own rows
+without cancelling unrelated preparation. Old pre-area generations remain pinned
+until every automatic type is authoritative and replacement completes.
 
 Source identity is an asynchronous SHA-256 over sorted, length-delimited input
 parts. `TileCoordinator` assigns every request a monotonic ownership version, so

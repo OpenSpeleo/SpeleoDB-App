@@ -222,12 +222,15 @@ areas. Manual rectangles share the same queue and storage lifecycle. See
 - The planner preserves directed antimeridian intervals, deduplicates root
   ranges, and clamps latitude to Web Mercator. Geometry-identical plans and
   fresh tile payloads are reused without network requests.
-- Replacement collection fails closed. Matching validated project records, valid
-  empty overlays, and matching current quarantines are resolved inputs;
-  transient reads, missing current commits, invalid/missing overlays, absent
-  SHA-256, or unavailable current-SHA GPS geometry abort replacement and retain
-  every active generation. Legacy GPS geometry remains usable for ordinary map
-  display but is not accepted as current planning input.
+- Source authority is scoped to automatic source types. Current validated
+  project records, valid empty overlays and current quarantines are resolved
+  inputs. Unavailable or invalid reads preserve that type's saved rectangles
+  while healthy types update the shared union. Legacy GPS geometry remains
+  usable for map display but is not accepted as current planning input. Failed
+  GIS details retain the corresponding accessible identities; authoritative
+  absence removes them. Ready core areas begin downloading while GIS preparation
+  is pending, then GIS joins the same queue. Pre-area legacy pins retire only
+  after all automatic sources are authoritative and replacement finishes.
 
 Legacy project GeoJSON cache entries with a matching stored commit are
 bbox-audited even while offline before Dashboard reads them. Unversioned legacy

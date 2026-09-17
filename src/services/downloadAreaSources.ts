@@ -9,7 +9,7 @@ import type { GpsTrackPrefetchSource } from '../controllers/GpsTrackCoordinator'
 import type { GisGeometryPrefetchSource } from '../types/gisGeometry';
 import { boundsForCoordinates, cornersForBounds } from './downloadAreaGeometry';
 
-const OVERLAY_TYPES: Record<MapOverlayId, DownloadAreaType> = {
+export const OVERLAY_AREA_TYPES: Record<MapOverlayId, Exclude<DownloadAreaType, DownloadAreaType.Manual>> = {
   landmarks: DownloadAreaType.Landmark,
   surfaceStations: DownloadAreaType.SurfaceStation,
   subsurfaceStations: DownloadAreaType.SubsurfaceStation,
@@ -51,7 +51,7 @@ export function automaticAreaInputs(
       areas.push({
         ...base,
         ...cornersForBounds(bounds, 50),
-        type: OVERLAY_TYPES[id],
+        type: OVERLAY_AREA_TYPES[id],
         objectId,
         name: name || 'Map point',
         sourceKey: `${id}:${objectId ?? JSON.stringify([lng, lat])}`,

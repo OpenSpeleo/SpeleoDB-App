@@ -2,9 +2,9 @@ import { MAP_LAYERS, MAP_OVERLAYS } from '../constants';
 import type { OfflineMapSyncEngineLike } from '../services/OfflineMapSyncEngine';
 import { LazyOfflineMapSyncEngine } from '../services/LazyOfflineMapSyncEngine';
 import { DownloadAreaService } from '../services/DownloadAreaService';
-import { automaticAreaInputs } from '../services/downloadAreaSources';
+import { automaticAreaInputs, OVERLAY_AREA_TYPES } from '../services/downloadAreaSources';
 import { countAreaCoordinates } from '../services/downloadAreaGeometry';
-import type { DownloadAreaInput } from '../types/downloadArea';
+import { DownloadAreaType, type AutomaticDownloadAreaSource } from '../types/downloadArea';
 import { getMapLayerById } from '../services/MapLayersService';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import {
@@ -26,7 +26,7 @@ import {
   type ActivePerformanceTiming,
 } from '../utils/performanceTiming';
 import type { GpsTrackPrefetchSource } from './GpsTrackCoordinator';
-import type { GisGeometryPrefetchSource } from '../types/gisGeometry';
+import type { GisGeometryPrefetchSnapshot } from '../types/gisGeometry';
 import { CancellationContext } from './CancellationContext';
 import { createSkippedTilePrefetchPhase } from './ProjectSyncPhases';
 
@@ -45,7 +45,7 @@ interface TileCoordinatorDependencies {
   hasNetworkAccess(): boolean;
   getProjects(): Project[];
   getGpsPrefetchSources(signal?: AbortSignal): Promise<GpsTrackPrefetchSource[]>;
-  getGisPrefetchSources(signal?: AbortSignal): Promise<GisGeometryPrefetchSource[]>;
+  getGisPrefetchSnapshot(signal?: AbortSignal, options?: { refresh?: boolean }): Promise<GisGeometryPrefetchSnapshot>;
   foldLandmarks?(collection: GeoJSON.FeatureCollection): Promise<GeoJSON.FeatureCollection>;
   notifyStateChanged(): void;
   deferWork?(work: () => void): void;
@@ -59,7 +59,7 @@ interface BuiltProjectInputs {
 }
 
 interface CoverageSources {
-  areas: DownloadAreaInput[];
+  sources: AutomaticDownloadAreaSource[];
   eligibleProjectCount: number;
   scheduledProjectCount: number;
   failedProjectCount: number;
@@ -214,21 +214,29 @@ export class TileCoordinator {
         phase: 'coverage_source_collection',
         startedAt: performance.now(),
       };
-      const sources = await this.collectCoverageSources(context, projects);
+      const sources = await this.collectCoverageSources(context, projects, forceRefresh, async ready => {
+        this.assertCoverageRequestCurrent(requestVersion, context);
+        // Start the existing automatic sources while GIS coordinates are still
+        // loading. Omitted source types retain their committed catalog intent.
+        await this.areas.reconcileAutomaticSources(ready.sources,
+          () => this.assertCoverageRequestCurrent(requestVersion, context));
+      });
       logElapsedPerformanceTiming('offline-map', context.runId, activeTiming, 'applied');
       activeTiming = null;
       this.assertCoverageRequestCurrent(requestVersion, context);
       await this.yieldForRendering(context);
       activeTiming = { phase: 'plan_schedule', startedAt: performance.now() };
-      await this.areas.reconcileAutomatic(sources.areas, () => this.assertCoverageRequestCurrent(requestVersion, context), forceRefresh);
-      const coordinateCount = sources.areas.reduce((count, area) => count + countAreaCoordinates(area), 0);
+      await this.areas.reconcileAutomaticSources(sources.sources, () => this.assertCoverageRequestCurrent(requestVersion, context), forceRefresh);
+      const incomplete = sources.sources.some(source => !source.complete
+        || Boolean(source.retainedSourceKeys?.length) || source.isCurrent?.() === false);
+      const coordinateCount = this.areas.getSnapshot().areas.reduce((count, area) => count + countAreaCoordinates(area), 0);
       context.throwIfAborted();
       logElapsedPerformanceTiming('offline-map', context.runId, activeTiming, 'applied');
       activeTiming = null;
       return {
         phase: 'tile_prefetch',
-        status: sources.failedProjectCount > 0 ? 'failed' : 'applied',
-        reason: sources.failedProjectCount > 0
+        status: incomplete ? 'failed' : 'applied',
+        reason: incomplete
           ? 'tile_prefetch_failed'
           : 'tile_prefetch_scheduled',
         eligibleProjectCount: sources.eligibleProjectCount,
@@ -336,9 +344,8 @@ export class TileCoordinator {
     validate: () => void = () => {},
   ): Promise<void> {
     if (!ids.length) return;
-    this.supersedeCoverageRequests();
-    for (const context of this.activeContexts) context.abort('GIS geometry access changed');
-    this.activeContexts.clear();
+    // GIS membership is checked again inside its catalog reconciliation. Removing
+    // one source must not cancel the project/GPS work awaiting that same read.
     await this.trackSourceWork(this.areas.removeGisGeometrySources(ids, validate));
   }
 
@@ -440,22 +447,70 @@ export class TileCoordinator {
   private async collectCoverageSources(
     context: CancellationContext,
     projects: Project[],
+    refreshGeometry: boolean,
+    onReady: (sources: CoverageSources) => Promise<void>,
   ): Promise<CoverageSources> {
-    const [overlays, gpsSources, built, geometries] = await Promise.all([
-      Promise.all(MAP_OVERLAYS.map(async (overlay) => ({ id: overlay.id, collection: await this.trackSourceWork(this.loadOverlay(context, overlay.id)) }))),
-      this.trackSourceWork(this.dependencies.getGpsPrefetchSources(context.signal)),
-      this.trackSourceWork(this.buildProjectInputs(context, projects)),
-      this.trackSourceWork(this.dependencies.getGisPrefetchSources(context.signal)),
-    ]);
-    context.throwIfAborted();
-    await this.yieldForRendering(context);
-    return {
-      areas: automaticAreaInputs(built.inputs, overlays, gpsSources, this.getEnabledLayers().map((layer) => layer.id), geometries),
+    const layers = this.getEnabledLayers().map(layer => layer.id);
+    let built: BuiltProjectInputs = {
+      inputs: [],
+      eligibleCount: projects.filter(project => project.geojson_file && !project.exclude_geojson).length,
+      failedCount: 0,
+    };
+    let landmarkCount = 0;
+    const collect = async (
+      type: AutomaticDownloadAreaSource['type'],
+      read: () => Promise<Omit<AutomaticDownloadAreaSource, 'type'>>,
+    ): Promise<AutomaticDownloadAreaSource> => {
+      try {
+        return { type, ...await this.trackSourceWork(read()) };
+      } catch {
+        context.throwIfAborted();
+        if (type === DownloadAreaType.Project) built.failedCount = Math.max(1, built.eligibleCount);
+        // Unavailable is not empty: the catalog retains this family's saved
+        // rectangles while healthy families still reach the shared planner.
+        return { type, inputs: [], complete: false };
+      }
+    };
+    const result = (sources: AutomaticDownloadAreaSource[]): CoverageSources => ({
+      sources,
       eligibleProjectCount: built.eligibleCount,
       scheduledProjectCount: built.inputs.length,
       failedProjectCount: built.failedCount,
-      landmarkCount: overlays.find((overlay) => overlay.id === 'landmarks')?.collection.features.length ?? 0,
-    };
+      landmarkCount,
+    });
+    let geometrySource: AutomaticDownloadAreaSource | undefined;
+    const geometryRead = this.trackSourceWork(collect(DownloadAreaType.GisGeometry, async () => {
+      const snapshot = await this.dependencies.getGisPrefetchSnapshot(context.signal, { refresh: refreshGeometry });
+      return {
+        inputs: automaticAreaInputs([], [], [], layers, snapshot.sources),
+        complete: snapshot.complete,
+        retainedSourceKeys: snapshot.retainedSourceKeys,
+        isCurrent: snapshot.isCurrent,
+      };
+    }).then(source => { geometrySource = source; return source; }));
+    const sources = await Promise.all([
+      collect(DownloadAreaType.Project, async () => {
+        built = await this.buildProjectInputs(context, projects);
+        return { inputs: automaticAreaInputs(built.inputs, [], [], layers), complete: true };
+      }),
+      ...MAP_OVERLAYS.map(overlay => collect(OVERLAY_AREA_TYPES[overlay.id], async () => {
+        const collection = await this.loadOverlay(context, overlay.id);
+        if (overlay.id === 'landmarks') landmarkCount = collection.features.length;
+        return { inputs: automaticAreaInputs([], [{ id: overlay.id, collection }], [], layers), complete: true };
+      })),
+      collect(DownloadAreaType.Track, async () => ({
+        inputs: automaticAreaInputs([], [], await this.dependencies.getGpsPrefetchSources(context.signal), layers),
+        complete: true,
+      })),
+    ]);
+    context.throwIfAborted();
+    await this.yieldForRendering(context);
+    // At most two catalog publications: a ready core batch, then the complete
+    // collection. Never rebuild the union for each individual geometry response.
+    if (!geometrySource) await onReady(result(sources));
+    const geometry = await geometryRead;
+    context.throwIfAborted();
+    return result([...sources, geometry]);
   }
 
   private async loadOverlay(context: CancellationContext, id: MapOverlayId): Promise<GeoJSON.FeatureCollection> {

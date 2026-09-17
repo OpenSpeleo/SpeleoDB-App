@@ -1,7 +1,7 @@
 import type { SpeleoDBService } from '../services/SpeleoDBService';
 import { GisGeometryCacheService, type GisGeometryCatalog } from '../services/GisGeometryCacheService';
 import type { StoredSession } from '../services/SecureSessionStore';
-import { EMPTY_GIS_GEOMETRY_SNAPSHOT, type GisGeometryMapRecord, type GisGeometryMetadata, type GisGeometryPrefetchSource, type GisGeometrySnapshot } from '../types/gisGeometry';
+import { EMPTY_GIS_GEOMETRY_SNAPSHOT, type GisGeometryMapRecord, type GisGeometryMetadata, type GisGeometryPrefetchSource, type GisGeometryPrefetchSnapshot, type GisGeometrySnapshot } from '../types/gisGeometry';
 import { isGisGeometryId, parseGisGeometryDetail, parseGisGeometryList } from '../gisGeometry/validation';
 import { createAbortError, isAbortError, throwIfAborted } from '../utils/abort';
 
@@ -347,25 +347,63 @@ export class GisGeometryCoordinator {
   }
 
   async getPrefetchSources(signal?: AbortSignal): Promise<GisGeometryPrefetchSource[]> {
+    const snapshot = await this.getPrefetchSnapshot(signal);
+    if (!snapshot.complete) throw new Error('GIS Geometry metadata is not current.');
+    if (snapshot.retainedSourceKeys.length) throw new Error(RETRY);
+    return snapshot.sources;
+  }
+
+  /** Partial coordinate failures must not block other automatic area sources. */
+  async getPrefetchSnapshot(
+    signal?: AbortSignal,
+    options: { refresh?: boolean } = {},
+  ): Promise<GisGeometryPrefetchSnapshot> {
     throwIfAborted(signal);
-    if (!this.refreshPromise && !this.refreshAttempted) {
-      await this.waitForCaller(this.refresh(), signal);
+    const session = this.session(), generation = this.generation;
+    const validate = () => {
+      throwIfAborted(signal);
+      this.assertCurrent(session.cacheScopeId, generation);
+    };
+    const incomplete = (): GisGeometryPrefetchSnapshot => ({ sources: [], complete: false, retainedSourceKeys: [], isCurrent: () => false });
+    try {
+      if (options.refresh || (!this.refreshPromise && !this.refreshAttempted)) {
+        await this.waitForCaller(this.refresh(), signal);
+      } else if (this.refreshPromise) {
+        await this.waitForCaller(this.refreshPromise, signal);
+      }
+    } catch {
+      // Account/caller cancellation is terminal. A failed collection preserves
+      // its prior family without denying healthy projects, tracks or overlays.
+      validate();
+      return incomplete();
     }
-    if (this.refreshPromise) await this.waitForCaller(this.refreshPromise, signal);
-    if (!this.currentMetadata) throw new Error('GIS Geometry metadata is not current.');
-    const session = this.session(), generation = this.generation, collectionGeneration = this.refreshGeneration;
+    validate();
+    if (!this.currentMetadata) return incomplete();
+    const collectionGeneration = this.refreshGeneration;
     const items = this.snapshot.items;
-    const settled = await Promise.allSettled(items.map(item => this.ensureDetail(item.id, { signal, priority: 'background' })));
-    throwIfAborted(signal);
-    this.assertCurrent(session.cacheScopeId, generation);
-    if (!this.currentMetadata || collectionGeneration !== this.refreshGeneration) throw createAbortError('GIS Geometry collection changed.');
-    const failed = settled.find(result => result.status === 'rejected');
-    if (failed) throw failed.reason;
-    return this.snapshot.items.map(item => {
+    await Promise.allSettled(items.map(item => this.ensureDetail(item.id, { signal, priority: 'background' })));
+    validate();
+    // A concurrent refresh or access denial invalidates collection authority,
+    // not the caller's unrelated tile work. Revocations are removed separately.
+    if (!this.currentMetadata || collectionGeneration !== this.refreshGeneration) return incomplete();
+    const sources: GisGeometryPrefetchSource[] = [];
+    const retainedSourceKeys: string[] = [];
+    for (const item of this.snapshot.items) {
       const record = this.snapshot.records[item.id];
-      if (!record || record.detail.revision !== item.revision) throw new Error(RETRY);
-      return { id: item.id, name: item.name, color: item.color, sourceRevision: String(item.revision), bounds: record.bounds };
-    });
+      if (!record || record.detail.revision !== item.revision) {
+        retainedSourceKeys.push(`gis-geometry:${item.id}`);
+      } else {
+        sources.push({ id: item.id, name: item.name, color: item.color, sourceRevision: String(item.revision), bounds: record.bounds });
+      }
+    }
+    const revisions = new Map(this.snapshot.items.map(item => [item.id, item.revision]));
+    const isCurrent = () => !signal?.aborted && !this.context.signal.aborted
+      && this.generation === generation && this.currentMetadata
+      && this.dependencies.getSession()?.cacheScopeId === session.cacheScopeId
+      && this.snapshot.scope === session.cacheScopeId
+      && this.snapshot.items.length === revisions.size
+      && this.snapshot.items.every(item => revisions.get(item.id) === item.revision);
+    return { sources, complete: true, retainedSourceKeys, isCurrent };
   }
 
   reportError(): void {

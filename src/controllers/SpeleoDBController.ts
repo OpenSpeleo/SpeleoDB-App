@@ -288,10 +288,10 @@ export class SpeleoDBController {
       hasNetworkAccess: () => this.hasNetworkAccess(),
       getProjects: () => this.projectSyncCoordinator.projects,
       getGpsPrefetchSources: (signal) => this.gpsTrackCoordinator.getPrefetchSources(signal),
-      getGisPrefetchSources: async (signal) => {
+      getGisPrefetchSnapshot: async (signal, options) => {
         await this.prepareGisGeometryScope();
         throwIfAborted(signal);
-        return this.gisGeometryCoordinator.getPrefetchSources(signal);
+        return this.gisGeometryCoordinator.getPrefetchSnapshot(signal, options);
       },
       foldLandmarks: async (collection) => {
         await this.offlineMutations.load();

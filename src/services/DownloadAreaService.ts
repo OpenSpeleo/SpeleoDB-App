@@ -9,6 +9,7 @@ import {
   type DownloadAreaProgress,
   type DownloadAreasSnapshot,
   type ManualDownloadAreaInput,
+  type AutomaticDownloadAreaSource,
 } from '../types/downloadArea';
 import type { MapLayerId } from '../types/mapLayer';
 import type {
@@ -299,39 +300,81 @@ export class DownloadAreaService {
     validate: () => void = () => {},
     forceRefresh = false,
   ): Promise<void> {
+    const types = Object.values(DownloadAreaType).filter(
+      (type) => type !== DownloadAreaType.Manual,
+    );
+    if (inputs.some((input) => input.type === DownloadAreaType.Manual ||
+      !Object.values(DownloadAreaType).includes(input.type)))
+      throw new Error('Automatic sources must contain automatic download areas.');
+    return this.reconcileAutomaticSources(types.map((type) => ({
+      type,
+      inputs: inputs.filter((input) => input.type === type),
+      complete: true,
+    })), validate, forceRefresh);
+  }
+  /** Merge source authority without converting an unreadable family to empty intent. */
+  async reconcileAutomaticSources(
+    sources: readonly AutomaticDownloadAreaSource[],
+    validate: () => void = () => {},
+    forceRefresh = false,
+  ): Promise<void> {
+    const types = new Set<DownloadAreaType>(sources.map((source) => source.type));
+    if (types.size !== sources.length || types.has(DownloadAreaType.Manual) || sources.some((source) =>
+      !Object.values(DownloadAreaType).includes(source.type) ||
+      source.inputs.some((input) => input.type !== source.type),
+    )) throw new Error('Automatic download areas must belong to one source type.');
     await this.preload();
     const { mutateDownloadAreaCatalog } =
       await import('./tileCache/DownloadAreaRepository');
+    let complete = false;
+    let unresolved = false;
     const catalog = await mutateDownloadAreaCatalog((current) => {
       this.assertActive();
       validate();
-      const old = new Map(
-        current.areas
-          .filter((area) => area.type !== DownloadAreaType.Manual)
-          .map((area) => [area.sourceKey, area]),
-      );
-      const unique = new Map(inputs.map((input) => [input.sourceKey, input]));
       const layerIds = [...downloadLayers(current)];
+      const authoritative = new Set<DownloadAreaType>();
+      const areas = current.areas.filter((area) =>
+        area.type === DownloadAreaType.Manual || !types.has(area.type),
+      );
+      for (const source of sources) {
+        const old = new Map(current.areas.filter((area) => area.type === source.type)
+          .map((area) => [area.sourceKey, area]));
+        // The repository invokes this callback after its last asynchronous read.
+        // A revoked or superseded source cannot sneak back into the shared union.
+        if (source.isCurrent?.() === false) {
+          areas.push(...old.values());
+          unresolved = true;
+          continue;
+        }
+        const retained = new Set(source.retainedSourceKeys);
+        const unique = new Map(source.inputs.map((input) => [input.sourceKey, input]));
+        for (const [key, area] of old) {
+          if (!unique.has(key) && (!source.complete || retained.has(key))) areas.push(area);
+        }
+        for (const input of unique.values())
+          areas.push(this.updatedArea(old.get(input.sourceKey), { ...input, layerIds }));
+        if (source.complete && retained.size === 0) authoritative.add(source.type);
+        else unresolved = true;
+      }
+      complete = Object.values(DownloadAreaType).every((type) =>
+        type === DownloadAreaType.Manual || authoritative.has(type),
+      );
       return {
         ...current,
         layerIds,
-        areas: [
-          ...current.areas.filter(
-            (area) => area.type === DownloadAreaType.Manual,
-          ),
-          ...[...unique.values()].map((input) =>
-            this.updatedArea(old.get(input.sourceKey), { ...input, layerIds }),
-          ),
-        ],
+        areas,
       };
     });
-    this.sourceReconciled = true;
+    this.sourceReconciled = complete;
     this.adoptCatalog(catalog);
-    this.publish({ error: null });
+    if (unresolved) this.reportAutomaticError();
+    else this.publish({ error: null });
     await this.cleanupReleased();
     await this.readCoverage();
     this.resume(forceRefresh);
-    if (!catalog.areas.length) await this.retireLegacyCoverage();
+    // A complete read may confirm the same union already downloaded by a partial
+    // read, so no new drain would otherwise retire legacy ownership.
+    await this.retireLegacyCoverage();
   }
   /** Remove confirmed inaccessible geometry without collecting other sources. */
   async removeGisGeometrySources(
@@ -759,7 +802,7 @@ export class DownloadAreaService {
   reportAutomaticError(): void {
     this.publish({
       error:
-        'Map layers could not be updated. Previous downloads are preserved.',
+        'Some map sources could not be updated. Previous downloads are preserved.',
     });
   }
   private assertActive(): void {

@@ -238,6 +238,20 @@ login/startup bundle boundary. The public controller façade exposes snapshot /
 subscribe, save, visibility, delete, retry, and foreground lifecycle operations.
 React reads the dedicated snapshot through `useDownloadAreas`.
 
+Automatic reconciliation accepts transient `AutomaticDownloadAreaSource`
+snapshots: source type, validated inputs, completeness, optional retained
+identities and a freshness callback. This is not a new persisted structure.
+Within the catalog transaction, authoritative types replace their own rows;
+unavailable types and explicitly retained identities keep their existing rows.
+Omitted types remain untouched. A stale snapshot cannot restore revoked rows.
+Latest layer preferences apply to all results in that same transaction.
+
+`TileCoordinator` collects source types independently. If GIS is still pending
+when core sources are ready, it publishes those core results immediately, then
+merges GIS in one final reconciliation. Both use the same standard rectangles,
+canonical union and queue; there is no geometry-specific tile engine. Unresolved
+sources report a retryable error without claiming their saved data is current.
+
 ## Replacement, overlap, recovery and migration
 
 Each rectangle generates coordinates at zooms 0–18. The existing worker combines
@@ -268,9 +282,10 @@ are retained for normal eviction after the final claim is released.
 
 Schema v9 and catalog schema version 1 remain compatible. Existing migration and
 recovery still run. Old per-area and pre-area generations remain pinned until
-authoritative source reconciliation and complete union replacement; failed
-source reads preserve them. Migration reuses cached bytes rather than clearing
-the cache.
+authoritative reconciliation of every automatic source type and complete union
+replacement. Partial reads retain these legacy pins, including when healthy
+source updates finish downloading first. Migration reuses cached bytes rather
+than clearing the cache.
 
 Startup recovers committed intent, active manifests and cached bytes. Area
 creation waits for the shared recovery promise before admitting generations, so
@@ -279,8 +294,9 @@ recovery promise before clearing storage. Interrupted pending generations are
 released by existing recovery and rebuilt from saved intent; already downloaded
 fresh bytes are reclaimed locally. Foreground loss cancels in-flight work, and
 foreground return resumes the queue. Logout disposes both service and engine,
-waits for idleness, then clears storage. Durable intent is never inferred from a
-partially collected set of automatic sources.
+waits for idleness, then clears storage. Missing source authority never deletes
+durable intent; partial reconciliation combines verified updates with retained
+catalog rows.
 
 ## Performance and verification
 

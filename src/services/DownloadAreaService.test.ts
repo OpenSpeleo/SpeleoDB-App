@@ -84,6 +84,120 @@ afterEach(async () => {
 });
 
 describe('download area production lifecycle', () => {
+  it('downloads healthy sources while retaining unreadable source intent and untouched families', async () => {
+    online = false;
+    const geometry = automatic({ type: DownloadAreaType.GisGeometry, objectId: 'geometry-1', sourceKey: 'gis-geometry:geometry-1' });
+    const track = automatic({ type: DownloadAreaType.Track, objectId: 'track-1', sourceKey: 'local:track-1' });
+    await service.reconcileAutomatic([automatic(), geometry, track]);
+    await service.saveManual(small);
+    const before = await readDownloadAreaCatalog();
+    const movedProject = automatic({ sourceRevision: 'commit-2', topLeft: [8.00001, 46.00002], bottomRight: [8.00002, 46.00001] });
+    online = true;
+    await service.reconcileAutomaticSources([
+      { type: DownloadAreaType.Project, inputs: [movedProject], complete: true },
+      { type: DownloadAreaType.GisGeometry, inputs: [], complete: false },
+    ]);
+    await service.waitForIdle();
+    const after = await readDownloadAreaCatalog();
+    expect(after.areas.filter((area) => area.type !== DownloadAreaType.Project)).toEqual(
+      expect.arrayContaining(before.areas.filter((area) => area.type !== DownloadAreaType.Project)),
+    );
+    expect(after.areas).toHaveLength(before.areas.length);
+    expect(after.areas.find((area) => area.type === DownloadAreaType.Project)).toMatchObject({
+      areaId: before.areas.find((area) => area.type === DownloadAreaType.Project)!.areaId,
+      revision: 2, sourceRevision: 'commit-2', topLeft: movedProject.topLeft,
+    });
+    expect(service.getSnapshot().error).toBeTruthy();
+    expect(planMock).toHaveBeenCalledOnce();
+    expect(planMock.mock.calls[0][0].projects).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalled();
+    const progress = service.getSyncSnapshot();
+    expect(progress.totalTiles).toBeGreaterThan(0);
+    expect(progress.completedTiles).toBe(progress.totalTiles);
+  });
+
+  it('reconciles known membership while preserving only unresolved geometry identities', async () => {
+    online = false;
+    const geometry = (id: string) => automatic({ type: DownloadAreaType.GisGeometry, objectId: id, sourceKey: `gis-geometry:${id}` });
+    await service.reconcileAutomatic([geometry('bad'), geometry('removed')]);
+    const retained = service.getSnapshot().areas.find((area) => area.objectId === 'bad');
+    await service.reconcileAutomaticSources([{ type: DownloadAreaType.GisGeometry,
+      inputs: [geometry('good'), { ...geometry('good'), name: 'Latest name' }],
+      complete: true, retainedSourceKeys: ['gis-geometry:bad'],
+    }]);
+    const areas = (await readDownloadAreaCatalog()).areas;
+    expect(areas).toHaveLength(2);
+    expect(areas.find((area) => area.objectId === 'bad')).toEqual(retained);
+    expect(areas.find((area) => area.objectId === 'good')?.name).toBe('Latest name');
+    expect(areas.some((area) => area.objectId === 'removed')).toBe(false);
+    expect(service.getSnapshot().error).toBeTruthy();
+  });
+
+  it('upserts successfully read members without inferring deletion from an incomplete family', async () => {
+    online = false;
+    await service.reconcileAutomatic([automatic()]);
+    const first = service.getSnapshot().areas[0];
+    await service.reconcileAutomaticSources([{ type: DownloadAreaType.Project, complete: false,
+      inputs: [automatic({ objectId: 'project-2', sourceKey: 'project:project-2' })],
+    }]);
+    expect((await readDownloadAreaCatalog()).areas).toEqual(expect.arrayContaining([
+      first, expect.objectContaining({ objectId: 'project-2' }),
+    ]));
+    await service.reconcileAutomaticSources([{ type: DownloadAreaType.Project, inputs: [], complete: true }]);
+    expect((await readDownloadAreaCatalog()).areas).toEqual([]);
+  });
+
+  it('checks source freshness inside the catalog transaction and still commits healthy peers', async () => {
+    online = false;
+    const geometry = automatic({ type: DownloadAreaType.GisGeometry, objectId: 'geometry-1', sourceKey: 'gis-geometry:geometry-1' });
+    const peer = { ...geometry, objectId: 'geometry-2', sourceKey: 'gis-geometry:geometry-2' };
+    await service.reconcileAutomatic([geometry, peer]);
+    const retained = service.getSnapshot().areas.find((area) => area.objectId === 'geometry-2');
+    await service.removeGisGeometrySources(['geometry-1']);
+    let current = true;
+    await service.reconcileAutomaticSources([
+      { type: DownloadAreaType.Project, inputs: [automatic()], complete: true },
+      { type: DownloadAreaType.GisGeometry, inputs: [geometry, { ...peer, name: 'Stale name' }], complete: true, isCurrent: () => current },
+    ], () => { current = false; });
+    const areas = (await readDownloadAreaCatalog()).areas;
+    expect(areas).toHaveLength(2);
+    expect(areas.find((area) => area.type === DownloadAreaType.Project)).toBeDefined();
+    expect(areas.find((area) => area.objectId === 'geometry-2')).toEqual(retained);
+    expect(areas.some((area) => area.objectId === 'geometry-1')).toBe(false);
+    expect(service.getSnapshot().error).toBeTruthy();
+  });
+
+  it('rejects cross-family inputs without mutating persisted intent', async () => {
+    online = false;
+    await service.reconcileAutomatic([automatic()]);
+    const before = await readDownloadAreaCatalog();
+    await expect(service.reconcileAutomaticSources([{ type: DownloadAreaType.GisGeometry,
+      inputs: [automatic()], complete: true,
+    }])).rejects.toThrow('one source type');
+    expect(await readDownloadAreaCatalog()).toEqual(before);
+  });
+
+  it('retains legacy pins through partial preparation and retires them after unchanged complete confirmation', async () => {
+    await engine.schedule({ mode: 'rebuild', plan: {
+      sourceRevision: 'legacy-partial', projects: [], points: [[2, 46]], paths: [], minZoom: 0, maxZoom: 1, padMeters: 50,
+    }, layers: [{ id: MAP_LAYERS[0].id, tileUrlTemplate: MAP_LAYERS[0].tileUrlTemplate }] });
+    await engine.waitForIdle();
+    const legacy = (await getOfflineMapGenerations()).find((generation) => !generation.coverageKey)!;
+    await service.reconcileAutomaticSources([
+      { type: DownloadAreaType.Project, inputs: [automatic()], complete: true },
+      { type: DownloadAreaType.GisGeometry, inputs: [], complete: false },
+    ]);
+    await service.waitForIdle();
+    expect(service.getSyncSnapshot().completedTiles).toBeGreaterThan(0);
+    expect((await getOfflineMapGenerations()).some((generation) => generation.id === legacy.id)).toBe(true);
+    const plans = planMock.mock.calls.length;
+    await service.reconcileAutomatic([automatic()]);
+    await service.waitForIdle();
+    expect((await getOfflineMapGenerations()).some((generation) => generation.id === legacy.id)).toBe(false);
+    expect(planMock).toHaveBeenCalledTimes(plans);
+    expect((await getTileCacheStats()).pinnedTileCount).toBeGreaterThan(0);
+  });
+
   it('shares GIS coverage with other sources and retains plans, pins, and area identity for metadata changes', async () => {
     online = false;
     const geometry = automatic({

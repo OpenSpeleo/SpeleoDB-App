@@ -39,6 +39,17 @@ export interface DownloadAreaCatalog {
   areas: DownloadArea[];
 }
 export type DownloadAreaInput = Omit<DownloadArea, 'areaId' | 'revision'>;
+/** Transient source authority; never persisted in the download-area catalog. */
+export interface AutomaticDownloadAreaSource {
+  type: Exclude<DownloadAreaType, DownloadAreaType.Manual>;
+  inputs: readonly DownloadAreaInput[];
+  /** False preserves existing members while allowing successful reads to advance. */
+  complete: boolean;
+  /** Known members whose current geometry could not be read. */
+  retainedSourceKeys?: readonly string[];
+  /** Checked at the catalog write seam; stale reads cannot update or delete rows. */
+  isCurrent?: () => boolean;
+}
 export type ManualDownloadAreaInput = Pick<
   DownloadArea,
   'topLeft' | 'bottomRight'

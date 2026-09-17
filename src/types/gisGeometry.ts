@@ -33,6 +33,15 @@ export interface GisGeometryPrefetchSource {
   sourceRevision: string;
   bounds: ProjectGeoJSONBounds;
 }
+export interface GisGeometryPrefetchSnapshot {
+  sources: GisGeometryPrefetchSource[];
+  /** Whether collection membership is authoritative for this read. */
+  complete: boolean;
+  /** Accessible members whose current coordinates could not be read. */
+  retainedSourceKeys: string[];
+  /** Rechecked at catalog commit so a late result cannot restore revoked access. */
+  isCurrent(): boolean;
+}
 export interface GisGeometrySnapshot {
   scope: string | null;
   items: readonly GisGeometryMetadata[];

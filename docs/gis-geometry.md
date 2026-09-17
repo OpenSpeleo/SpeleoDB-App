@@ -155,12 +155,19 @@ six tile workers, deduplicated tile membership, storage consent and recovery.
 Visibility, names, colors and unchanged bounds do not rebuild plans. Changed
 bounds use existing rolling replacement across enabled layers.
 
-Required sources must be complete/current before replacement. Failed or unknown
-GIS reads preserve prior coverage; they are not empty input. GIS browsing and
-coordinate preparation proceed independently of project refresh, while a new
-tile union can wait for another source family to recover. Confirmed revocation
-removes only the corresponding GIS catalog rows without waiting for unrelated
-reads or deleting shared public basemap bytes.
+Automatic source authority is scoped to each source type. Unavailable GIS
+metadata preserves its saved rectangles; failed accessible details preserve only
+those identities while healthy peers update. Failure is never an authoritative
+empty collection. Ready projects, points and tracks enter the standard catalog
+and start tile downloads while GIS metadata/details are pending; GIS joins the
+same union in one final reconciliation. Fast GIS needs only one publication;
+slow GIS needs at most two, never one rebuild per detail response.
+
+Explicit tile refresh retries GIS metadata after a failed read without an
+automatic denial retry loop. Confirmed revocation removes only the corresponding
+GIS catalog rows without cancelling unrelated source preparation or deleting
+shared public basemap bytes. A freshness callback checked inside the catalog
+transaction prevents a superseded GIS snapshot from restoring removed rows.
 
 Server geometry validity and tile capacity are separate limits. A long zero-area
 line or polar rectangle can exceed the existing 1,000,000-coordinate per-area
@@ -183,6 +190,13 @@ Source injection. Real offline-engine tests verify rectangle/URL deduplication,
 unchanged coverage reuse, failed replacement, revoked-source cleanup and
 oversized-source isolation. Production Chromium/WebKit tests exercise real
 workers, storage, narrow layouts and offline reload.
+
+Tile regression tests start from an empty catalog with healthy automatic areas
+and unavailable GIS metadata (403/404/5xx, malformed or non-JSON responses).
+They verify source-local retention and explicit retry. Held metadata/detail
+tests assert healthy planning before GIS resolves; Chromium/WebKit additionally
+verify nonzero completed tiles and 100% in Settings using real workers and
+IndexedDB. Recovery must merge GIS without changing existing area identities.
 
 Native loopback tests seed another account's session cookie and verify
 token-only GETs, response-cookie suppression, redirect refusal and cancellation.

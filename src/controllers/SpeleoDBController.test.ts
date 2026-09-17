@@ -389,6 +389,17 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
+// Landmark/GPS mutations enqueue tile preparation after their own promises
+// resolve. Drain helper-owned controllers before another test reuses IndexedDB.
+const auxiliaryControllers = new Set<SpeleoDBController>();
+afterEach(async () => {
+  for (const controller of auxiliaryControllers) {
+    controller.setOfflineDownloadsForeground(false);
+    await controller.waitForOfflineMapsIdle();
+  }
+  auxiliaryControllers.clear();
+});
+
 async function flushPromises(times = 1): Promise<void> {
   for (let i = 0; i < times; i += 1) {
     await Promise.resolve();
@@ -3331,10 +3342,11 @@ describe('SpeleoDBController GIS Geometry integration', () => {
     const prefs = options.prefs ?? createMockPrefs({ token: 'tok', instance: 'https://www.speleodb.org' });
     const tile = createMockTilePrefetch();
     const gisCache = options.gisCache ?? new GisGeometryCacheService(store);
-    const controller = new SpeleoDBController(service, prefs, new ProjectCacheService(store), tile,
+    const cache = new ProjectCacheService(store);
+    const controller = new SpeleoDBController(service, prefs, cache, tile,
       undefined, undefined, undefined, undefined, undefined, undefined, gisCache);
     controllers.push(controller);
-    return { controller, service, prefs, tile, gisCache, scope: prefs.session.getSession()!.cacheScopeId! };
+    return { controller, service, prefs, cache, tile, gisCache, scope: prefs.session.getSession()!.cacheScopeId! };
   }
   function area(id = GEOMETRY_ID): DownloadArea {
     return { areaId: `gis-area-${id}`, objectId: id, type: DownloadAreaType.GisGeometry,
@@ -3342,6 +3354,126 @@ describe('SpeleoDBController GIS Geometry integration', () => {
       topLeft: [-87.501, 20.101], bottomRight: [-87.498, 20.099], visible: false,
       layerIds: ['esri-satellite'], revision: 1 };
   }
+
+  function healthySources(overrides: Partial<SpeleoDBService> = {}): SpeleoDBService {
+    return createMockService({
+      getGisGeometries: vi.fn(async () => ({ status: 200, data: [geometryMetadata()] })),
+      getGisGeometry: vi.fn(async () => ({ status: 200, data: geometryDetail() })),
+      getLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: {
+        type: 'FeatureCollection' as const,
+        features: [{ type: 'Feature' as const, properties: { id: 'camp-1', name: 'Camp' },
+          geometry: { type: 'Point' as const, coordinates: [2.4, 46.6] } }],
+      } })),
+      ...overrides,
+    });
+  }
+
+  async function expectHealthyTiles(h: ReturnType<typeof harness>): Promise<void> {
+    await h.controller.waitForOfflineMapsIdle();
+    const catalog = await readDownloadAreaCatalog();
+    expect(catalog.areas).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: DownloadAreaType.Project, objectId: DEFAULT_PROJECT.id,
+        sourceKey: `project:${DEFAULT_PROJECT.id}`, visible: false }),
+      expect.objectContaining({ type: DownloadAreaType.Landmark, objectId: 'camp-1', sourceKey: 'landmarks:camp-1' }),
+    ]));
+    expect(h.tile.schedule).toHaveBeenCalled();
+    const request = vi.mocked(h.tile.schedule).mock.calls.at(-1)![0];
+    expectRebuildRequest(request);
+    expect(request.plan.projects.length).toBeGreaterThanOrEqual(2);
+    expect(request.plan.minZoom).toBe(0);
+    expect(request.plan.maxZoom).toBe(18);
+  }
+
+  it.each([403, 404, 503])('prepares healthy automatic tiles when the geometry collection returns %s', async (status) => {
+    const h = harness({ service: healthySources({
+      getGisGeometries: vi.fn(async () => ({ status, data: null })),
+    }) });
+    await h.controller.syncProjects();
+    await expectHealthyTiles(h);
+    expect(h.controller.downloadAreasSnapshot.error).toBeTruthy();
+    expect((await readDownloadAreaCatalog()).areas.some(value => value.type === DownloadAreaType.GisGeometry)).toBe(false);
+  });
+
+  it.each(['non-JSON', 'malformed'] as const)('prepares healthy automatic tiles when the geometry response is %s', async (kind) => {
+    const h = harness({ service: healthySources({
+      getGisGeometries: kind === 'non-JSON'
+        ? vi.fn(async () => { throw new Error('Expected a JSON response.'); })
+        : vi.fn(async () => ({ status: 200, data: { results: [geometryMetadata()] } })),
+    }) });
+    await h.controller.syncProjects();
+    await expectHealthyTiles(h);
+    expect(h.controller.downloadAreasSnapshot.error).toBeTruthy();
+  });
+
+  it('prepares healthy automatic tiles when an accessible geometry detail cannot be downloaded', async () => {
+    const h = harness({ service: healthySources({
+      getGisGeometry: vi.fn(async () => ({ status: 503, data: null })),
+    }) });
+    await h.controller.syncProjects();
+    await expectHealthyTiles(h);
+    expect(h.controller.gisGeometrySnapshot.items).toEqual([geometryMetadata()]);
+    expect(h.controller.downloadAreasSnapshot.error).toBeTruthy();
+  });
+
+  it('recovers a failed geometry collection through the public offline-map refresh action', async () => {
+    const h = harness({ service: healthySources() });
+    vi.mocked(h.service.getGisGeometries).mockResolvedValueOnce({ status: 503, data: null });
+    await h.controller.syncProjects();
+    await expectHealthyTiles(h);
+    expect(h.service.getGisGeometries).toHaveBeenCalledOnce();
+    await h.controller.refreshOfflineMaps();
+    await h.controller.waitForOfflineMapsIdle();
+    expect(h.service.getGisGeometries).toHaveBeenCalledTimes(2);
+    expect((await readDownloadAreaCatalog()).areas).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: DownloadAreaType.GisGeometry, objectId: GEOMETRY_ID }),
+    ]));
+    expect(h.controller.downloadAreasSnapshot.error).toBeNull();
+    const request = vi.mocked(h.tile.schedule).mock.calls.at(-1)![0];
+    expectRebuildRequest(request);
+    expect(request.plan.projects).toHaveLength(3);
+  });
+
+  it('finishes healthy source updates during delayed revocation and later historical tombstone replay', async () => {
+    const h = harness({ service: healthySources() });
+    await h.controller.syncProjects();
+    await expectHealthyTiles(h);
+    expect((await readDownloadAreaCatalog()).areas.some(value => value.type === DownloadAreaType.GisGeometry)).toBe(true);
+    const metadata = createDeferred<HttpResponse<unknown>>();
+    vi.mocked(h.service.getGisGeometries).mockReturnValueOnce(metadata.promise);
+    const readOverlay = vi.spyOn(h.cache, 'getOverlayGeoJSONForOfflineMap');
+    vi.mocked(h.service.getProjectsGeoJSON).mockResolvedValue({ status: 200, data: [
+      createProjectFixture({ ...DEFAULT_PROJECT, latest_commit: { ...DEFAULT_PROJECT.latest_commit, id: 'commit-2' } }),
+    ] });
+    vi.mocked(h.service.downloadJSON).mockResolvedValue({ status: 200, data: {
+      type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [3.3, 46.6] } }],
+    } });
+    const sync = h.controller.syncProjects();
+    try {
+      await vi.waitFor(() => expect(readOverlay).toHaveBeenCalled());
+    } finally {
+      metadata.resolve({ status: 200, data: [] });
+    }
+    await sync;
+    await expectHealthyTiles(h);
+    let catalog = await readDownloadAreaCatalog();
+    expect(catalog.areas.some(value => value.type === DownloadAreaType.GisGeometry)).toBe(false);
+    expect(catalog.areas.find(value => value.type === DownloadAreaType.Project)).toMatchObject({ sourceRevision: 'commit-2', revision: 2 });
+    expect((await h.gisCache.getCatalog(h.scope))?.revokedIds).toContain(GEOMETRY_ID);
+    const scheduled = vi.mocked(h.tile.schedule).mock.calls.length;
+    vi.mocked(h.service.getGisGeometries).mockResolvedValue({ status: 200, data: [] });
+    vi.mocked(h.service.getProjectsGeoJSON).mockResolvedValue({ status: 200, data: [
+      createProjectFixture({ ...DEFAULT_PROJECT, latest_commit: { ...DEFAULT_PROJECT.latest_commit, id: 'commit-3' } }),
+    ] });
+    vi.mocked(h.service.downloadJSON).mockResolvedValue({ status: 200, data: {
+      type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [4.3, 46.6] } }],
+    } });
+    await h.controller.syncProjects();
+    await expectHealthyTiles(h);
+    catalog = await readDownloadAreaCatalog();
+    expect(catalog.areas.find(value => value.type === DownloadAreaType.Project)).toMatchObject({ sourceRevision: 'commit-3', revision: 3 });
+    expect(catalog.areas.some(value => value.type === DownloadAreaType.GisGeometry)).toBe(false);
+    expect(vi.mocked(h.tile.schedule).mock.calls.length).toBeGreaterThan(scheduled);
+  });
 
   it('loads GIS metadata and detail even when the independent project collection fails', async () => {
     const h = harness();
@@ -3355,21 +3487,36 @@ describe('SpeleoDBController GIS Geometry integration', () => {
     expect(await h.gisCache.getDetail(h.scope, GEOMETRY_ID)).toEqual(detail);
   });
 
-  it('holds the offline union until metadata and shared detail are complete', async () => {
-    const h = harness();
+  it('prepares healthy tiles before delayed GIS metadata and detail, then merges the shared detail into the union', async () => {
+    const h = harness({ service: healthySources() });
     const metadata = createDeferred<HttpResponse<unknown>>();
     const detail = createDeferred<HttpResponse<unknown>>();
     vi.mocked(h.service.getGisGeometries).mockReturnValue(metadata.promise);
     vi.mocked(h.service.getGisGeometry).mockReturnValue(detail.promise);
     const sync = h.controller.syncProjects();
-    await vi.waitFor(() => expect(h.service.getGpsTracks).toHaveBeenCalledOnce());
-    expect(h.tile.schedule).not.toHaveBeenCalled();
-    metadata.resolve({ status: 200, data: [geometryMetadata()] });
+    let display: ReturnType<SpeleoDBController['getGisGeometryDetail']> | undefined;
+    try {
+      await vi.waitFor(() => expect(h.tile.schedule).toHaveBeenCalled());
+      expect(h.service.getGisGeometry).not.toHaveBeenCalled();
+      const before = await readDownloadAreaCatalog();
+      expect(before.areas.map(value => value.type)).toEqual(expect.arrayContaining([
+        DownloadAreaType.Project, DownloadAreaType.Landmark,
+      ]));
+      expect(before.areas.some(value => value.type === DownloadAreaType.GisGeometry)).toBe(false);
+      const first = vi.mocked(h.tile.schedule).mock.calls[0][0];
+      expectRebuildRequest(first);
+      expect(first.plan.projects).toHaveLength(2);
+      metadata.resolve({ status: 200, data: [geometryMetadata()] });
+      await sync;
+      await vi.waitFor(() => expect(h.service.getGisGeometry).toHaveBeenCalledOnce());
+      display = h.controller.getGisGeometryDetail(GEOMETRY_ID);
+      expect((await readDownloadAreaCatalog()).areas).toEqual(before.areas);
+    } finally {
+      // Never strand the ignored-abort transport fixture if an assertion fails.
+      metadata.resolve({ status: 200, data: [geometryMetadata()] });
+      detail.resolve({ status: 200, data: geometryDetail() });
+    }
     await sync;
-    await vi.waitFor(() => expect(h.service.getGisGeometry).toHaveBeenCalledOnce());
-    const display = h.controller.getGisGeometryDetail(GEOMETRY_ID);
-    expect(h.tile.schedule).not.toHaveBeenCalled();
-    detail.resolve({ status: 200, data: geometryDetail() });
     await display;
     await h.controller.waitForOfflineMapsIdle();
     expect(h.service.getGisGeometries).toHaveBeenCalledOnce();
@@ -3378,6 +3525,9 @@ describe('SpeleoDBController GIS Geometry integration', () => {
     expect(saved).toMatchObject({ objectId: GEOMETRY_ID, sourceRevision: '1', name: 'Reference line' });
     expect(saved!.topLeft[0]).toBeLessThan(-87.5);
     expect(saved!.bottomRight[0]).toBeGreaterThan(-87.499123456789);
+    const final = vi.mocked(h.tile.schedule).mock.calls.at(-1)![0];
+    expectRebuildRequest(final);
+    expect(final.plan.projects).toHaveLength(3);
   });
 
   it('restores the same secure scope offline without reading the network', async () => {
@@ -3517,6 +3667,7 @@ describe('SpeleoDBController landmark CRUD', () => {
       createMockTilePrefetch(),
       opStore,
     );
+    auxiliaryControllers.add(controller);
     return { service, prefs, cache, controller };
   }
 
@@ -3679,6 +3830,7 @@ describe('SpeleoDBController landmark CRUD', () => {
       createMockTilePrefetch(),
       createMemoryOpStore(),
     );
+    auxiliaryControllers.add(controller);
     await controller.validateSession();
     expect(controller.isOfflineLocked).toBe(true);
     return { service, prefs, cache, controller };
@@ -4546,6 +4698,7 @@ function gpsControllerWith(opts: {
     watcher,
     notificationGuard,
   );
+  auxiliaryControllers.add(controller);
   return { controller, store, watcher, service, prefs, cache, notificationGuard };
 }
 
@@ -4952,6 +5105,7 @@ describe('SpeleoDBController GPS tracks', () => {
           realStore,
           watcher1,
         );
+        auxiliaryControllers.add(controller1);
         await controller1.startTrackRecording();
         watcher1.emit(point(1, 2, 0));
         watcher1.emit(point(1.001, 2, 15_000));
@@ -4975,6 +5129,7 @@ describe('SpeleoDBController GPS tracks', () => {
           new GpsTrackStore(),
           createFakeWatcher(),
         );
+        auxiliaryControllers.add(controller2);
         await vi.waitFor(() => expect(controller2.gpsTracks).toHaveLength(1));
         const recovered = controller2.gpsTracks[0];
         expect(recovered.pointCount).toBe(2);

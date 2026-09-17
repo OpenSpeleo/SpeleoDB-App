@@ -51,6 +51,43 @@ async function openGis(page: Page) {
   return page.getByTestId('gis-geometry-panel');
 }
 
+async function automaticLandmark(page: Page) {
+  await page.route('https://offline-maps.test/api/v2/landmarks/geojson/', route => route.fulfill({
+    headers: { 'access-control-allow-origin': '*' },
+    json: { type: 'FeatureCollection', features: [{
+      type: 'Feature', id: 'automatic-landmark',
+      properties: { id: 'automatic-landmark', name: 'Automatic landmark' },
+      geometry: { type: 'Point', coordinates: [-87.5, 20.1] },
+    }] },
+  }));
+}
+
+async function expectCompletedTiles(page: Page) {
+  await expect(page.getByTestId('sync-pct')).toHaveText('100%');
+  await expect.poll(async () => {
+    const counts = (await page.getByTestId('sync-tiles').innerText()).split('/').map(value => Number(value.replace(/\D/g, '')));
+    return counts.length === 2 && counts[0] > 0 && counts[0] === counts[1];
+  }).toBe(true);
+}
+
+async function downloadAreaCatalog(page: Page): Promise<DownloadAreaCatalog | null> {
+  return page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('speleo_tiles');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      if (!db.objectStoreNames.contains('offline_map_settings')) return null;
+      return await new Promise<DownloadAreaCatalog | null>((resolve, reject) => {
+        const request = db.transaction('offline_map_settings').objectStore('offline_map_settings').get('download-areas');
+        request.onsuccess = () => resolve(request.result ?? null);
+        request.onerror = () => reject(request.error);
+      });
+    } finally { db.close(); }
+  });
+}
+
 /** Read the real download catalog/generations; readiness has no row label. */
 async function offlineGeometryReady(page: Page) {
   return page.evaluate(async ids => {
@@ -233,5 +270,77 @@ test('a refreshed access loss removes an already visible geometry', async ({ pag
   await expect(panel.getByText('No geometries available.')).toBeVisible();
   await page.getByRole('tab', { name: 'Map', exact: true }).click();
   await expect.poll(async () => (await colorPixels(page, await canvas.screenshot({ scale: 'css' }))).cyan.count).toBe(0);
+  expect(app.errors).toEqual([]);
+});
+
+for (const status of [404, 503]) {
+  test(`automatic landmark tiles sync despite GIS collection ${status}, then merge recovered geometries`, async ({ page }) => {
+    await fixture(page);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    let recovered = false;
+    let collectionReads = 0;
+    const headers = { 'access-control-allow-origin': '*' };
+    await automaticLandmark(page);
+    await page.route('https://offline-maps.test/api/v2/gis-geometries/**', route => {
+      const id = new URL(route.request().url()).pathname.split('/')[4];
+      if (!id) collectionReads++;
+      return route.fulfill(recovered
+        ? { headers, json: id ? DETAILS[id] : [LINE, POLYGON] }
+        : { headers, status, json: { detail: 'Geometry collection unavailable' } });
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/dashboard');
+    const panel = await openGis(page);
+    await expect(panel.getByRole('alert')).toHaveText('GIS Geometries could not be refreshed. Try again.');
+    await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+    await expectCompletedTiles(page);
+    const initial = await downloadAreaCatalog(page);
+    expect(initial?.schemaVersion).toBe(1);
+    expect(initial?.areas).toEqual([expect.objectContaining({
+      type: 'landmark', objectId: 'automatic-landmark', sourceKey: 'landmarks:automatic-landmark',
+      sourceRevision: '[-87.5,20.1]', layerIds: ['esri-satellite'],
+    })]);
+    expect(collectionReads).toBe(1);
+
+    recovered = true;
+    await page.getByTestId('sync-button').click();
+    await expect.poll(() => offlineGeometryReady(page)).toBe(true);
+    await expect(page.getByTestId('sync-pct')).toHaveText('100%');
+    const updated = await downloadAreaCatalog(page);
+    expect(updated?.areas).toHaveLength(3);
+    expect(updated?.areas.find(area => area.type === 'landmark')).toEqual(initial!.areas[0]);
+    expect(updated?.areas.filter(area => area.type === 'gis-geometry').map(area => area.sourceKey).sort())
+      .toEqual([`gis-geometry:${LINE.id}`, `gis-geometry:${POLYGON.id}`].sort());
+    expect(collectionReads).toBe(2);
+    await openGis(page);
+    await expect(panel.getByRole('alert')).toHaveCount(0);
+    await expect(panel.getByText('0 of 2 visible')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+}
+
+test('automatic landmark downloads finish while GIS details are still pending', async ({ page }) => {
+  const app = await geometryFixture(page, true);
+  await automaticLandmark(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/dashboard');
+  const panel = await openGis(page);
+  await expect(panel.getByText('0 of 2 visible')).toBeVisible();
+  await expect.poll(() => app.requests.filter(request => request.path !== '/api/v2/gis-geometries/').length).toBe(2);
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+  // The coordinate requests remain unresolved until after real tile completion.
+  await expectCompletedTiles(page);
+  const initial = await downloadAreaCatalog(page);
+  expect(initial?.areas).toEqual([expect.objectContaining({
+    type: 'landmark', sourceKey: 'landmarks:automatic-landmark', objectId: 'automatic-landmark',
+  })]);
+  app.release();
+  await expect.poll(() => offlineGeometryReady(page)).toBe(true);
+  await expectCompletedTiles(page);
+  const updated = await downloadAreaCatalog(page);
+  expect(updated?.areas).toHaveLength(3);
+  expect(updated?.areas.find(area => area.type === 'landmark')).toEqual(initial!.areas[0]);
+  expect(app.requests).toHaveLength(3);
   expect(app.errors).toEqual([]);
 });

@@ -21,6 +21,112 @@ function harness() {
   return { service, coordinator, cache, revoked, setOnline: (value: boolean) => { online = value; }, setSession: (value: StoredSession | null) => { session = value; } };
 }
 describe('GIS Geometry shared read coordinator', () => {
+  it('returns healthy geometry sources while retaining only failed accessible members', async () => {
+    const h = harness();
+    const failedId = '12345678-1234-4234-8234-000000000002';
+    h.service.getGisGeometries.mockResolvedValue({ status: 200, data: [geometryMetadata(), geometryMetadata({ id: failedId })] });
+    h.service.getGisGeometry.mockImplementation(async (_instance, _token, id) => id === failedId
+      ? { status: 503, data: {} }
+      : { status: 200, data: geometryDetail({ id }) });
+    const snapshot = await h.coordinator.getPrefetchSnapshot();
+    expect(snapshot.complete).toBe(true);
+    expect(snapshot.sources.map(source => source.id)).toEqual([GEOMETRY_ID]);
+    expect(snapshot.retainedSourceKeys).toEqual([`gis-geometry:${failedId}`]);
+    expect(h.coordinator.getSnapshot().errors[failedId]).toBeDefined();
+    await h.coordinator.waitForIdle();
+  });
+
+  it.each([403, 404, 503])('preserves unknown membership after collection %s without automatic retries', async status => {
+    const h = harness();
+    h.service.getGisGeometries.mockResolvedValue({ status, data: {} });
+    expect(await h.coordinator.getPrefetchSnapshot()).toEqual(expect.objectContaining({ sources: [], complete: false, retainedSourceKeys: [] }));
+    expect(await h.coordinator.getPrefetchSnapshot()).toEqual(expect.objectContaining({ sources: [], complete: false, retainedSourceKeys: [] }));
+    expect(h.service.getGisGeometries).toHaveBeenCalledTimes(1);
+    expect(h.service.getGisGeometry).not.toHaveBeenCalled();
+  });
+
+  it('recovers failed metadata on explicit tile refresh without retrying ordinary reads', async () => {
+    const h = harness();
+    h.service.getGisGeometries.mockResolvedValueOnce({ status: 503, data: {} });
+    expect((await h.coordinator.getPrefetchSnapshot()).complete).toBe(false);
+    expect((await h.coordinator.getPrefetchSnapshot()).complete).toBe(false);
+    const recovered = await h.coordinator.getPrefetchSnapshot(undefined, { refresh: true });
+    expect(recovered.complete).toBe(true);
+    expect(recovered.sources.map(source => source.id)).toEqual([GEOMETRY_ID]);
+    expect(h.service.getGisGeometries).toHaveBeenCalledTimes(2);
+    await h.coordinator.waitForIdle();
+  });
+
+  it.each([403, 404])('does not retain a detail denied with %s while collection revalidation runs', async status => {
+    const h = harness(), detail = deferred<HttpResponse<unknown>>(), revalidation = deferred<HttpResponse<unknown>>();
+    h.service.getGisGeometries.mockResolvedValueOnce({ status: 200, data: [geometryMetadata()] }).mockReturnValue(revalidation.promise);
+    h.service.getGisGeometry.mockReturnValue(detail.promise);
+    await h.coordinator.refresh();
+    const prefetch = h.coordinator.getPrefetchSnapshot();
+    detail.resolve({ status, data: {} });
+    expect(await prefetch).toEqual(expect.objectContaining({ sources: [], complete: false, retainedSourceKeys: [] }));
+    expect(h.coordinator.getSnapshot().items).toEqual([]);
+    expect(h.revoked).toHaveBeenCalledWith([GEOMETRY_ID], 'account-a', expect.any(Function));
+    revalidation.resolve({ status: 200, data: [] });
+    await h.coordinator.waitForIdle();
+    expect(await h.coordinator.getPrefetchSnapshot()).toEqual(expect.objectContaining({ sources: [], complete: true, retainedSourceKeys: [] }));
+    expect(h.service.getGisGeometry).toHaveBeenCalledTimes(1);
+    expect(h.service.getGisGeometries).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports incomplete authority without aborting tile work when a newer collection arrives', async () => {
+    const h = harness(), detail = deferred<HttpResponse<unknown>>();
+    h.service.getGisGeometry.mockReturnValue(detail.promise);
+    await h.coordinator.refresh();
+    const prefetch = h.coordinator.getPrefetchSnapshot();
+    h.service.getGisGeometries.mockResolvedValue({ status: 200, data: [geometryMetadata({ name: 'Renamed' })] });
+    await h.coordinator.refresh();
+    detail.resolve({ status: 200, data: geometryDetail() });
+    expect(await prefetch).toEqual(expect.objectContaining({ sources: [], complete: false, retainedSourceKeys: [] }));
+    await h.coordinator.waitForIdle();
+  });
+
+  it('still aborts partial source reads when their authenticated account changes', async () => {
+    const h = harness(), metadata = deferred<HttpResponse<unknown>>();
+    h.service.getGisGeometries.mockReturnValue(metadata.promise);
+    const prefetch = h.coordinator.getPrefetchSnapshot();
+    const rejected = expect(prefetch).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.waitFor(() => expect(h.service.getGisGeometries).toHaveBeenCalledOnce());
+    h.setSession({ token: 'other', instance: 'https://example.test', cacheScopeId: 'account-b' });
+    metadata.resolve({ status: 200, data: [geometryMetadata()] });
+    await rejected;
+    await h.coordinator.waitForIdle();
+  });
+
+  it('fences a prepared snapshot against revocation while allowing capability-only refreshes', async () => {
+    const h = harness();
+    const prepared = await h.coordinator.getPrefetchSnapshot();
+    expect(prepared.isCurrent()).toBe(true);
+    h.service.getGisGeometries.mockResolvedValue({ status: 200, data: [geometryMetadata({
+      user_permission_level: 3, user_permission_level_label: 'ADMIN',
+      can_write: true, can_delete: true, can_manage_permissions: true,
+    })] });
+    await h.coordinator.refresh();
+    expect(prepared.isCurrent()).toBe(true);
+    h.service.getGisGeometries.mockResolvedValue({ status: 200, data: [] });
+    await h.coordinator.refresh();
+    expect(prepared.isCurrent()).toBe(false);
+    await h.coordinator.waitForIdle();
+  });
+
+  it('invalidates prepared bounds after a content revision or account change', async () => {
+    const h = harness();
+    const prepared = await h.coordinator.getPrefetchSnapshot();
+    h.service.getGisGeometries.mockResolvedValue({ status: 200, data: [geometryMetadata({ revision: 2 })] });
+    h.service.getGisGeometry.mockResolvedValue({ status: 200, data: geometryDetail({ revision: 2 }) });
+    const updated = await h.coordinator.getPrefetchSnapshot(undefined, { refresh: true });
+    expect(prepared.isCurrent()).toBe(false);
+    expect(updated.isCurrent()).toBe(true);
+    h.setSession({ token: 'other', instance: 'https://example.test', cacheScopeId: 'account-b' });
+    expect(updated.isCurrent()).toBe(false);
+    await h.coordinator.waitForIdle();
+  });
+
   it.each([403, 200])('removes known revoked access on collection %s even if the durable catalog transaction aborts', async status => {
     const h = harness();
     await h.coordinator.refresh();
@@ -123,7 +229,7 @@ describe('GIS Geometry shared read coordinator', () => {
     expect(reopened.revoked).toHaveBeenCalledTimes(1);
     expect(await new GisGeometryCacheService(store).getDetail('account-a', GEOMETRY_ID)).toBeNull();
   });
-  it('preserves cached bytes as stale on a transient list failure and blocks incomplete tile replacement', async () => {
+  it('preserves cached bytes as stale on a transient list failure and rejects strict source reads', async () => {
     const h = harness(); await h.coordinator.refresh(); await h.coordinator.waitForIdle();
     h.service.getGisGeometries.mockResolvedValue({ status: 503, data: {} });
     await expect(h.coordinator.refresh()).rejects.toThrow();
