@@ -21,6 +21,44 @@ function harness() {
   return { service, coordinator, cache, revoked, setOnline: (value: boolean) => { online = value; }, setSession: (value: StoredSession | null) => { session = value; } };
 }
 describe('GIS Geometry shared read coordinator', () => {
+  it('does not let a retried startup restoration overwrite an accepted detail commit', async () => {
+    const h = harness();
+    const writeStarted = deferred<void>(), releaseWrite = deferred<void>();
+    const readStarted = deferred<void>(), releaseRead = deferred<void>();
+    const admin = { user_permission_level: 3 as const, user_permission_level_label: 'ADMIN' as const,
+      can_write: true, can_delete: true, can_manage_permissions: true };
+    // A transient startup failure is repaired by the online collection, leaving
+    // load() retryable when the facade next requests a foreground geometry.
+    vi.spyOn(h.cache, 'getCatalog').mockRejectedValueOnce(new Error('Storage temporarily unavailable'));
+    h.service.getGisGeometry.mockResolvedValue({ status: 200, data: geometryDetail({ revision: 2, ...admin }) });
+    const putDetail = h.cache.putDetail.bind(h.cache);
+    vi.spyOn(h.cache, 'putDetail').mockImplementationOnce(async (...args) => {
+      writeStarted.resolve();
+      await releaseWrite.promise;
+      return putDetail(...args);
+    });
+    await h.coordinator.refresh();
+    await writeStarted.promise;
+    const detail = h.coordinator.ensureDetail(GEOMETRY_ID);
+    const getDetail = h.cache.getDetail.bind(h.cache);
+    vi.spyOn(h.cache, 'getDetail').mockImplementationOnce(async (...args) => {
+      const record = await getDetail(...args);
+      readStarted.resolve();
+      await releaseRead.promise;
+      return record;
+    });
+    const restoration = h.coordinator.load();
+    releaseWrite.resolve();
+    await detail;
+    await readStarted.promise;
+    releaseRead.resolve();
+    await restoration;
+    await h.coordinator.waitForIdle();
+    expect(h.coordinator.getSnapshot().items[0]).toMatchObject({ revision: 2, can_delete: true });
+    expect(h.coordinator.getSnapshot().records[GEOMETRY_ID]?.detail).toMatchObject({ revision: 2, can_delete: true });
+    expect((await h.cache.getCatalog('account-a'))?.items[0]).toMatchObject({ revision: 2, can_delete: true });
+  });
+
   it('persists fresh access when newer durable content survived an interrupted catalog write', async () => {
     const h = harness();
     const admin = { user_permission_level: 3 as const, user_permission_level_label: 'ADMIN' as const,

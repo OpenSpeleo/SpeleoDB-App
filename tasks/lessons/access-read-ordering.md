@@ -22,3 +22,8 @@ latest accepted permission metadata onto that content before publication. Also
 detach queued/in-flight identity deduplication on revocation: regranting an ID
 must not reuse work belonging to its old access epoch. Keep old work tracked and
 fenced until it settles.
+
+Cached restoration is also an authority publication. A retry after startup
+failure must use the same serialized publication lane as online commits;
+otherwise its older asynchronous cache reads can overwrite newly accepted
+content and access metadata even when all durable writes are correctly ordered.

@@ -552,7 +552,11 @@ export class HttpClient {
 
       if (req.requireJson) {
         const contentType = response.headers.get('content-type') ?? '';
-        const body = response.status >= 200 && response.status < 300
+        const successful = response.status >= 200 && response.status < 300;
+        // Status is authoritative without reading an error body. Stop its
+        // transport before removing the deadline, without waiting for cleanup.
+        if (!successful) void response.body?.cancel().catch(() => {});
+        const body = successful
           ? await this.awaitWithAbort(response.text(), abortContext.signal)
           : '';
         throwIfAborted(abortContext.signal);

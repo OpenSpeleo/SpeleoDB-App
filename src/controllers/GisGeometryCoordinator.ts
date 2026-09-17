@@ -83,7 +83,10 @@ export class GisGeometryCoordinator {
     if (this.loadPromise) return this.loadPromise;
     const generation = this.generation;
     const validate = () => this.assertCurrent(session.cacheScopeId, generation);
-    const operation = this.track((async () => {
+    // Restoration publishes membership and records, so it shares the same lane
+    // as online commits. A retry must not overwrite a newer accepted detail.
+    const operation = this.track(this.commit(async () => {
+      validate();
       // Cleanup retries must retain accepted runtime authority: a failed
       // catalog write can leave older, already-revoked membership on disk.
       const catalog = this.catalog ?? await this.cache.getCatalog(session.cacheScopeId);
@@ -118,7 +121,7 @@ export class GisGeometryCoordinator {
       }));
       validate();
       this.publish({ items: [...restored.values()], records, errors });
-    })());
+    }));
     this.loadPromise = operation;
     void operation.catch(error => {
       if (this.loadPromise === operation) this.loadPromise = null;

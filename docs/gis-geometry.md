@@ -101,7 +101,10 @@ Content revision and access metadata remain separate even after an interrupted
 detail/catalog write: recovering newer durable coordinates must merge the latest
 accepted permission fields. Revocation detaches pending work from its resource
 identity so a later regrant can fetch independently; old responses remain
-epoch-fenced and tracked until they settle.
+epoch-fenced and tracked until they settle. Cache restoration uses the same
+serialized publication lane as online commits, including retries after startup
+failures. An older cache read therefore cannot replace a newly accepted detail
+or access metadata while the user opens a geometry.
 
 Confirmed revocation removes usable in-memory membership before fallible cache
 writes. Catalog persistence, detail deletion and automatic-area cleanup are
@@ -137,7 +140,9 @@ HttpClient's GIS path omits cookies on web and uses the first-party
 `GisGeometryHttp` plugin on native platforms. Status and content type reach the
 shared parser before JSON decoding. Non-JSON denials retain their HTTP status;
 malformed successes receive fixed local error messages, without reflecting raw
-server HTML.
+server HTML. The web transport cancels discarded non-success bodies before
+releasing request ownership. It does not wait for or reflect error-body cleanup:
+a stalled body or rejected cancellation cannot delay the received denial status.
 
 Android installs a permanent route-scoped delegating CookieHandler after
 Capacitor's cookie plugin and before WebView startup. GIS requests use raw-body
@@ -233,5 +238,5 @@ and limitations are recorded in the
 [deep failure-mode review](../tasks/todos/gis-geometry-deep-review.md) records
 additional interrupted-write, regrant, stalled-source and native-body evidence.
 
-The [fresh independent review](../tasks/todos/gis-geometry-fresh-review.md) adds
-failed-cleanup recovery, worker-drain and native streaming-deadline regressions.
+The [latest independent review](../tasks/todos/gis-geometry-review-round-3.md)
+adds cache-restoration ordering and discarded web response-body regressions.

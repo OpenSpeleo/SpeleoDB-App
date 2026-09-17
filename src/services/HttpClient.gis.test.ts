@@ -33,6 +33,33 @@ describe('GIS JSON GET transport', () => {
     expect(read).not.toHaveBeenCalled();
   });
 
+  it.each([403, 404, 500])('cancels an unread HTTP %s body without waiting for its transport cleanup', async (status) => {
+    let finishCancellation!: () => void;
+    const cancelled = new Promise<void>((resolve) => { finishCancellation = resolve; });
+    const cancel = vi.fn(() => cancelled);
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, {
+      status, headers: { 'Content-Type': 'text/html' },
+    }));
+    try {
+      expect(await new HttpClient({ isNativePlatform: () => false }).request(request))
+        .toEqual({ status, data: null, contentType: 'text/html' });
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      finishCancellation();
+      await body.cancel();
+    }
+  });
+
+  it('preserves denial status when discarded-body cancellation rejects', async () => {
+    const cancel = vi.fn(async () => { throw new Error('Transport cleanup failed'); });
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 403 }));
+    expect(await new HttpClient({ isNativePlatform: () => false }).request(request))
+      .toEqual({ status: 403, data: null, contentType: '' });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ['text/html', '<html>secret</html>', 'The server did not return JSON.'],
     ['application/json', '{"broken":', 'The server returned invalid JSON.'],

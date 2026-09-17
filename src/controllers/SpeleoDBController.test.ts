@@ -2497,15 +2497,26 @@ describe('SpeleoDBController', () => {
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
       await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(1));
-      await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(2));
-
-      const firstRequest = schedule.mock.calls[0][0];
-      const secondRequest = schedule.mock.calls[1][0];
+      await controller.waitForOfflineMapsIdle();
+      expect(schedule).toHaveBeenCalled();
+      const firstRequest = schedule.mock.calls.at(-1)![0];
       expectRebuildRequest(firstRequest);
-      expectRebuildRequest(secondRequest);
-      expect(firstRequest.plan.sourceRevision).toBe(secondRequest.plan.sourceRevision);
+      expect(firstRequest.plan.projects).toHaveLength(2);
+      const firstAreas = (await readDownloadAreaCatalog()).areas;
+
+      schedule.mockClear();
+      await controller.syncProjects();
+      await controller.waitForOfflineMapsIdle();
+      // Independent source publications may schedule more than one batch. This
+      // engine double does not persist activation; every requested union must
+      // nevertheless preserve the settled geometry and its canonical signature.
+      expect(schedule).toHaveBeenCalled();
+      for (const [nextRequest] of schedule.mock.calls) {
+        expectRebuildRequest(nextRequest);
+        expect(nextRequest.plan).toEqual(firstRequest.plan);
+        expect(nextRequest.coverageKey).toBe(firstRequest.coverageKey);
+      }
+      expect((await readDownloadAreaCatalog()).areas).toEqual(firstAreas);
     });
 
     it('schedules satellite first, then enabled extra layers at their max zoom', async () => {
