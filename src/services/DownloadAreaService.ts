@@ -333,6 +333,33 @@ export class DownloadAreaService {
     this.resume(forceRefresh);
     if (!catalog.areas.length) await this.retireLegacyCoverage();
   }
+  /** Remove confirmed inaccessible geometry without collecting other sources. */
+  async removeGisGeometrySources(
+    ids: readonly string[],
+    validate: () => void = () => {},
+  ): Promise<void> {
+    if (!ids.length) return;
+    const removed = new Set(ids);
+    await this.preload();
+    const { mutateDownloadAreaCatalog } =
+      await import('./tileCache/DownloadAreaRepository');
+    const catalog = await mutateDownloadAreaCatalog((current) => {
+      this.assertActive();
+      validate();
+      return {
+        ...current,
+        areas: current.areas.filter((area) =>
+          area.type !== DownloadAreaType.GisGeometry ||
+          area.objectId === null || !removed.has(area.objectId),
+        ),
+      };
+    });
+    this.adoptCatalog(catalog);
+    this.resume();
+    await this.cleanupReleased();
+    await this.readCoverage();
+    await this.engine.refreshCacheStats?.();
+  }
   async setLayers(layerIds: MapLayerId[]): Promise<void> {
     const restored = Boolean(this.loaded);
     let added: string[] = [];

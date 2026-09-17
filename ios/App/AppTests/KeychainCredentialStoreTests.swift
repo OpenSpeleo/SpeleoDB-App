@@ -1,6 +1,6 @@
 import Security
 import XCTest
-@testable import App
+@testable import SpeleoDB
 
 final class KeychainCredentialStoreTests: XCTestCase {
     private var service = ""

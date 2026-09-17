@@ -9,6 +9,7 @@ import type { OverlayIconAvailability } from './dashboardMapUtils';
 import { GpsMapLayers } from './GpsMapLayers';
 import { OverlayMapLayers } from './OverlayMapLayers';
 import { ProjectMapLayers } from './ProjectMapLayers';
+import { GisGeometryMapLayers } from './GisGeometryMapLayers';
 
 vi.mock('react-map-gl/maplibre', () => ({
   Source: ({
@@ -26,14 +27,19 @@ vi.mock('react-map-gl/maplibre', () => ({
       ))}
     </div>
   ),
-  Layer: ({ id, source, paint }: {
+  Layer: ({ id, source, paint, filter, beforeId }: {
     id: string;
     source?: string;
     paint?: Record<string, unknown>;
+    filter?: unknown;
+    beforeId?: string;
   }) => (
     <div
       data-layer-id={id}
       data-layer-source-id={source}
+      data-paint={JSON.stringify(paint)}
+      data-filter={JSON.stringify(filter)}
+      data-before-id={beforeId}
       data-text-color-expression={JSON.stringify(paint?.['text-color'])}
     />
   ),
@@ -94,6 +100,24 @@ const PROJECT: Project = {
 };
 
 describe('Dashboard map layers', () => {
+  it('binds all GIS styles directly to one source below the stable GIS anchor', () => {
+    const { container } = render(<GisGeometryMapLayers featureCollection={EMPTY_FEATURE_COLLECTION} />);
+    const styles = [
+      ['fill', 'Polygon', { 'fill-color': ['get', 'color'], 'fill-opacity': 0.175 }],
+      ['outline', 'Polygon', { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-opacity': 0.95 }],
+      ['line', 'LineString', { 'line-color': ['get', 'color'], 'line-width': 2.5, 'line-opacity': 0.95 }],
+    ] as const;
+    for (const [suffix, type, paint] of styles) {
+      const layer = container.querySelector(`[data-layer-id="gis-geometries-${suffix}"]`)!;
+      expect(layer).toHaveAttribute('data-layer-source-id', 'gis-geometries-source');
+      expect(layer).toHaveAttribute('data-before-id', 'gis-geometry-order-anchor');
+      expect(JSON.parse(layer.getAttribute('data-paint')!)).toEqual(paint);
+      expect(JSON.parse(layer.getAttribute('data-filter')!)).toEqual(['==', ['geometry-type'], type]);
+    }
+    expect(container.querySelector('[data-layer-id="gis-geometry-order-anchor"]'))
+      .toHaveAttribute('data-layer-source-id', 'gis-geometry-order-source');
+  });
+
   it('binds every active project layer to its GeoJSON source', () => {
     const { container } = render(
       <ProjectMapLayers

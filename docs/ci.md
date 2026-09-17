@@ -172,11 +172,12 @@ For version-zero dependencies, minor updates can still be breaking and require
 review. See the
 [updater's version-target documentation](https://github.com/raineorshine/npm-check-updates#target).
 
-React and React DOM remain on 19.2 with patch updates: React 19.3 increased the
-production entry from approximately 443 KB to 473 KB, exceeding its 450 KB
-budget. An isolated build with all other updates and React 19.2.8 passes. A
-future React minor upgrade must address that startup cost before removing the
-patch-only exception; keep the existing bundle budgets enforced.
+React and React DOM remain on 19.2 with patch updates. React 19.3 previously
+increased the production entry from approximately 443 KB to 473 KB, exceeding
+the then-current 450 KB budget. The entry limit is now 750 KB, raised for GIS
+Geometry with room for feature growth; the initial-graph and lazy-chunk limits
+remain unchanged. A future React minor upgrade still needs a compatibility and
+startup-cost review before removing the patch-only exception.
 
 Major upgrades require a dedicated migration with source and test changes. In
 particular, the current app owns navigation through React Router 5

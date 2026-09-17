@@ -85,7 +85,10 @@ for feature work in this repository.
   checkpoint persistence.
 - Circular longitude logic is centralized. Consumers merge complete directed
   intervals and clamp display/tile latitude to Web Mercator; do not
-  independently min/max interval endpoints.
+  independently min/max interval endpoints. GIS Geometry is the explicit
+  API-contract exception: its validated raw coordinate minima/maxima define
+  bounds, without a shortest wrapped interval. See
+  [GIS Geometry](gis-geometry.md).
 
 ## TypeScript and code style
 

@@ -1,0 +1,17 @@
+/* Preserve touch targets when Pending adds a seventh tab or text is enlarged. */
+.app-tab-bar {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  flex-shrink: 0;
+}
+
+.app-tab-bar__tab {
+  flex: 1 0 max-content;
+  min-width: 44px;
+  min-height: 44px;
+  padding-inline: 2px;
+}
+
+.app-tab-bar__tab > span {
+  white-space: nowrap;
+}

@@ -21,6 +21,7 @@ import type { SessionMetadataStore } from './SecureSessionStore';
 const LEGACY_PLAINTEXT_CREDENTIALS_KEY = 'speleo_users_db';
 
 export interface UserPreferences {
+  cacheScopeId?: string;
   email?: string;
   instance?: string;
   hasStoredSession?: boolean;
@@ -169,6 +170,7 @@ function readRawPreferences(): StoredPreferences {
     const hasInvalidSessionMetadata = (hasLegacyToken || hasStoredSession) && !hasInstance;
     const normalized: StoredPreferences = {
       email: hasInvalidSessionMetadata ? undefined : parsed.email,
+      cacheScopeId: !hasInvalidSessionMetadata && typeof parsed.cacheScopeId === 'string' && /^[a-zA-Z0-9-]{8,128}$/.test(parsed.cacheScopeId) ? parsed.cacheScopeId : undefined,
       token: hasLegacyToken && !hasInvalidSessionMetadata ? parsed.token : undefined,
       instance: hasInstance ? parsed.instance : undefined,
       hasStoredSession: (hasStoredSession && !hasInvalidSessionMetadata) || undefined,
@@ -232,6 +234,7 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
       const mutated = nextMutation(current);
       const next: StoredPreferences = {
         email: mutated.email,
+        cacheScopeId: mutated.cacheScopeId,
         token: mutated.token,
         instance: mutated.instance,
         hasStoredSession: mutated.hasStoredSession === true || undefined,
@@ -280,17 +283,19 @@ export const sessionMetadataStore: SessionMetadataStore = {
     const stored = readRawPreferences();
     return {
       email: stored.email,
+      cacheScopeId: stored.cacheScopeId,
       instance: stored.instance,
       hasStoredSession: stored.hasStoredSession === true,
       legacyToken: stored.token,
     };
   },
-  commit: ({ email, instance }) => {
+  commit: ({ email, instance, cacheScopeId }) => {
     const current = readRawPreferences();
     writePreferences({
       ...current,
       email,
       instance,
+      cacheScopeId,
       hasStoredSession: true,
       token: undefined,
     });
@@ -300,6 +305,7 @@ export const sessionMetadataStore: SessionMetadataStore = {
     writePreferences({
       ...current,
       email: undefined,
+      cacheScopeId: undefined,
       hasStoredSession: undefined,
       token: undefined,
     });

@@ -20,6 +20,7 @@ describe('createAppSessionStore', () => {
     });
 
     expect(sessions.getSession()).toEqual({
+      cacheScopeId: expect.any(String),
       email: 'browser@example.com',
       instance: 'https://speleodb.org',
       token: 'volatile-token',

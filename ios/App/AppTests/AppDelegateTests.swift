@@ -1,6 +1,6 @@
 import UIKit
 import XCTest
-@testable import App
+@testable import SpeleoDB
 
 @MainActor
 final class AppDelegateTests: XCTestCase {

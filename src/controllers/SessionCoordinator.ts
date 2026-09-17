@@ -94,7 +94,7 @@ function normalizeStoredSession(session: StoredSession): StoredSession | null {
   const instance = normalizeInstance(session.instance);
   if (!token || !instance) return null;
   const email = session.email?.trim();
-  return { token, instance, ...(email ? { email } : {}) };
+  return { token, instance, ...(email ? { email } : {}), ...(session.cacheScopeId ? { cacheScopeId: session.cacheScopeId } : {}) };
 }
 
 function sessionsMatch(left: StoredSession, right: StoredSession): boolean {

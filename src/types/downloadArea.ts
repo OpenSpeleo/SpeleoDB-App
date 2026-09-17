@@ -5,6 +5,7 @@ export enum DownloadAreaType {
   Project = 'project',
   Landmark = 'landmark',
   Track = 'track',
+  GisGeometry = 'gis-geometry',
   SurfaceStation = 'surface-station',
   SubsurfaceStation = 'subsurface-station',
   ExplorationLead = 'exploration-lead',

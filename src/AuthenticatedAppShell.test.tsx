@@ -55,6 +55,7 @@ vi.mock('./pages/Settings', () => ({
         <button onClick={() => onDashboardPanelChange('projects')}>Open projects</button>
         <button onClick={() => onDashboardPanelChange('landmarks')}>Open landmarks</button>
         <button onClick={() => onDashboardPanelChange('gps')}>Open GPS</button>
+        <button onClick={() => onDashboardPanelChange('gis-geometries')}>Open GIS Geometry</button>
         <button onClick={() => onDashboardPanelChange(null)}>Close panels</button>
       </div>
     );
@@ -120,6 +121,8 @@ describe('AuthenticatedAppShell', () => {
     expect(dashboard).toHaveAttribute('data-active-panel', 'landmarks');
     await user.click(screen.getByRole('button', { name: 'Open GPS' }));
     expect(dashboard).toHaveAttribute('data-active-panel', 'gps');
+    await user.click(screen.getByRole('button', { name: 'Open GIS Geometry' }));
+    expect(dashboard).toHaveAttribute('data-active-panel', 'gis-geometries');
     await user.click(screen.getByRole('button', { name: 'Close panels' }));
     expect(dashboard).toHaveAttribute('data-active-panel', 'none');
   });

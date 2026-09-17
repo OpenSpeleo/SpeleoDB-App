@@ -1,14 +1,18 @@
+import { generateUuid } from '../utils/ids';
 import type { CredentialStore } from './CredentialStore';
 import { isAbortError, throwIfAborted } from '../utils/abort';
 import { getInstanceBaseUrl } from '../utils/instanceUrl';
 
 export interface StoredSession {
+  /** Non-secret cache ownership; never derived from token or email. */
+  cacheScopeId?: string;
   email?: string;
   instance: string;
   token: string;
 }
 
 export interface SessionMetadata {
+  cacheScopeId?: string;
   email?: string;
   hasStoredSession: boolean;
   instance?: string;
@@ -49,7 +53,7 @@ function normalizeSession(session: StoredSession): StoredSession {
     );
   }
   const email = session.email?.trim();
-  return { token, instance, ...(email ? { email } : {}) };
+  return { token, instance, ...(email ? { email } : {}), ...(session.cacheScopeId ? { cacheScopeId: session.cacheScopeId } : {}) };
 }
 
 function normalizeNewSession(session: StoredSession): StoredSession {
@@ -115,6 +119,12 @@ export class SecureSessionStore implements SessionStore {
     options: { signal?: AbortSignal },
   ): Promise<void> {
     const previousSession = this.current ? { ...this.current } : null;
+    // A scope follows one securely committed credential/origin pair. New credentials
+    // deliberately discard access to old cached account data, even without an email.
+    normalized = { ...normalized, cacheScopeId:
+      previousSession?.token === normalized.token && previousSession.instance === normalized.instance
+        ? previousSession.cacheScopeId ?? generateUuid()
+        : generateUuid() };
     throwIfAborted(options.signal);
     const previousToken = await this.credentials.readToken();
     throwIfAborted(options.signal);
@@ -127,6 +137,7 @@ export class SecureSessionStore implements SessionStore {
       this.metadata.commit({
         email: normalized.email,
         instance: normalized.instance,
+        cacheScopeId: normalized.cacheScopeId,
       });
       throwIfAborted(options.signal);
     } catch (error) {
@@ -191,6 +202,7 @@ export class SecureSessionStore implements SessionStore {
       if (legacyToken && instance) {
         const migrated = normalizeSession({
           email: metadata.email,
+          cacheScopeId: metadata.cacheScopeId || generateUuid(),
           instance,
           token: legacyToken,
         });
@@ -202,9 +214,13 @@ export class SecureSessionStore implements SessionStore {
       if (metadata.hasStoredSession && instance && secureToken) {
         const restored = normalizeSession({
           email: metadata.email,
+          cacheScopeId: metadata.cacheScopeId || generateUuid(),
           instance,
           token: secureToken,
         });
+        if (!metadata.cacheScopeId) {
+          this.metadata.commit({ email: restored.email, instance: restored.instance, cacheScopeId: restored.cacheScopeId });
+        }
         this.current = restored;
         return { ...restored };
       }
@@ -230,7 +246,7 @@ export class SecureSessionStore implements SessionStore {
       await this.credentials.writeToken(session.token);
     }
     try {
-      this.metadata.commit({ email: session.email, instance: session.instance });
+      this.metadata.commit({ email: session.email, instance: session.instance, cacheScopeId: session.cacheScopeId });
     } catch (error) {
       if (previousToken !== session.token) {
         await this.rollbackCredential(previousToken, error);
@@ -276,6 +292,7 @@ export class SecureSessionStore implements SessionStore {
           this.metadata.commit({
             email: previousSession.email,
             instance: previousSession.instance,
+            cacheScopeId: previousSession.cacheScopeId,
           });
         } else {
           this.metadata.clear();

@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import App
+@testable import SpeleoDB
 
 final class SensitiveDataProtectionTests: XCTestCase {
     private var temporaryDirectory: URL!

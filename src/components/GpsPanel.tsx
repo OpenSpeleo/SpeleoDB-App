@@ -15,6 +15,7 @@
  */
 
 import React from 'react';
+import { DashboardSidePanel } from './DashboardSidePanel';
 import { IonToggle } from '@ionic/react';
 import type {
   GpsRecordingState,
@@ -315,89 +316,53 @@ const GpsPanel: React.FC<GpsPanelProps> = ({
   onDeleteTrack,
 }) => {
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        className={`absolute inset-0 z-20 bg-black/40 transition-opacity duration-300 ${
-          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-        }`}
-        onClick={onClose}
+    <DashboardSidePanel isOpen={isOpen} onClose={onClose} title="GPS Tools" testId="gps-panel">
+      <RecordEntry
+        recordingState={recordingState}
+        currentPoints={currentPoints}
+        measurementUnit={measurementUnit}
+        onOpenRecorder={onOpenRecorder}
+        onCollectPoint={onCollectPoint}
       />
 
-      {/* Panel */}
-      <div
-        className={`absolute top-0 left-0 bottom-0 z-30 w-72 max-w-[80vw]
-          bg-slate-900/95 backdrop-blur-md border-r border-slate-700/50
-          flex flex-col transition-transform duration-300 ease-in-out
-          ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
-        style={{ paddingTop: 'var(--safe-area-inset-top, env(safe-area-inset-top))' }}
-        data-testid="gps-panel"
-      >
-        {/* Header */}
-        <div className="shrink-0 border-b border-slate-700/50 px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-slate-100">GPS Tools</h2>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400
-                         hover:bg-slate-700/50 hover:text-slate-100 transition-colors"
-              aria-label="Close panel"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <RecordEntry
-          recordingState={recordingState}
-          currentPoints={currentPoints}
-          measurementUnit={measurementUnit}
-          onOpenRecorder={onOpenRecorder}
-          onCollectPoint={onCollectPoint}
-        />
-
-        {/* Recorded Tracks section title + count */}
-        <div className="shrink-0 px-4 pt-3 pb-2">
-          <h3 className="text-sm font-semibold text-slate-100">Recorded Tracks</h3>
-          <p className="mt-0.5 text-xs text-slate-400">
-            {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}
-          </p>
-        </div>
-
-        {/* Tracks list */}
-        <div
-          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pt-1"
-          data-testid="gps-panel-list"
-        >
-          {tracks.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs leading-relaxed text-slate-500">
-              Tracks you record in the app or upload to SpeleoDB will appear here.
-            </div>
-          ) : (
-            <ul>
-              {tracks.map((track) => (
-                <TrackRow
-                  key={track.id}
-                  track={track}
-                  measurementUnit={measurementUnit}
-                  visible={trackVisibility[track.id] === true}
-                  loading={loadingTrackIds?.has(track.id) ?? false}
-                  onTrackTap={onTrackTap}
-                  onToggleTrackVisibility={onToggleTrackVisibility}
-                  onShareTrack={onShareTrack}
-                  onUploadTrack={onUploadTrack}
-                  onEditTrack={onEditTrack}
-                  onDeleteTrack={onDeleteTrack}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
+      {/* Recorded Tracks section title + count */}
+      <div className="shrink-0 px-4 pt-3 pb-2">
+        <h3 className="text-sm font-semibold text-slate-100">Recorded Tracks</h3>
+        <p className="mt-0.5 text-xs text-slate-400">
+          {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}
+        </p>
       </div>
-    </>
+
+      {/* Tracks list */}
+      <div
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pt-1"
+        data-testid="gps-panel-list"
+      >
+        {tracks.length === 0 ? (
+          <div className="px-4 py-6 text-center text-xs leading-relaxed text-slate-500">
+            Tracks you record in the app or upload to SpeleoDB will appear here.
+          </div>
+        ) : (
+          <ul>
+            {tracks.map((track) => (
+              <TrackRow
+                key={track.id}
+                track={track}
+                measurementUnit={measurementUnit}
+                visible={trackVisibility[track.id] === true}
+                loading={loadingTrackIds?.has(track.id) ?? false}
+                onTrackTap={onTrackTap}
+                onToggleTrackVisibility={onToggleTrackVisibility}
+                onShareTrack={onShareTrack}
+                onUploadTrack={onUploadTrack}
+                onEditTrack={onEditTrack}
+                onDeleteTrack={onDeleteTrack}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+    </DashboardSidePanel>
   );
 };
 

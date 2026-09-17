@@ -34,6 +34,7 @@ describe('secure session migration integration', () => {
       email: 'legacy@example.com',
       instance: 'https://speleodb.org',
       token: 'legacy-secret',
+      cacheScopeId: expect.any(String),
     });
 
     const raw = localStorage.getItem(PREFERENCES.STORAGE_KEY) ?? '';
@@ -45,6 +46,11 @@ describe('secure session migration integration', () => {
       projectVisibility: { project: false },
     });
     expect(getToken()).toBe('legacy-secret');
+    const scope = sessions.getSession()?.cacheScopeId;
+    expect(sessionMetadataStore.read().cacheScopeId).toBe(scope);
+    const restarted = new SecureSessionStore(credentials, sessionMetadataStore);
+    await restarted.initialize();
+    expect(restarted.getSession()?.cacheScopeId).toBe(scope);
   });
 
   it('never writes a fresh token into localStorage', async () => {

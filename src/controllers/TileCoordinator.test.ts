@@ -11,6 +11,8 @@ import { TileCoordinator } from './TileCoordinator';
 import type { GpsTrackPrefetchSource } from './GpsTrackCoordinator';
 import { evictLayerTilesRuntime } from '../services/TileCacheRuntime';
 import type { Project } from '../types/project';
+import type { GisGeometryPrefetchSource } from '../types/gisGeometry';
+import { readDownloadAreaCatalog } from '../services/tileCache/DownloadAreaRepository';
 
 function expectRebuildRequest(
   request: OfflineMapSyncRequest,
@@ -130,6 +132,8 @@ function createHarness(options: { deferWork?: (work: () => void) => void } = {})
     },
   ];
   const getGpsPrefetchSources = vi.fn(async () => gpsSources);
+  const gisSources: GisGeometryPrefetchSource[] = [];
+  const getGisPrefetchSources = vi.fn(async () => gisSources);
   const notifyStateChanged = vi.fn();
   let layerOfflineSync: Record<string, boolean> = {};
   const coordinator = new TileCoordinator({
@@ -141,6 +145,7 @@ function createHarness(options: { deferWork?: (work: () => void) => void } = {})
     hasNetworkAccess: () => true,
     getProjects: () => [],
     getGpsPrefetchSources,
+    getGisPrefetchSources,
     notifyStateChanged,
     deferWork: options.deferWork ?? ((work) => work()),
     yieldToMainThread: async () => {},
@@ -156,10 +161,148 @@ function createHarness(options: { deferWork?: (work: () => void) => void } = {})
     releaseLayer,
     getGpsPrefetchSources,
     gpsSources,
+    gisSources,
+    getGisPrefetchSources,
   };
 }
 
 describe('TileCoordinator offline coverage', () => {
+  const geometrySource: GisGeometryPrefetchSource = {
+    id: 'geometry-1',
+    name: 'Reference polygon',
+    color: '#377eb8',
+    sourceRevision: '3',
+    bounds: { west: 6, east: 6.001, south: 6, north: 6.001, crossesDateline: false },
+  };
+
+  it('waits for admitted deferred source reads before reporting offline-map idleness', async () => {
+    let runDeferred!: () => void;
+    const { coordinator, getGisPrefetchSources, schedule } = createHarness({
+      deferWork: (work) => { runDeferred = work; },
+    });
+    const source = deferred<GisGeometryPrefetchSource[]>();
+    getGisPrefetchSources.mockReturnValueOnce(source.promise);
+    coordinator.queueProjectSync([], 1);
+    let idle = false;
+    const waiting = coordinator.waitForIdle().then(() => { idle = true; });
+    await Promise.resolve();
+    expect(idle).toBe(false);
+    expect(getGisPrefetchSources).not.toHaveBeenCalled();
+    runDeferred();
+    await vi.waitFor(() => expect(getGisPrefetchSources).toHaveBeenCalledOnce());
+    expect(idle).toBe(false);
+    source.resolve([geometrySource]);
+    await waiting;
+    expect(idle).toBe(true);
+    expect(schedule).toHaveBeenCalledOnce();
+    expect((await readDownloadAreaCatalog()).areas.some((area) => area.objectId === geometrySource.id)).toBe(true);
+  });
+
+  it('keeps unresolved sibling sources owned after another required source fails', async () => {
+    const { coordinator, getGisPrefetchSources, cache, schedule } = createHarness();
+    const source = deferred<GisGeometryPrefetchSource[]>();
+    getGisPrefetchSources.mockReturnValueOnce(source.promise);
+    vi.mocked(cache.getOverlayGeoJSONForOfflineMap).mockRejectedValueOnce(new Error('Overlay unavailable'));
+    const result = await coordinator.scheduleSyncPhase(new CancellationContext(1, 'failure'), []);
+    expect(result.status).toBe('failed');
+    let idle = false;
+    const waiting = coordinator.waitForIdle().then(() => { idle = true; });
+    await Promise.resolve();
+    expect(idle).toBe(false);
+    source.resolve([]);
+    await waiting;
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it('settles cancelled deferred admission without needing its scheduler callback', async () => {
+    let runDeferred!: () => void;
+    const { coordinator, getGisPrefetchSources, schedule } = createHarness({
+      deferWork: (work) => { runDeferred = work; },
+    });
+    coordinator.queueProjectSync([], 1);
+    coordinator.cancel();
+    await coordinator.waitForIdle();
+    runDeferred();
+    expect(getGisPrefetchSources).not.toHaveBeenCalled();
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it('drains an active source that ignores abort before completing logout', async () => {
+    const { coordinator, getGisPrefetchSources, schedule } = createHarness();
+    const source = deferred<GisGeometryPrefetchSource[]>();
+    getGisPrefetchSources.mockReturnValueOnce(source.promise);
+    coordinator.queueProjectSync([], 1);
+    await vi.waitFor(() => expect(getGisPrefetchSources).toHaveBeenCalledOnce());
+    let stopped = false;
+    const stopping = Promise.resolve(coordinator.stopForLogout()).then(() => { stopped = true; });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    source.resolve([geometrySource]);
+    await stopping;
+    expect(stopped).toBe(true);
+    expect(schedule).not.toHaveBeenCalled();
+    expect((await readDownloadAreaCatalog()).areas).toEqual([]);
+  });
+
+  it('waits for all GIS sources and schedules their hidden padded rectangles with the shared union', async () => {
+    const { coordinator, schedule, getGisPrefetchSources } = createHarness();
+    const pending = deferred<GisGeometryPrefetchSource[]>();
+    getGisPrefetchSources.mockReturnValueOnce(pending.promise);
+    const sync = coordinator.scheduleSyncPhase(new CancellationContext(1, 'GIS source read'), []);
+    await vi.waitFor(() => expect(getGisPrefetchSources).toHaveBeenCalledOnce());
+    expect(schedule).not.toHaveBeenCalled();
+    pending.resolve([geometrySource]);
+    await sync;
+    await coordinator.areas.waitForIdle();
+    const area = coordinator.areas.getSnapshot().areas.find((value) => value.type === DownloadAreaType.GisGeometry)!;
+    expect(area).toMatchObject({ objectId: geometrySource.id, sourceKey: 'gis-geometry:geometry-1', sourceRevision: '3', visible: false });
+    expect(area.topLeft[0]).toBeLessThan(6);
+    expect(area.topLeft[1]).toBeGreaterThan(6.001);
+    expect(area.bottomRight[0]).toBeGreaterThan(6.001);
+    expect(area.bottomRight[1]).toBeLessThan(6);
+    expect(schedule).toHaveBeenCalledOnce();
+    const request = schedule.mock.calls[0][0];
+    expectRebuildRequest(request);
+    expect(request.plan.projects).toHaveLength(6);
+  });
+
+  it('preserves the catalog when a required current GIS detail is unavailable', async () => {
+    const { coordinator, schedule, gisSources, getGisPrefetchSources } = createHarness();
+    gisSources.push(geometrySource);
+    await coordinator.scheduleSyncPhase(new CancellationContext(1, 'initial'), []);
+    await coordinator.areas.waitForIdle();
+    const before = await readDownloadAreaCatalog();
+    const calls = schedule.mock.calls.length;
+    getGisPrefetchSources.mockRejectedValueOnce(new Error('Current GIS detail unavailable'));
+    const result = await coordinator.scheduleSyncPhase(new CancellationContext(2, 'failed'), []);
+    expect(result.status).toBe('failed');
+    expect(await readDownloadAreaCatalog()).toEqual(before);
+    expect(schedule).toHaveBeenCalledTimes(calls);
+  });
+
+  it('removes revoked GIS sources despite unrelated failures and rejects an older collected result', async () => {
+    const { coordinator, cache, gisSources, getGisPrefetchSources } = createHarness();
+    gisSources.push(geometrySource);
+    await coordinator.scheduleSyncPhase(new CancellationContext(1, 'initial'), []);
+    await coordinator.areas.waitForIdle();
+    const before = await readDownloadAreaCatalog();
+    const unrelated = before.areas.filter((area) => area.type !== DownloadAreaType.GisGeometry);
+    const delayed = deferred<GisGeometryPrefetchSource[]>();
+    getGisPrefetchSources.mockReturnValueOnce(delayed.promise);
+    const old = coordinator.scheduleSyncPhase(new CancellationContext(2, 'older'), []);
+    const oldRejection = expect(old).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.waitFor(() => expect(getGisPrefetchSources).toHaveBeenCalledTimes(2));
+    vi.mocked(cache.getOverlayGeoJSONForOfflineMap).mockRejectedValueOnce(new Error('Unrelated cache failure'));
+    const failure = await coordinator.scheduleSyncPhase(new CancellationContext(3, 'unrelated failure'), []);
+    expect(failure.status).toBe('failed');
+    await coordinator.removeGisGeometrySources([geometrySource.id]);
+    expect((await readDownloadAreaCatalog()).areas).toEqual(unrelated);
+    delayed.resolve([geometrySource]);
+    await oldRejection;
+    await coordinator.areas.waitForIdle();
+    expect((await readDownloadAreaCatalog()).areas).toEqual(unrelated);
+  });
+
   it('does not start queued project-sync preparation after cancellation', async () => {
     let deferredWork: (() => void) | null = null;
     const { coordinator, schedule } = createHarness({

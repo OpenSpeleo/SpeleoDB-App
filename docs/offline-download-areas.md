@@ -21,6 +21,7 @@ cylinder installs also pass through the shared point adapter.
 | Project                              | Validated current-commit GeoJSON bounds + 50 m | Satellite plus enabled layers | Source-owned, hidden       |
 | Landmark / station / lead / cylinder | Point bounds + 50 m                            | Same shared preferences       | Source-owned, hidden       |
 | Local / remote GPS track             | Entire track bounds + 50 m                     | Same shared preferences       | Source-owned, hidden       |
+| GIS Geometry                         | Raw coordinate min/max bounds + 50 m           | Same shared preferences       | Source-owned, hidden       |
 
 Every area covers zoom levels 0–18. Longitude intervals can cross the dateline;
 latitude is limited to Web Mercator. A constant-space preflight rejects manual
@@ -200,6 +201,14 @@ identity across reconciliation, including separate local/server track domains.
 bounds change. Layer switches never increment an area revision. Renaming and
 visibility never invalidate coverage. Catalog revision tracks persisted
 mutations independently.
+
+GIS Geometry adds the automatic type `gis-geometry` with source key
+`gis-geometry:<uuid>`, the UUID as `objectId` and content revision as
+`sourceRevision`. Its raw min/max bounds receive the same 50 m padding and
+shared union planning as other automatic sources. Visibility is unrelated to
+offline preparation. Existing database/catalog versions remain unchanged; older
+apps reject the new enum, so downgrading with such a catalog is unsupported. See
+[GIS Geometry](gis-geometry.md) for access revocation and account cleanup.
 
 One `download-areas` record in the `offline_map_settings` IndexedDB store holds
 these local user settings. This is intentionally outside small localStorage

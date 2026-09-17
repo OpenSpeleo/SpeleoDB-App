@@ -31,6 +31,36 @@ function renderTabBar(
 }
 
 describe('AppTabBar', () => {
+  it('opens GIS from another route with its full accessible name', async () => {
+    const { history, onDashboardPanelChange, onTabPress } = renderTabBar('/settings');
+    await userEvent.click(screen.getByRole('tab', { name: 'Geometries' }));
+    expect(history.location.pathname).toBe('/dashboard');
+    expect(onDashboardPanelChange).toHaveBeenCalledExactlyOnceWith('gis-geometries');
+    expect(onTabPress).toHaveBeenCalledOnce();
+    const tab = screen.getByRole('tab', { name: 'Geometries' });
+    expect(tab).toHaveTextContent('Geometries');
+    expect(tab.querySelector('svg')).toHaveAttribute('stroke-width', '1.8');
+    expect(tab.querySelector('path')).toHaveAttribute('d', 'M5 6l14 3-4 11L5 6z');
+    expect([...tab.querySelectorAll('circle')].map(circle => [circle.getAttribute('cx'), circle.getAttribute('cy'), circle.getAttribute('r')]))
+      .toEqual([['5', '6', '2'], ['19', '9', '2'], ['15', '20', '2']]);
+  });
+
+  it('closes the active GIS panel with a second tab tap', async () => {
+    const { onDashboardPanelChange } = renderTabBar('/dashboard', 'gis-geometries');
+    const tab = screen.getByRole('tab', { name: 'Geometries' });
+    expect(tab).toHaveAttribute('aria-selected', 'true');
+    await userEvent.click(tab);
+    expect(onDashboardPanelChange).toHaveBeenCalledExactlyOnceWith(null);
+  });
+
+  it('replaces GPS with GIS in one transition and retains live recording feedback', async () => {
+    const { onDashboardPanelChange } = renderTabBar('/dashboard', 'gps', 1, { isGpsRecording: true });
+    await userEvent.click(screen.getByRole('tab', { name: 'Geometries' }));
+    expect(onDashboardPanelChange).toHaveBeenCalledExactlyOnceWith('gis-geometries');
+    expect(screen.getByTestId('gps-tab-recording-dot')).toBeInTheDocument();
+    expect(screen.getByTestId('pending-tab-badge')).toHaveTextContent('1');
+  });
+
   it('opens the project panel and navigates to dashboard from settings', async () => {
     const user = userEvent.setup();
     const { history, onDashboardPanelChange } = renderTabBar('/settings');
@@ -83,7 +113,7 @@ describe('AppTabBar', () => {
   it('renders the GPS tab between Landmarks and Map', () => {
     renderTabBar('/dashboard');
     const tabs = screen.getAllByRole('tab').map((tab) => tab.textContent);
-    expect(tabs).toEqual(['Projects', 'Landmarks', 'GPS', 'Map', 'Settings']);
+    expect(tabs).toEqual(['Projects', 'Geometries', 'Landmarks', 'GPS', 'Map', 'Settings']);
   });
 
   it('opens the GPS panel and navigates to dashboard from settings', async () => {
@@ -181,10 +211,10 @@ describe('AppTabBar', () => {
   it('reveals the Pending tab with a badge when there are pending ops', () => {
     renderTabBar('/dashboard', null, 3);
     const tabs = screen.getAllByRole('tab');
-    expect(tabs).toHaveLength(6);
-    expect(tabs[4]).toHaveAttribute('data-testid', 'pending-tab');
-    expect(tabs[4]).toHaveTextContent('Pending');
-    expect(tabs[5]).toHaveTextContent('Settings');
+    expect(tabs).toHaveLength(7);
+    expect(tabs[5]).toHaveAttribute('data-testid', 'pending-tab');
+    expect(tabs[5]).toHaveTextContent('Pending');
+    expect(tabs[6]).toHaveTextContent('Settings');
     expect(screen.getByTestId('pending-tab-badge')).toHaveTextContent('3');
   });
 

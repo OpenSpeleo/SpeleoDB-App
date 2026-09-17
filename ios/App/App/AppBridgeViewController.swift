@@ -6,5 +6,6 @@ final class AppBridgeViewController: CAPBridgeViewController {
         // Type registration is ignored while Capacitor package discovery is enabled.
         bridge?.registerPluginInstance(CredentialStorePlugin())
         bridge?.registerPluginInstance(PerformanceDiagnosticsPlugin())
+        bridge?.registerPluginInstance(GisGeometryHttpPlugin())
     }
 }

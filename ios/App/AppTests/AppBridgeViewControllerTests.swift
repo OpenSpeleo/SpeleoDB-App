@@ -1,8 +1,14 @@
 import XCTest
-@testable import App
+@testable import SpeleoDB
 
 @MainActor
 final class AppBridgeViewControllerTests: XCTestCase {
+    func testGisGeometryHttpPluginIsRegisteredWithLoadedBridge() {
+        let viewController = AppBridgeViewController()
+        viewController.loadViewIfNeeded()
+        XCTAssertTrue(viewController.bridge?.plugin(withName: "GisGeometryHttp") is GisGeometryHttpPlugin)
+    }
+
     func testCredentialStorePluginIsRegisteredWithLoadedBridge() {
         let viewController = AppBridgeViewController()
 

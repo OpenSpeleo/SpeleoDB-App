@@ -5,6 +5,10 @@ behaviors.
 
 ## Available docs
 
+- `gis-geometry.md`: read-only private line/polygon browsing, session
+  visibility, token-only HTTP, scoped cache/revocation, and automatic offline
+  rectangles.
+
 - `display-scaling.md`: OS display-scaling boundaries, login scroll ownership,
   the app-wide scroll-container audit, and browser/device verification.
 

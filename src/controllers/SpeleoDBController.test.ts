@@ -1,7 +1,13 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { SpeleoDBController, type PreferencesPort } from './SpeleoDBController';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
-import type { ProjectCacheService } from '../services/ProjectCacheService';
+import { ProjectCacheService } from '../services/ProjectCacheService';
+import { CacheStore } from '../services/CacheStore';
+import { GisGeometryCacheService } from '../services/GisGeometryCacheService';
+import { GEOMETRY_ID, geometryDetail, geometryMetadata } from '../gisGeometry/testFixtures';
+import { parseGisGeometryDetail } from '../gisGeometry/validation';
+import { mutateDownloadAreaCatalog, readDownloadAreaCatalog } from '../services/tileCache/DownloadAreaRepository';
+import { DownloadAreaType, type DownloadArea } from '../types/downloadArea';
 import { type HttpResponse } from '../services/HttpClient';
 import type { AuthTokenResponse } from '../types';
 import type { OfflineMapSyncEngineLike } from '../services/OfflineMapSyncEngine';
@@ -109,6 +115,8 @@ const V2_PROJECT = createProjectFixture({
 
 function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBService {
   return {
+    getGisGeometries: vi.fn(async () => ({ status: 200, data: [] })),
+    getGisGeometry: vi.fn(async () => ({ status: 404, data: {} })),
     authenticate: vi.fn(async () => ({ status: 200, data: { user: 'u@x.com', token: 'tok' } }) as HttpResponse<AuthTokenResponse>),
     validateToken: vi.fn(async () => ({ status: 200, data: {} }) as HttpResponse<unknown>),
     getProjectsGeoJSON: vi.fn(async () => ({ status: 200, data: [DEFAULT_PROJECT] }) as HttpResponse<Project[]>),
@@ -148,6 +156,7 @@ function createMockService(overrides?: Partial<SpeleoDBService>): SpeleoDBServic
 }
 
 type StoredPrefs = {
+  cacheScopeId?: string;
   email?: string;
   token?: string;
   instance?: string;
@@ -159,6 +168,7 @@ type StoredPrefs = {
   layerOfflineSync?: Record<string, boolean>;
 };
 
+let nextMockScope = 0;
 function createMockPrefs(initial?: StoredPrefs): PreferencesPort {
   const { token: initialToken, ...initialPreferences } = initial ?? {};
   let store: StoredPrefs = {
@@ -174,6 +184,7 @@ function createMockPrefs(initial?: StoredPrefs): PreferencesPort {
         email: initialPreferences.email,
         instance: initialPreferences.instance,
         token: initialToken,
+        cacheScopeId: initialPreferences.cacheScopeId ?? `controller-test-scope-${++nextMockScope}`,
       }
       : null;
   const clearPreferences = vi.fn(() => { store = {}; });
@@ -181,7 +192,8 @@ function createMockPrefs(initial?: StoredPrefs): PreferencesPort {
     initialize: vi.fn(async () => currentSession),
     getSession: vi.fn(() => currentSession ? { ...currentSession } : null),
     establish: vi.fn(async (next) => {
-      currentSession = { ...next };
+      currentSession = { ...next, cacheScopeId: currentSession && currentSession.token === next.token && currentSession.instance === next.instance
+        ? currentSession.cacheScopeId : `controller-test-scope-${++nextMockScope}` };
       store = {
         ...store,
         email: next.email,
@@ -3297,6 +3309,181 @@ describe('SpeleoDBController', () => {
 });
 
 // ==================== Landmark CRUD ====================
+
+describe('SpeleoDBController GIS Geometry integration', () => {
+  const store = new CacheStore();
+  let controllers: SpeleoDBController[];
+  beforeEach(async () => {
+    controllers = [];
+    localStorage.clear();
+    await new ProjectCacheService(store).clearAll();
+    await clearCachedTiles();
+  });
+  afterEach(async () => {
+    for (const controller of controllers) await controller.logout();
+  });
+  function harness(options: { service?: SpeleoDBService; prefs?: PreferencesPort; gisCache?: GisGeometryCacheService } = {}) {
+    const service = options.service ?? createMockService({
+      getProjectsGeoJSON: vi.fn(async () => ({ status: 200, data: [] })),
+      getGisGeometries: vi.fn(async () => ({ status: 200, data: [geometryMetadata()] })),
+      getGisGeometry: vi.fn(async () => ({ status: 200, data: geometryDetail() })),
+    });
+    const prefs = options.prefs ?? createMockPrefs({ token: 'tok', instance: 'https://www.speleodb.org' });
+    const tile = createMockTilePrefetch();
+    const gisCache = options.gisCache ?? new GisGeometryCacheService(store);
+    const controller = new SpeleoDBController(service, prefs, new ProjectCacheService(store), tile,
+      undefined, undefined, undefined, undefined, undefined, undefined, gisCache);
+    controllers.push(controller);
+    return { controller, service, prefs, tile, gisCache, scope: prefs.session.getSession()!.cacheScopeId! };
+  }
+  function area(id = GEOMETRY_ID): DownloadArea {
+    return { areaId: `gis-area-${id}`, objectId: id, type: DownloadAreaType.GisGeometry,
+      sourceKey: `gis-geometry:${id}`, sourceRevision: '1', name: 'Saved geometry',
+      topLeft: [-87.501, 20.101], bottomRight: [-87.498, 20.099], visible: false,
+      layerIds: ['esri-satellite'], revision: 1 };
+  }
+
+  it('loads GIS metadata and detail even when the independent project collection fails', async () => {
+    const h = harness();
+    vi.mocked(h.service.getProjectsGeoJSON).mockResolvedValue({ status: 400, data: [] });
+    allowConsoleWarn(expect.stringContaining('syncProjects: refresh skipped (status=400)'));
+    const result = await h.controller.syncProjects();
+    expect(result.phases.projectRefresh.status).not.toBe('applied');
+    expect(h.controller.gisGeometrySnapshot.items).toEqual([geometryMetadata()]);
+    const detail = await h.controller.getGisGeometryDetail(GEOMETRY_ID);
+    expect(detail.detail.geojson).toEqual(geometryDetail().geojson);
+    expect(await h.gisCache.getDetail(h.scope, GEOMETRY_ID)).toEqual(detail);
+  });
+
+  it('holds the offline union until metadata and shared detail are complete', async () => {
+    const h = harness();
+    const metadata = createDeferred<HttpResponse<unknown>>();
+    const detail = createDeferred<HttpResponse<unknown>>();
+    vi.mocked(h.service.getGisGeometries).mockReturnValue(metadata.promise);
+    vi.mocked(h.service.getGisGeometry).mockReturnValue(detail.promise);
+    const sync = h.controller.syncProjects();
+    await vi.waitFor(() => expect(h.service.getGpsTracks).toHaveBeenCalledOnce());
+    expect(h.tile.schedule).not.toHaveBeenCalled();
+    metadata.resolve({ status: 200, data: [geometryMetadata()] });
+    await sync;
+    await vi.waitFor(() => expect(h.service.getGisGeometry).toHaveBeenCalledOnce());
+    const display = h.controller.getGisGeometryDetail(GEOMETRY_ID);
+    expect(h.tile.schedule).not.toHaveBeenCalled();
+    detail.resolve({ status: 200, data: geometryDetail() });
+    await display;
+    await h.controller.waitForOfflineMapsIdle();
+    expect(h.service.getGisGeometries).toHaveBeenCalledOnce();
+    expect(h.service.getGisGeometry).toHaveBeenCalledOnce();
+    const saved = (await readDownloadAreaCatalog()).areas.find(value => value.type === DownloadAreaType.GisGeometry);
+    expect(saved).toMatchObject({ objectId: GEOMETRY_ID, sourceRevision: '1', name: 'Reference line' });
+    expect(saved!.topLeft[0]).toBeLessThan(-87.5);
+    expect(saved!.bottomRight[0]).toBeGreaterThan(-87.499123456789);
+  });
+
+  it('restores the same secure scope offline without reading the network', async () => {
+    const first = harness();
+    await first.controller.syncProjects();
+    await first.controller.getGisGeometryDetail(GEOMETRY_ID);
+    await first.controller.waitForOfflineMapsIdle();
+    const restarted = harness({ prefs: first.prefs });
+    vi.mocked(restarted.service.validateToken).mockResolvedValue({ status: 503, data: {} });
+    expect(await restarted.controller.validateSession()).toBe('network_error');
+    await vi.waitFor(() => expect(restarted.controller.gisGeometrySnapshot.records[GEOMETRY_ID]).toBeDefined());
+    expect(restarted.controller.gisGeometrySnapshot.scope).toBe(first.scope);
+    expect(restarted.controller.gisGeometrySnapshot.status).toBe('stale');
+    expect((await restarted.controller.getGisGeometryDetail(GEOMETRY_ID)).detail.geojson).toEqual(geometryDetail().geojson);
+    expect(restarted.service.getGisGeometries).not.toHaveBeenCalled();
+    expect(restarted.service.getGisGeometry).not.toHaveBeenCalled();
+  });
+
+  it('replays durable membership cleanup across the geometry and offline-area databases on startup', async () => {
+    const scope = 'startup-repair-scope';
+    const gisCache = new GisGeometryCacheService(store);
+    await gisCache.putDetail(scope, parseGisGeometryDetail(geometryDetail()));
+    await gisCache.putCatalog({ schemaVersion: 1, scope, items: [], revokedIds: [GEOMETRY_ID] });
+    await mutateDownloadAreaCatalog(catalog => ({ ...catalog, areas: [area()] }));
+    const h = harness({ gisCache, prefs: createMockPrefs({ token: 'tok', instance: 'https://www.speleodb.org', cacheScopeId: scope }) });
+    vi.mocked(h.service.validateToken).mockResolvedValue({ status: 503, data: {} });
+    expect(await h.controller.validateSession()).toBe('network_error');
+    await vi.waitFor(async () => expect((await readDownloadAreaCatalog()).areas).toEqual([]));
+    expect(h.controller.gisGeometrySnapshot.records).toEqual({});
+    expect(await gisCache.getDetail(scope, GEOMETRY_ID)).toBeNull();
+    expect(h.service.getGisGeometries).not.toHaveBeenCalled();
+  });
+
+  it('removes orphan GIS offline areas when a restored scope has no authoritative catalog', async () => {
+    await mutateDownloadAreaCatalog(catalog => ({ ...catalog, areas: [area()] }));
+    const h = harness();
+    vi.mocked(h.service.validateToken).mockResolvedValue({ status: 503, data: {} });
+    expect(await h.controller.validateSession()).toBe('network_error');
+    await vi.waitFor(async () => expect((await readDownloadAreaCatalog()).areas).toEqual([]));
+    expect(h.service.getGisGeometries).not.toHaveBeenCalled();
+  });
+
+  it('drains a late detail before logout finishes and prevents it from restoring deleted bytes', async () => {
+    const h = harness();
+    const delayed = createDeferred<HttpResponse<unknown>>();
+    vi.mocked(h.service.getGisGeometry).mockReturnValue(delayed.promise);
+    await h.controller.refreshGisGeometries();
+    let loggedOut = false;
+    const logout = h.controller.logout().then(() => { loggedOut = true; });
+    await vi.waitFor(() => expect(h.prefs.session.getSession()).toBeNull());
+    expect(h.controller.gisGeometrySnapshot.records).toEqual({});
+    expect(loggedOut).toBe(false);
+    delayed.resolve({ status: 200, data: geometryDetail() });
+    await logout;
+    expect(await h.gisCache.getCatalog(h.scope)).toBeNull();
+    expect(await h.gisCache.getDetail(h.scope, GEOMETRY_ID)).toBeNull();
+    expect((await readDownloadAreaCatalog()).areas).toEqual([]);
+  });
+
+  it('clears the previous account before the same UUID can load for its replacement', async () => {
+    const h = harness();
+    await h.controller.syncProjects();
+    await h.controller.getGisGeometryDetail(GEOMETRY_ID);
+    await h.controller.waitForOfflineMapsIdle();
+    expect((await readDownloadAreaCatalog()).areas.some(value => value.type === DownloadAreaType.GisGeometry)).toBe(true);
+    const delayed = createDeferred<HttpResponse<unknown>>();
+    vi.mocked(h.service.getGisGeometries).mockResolvedValueOnce({ status: 200, data: [geometryMetadata({ revision: 2 })] });
+    vi.mocked(h.service.getGisGeometry).mockReturnValueOnce(delayed.promise);
+    await h.controller.refreshGisGeometries();
+    expect(await h.controller.loginWithToken({ token: 'account-b-token', instance: 'https://www.speleodb.org' })).toMatchObject({ success: true });
+    expect(h.controller.gisGeometrySnapshot.items).toEqual([]);
+    const newScope = h.prefs.session.getSession()!.cacheScopeId!;
+    expect(newScope).not.toBe(h.scope);
+    vi.mocked(h.service.getGisGeometries).mockResolvedValue({ status: 200, data: [geometryMetadata({ name: 'Other account' })] });
+    vi.mocked(h.service.getGisGeometry).mockResolvedValue({ status: 200, data: geometryDetail({ name: 'Other account' }) });
+    const refresh = h.controller.refreshGisGeometries();
+    await Promise.resolve();
+    expect(h.service.getGisGeometries).toHaveBeenCalledTimes(2);
+    delayed.resolve({ status: 200, data: geometryDetail({ revision: 2, name: 'Late previous account' }) });
+    await refresh;
+    expect(await h.gisCache.getCatalog(h.scope)).toBeNull();
+    expect(await h.gisCache.getDetail(h.scope, GEOMETRY_ID)).toBeNull();
+    const newDetail = await h.controller.getGisGeometryDetail(GEOMETRY_ID);
+    expect(newDetail.detail).toMatchObject({ name: 'Other account', revision: 1 });
+    expect((await h.gisCache.getDetail(newScope, GEOMETRY_ID))?.detail.name).toBe('Other account');
+    await h.controller.waitForOfflineMapsIdle();
+    const saved = (await readDownloadAreaCatalog()).areas.filter(value => value.type === DownloadAreaType.GisGeometry);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ name: 'Other account', sourceRevision: '1' });
+  });
+
+  it('surfaces account-cleanup failure and admits no new account reads before explicit retry', async () => {
+    const h = harness();
+    await h.controller.refreshGisGeometries();
+    await h.controller.getGisGeometryDetail(GEOMETRY_ID);
+    await h.controller.waitForOfflineMapsIdle();
+    const failed = vi.spyOn(h.gisCache, 'clearScope').mockRejectedValueOnce(new Error('storage unavailable'));
+    await h.controller.loginWithToken({ token: 'account-b-token', instance: 'https://www.speleodb.org' });
+    await expect(h.controller.refreshGisGeometries()).rejects.toThrow('storage unavailable');
+    expect(h.controller.gisGeometrySnapshot).toMatchObject({ status: 'error', records: {} });
+    expect(h.service.getGisGeometries).toHaveBeenCalledOnce();
+    await h.controller.refreshGisGeometries();
+    expect(failed).toHaveBeenCalledTimes(2);
+    expect(h.service.getGisGeometries).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('SpeleoDBController landmark CRUD', () => {
   const ONLINE_PREFS = { token: 'tok', instance: 'https://www.speleodb.org' };

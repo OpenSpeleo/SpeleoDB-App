@@ -24,6 +24,9 @@ import { registerTileCacheProtocol } from '../services/TileCacheService';
 import ProjectPanel from '../components/ProjectPanel';
 import LandmarkPanel from '../components/LandmarkPanel';
 import GpsPanel from '../components/GpsPanel';
+import { GisGeometryPanel } from '../components/GisGeometryPanel';
+import { useGisGeometries } from '../hooks/useGisGeometries';
+import { useDashboardGisGeometryActions } from './dashboard/useDashboardGisGeometryActions';
 import AppTabBar from '../components/AppTabBar';
 import type { MapColorMode } from '../types/mapColorMode';
 import type { MeasurementUnit } from '../types/measurementUnit';
@@ -334,6 +337,19 @@ const Dashboard: React.FC<DashboardProps> = ({
     onSaveAveragedPoint: handleAveragingSave,
   });
 
+  const gisGeometrySnapshot = useGisGeometries(controller);
+  const closeGisPanel = useCallback(() => onDashboardPanelChange(null), [onDashboardPanelChange]);
+  const gisActions = useDashboardGisGeometryActions({
+    source: controller,
+    snapshot: gisGeometrySnapshot,
+    mapRef,
+    panelActive: isActive && activeDashboardPanel === 'gis-geometries',
+    onClosePanel: closeGisPanel,
+  });
+  const refreshGisGeometries = useCallback(() => {
+    void controller.refreshGisGeometries().catch(() => {});
+  }, [controller]);
+
   // ---- Render ---------------------------------------------------------------
 
   if (!controller.isAuthenticated()) return null;
@@ -353,6 +369,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             downloadAreas={offlineMapsOpen ? downloadAreas.areas : EMPTY_DOWNLOAD_AREAS.areas}
             editingArea={editingArea}
             onOpenOfflineMaps={() => onDashboardPanelChange('offline-maps')}
+            gisLayers={{ featureCollection: gisActions.featureCollection }}
             projectLayers={{
               projects: sortedProjects,
               activeProjectIds: effectiveActiveProjectIds,
@@ -402,6 +419,21 @@ const Dashboard: React.FC<DashboardProps> = ({
             onToggleCountryCollapsed={handleToggleCountryCollapsed}
             onClose={closeProjectPanel}
             isOpen={activeDashboardPanel === 'projects'}
+          />
+
+          <GisGeometryPanel
+            isOpen={activeDashboardPanel === 'gis-geometries'}
+            onClose={closeGisPanel}
+            snapshot={gisGeometrySnapshot}
+            offline={isOfflineLocked}
+            visibility={gisActions.visibility}
+            visibleCount={gisActions.visibleCount}
+            onToggle={gisActions.toggle}
+            onZoom={gisActions.zoom}
+            onRetry={gisActions.retry}
+            onRefresh={refreshGisGeometries}
+            onShowAll={gisActions.showAll}
+            onHideAll={gisActions.hideAll}
           />
 
           {/* ---- Landmark panel ---- */}

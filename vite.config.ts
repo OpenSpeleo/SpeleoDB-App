@@ -44,7 +44,7 @@ baseLogger.info = (msg: string, options?: LogOptions) => {
 }
 
 const BUNDLE_BUDGET = {
-  maxEntryChunkBytes: 450_000,
+  maxEntryChunkBytes: 750_000,
   maxInitialJsBytes: 1_200_000,
   maxLazyChunkBytes: 1_900_000,
 } as const

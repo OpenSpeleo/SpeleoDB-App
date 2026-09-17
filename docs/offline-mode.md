@@ -209,6 +209,11 @@ areas. Manual rectangles share the same queue and storage lifecycle. See
   display visibility. Pending landmark operations are folded before conversion.
 - Each durable local or current-SHA remote GPS track uses one bounding rectangle
   around all its points, replacing the previous segment corridor.
+- Each accessible GIS Geometry uses its validated raw min/max coordinate bounds,
+  regardless of map visibility. Metadata and coordinates prepare in the
+  background; incomplete GIS reads preserve existing coverage. Confirmed access
+  loss removes that geometry's area independently of unrelated source failures.
+  See [GIS Geometry](gis-geometry.md) for scope isolation and restart repair.
 - Automatic bounds get 50 m padding; manual bounds are exact. Every area uses
   zoom 0–18 and one immutable plan shared across its requested layers.
 - Manual areas request satellite and both hillshades; automatic areas follow the

@@ -162,6 +162,38 @@ describe('download area geometry and validation', () => {
   });
 });
 describe('source adapters feed one rectangular area model', () => {
+  it('preserves GIS min/max bounds, pads flat lines, and bounds only the catalog label', () => {
+    const sources = automaticAreaInputs([], [], [], ['esri-satellite'], [{
+      id: 'geometry-1',
+      name: `  ${'A'.repeat(255)}  `,
+      color: '#377eb8',
+      sourceRevision: '4',
+      // A valid line may traverse this interval through intermediate vertices.
+      bounds: { west: -170, east: 170, south: 20, north: 20, crossesDateline: false },
+    }]);
+    expect(sources).toHaveLength(1);
+    const source = sources[0];
+    expect(source).toMatchObject({
+      type: DownloadAreaType.GisGeometry,
+      objectId: 'geometry-1',
+      sourceKey: 'gis-geometry:geometry-1',
+      sourceRevision: '4',
+      color: '#377eb8',
+      name: 'A'.repeat(120),
+      visible: false,
+    });
+    expect(source.topLeft[0]).toBeLessThan(-170);
+    expect(source.bottomRight[0]).toBeGreaterThan(170);
+    expect(source.topLeft[1]).toBeGreaterThan(20);
+    expect(source.bottomRight[1]).toBeLessThan(20);
+    expect(areaBounds(source).crossesDateline).toBe(false);
+    expect(parseDownloadAreaCatalog({
+      schemaVersion: 1,
+      revision: 1,
+      areas: [{ ...source, areaId: 'area-geometry', revision: 1 }],
+    }).areas[0].type).toBe(DownloadAreaType.GisGeometry);
+  });
+
   it('includes projects, each point overlay, and exactly one rectangle for an entire track', () => {
     const inputs = automaticAreaInputs(
       [

@@ -1,4 +1,5 @@
 import { DownloadAreaMapLayers } from './DownloadAreaMapLayers';
+import { GisGeometryMapLayers, type GisGeometryMapLayersProps } from './GisGeometryMapLayers';
 import type { DownloadArea } from '../../types/downloadArea';
 import { useCallback, useState, type PointerEventHandler, type RefObject } from 'react';
 import type { StyleSpecification } from 'maplibre-gl';
@@ -43,6 +44,7 @@ interface DashboardMapCanvasProps {
   onSelectedMapLayerIdChange: (layerId: MapLayerId) => void;
   isOfflineLocked: boolean;
   layerOfflineSync: Record<string, boolean>;
+  gisLayers?: GisGeometryMapLayersProps;
   projectLayers: ProjectMapLayersProps;
   overlayLayers: Omit<OverlayMapLayersProps, 'iconsLoaded' | 'iconAvailability'>;
   gpsLayers: GpsMapLayersProps;
@@ -60,6 +62,7 @@ interface MapViewportProps {
   downloadAreas?: readonly DownloadArea[];
   mapRef: RefObject<MapRef | null>;
   mapStyle: Record<string, unknown> | null;
+  gisLayers?: GisGeometryMapLayersProps;
   projectLayers: ProjectMapLayersProps;
   overlayLayers: Omit<OverlayMapLayersProps, 'iconsLoaded' | 'iconAvailability'>;
   gpsLayers: GpsMapLayersProps;
@@ -80,6 +83,7 @@ function MapViewport({
   downloadAreas = [],
   mapRef,
   mapStyle,
+  gisLayers,
   projectLayers,
   overlayLayers,
   gpsLayers,
@@ -118,6 +122,7 @@ function MapViewport({
       onMouseLeave={gestures.onMouseLeave}
     >
       <DownloadAreaMapLayers areas={downloadAreas} mapRef={mapRef} />
+      <GisGeometryMapLayers {...gisLayers} />
       <ProjectMapLayers {...projectLayers} />
       <OverlayMapLayers
         {...overlayLayers}
@@ -231,6 +236,7 @@ export function DashboardMapCanvas({
   onSelectedMapLayerIdChange,
   isOfflineLocked,
   layerOfflineSync,
+  gisLayers,
   projectLayers,
   overlayLayers,
   gpsLayers,
@@ -275,6 +281,7 @@ export function DashboardMapCanvas({
           downloadAreas={downloadAreas}
           mapRef={mapRef}
           mapStyle={shell.mapStyle}
+          gisLayers={gisLayers}
           projectLayers={projectLayers}
           overlayLayers={overlayLayers}
           gpsLayers={gpsLayers}

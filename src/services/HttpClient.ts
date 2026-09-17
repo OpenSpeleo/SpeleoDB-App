@@ -11,6 +11,7 @@ import { getPreferences } from './PreferencesService';
 import { getInstanceBaseUrl } from '../utils/instanceUrl';
 import { getAppleMarketingModelOrIdentifier } from '../utils/appleDeviceModelMap';
 import { createAbortError, throwIfAborted } from '../utils/abort';
+import { requestGisGeometryHttp, type GisGeometryHttpPlugin } from './GisGeometryHttp';
 
 // ==================== Public types ====================
 
@@ -54,11 +55,16 @@ export interface HttpRequest {
   timeoutMs?: number;
   /** Optional caller-owned cancellation. */
   signal?: AbortSignal;
+  /** Strict status/media-type-first parsing for typed JSON API reads. */
+  requireJson?: boolean;
+  /** Supported for the GIS read-only route family on every platform. */
+  cookiePolicy?: 'omit';
 }
 
 export interface HttpResponse<T = unknown> {
   status: number;
   data: T;
+  contentType?: string;
 }
 
 export interface HttpClientDeps {
@@ -66,6 +72,31 @@ export interface HttpClientDeps {
   isProduction?: () => boolean;
   getNativeUserAgent?: () => Promise<string | undefined>;
   nativeHttp?: Pick<typeof CapacitorHttp, 'request'>;
+  gisGeometryHttp?: GisGeometryHttpPlugin;
+}
+
+function assertCookieFreeRead(req: HttpRequest): void {
+  if (req.cookiePolicy !== 'omit') return;
+  const url = new URL(req.url);
+  const route = /^\/api\/v2\/gis-geometries\/(?:[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\/)?$/i;
+  if (req.method !== 'GET' || !route.test(url.pathname) || url.search || url.hash
+    || req.data !== undefined || req.formData || req.multipart
+    || Object.keys(req.headers ?? {}).some((key) => /^cookie2?$/i.test(key))) {
+    throw new TypeError('Cookie-free transport requires a GIS Geometry GET request.');
+  }
+}
+
+function strictJsonResponse<T>(status: number, contentType: string, body: string): HttpResponse<T> {
+  // Denials must remain denials even when Django returns HTML or malformed JSON.
+  if (status < 200 || status >= 300) return { status, contentType, data: null as T };
+  if (!/^application\/(?:[\w.-]+\+)?json(?:\s*;|\s*$)/i.test(contentType)) {
+    throw new TypeError('The server did not return JSON.');
+  }
+  try {
+    return { status, contentType, data: JSON.parse(body) as T };
+  } catch {
+    throw new TypeError('The server returned invalid JSON.');
+  }
 }
 
 export class MultipartPayloadError extends Error {
@@ -388,6 +419,7 @@ export class HttpClient {
       );
     }
     assertSafeRequestUrl(req.url, (this.deps.isProduction ?? (() => import.meta.env.PROD))());
+    assertCookieFreeRead(req);
 
     if ((this.deps.isNativePlatform ?? isNativePlatform)()) {
       return this.nativeRequest<T>(req, timeout);
@@ -437,6 +469,12 @@ export class HttpClient {
       this.deps.getNativeUserAgent,
     );
     throwIfAborted(signal);
+    if (req.cookiePolicy === 'omit') {
+      const response = await requestGisGeometryHttp(
+        req.url, nativeHeaders ?? {}, timeout, signal, this.deps.gisGeometryHttp,
+      );
+      return strictJsonResponse<T>(response.status, response.contentType, response.body);
+    }
     const nativeHttp = this.deps.nativeHttp ?? CapacitorHttp;
     const response = await nativeHttp.request({
       url: req.url,
@@ -490,6 +528,7 @@ export class HttpClient {
         signal: abortContext.signal,
         redirect: hasSensitiveRequestData(req) ? 'manual' : 'follow',
       };
+      if (req.cookiePolicy === 'omit') init.credentials = 'omit';
 
       // Prefer FormData when provided (e.g. login); otherwise send JSON body.
       // When using FormData the browser MUST set the Content-Type header itself
@@ -510,6 +549,15 @@ export class HttpClient {
         fetch(req.url, init),
         abortContext.signal,
       );
+
+      if (req.requireJson) {
+        const contentType = response.headers.get('content-type') ?? '';
+        const body = response.status >= 200 && response.status < 300
+          ? await this.awaitWithAbort(response.text(), abortContext.signal)
+          : '';
+        throwIfAborted(abortContext.signal);
+        return strictJsonResponse<T>(response.status, contentType, body);
+      }
 
       // Swallow malformed JSON only. Deadline/caller abort remains
       // authoritative through body parsing and final publication.

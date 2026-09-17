@@ -6,6 +6,7 @@ import type { MapLayerId } from '../types/mapLayer';
 import type { MapOverlayId } from '../types/mapOverlay';
 import type { TilePrefetchProjectInput } from '../types/tilePrefetch';
 import type { GpsTrackPrefetchSource } from '../controllers/GpsTrackCoordinator';
+import type { GisGeometryPrefetchSource } from '../types/gisGeometry';
 import { boundsForCoordinates, cornersForBounds } from './downloadAreaGeometry';
 
 const OVERLAY_TYPES: Record<MapOverlayId, DownloadAreaType> = {
@@ -20,6 +21,7 @@ export function automaticAreaInputs(
   overlays: Array<{ id: MapOverlayId; collection: GeoJSON.FeatureCollection }>,
   tracks: GpsTrackPrefetchSource[],
   layerIds: MapLayerId[],
+  geometries: readonly GisGeometryPrefetchSource[] = [],
 ): DownloadAreaInput[] {
   const base = { visible: false, layerIds };
   const areas: DownloadAreaInput[] = projects.map((project) => ({
@@ -68,6 +70,20 @@ export function automaticAreaInputs(
       name: 'GPS track',
       sourceKey: `${track.targetKind}:${track.targetId}`,
       sourceRevision: track.sourceRevision,
+    });
+  }
+  for (const geometry of geometries) {
+    // GIS uses coordinate minima/maxima, never the shortest wrapped interval.
+    // Its validated bounds also cover polygon interiors and zero-area lines.
+    areas.push({
+      ...base,
+      ...cornersForBounds(geometry.bounds, 50),
+      type: DownloadAreaType.GisGeometry,
+      objectId: geometry.id,
+      name: geometry.name.trim().slice(0, 120) || 'GIS Geometry',
+      color: geometry.color,
+      sourceKey: `gis-geometry:${geometry.id}`,
+      sourceRevision: geometry.sourceRevision,
     });
   }
   return areas;

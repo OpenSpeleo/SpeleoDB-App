@@ -29,6 +29,9 @@
 		B10000000000000000000004 /* SceneDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* SceneDelegateTests.swift */; };
 		B10000000000000000000005 /* PerformanceTimingLogFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* PerformanceTimingLogFormatterTests.swift */; };
 		B10000000000000000000006 /* AppDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* AppDelegateTests.swift */; };
+		B10000000000000000000007 /* GisGeometryHttpClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* GisGeometryHttpClientTests.swift */; };
+		A10000000000000000000007 /* GisGeometryHttpClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* GisGeometryHttpClient.swift */; };
+		A10000000000000000000008 /* GisGeometryHttpPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* GisGeometryHttpPlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -67,6 +70,9 @@
 		B10000000000000000000014 /* SceneDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegateTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000015 /* PerformanceTimingLogFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTimingLogFormatterTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000016 /* AppDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
+		B10000000000000000000017 /* GisGeometryHttpClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisGeometryHttpClientTests.swift; sourceTree = "<group>"; };
+		A10000000000000000000017 /* GisGeometryHttpClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisGeometryHttpClient.swift; sourceTree = "<group>"; };
+		A10000000000000000000018 /* GisGeometryHttpPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisGeometryHttpPlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -119,6 +125,8 @@
 				A10000000000000000000014 /* SensitiveDataProtection.swift */,
 				A10000000000000000000015 /* PerformanceTimingLogFormatter.swift */,
 				A10000000000000000000016 /* PerformanceDiagnosticsPlugin.swift */,
+				A10000000000000000000018 /* GisGeometryHttpPlugin.swift */,
+				A10000000000000000000017 /* GisGeometryHttpClient.swift */,
 				50A1B2C21FED79650016851F /* SceneDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
@@ -139,6 +147,7 @@
 				B10000000000000000000011 /* KeychainCredentialStoreTests.swift */,
 				B10000000000000000000012 /* SensitiveDataProtectionTests.swift */,
 				B10000000000000000000015 /* PerformanceTimingLogFormatterTests.swift */,
+				B10000000000000000000017 /* GisGeometryHttpClientTests.swift */,
 			);
 			path = AppTests;
 			sourceTree = "<group>";
@@ -293,6 +302,8 @@
 				A10000000000000000000004 /* SensitiveDataProtection.swift in Sources */,
 				A10000000000000000000005 /* PerformanceTimingLogFormatter.swift in Sources */,
 				A10000000000000000000006 /* PerformanceDiagnosticsPlugin.swift in Sources */,
+				A10000000000000000000008 /* GisGeometryHttpPlugin.swift in Sources */,
+				A10000000000000000000007 /* GisGeometryHttpClient.swift in Sources */,
 				50A1B2C31FED79650016851F /* SceneDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -307,6 +318,7 @@
 				B10000000000000000000003 /* AppBridgeViewControllerTests.swift in Sources */,
 				B10000000000000000000004 /* SceneDelegateTests.swift in Sources */,
 				B10000000000000000000005 /* PerformanceTimingLogFormatterTests.swift in Sources */,
+				B10000000000000000000007 /* GisGeometryHttpClientTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -534,7 +546,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/App";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SpeleoDB.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SpeleoDB";
 			};
 			name = Debug;
 		};
@@ -554,7 +566,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/App";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SpeleoDB.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SpeleoDB";
 			};
 			name = Release;
 		};

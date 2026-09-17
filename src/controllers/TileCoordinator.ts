@@ -26,6 +26,7 @@ import {
   type ActivePerformanceTiming,
 } from '../utils/performanceTiming';
 import type { GpsTrackPrefetchSource } from './GpsTrackCoordinator';
+import type { GisGeometryPrefetchSource } from '../types/gisGeometry';
 import { CancellationContext } from './CancellationContext';
 import { createSkippedTilePrefetchPhase } from './ProjectSyncPhases';
 
@@ -44,6 +45,7 @@ interface TileCoordinatorDependencies {
   hasNetworkAccess(): boolean;
   getProjects(): Project[];
   getGpsPrefetchSources(signal?: AbortSignal): Promise<GpsTrackPrefetchSource[]>;
+  getGisPrefetchSources(signal?: AbortSignal): Promise<GisGeometryPrefetchSource[]>;
   foldLandmarks?(collection: GeoJSON.FeatureCollection): Promise<GeoJSON.FeatureCollection>;
   notifyStateChanged(): void;
   deferWork?(work: () => void): void;
@@ -79,6 +81,7 @@ export class TileCoordinator {
   private readonly progressListeners = new Set<() => void>();
   private coverageRequestVersion = 0;
   private layerSettingsTail: Promise<void> = Promise.resolve();
+  private readonly sourceWork = new Set<Promise<unknown>>();
 
   constructor(
     private readonly dependencies: TileCoordinatorDependencies,
@@ -188,7 +191,15 @@ export class TileCoordinator {
     return operation;
   }
 
-  async scheduleSyncPhase(
+  scheduleSyncPhase(
+    context: CancellationContext,
+    projects: Project[],
+    forceRefresh = false,
+  ): Promise<TilePrefetchPhaseResult> {
+    return this.trackSourceWork(this.runSyncPhase(context, projects, forceRefresh));
+  }
+
+  private async runSyncPhase(
     context: CancellationContext,
     projects: Project[],
     forceRefresh = false,
@@ -251,9 +262,22 @@ export class TileCoordinator {
   queueProjectSync(projects: Project[], runId: number): void {
     this.areas.resumeManual();
     const context = this.beginContext('Project sync offline-map preparation', runId);
+    let started = false;
+    let complete!: () => void;
+    this.trackSourceWork(new Promise<void>((resolve) => { complete = resolve; }));
+    const finish = () => {
+      context.signal.removeEventListener('abort', cancelDeferred);
+      this.activeContexts.delete(context);
+      complete();
+    };
+    const cancelDeferred = () => { if (!started) finish(); };
+    context.signal.addEventListener('abort', cancelDeferred, { once: true });
     const run = () => {
+      if (started) return;
+      started = true;
+      context.signal.removeEventListener('abort', cancelDeferred);
       if (context.signal.aborted) {
-        this.activeContexts.delete(context);
+        finish();
         return;
       }
       void this.scheduleSyncPhase(context, projects)
@@ -262,9 +286,14 @@ export class TileCoordinator {
             console.warn('Background offline-map preparation failed:', error);
           }
         })
-        .finally(() => this.activeContexts.delete(context));
+        .finally(finish);
     };
-    (this.dependencies.deferWork ?? deferToNextTask)(run);
+    try {
+      (this.dependencies.deferWork ?? deferToNextTask)(run);
+    } catch (error) {
+      finish();
+      throw error;
+    }
   }
 
   async refreshOfflineMaps(): Promise<void> {
@@ -301,6 +330,18 @@ export class TileCoordinator {
     // atomically replaces the union while the prior coverage remains usable.
   }
 
+  /** Revoked GIS access cannot wait for unrelated source reads to succeed. */
+  async removeGisGeometrySources(
+    ids: readonly string[],
+    validate: () => void = () => {},
+  ): Promise<void> {
+    if (!ids.length) return;
+    this.supersedeCoverageRequests();
+    for (const context of this.activeContexts) context.abort('GIS geometry access changed');
+    this.activeContexts.clear();
+    await this.trackSourceWork(this.areas.removeGisGeometrySources(ids, validate));
+  }
+
   cancel(): void {
     this.supersedeCoverageRequests();
     for (const context of this.activeContexts) context.abort('Async operations invalidated');
@@ -310,6 +351,7 @@ export class TileCoordinator {
   }
 
   stopForLogout(): Promise<void> | void {
+    this.cancel();
     const current = this.engine;
     this.areas.dispose();
     current.dispose();
@@ -319,7 +361,24 @@ export class TileCoordinator {
     this.promptAcknowledged = false;
     this.consentRequested = false;
     setTileCacheOverLimitApprovedRuntime(false);
-    return Promise.all([current.waitForIdle(), this.areas.waitForIdle(), this.layerSettingsTail]).then(() => {});
+    return Promise.all([current.waitForIdle(), this.waitForIdle()]).then(() => {});
+  }
+
+  /** Includes work admitted before its deferred callback or source reads settle. */
+  async waitForIdle(): Promise<void> {
+    let preferences: Promise<void>;
+    do {
+      preferences = this.layerSettingsTail;
+      await Promise.allSettled([...this.sourceWork, preferences]);
+      await this.areas.waitForIdle();
+    } while (this.sourceWork.size > 0 || preferences !== this.layerSettingsTail);
+  }
+
+  private trackSourceWork<T>(work: Promise<T>): Promise<T> {
+    this.sourceWork.add(work);
+    const complete = () => { this.sourceWork.delete(work); };
+    void work.then(complete, complete);
+    return work;
   }
 
   persistentCleanupTasks(): Promise<void>[] {
@@ -382,15 +441,16 @@ export class TileCoordinator {
     context: CancellationContext,
     projects: Project[],
   ): Promise<CoverageSources> {
-    const [overlays, gpsSources, built] = await Promise.all([
-      Promise.all(MAP_OVERLAYS.map(async (overlay) => ({ id: overlay.id, collection: await this.loadOverlay(context, overlay.id) }))),
-      this.dependencies.getGpsPrefetchSources(context.signal),
-      this.buildProjectInputs(context, projects),
+    const [overlays, gpsSources, built, geometries] = await Promise.all([
+      Promise.all(MAP_OVERLAYS.map(async (overlay) => ({ id: overlay.id, collection: await this.trackSourceWork(this.loadOverlay(context, overlay.id)) }))),
+      this.trackSourceWork(this.dependencies.getGpsPrefetchSources(context.signal)),
+      this.trackSourceWork(this.buildProjectInputs(context, projects)),
+      this.trackSourceWork(this.dependencies.getGisPrefetchSources(context.signal)),
     ]);
     context.throwIfAborted();
     await this.yieldForRendering(context);
     return {
-      areas: automaticAreaInputs(built.inputs, overlays, gpsSources, this.getEnabledLayers().map((layer) => layer.id)),
+      areas: automaticAreaInputs(built.inputs, overlays, gpsSources, this.getEnabledLayers().map((layer) => layer.id), geometries),
       eligibleProjectCount: built.eligibleCount,
       scheduledProjectCount: built.inputs.length,
       failedProjectCount: built.failedCount,

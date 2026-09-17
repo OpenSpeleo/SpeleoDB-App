@@ -73,11 +73,13 @@ describe('SecureSessionStore', () => {
     });
 
     await expect(store.initialize()).resolves.toEqual({
+      cacheScopeId: expect.any(String),
       email: 'user@example.com',
       instance: 'https://speleodb.org',
       token: 'secure-token',
     });
     expect(store.getSession()).toEqual({
+      cacheScopeId: expect.any(String),
       email: 'user@example.com',
       instance: 'https://speleodb.org',
       token: 'secure-token',
@@ -112,6 +114,7 @@ describe('SecureSessionStore', () => {
       .toBeLessThan(vi.mocked(metadataStore.commit).mock.invocationCallOrder[0]);
     expect(getSecureToken()).toBe('legacy-token');
     expect(getMetadata()).toEqual({
+      cacheScopeId: expect.any(String),
       email: 'legacy@example.com',
       hasStoredSession: true,
       instance: 'https://speleodb.org',
@@ -236,11 +239,13 @@ describe('SecureSessionStore', () => {
     expect(vi.mocked(credentials.writeToken).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(metadataStore.commit).mock.invocationCallOrder[0]);
     expect(getMetadata()).toEqual({
+      cacheScopeId: expect.any(String),
       email: 'user@example.com',
       hasStoredSession: true,
       instance: 'https://speleodb.org',
     });
     expect(store.getSession()).toEqual({
+      cacheScopeId: expect.any(String),
       email: 'user@example.com',
       instance: 'https://speleodb.org',
       token: 'token',
@@ -257,6 +262,7 @@ describe('SecureSessionStore', () => {
     });
 
     expect(getMetadata()).toEqual({
+      cacheScopeId: expect.any(String),
       hasStoredSession: true,
       instance: 'https://example.com',
     });
@@ -290,11 +296,13 @@ describe('SecureSessionStore', () => {
     expect(credentials.writeToken).toHaveBeenNthCalledWith(2, 'old-token');
     expect(getSecureToken()).toBe('old-token');
     expect(getMetadata()).toEqual({
+      cacheScopeId: expect.any(String),
       email: 'old@example.com',
       hasStoredSession: true,
       instance: 'https://old.example',
     });
     expect(store.getSession()).toEqual({
+      cacheScopeId: expect.any(String),
       email: 'old@example.com',
       instance: 'https://old.example',
       token: 'old-token',
@@ -326,11 +334,13 @@ describe('SecureSessionStore', () => {
 
     expect(getSecureToken()).toBe('old-token');
     expect(getMetadata()).toEqual({
+      cacheScopeId: expect.any(String),
       email: 'old@example.com',
       hasStoredSession: true,
       instance: 'https://old.example',
     });
     expect(store.getSession()).toEqual({
+      cacheScopeId: expect.any(String),
       email: 'old@example.com',
       instance: 'https://old.example',
       token: 'old-token',
@@ -534,5 +544,54 @@ describe('SecureSessionStore', () => {
     await expect(store.initialize()).rejects.toThrow('corrupt storage');
 
     expect(store.getSession()).toBeNull();
+  });
+});
+
+describe('secure GIS cache ownership', () => {
+  it('migrates an opaque scope once and restores it without changing the token', async () => {
+    const h = createHarness({ secureToken: 'legacy-token', metadata: { hasStoredSession: true, instance: 'https://example.com' } });
+    const first = await h.store.initialize();
+    expect(first?.cacheScopeId).toEqual(expect.any(String));
+    expect(h.getMetadata().cacheScopeId).toBe(first?.cacheScopeId);
+    const restored = new SecureSessionStore(h.credentials, h.metadataStore);
+    expect((await restored.initialize())?.cacheScopeId).toBe(first?.cacheScopeId);
+    expect(h.credentials.writeToken).not.toHaveBeenCalled();
+    expect(h.metadataStore.commit).toHaveBeenCalledTimes(1);
+  });
+  it('keeps scope for the same secure credentials and rotates for token or origin changes', async () => {
+    const h = createHarness(); await h.store.initialize();
+    await h.store.establish({ token: 'one', instance: 'https://example.com' });
+    const a = h.store.getSession()!.cacheScopeId;
+    await h.store.establish({ token: 'one', instance: 'https://example.com' });
+    expect(h.store.getSession()!.cacheScopeId).toBe(a);
+    await h.store.establish({ token: 'two', instance: 'https://example.com' });
+    const b = h.store.getSession()!.cacheScopeId;
+    expect(b).not.toBe(a);
+    await h.store.establish({ token: 'two', instance: 'https://other.example.com' });
+    expect(h.store.getSession()!.cacheScopeId).not.toBe(b);
+    expect(JSON.stringify(h.getMetadata())).not.toContain('two');
+    await h.store.clear();
+    expect(h.getMetadata().cacheScopeId).toBeUndefined();
+  });
+  it('fails closed if the initial scope cannot be committed', async () => {
+    const h = createHarness({ secureToken: 'legacy-token', metadata: { hasStoredSession: true, instance: 'https://example.com' } });
+    vi.mocked(h.metadataStore.commit).mockImplementation(() => { throw new Error('storage'); });
+    await expect(h.store.initialize()).rejects.toThrow('storage');
+    expect(h.store.getSession()).toBeNull();
+    expect(h.getSecureToken()).toBe('legacy-token');
+  });
+  it('rolls back cache ownership with credentials when a native write is superseded', async () => {
+    const h = createHarness(); await h.store.initialize();
+    await h.store.establish({ token: 'old', instance: 'https://example.com' });
+    const oldScope = h.store.getSession()!.cacheScopeId;
+    const write = createDeferred<void>();
+    vi.mocked(h.credentials.writeToken).mockImplementationOnce(() => write.promise);
+    const abort = new AbortController();
+    const establishing = h.store.establish({ token: 'new', instance: 'https://example.com' }, { signal: abort.signal });
+    await vi.waitFor(() => expect(h.credentials.writeToken).toHaveBeenCalledWith('new'));
+    abort.abort(); write.resolve();
+    await expect(establishing).rejects.toMatchObject({ name: 'AbortError' });
+    expect(h.store.getSession()!.cacheScopeId).toBe(oldScope);
+    expect(h.getMetadata().cacheScopeId).toBe(oldScope);
   });
 });

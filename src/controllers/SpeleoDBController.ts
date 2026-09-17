@@ -1,4 +1,4 @@
-import type { ManualDownloadAreaInput } from '../types/downloadArea';
+import { DownloadAreaType, type ManualDownloadAreaInput } from '../types/downloadArea';
 /**
  * SpeleoDBController -- the "center of the app".
  *
@@ -95,6 +95,9 @@ import { TileCoordinator } from './TileCoordinator';
 import { GpsRecordingCoordinator } from './GpsRecordingCoordinator';
 import { GpsTrackCoordinator } from './GpsTrackCoordinator';
 import { GpsTrackMutationCoordinator } from './GpsTrackMutationCoordinator';
+import { GisGeometryCoordinator } from './GisGeometryCoordinator';
+import type { GisGeometryCacheService } from '../services/GisGeometryCacheService';
+import { EMPTY_GIS_GEOMETRY_SNAPSHOT, type GisGeometryMapRecord, type GisGeometrySnapshot } from '../types/gisGeometry';
 import { createAbortError, isAbortError, throwIfAborted } from '../utils/abort';
 import { CancellationContext } from './CancellationContext';
 import type {
@@ -163,6 +166,11 @@ export class SpeleoDBController {
   private readonly gpsTrackCoordinator: GpsTrackCoordinator;
   private readonly gpsTrackMutationCoordinator: GpsTrackMutationCoordinator;
   private readonly gpsRecordingCoordinator: GpsRecordingCoordinator;
+  private readonly gisGeometryCoordinator: GisGeometryCoordinator;
+  private gisReadyScope: string | null = null;
+  private gisPreparingScope: string | null = null;
+  private gisScopeCleanup: Promise<void> = Promise.resolve();
+  private readonly gisScopesToClear = new Set<string>();
   private _listeners = new Set<() => void>();
   private _isPurgingLocalData = false;
   private _asyncGeneration = 0;
@@ -185,6 +193,7 @@ export class SpeleoDBController {
       new CapacitorRecordingNotificationPermissionGuard(),
     gpsTrackGpxService: GpsTrackGpxService = new GpsTrackGpxService(),
     private projectGeoJSONAnalyzer: ProjectGeoJSONAnalyzerPort = new ProjectGeoJSONAnalyzer(),
+    gisGeometryCache?: GisGeometryCacheService,
   ) {
     this.sessionCoordinator = new SessionCoordinator({
       transport: this.service,
@@ -255,6 +264,21 @@ export class SpeleoDBController {
       pendingMutations: () => this.offlineMutations,
       hasNetworkAccess: () => this.hasNetworkAccess(),
     });
+    this.gisReadyScope = this.prefs.session.getSession()?.cacheScopeId ?? null;
+    this.gisGeometryCoordinator = new GisGeometryCoordinator({
+      service: this.service,
+      cache: gisGeometryCache,
+      getSession: () => this._isPurgingLocalData ? null : this.prefs.session.getSession(),
+      hasNetworkAccess: () => this.hasNetworkAccess(),
+      onRevoked: async (ids, scope, validate) => {
+        const assertOwned = () => {
+          validate();
+          if (this.prefs.session.getSession()?.cacheScopeId !== scope) throw createAbortError();
+        };
+        assertOwned();
+        await this.tileCoordinator.removeGisGeometrySources(ids, assertOwned);
+      },
+    });
     this.tileCoordinator = new TileCoordinator({
       cache: this.cache,
       preferences: {
@@ -264,6 +288,11 @@ export class SpeleoDBController {
       hasNetworkAccess: () => this.hasNetworkAccess(),
       getProjects: () => this.projectSyncCoordinator.projects,
       getGpsPrefetchSources: (signal) => this.gpsTrackCoordinator.getPrefetchSources(signal),
+      getGisPrefetchSources: async (signal) => {
+        await this.prepareGisGeometryScope();
+        throwIfAborted(signal);
+        return this.gisGeometryCoordinator.getPrefetchSources(signal);
+      },
       foldLandmarks: async (collection) => {
         await this.offlineMutations.load();
         return this.offlineMutations.foldLandmarks(collection);
@@ -304,6 +333,10 @@ export class SpeleoDBController {
       elapsedNow: () => performance.now(),
     });
     void this.gpsTrackCoordinator.load();
+    if (this.prefs.session.getSession()?.cacheScopeId) {
+      void this.trackOperation(this.gisGeometryCoordinator.load()
+        .then(() => this.repairGisGeometryAreas()).catch(() => {}));
+    }
     // Load persisted ops so the map folds them and the Pending tab appears on
     // startup (before any user action). Only refresh the UI when something was
     // actually restored, so a clean start does not perturb revisions.
@@ -454,7 +487,7 @@ export class SpeleoDBController {
   }
 
   waitForOfflineMapsIdle(): Promise<void> {
-    return this.tileCoordinator.areas.waitForIdle();
+    return this.tileCoordinator.waitForIdle();
   }
 
   setOfflineDownloadsForeground(active: boolean): void {
@@ -633,6 +666,7 @@ export class SpeleoDBController {
     this.sessionCoordinator.invalidate();
     this.projectSyncCoordinator.cancel();
     this.tileCoordinator.cancel();
+    this.gisGeometryCoordinator.reset();
   }
 
   private captureAsyncGeneration(): number {
@@ -834,6 +868,11 @@ export class SpeleoDBController {
 
       await Promise.all(teardownTasks);
       await this.waitForTrackedOperations();
+      await this.gisGeometryCoordinator.waitForIdle();
+      await this.gisScopeCleanup.catch(() => { cleanupFailed = true; });
+      this.gisReadyScope = null;
+      this.gisPreparingScope = null;
+      this.gisScopesToClear.clear();
       if (this.gpsTrackCoordinator.hasPendingPersistence) {
         try {
           await this.gpsTrackCoordinator.waitForPersistence();
@@ -879,7 +918,112 @@ export class SpeleoDBController {
    *    download any new/changed geojson files in the background.
    */
   async syncProjects(): Promise<SyncProjectsResult> {
-    return this.trackOperation(this.projectSyncCoordinator.sync());
+    // Register the metadata barrier before the project phase can enqueue tiles.
+    // A geometry failure remains separately observable and cannot block projects.
+    const geometries = this.syncGisGeometryMetadata();
+    const projects = this.trackOperation(this.projectSyncCoordinator.sync());
+    const [result] = await Promise.all([projects, geometries]);
+    return result;
+  }
+
+  get gisGeometrySnapshot(): GisGeometrySnapshot {
+    const snapshot = this.gisGeometryCoordinator.getSnapshot();
+    return snapshot.scope && snapshot.scope !== this.prefs.session.getSession()?.cacheScopeId
+      ? EMPTY_GIS_GEOMETRY_SNAPSHOT : snapshot;
+  }
+
+  subscribeGisGeometries(listener: () => void): () => void {
+    return this.gisGeometryCoordinator.subscribe(listener);
+  }
+
+  async getGisGeometryDetail(id: string): Promise<GisGeometryMapRecord> {
+    return this.runUserOperation(async (context) => {
+      await this.prepareGisGeometryScope();
+      context.throwIfAborted();
+      await this.gisGeometryCoordinator.load();
+      context.throwIfAborted();
+      return this.gisGeometryCoordinator.ensureDetail(id, { signal: context.signal, priority: 'foreground' });
+    });
+  }
+
+  async refreshGisGeometries(): Promise<void> {
+    await this.runUserOperation(async (context) => {
+      await this.prepareGisGeometryScope();
+      context.throwIfAborted();
+      await this.gisGeometryCoordinator.refresh();
+      context.throwIfAborted();
+      await this.repairGisGeometryAreas();
+      context.throwIfAborted();
+      if (this.hasNetworkAccess()) this.tileCoordinator.queueProjectSync(this.projects, context.runId);
+    });
+  }
+
+  private syncGisGeometryMetadata(): Promise<void> {
+    if (!this.prefs.session.getSession()?.cacheScopeId || this._isPurgingLocalData) return Promise.resolve();
+    return this.trackOperation(this.prepareGisGeometryScope()
+      .then(() => this.gisGeometryCoordinator.refresh())
+      .then(() => this.repairGisGeometryAreas()).catch(() => {}));
+  }
+
+  /** One cleanup barrier prevents old account coordinates or area rows crossing sessions. */
+  private prepareGisGeometryScope(): Promise<void> {
+    const scope = this.prefs.session.getSession()?.cacheScopeId;
+    if (!scope || this._isPurgingLocalData) return Promise.reject(createAbortError('No active GIS Geometry account.'));
+    if (scope === this.gisReadyScope) return Promise.resolve();
+    if (scope === this.gisPreparingScope) return this.gisScopeCleanup;
+    if (this.gisReadyScope) this.gisScopesToClear.add(this.gisReadyScope);
+    this.gisPreparingScope = scope;
+    this.gisGeometryCoordinator.reset();
+    const generation = this._asyncGeneration;
+    const validate = () => {
+      if (this._isPurgingLocalData || generation !== this._asyncGeneration || this.prefs.session.getSession()?.cacheScopeId !== scope) throw createAbortError();
+    };
+    const previous = this.gisScopeCleanup;
+    const cleanup = previous.catch(() => {}).then(async () => {
+      validate();
+      await this.gisGeometryCoordinator.waitForIdle();
+      validate();
+      for (const oldScope of this.gisScopesToClear) {
+        await this.gisGeometryCoordinator.clearScope(oldScope);
+        validate();
+      }
+      await this.tileCoordinator.areas.preload();
+      validate();
+      const ids = this.downloadAreasSnapshot.areas
+        .filter(area => area.type === DownloadAreaType.GisGeometry && area.objectId)
+        .map(area => area.objectId!);
+      if (ids.length) await this.tileCoordinator.removeGisGeometrySources(ids, validate);
+      validate();
+      this.gisScopesToClear.clear();
+      this.gisReadyScope = scope;
+    }).catch(error => {
+      if (!isAbortError(error) && generation === this._asyncGeneration) this.gisGeometryCoordinator.reportError();
+      throw error;
+    }).finally(() => {
+      if (this.gisScopeCleanup === cleanup) this.gisPreparingScope = null;
+    });
+    this.gisScopeCleanup = cleanup;
+    return cleanup;
+  }
+
+  /** Repair catalog cleanup interrupted between the two independent databases. */
+  private async repairGisGeometryAreas(): Promise<void> {
+    const snapshot = this.gisGeometrySnapshot;
+    if (!snapshot.scope || snapshot.status === 'loading' || snapshot.status === 'error') return;
+    const generation = this._asyncGeneration;
+    const accessible = new Set(snapshot.items.map(item => item.id));
+    const validate = () => {
+      const current = this.gisGeometrySnapshot;
+      if (this._isPurgingLocalData || generation !== this._asyncGeneration
+        || current.items.length !== accessible.size || current.items.some(item => !accessible.has(item.id))
+        || this.prefs.session.getSession()?.cacheScopeId !== snapshot.scope) throw createAbortError();
+    };
+    await this.tileCoordinator.areas.preload();
+    validate();
+    const removed = this.downloadAreasSnapshot.areas
+      .filter(area => area.type === DownloadAreaType.GisGeometry && area.objectId && !accessible.has(area.objectId))
+      .map(area => area.objectId!);
+    if (removed.length) await this.tileCoordinator.removeGisGeometrySources(removed, validate);
   }
 
   /**

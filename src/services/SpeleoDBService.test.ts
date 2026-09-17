@@ -495,3 +495,22 @@ describe('SpeleoDBService', () => {
     });
   });
 });
+
+describe('GIS Geometry read-only requests', () => {
+  it('uses documented token-only JSON collection/detail URLs with no request body', async () => {
+    const http = createMockHttpClient({ status: 200, data: [] });
+    const service = new SpeleoDBService(http);
+    const abort = new AbortController();
+    await service.getGisGeometries(INSTANCE, TOKEN, { signal: abort.signal, timeoutMs: 1234 });
+    await service.getGisGeometry(INSTANCE, TOKEN, '12345678-1234-4234-8234-123456789abc');
+    expect(http.calls).toEqual([
+      { url: `${INSTANCE}/api/v2/gis-geometries/`, method: 'GET', headers: { Authorization: AUTH_HEADER, Accept: 'application/json' }, signal: abort.signal, timeoutMs: 1234, requireJson: true, cookiePolicy: 'omit' },
+      { url: `${INSTANCE}/api/v2/gis-geometries/12345678-1234-4234-8234-123456789abc/`, method: 'GET', headers: { Authorization: AUTH_HEADER, Accept: 'application/json' }, signal: undefined, timeoutMs: undefined, requireJson: true, cookiePolicy: 'omit' },
+    ]);
+  });
+  it('rejects malformed detail UUIDs before transport admission', async () => {
+    const http = createMockHttpClient();
+    await expect(new SpeleoDBService(http).getGisGeometry(INSTANCE, TOKEN, '../other')).rejects.toThrow();
+    expect(http.calls).toEqual([]);
+  });
+});

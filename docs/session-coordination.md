@@ -61,3 +61,11 @@ characterization coverage for façade behavior and cross-subsystem teardown.
 The extraction adds no timers, polling, persistence reads, or network calls.
 Session state getters return stable references between transitions, preserving
 `useSyncExternalStore` behavior without controller-owned duplicate snapshots.
+
+GIS Geometry adds a non-secret random cache scope to secure-session metadata.
+The façade owns its cleanup barrier: invalidate old work, drain accepted writes,
+clear the previous scoped geometry cache and automatic GIS areas, then allow the
+replacement account's reads. Logout includes geometry requests and tile source
+admissions in its drain boundary. Neither an email nor the token is a cache key;
+token sessions can have no email. See [GIS Geometry](gis-geometry.md) for
+membership authority and repair across the separate cache/tile databases.

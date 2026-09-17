@@ -1168,3 +1168,14 @@ describe('SessionCoordinator', () => {
     });
   });
 });
+
+
+describe('GIS cache scope through session validation', () => {
+  it('preserves an existing opaque scope through origin normalization and token validation', async () => {
+    const { coordinator, store } = createHarness({ session: {
+      instance: 'https://WWW.SPELEODB.ORG/', token: 'stored-token', cacheScopeId: 'stable-cache-scope',
+    } });
+    expect(await coordinator.validateSession()).toBe('ok');
+    expect(store.getSession()?.cacheScopeId).toBe('stable-cache-scope');
+  });
+});

@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(CredentialStorePlugin.class);
         registerPlugin(PerformanceDiagnosticsPlugin.class);
+        registerPlugin(GisGeometryHttpPlugin.class);
         // Local Android-only plugin used to request POST_NOTIFICATIONS (Android 13+)
         // for the background GPS recording foreground-service notification.
         registerPlugin(RecordingNotificationPermissionPlugin.class);

@@ -211,11 +211,11 @@ export class CacheStore {
   }
 
   /**
-   * Delete a single entry from a store.
+   * Delete an entry or key range from a store.
    */
   async delete(
     store: StoreName,
-    key: string,
+    key: string | IDBKeyRange,
     options: CacheStoreWriteOptions = {},
   ): Promise<void> {
     return this.write(store, (objectStore) => objectStore.delete(key), 'delete', options);

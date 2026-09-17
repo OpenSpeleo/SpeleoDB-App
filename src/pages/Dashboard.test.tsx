@@ -15,6 +15,8 @@ import { LandmarkMutationError } from '../types/landmark';
 import { allowConsoleWarn } from '../test/consoleGuard';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
 import { measureProjectGeoJSONBounds } from '../utils/projectGeoJSONBounds';
+import { gisRecord, gisSnapshot } from '../test/gisGeometryFixtures';
+import { EMPTY_GIS_GEOMETRY_SNAPSHOT, type GisGeometrySnapshot } from '../types/gisGeometry';
 
 // jsdom lacks PointerEvent -- polyfill so fireEvent.pointerDown/Up creates
 // events with pointerId/pointerType that the pointer-capture handlers rely on.
@@ -266,6 +268,7 @@ vi.mock('../components/AppTabBar', () => ({
   }) => (
     <div data-testid="app-tab-bar">
       <button data-testid="projects-tab" onClick={() => { onTabPress?.(); onDashboardPanelChange?.('projects'); }}>Projects</button>
+      <button data-testid="gis-geometries-tab" onClick={() => { onTabPress?.(); onDashboardPanelChange?.('gis-geometries'); }}>GIS</button>
       <button data-testid="gps-tab" onClick={() => { onTabPress?.(); onDashboardPanelChange?.('gps'); }}>GPS</button>
       <button data-testid="map-tab" onClick={() => { onTabPress?.(); onDashboardPanelChange?.(null); }}>Map</button>
     </div>
@@ -516,7 +519,16 @@ let mockLandmarksRevision = 0;
 let mockMapDataRevision = 1;
 let mockGpsRecordingState: 'idle' | 'recording' | 'paused' = 'idle';
 let mockGpsTracks: GpsTrackListItem[] = [];
+let mockGisSnapshot: GisGeometrySnapshot = EMPTY_GIS_GEOMETRY_SNAPSHOT;
+const gisListeners = new Set<() => void>();
 const mockController = {
+  get gisGeometrySnapshot() { return mockGisSnapshot; },
+  subscribeGisGeometries(listener: () => void) {
+    gisListeners.add(listener);
+    return () => { gisListeners.delete(listener); };
+  },
+  getGisGeometryDetail: vi.fn(async (id: string) => mockGisSnapshot.records[id]),
+  refreshGisGeometries: vi.fn(async () => {}),
   syncProjects: mockSyncProjects,
   getProjectGeoJSON: mockGetProjectGeoJSON,
   getProjectMapData: mockGetProjectMapData,
@@ -831,6 +843,7 @@ function mixedProjectFeatureCollection(): GeoJSON.FeatureCollection {
 describe('Dashboard', () => {
   afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
+  mockGisSnapshot = EMPTY_GIS_GEOMETRY_SNAPSHOT;
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
       disconnect() {}
@@ -1019,6 +1032,30 @@ describe('Dashboard', () => {
     await waitFor(() => {
       expect(mockSyncProjects).toHaveBeenCalledOnce();
     });
+  });
+
+  it('wires GIS metadata, map toggle, row zoom and revocation through the real panel', async () => {
+    const record = gisRecord();
+    const id = record.detail.id;
+    mockGisSnapshot = gisSnapshot({ records: { [id]: record } });
+    renderDashboard();
+    await userEvent.click(screen.getByTestId('gis-geometries-tab'));
+    const panel = screen.getByTestId('gis-geometry-panel');
+    expect(panel).toHaveAttribute('aria-hidden', 'false');
+    expect(within(panel).getByText('0 of 1 visible')).toBeInTheDocument();
+    const source = () => document.querySelector('[data-source-id="gis-geometries-source"]');
+    expect(source()?.getAttribute('data-source-data')).toContain('"features":[]');
+    await userEvent.click(screen.getByTestId(`gis-geometry-toggle-${id}`).querySelector('input')!);
+    await waitFor(() => expect(source()?.getAttribute('data-source-data')).toContain(record.detail.name));
+    expect(mockMapFitBounds).not.toHaveBeenCalled();
+    await userEvent.click(within(panel).getByRole('button', { name: `Zoom to ${record.detail.name}` }));
+    await waitFor(() => expect(panel).toHaveAttribute('aria-hidden', 'true'));
+    expect(mockMapFitBounds).toHaveBeenCalledWith([[-87.5, 20.1], [-87.499, 20.1]], { padding: 60, maxZoom: 16, duration: 800 });
+    act(() => {
+      mockGisSnapshot = gisSnapshot({ items: [], records: {} });
+      gisListeners.forEach(listener => listener());
+    });
+    expect(source()?.getAttribute('data-source-data')).toContain('"features":[]');
   });
 
   it('opens project panel when Projects tab is clicked', async () => {

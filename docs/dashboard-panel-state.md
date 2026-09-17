@@ -2,12 +2,13 @@
 
 ## Intent
 
-The Projects, Landmarks, GPS, and Offline Maps panels occupy the same dashboard
-slot and are mutually exclusive. Their state is therefore one navigation value,
-not three independent booleans:
+The Projects, Geometries, Landmarks, GPS, and Offline Maps panels occupy the
+same dashboard slot and are mutually exclusive. Their state is therefore one
+navigation value, not independent booleans:
 
 ```ts
-type DashboardPanel = "projects" | "landmarks" | "gps" | "offline-maps" | null;
+type DashboardPanel =
+  "projects" | "gis-geometries" | "landmarks" | "gps" | "offline-maps" | null;
 ```
 
 This representation makes simultaneous panels impossible and replaces six
@@ -60,6 +61,11 @@ and inactive-page unmount cleanup. `AppTabBar.test.tsx` covers route navigation,
 activation, replacement, same-tab close, Map close, and recording/pending
 presentation. Dashboard, Settings, Pending, and shared-state tests exercise the
 page integration contract.
+
+Projects, Geometries and GPS share `DashboardSidePanel` for panel positioning,
+safe areas, backdrop, Escape, focus return and inert closed content. Geometries
+uses the Projects list presentation; its visibility and name-tap framing are
+documented in [GIS Geometry](gis-geometry.md).
 
 Offline Maps opens from the map download button or Settings. Selection hides the
 tab bar and other map controls; dirty route departure is guarded by the editor.

@@ -2,7 +2,7 @@ import {
   planOfflineMapInWorker,
   collectOfflineMapCoordinates,
 } from './OfflineMapPlanner';
-import { areaBounds } from './downloadAreaGeometry';
+import { areaBounds, countAreaCoordinates, MAX_AREA_COORDINATES } from './downloadAreaGeometry';
 import { automaticAreaInputs } from './downloadAreaSources';
 import * as tileRepository from './tileCache/TileCacheRepository';
 import { DOWNLOAD_AREA_COLORS } from './downloadAreaColors';
@@ -84,6 +84,113 @@ afterEach(async () => {
 });
 
 describe('download area production lifecycle', () => {
+  it('shares GIS coverage with other sources and retains plans, pins, and area identity for metadata changes', async () => {
+    online = false;
+    const geometry = automatic({
+      type: DownloadAreaType.GisGeometry,
+      objectId: 'geometry-1',
+      sourceKey: 'gis-geometry:geometry-1',
+      sourceRevision: '1',
+      color: '#377eb8',
+    });
+    const project = automatic({ objectId: 'geometry-1' });
+    await service.reconcileAutomatic([project, geometry]);
+    await service.saveManual(small);
+    online = true;
+    service.resume();
+    await service.waitForIdle();
+    const before = await readDownloadAreaCatalog();
+    const previousArea = before.areas.find((area) => area.type === DownloadAreaType.GisGeometry)!;
+    const generations = await getOfflineMapGenerations();
+    const stats = await getTileCacheStats();
+    const tileCount = countAreaCoordinates(small) * MAP_LAYERS.length;
+    expect(fetchMock).toHaveBeenCalledTimes(tileCount);
+    expect(new Set(fetchMock.mock.calls.map(([url]) => url)).size).toBe(tileCount);
+    expect(planMock).toHaveBeenCalledOnce();
+    await service.reconcileAutomatic([project, { ...geometry, name: 'Renamed', color: '#aabbcc', sourceRevision: '2' }]);
+    await service.waitForIdle();
+    const changed = (await readDownloadAreaCatalog()).areas.find((area) => area.type === DownloadAreaType.GisGeometry)!;
+    expect(changed).toMatchObject({ areaId: previousArea.areaId, revision: previousArea.revision, sourceRevision: '2', name: 'Renamed', color: '#aabbcc' });
+    const remaining = (await readDownloadAreaCatalog()).areas.filter((area) => area.type !== DownloadAreaType.GisGeometry);
+    await service.removeGisGeometrySources(['geometry-1']);
+    await service.waitForIdle();
+    expect((await readDownloadAreaCatalog()).areas).toEqual(remaining);
+    expect(await getOfflineMapGenerations()).toEqual(generations);
+    expect(await getTileCacheStats()).toEqual(stats);
+    expect(planMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(tileCount);
+  });
+
+  it('preserves all active layers when changed GIS bounds fail replacement on one provider', async () => {
+    const geometry = automatic({ type: DownloadAreaType.GisGeometry, objectId: 'geometry-1', sourceKey: 'gis-geometry:geometry-1', sourceRevision: '1' });
+    await service.reconcileAutomatic([geometry]);
+    await service.waitForIdle();
+    const before = await getOfflineMapGenerations();
+    const original = service.getSnapshot().areas[0];
+    fetchMock.mockImplementation(async (url: string) => new Response(new Uint8Array([1]), {
+      status: url.includes('Hillshade_Dark') ? 404 : 200,
+      headers: { 'content-type': 'image/png' },
+    }));
+    await service.reconcileAutomatic([{ ...geometry, sourceRevision: '2', topLeft: [8.00001, 46.00002], bottomRight: [8.00002, 46.00001] }]);
+    await service.waitForIdle();
+    expect(service.getSnapshot().areas[0]).toMatchObject({ areaId: original.areaId, revision: 2, sourceRevision: '2' });
+    expect(service.getSnapshot().progress[original.areaId].status).toBe('incomplete');
+    expect((await getOfflineMapGenerations()).filter((generation) => generation.status === 'active')).toEqual(before);
+  });
+
+  it('isolates a contract-sized GIS geometry whose padded Mercator rectangle exceeds the tile cap', async () => {
+    // Five distinct vertices at longitudes -180,-90,0,90,180 with monotonically
+    // increasing latitude 85..85.00005 have a valid 19.39713072 km² bbox.
+    const [oversized] = automaticAreaInputs([], [], [], ['esri-satellite'], [{
+      id: 'geometry-large', name: 'High latitude line', color: '#377eb8', sourceRevision: '1',
+      bounds: { west: -180, east: 180, south: 85, north: 85.00005, crossesDateline: false },
+    }]);
+    expect(countAreaCoordinates(oversized)).toBe(3_325_951);
+    expect(countAreaCoordinates(oversized)).toBeGreaterThan(MAX_AREA_COORDINATES);
+    await service.reconcileAutomatic([oversized, automatic()]);
+    await service.waitForIdle();
+    const snapshot = service.getSnapshot();
+    const large = snapshot.areas.find((area) => area.type === DownloadAreaType.GisGeometry)!;
+    const peer = snapshot.areas.find((area) => area.type === DownloadAreaType.Project)!;
+    expect(snapshot.progress[large.areaId].status).toBe('too-large');
+    expect(snapshot.progress[peer.areaId].status).toBe('downloaded');
+    expect(planMock).toHaveBeenCalledOnce();
+    expect(planMock.mock.calls[0][0].projects).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(countAreaCoordinates(small) * MAP_LAYERS.length);
+  });
+
+  it('validates revocation ownership inside the catalog transaction before deleting a regranted geometry', async () => {
+    online = false;
+    await service.reconcileAutomatic([automatic({ type: DownloadAreaType.GisGeometry, objectId: 'geometry-1', sourceKey: 'gis-geometry:geometry-1' })]);
+    const before = await readDownloadAreaCatalog();
+    await expect(service.removeGisGeometrySources(['geometry-1'], () => {
+      throw new DOMException('Access changed again', 'AbortError');
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await readDownloadAreaCatalog()).toEqual(before);
+    expect(service.getSnapshot().areas).toEqual(before.areas);
+  });
+
+  it('does not restore revoked GIS catalog rows or pending tile claims when transport ignores abort', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    fetchMock.mockImplementation(async () => {
+      await gate;
+      return new Response(new Uint8Array([1]), { headers: { 'content-type': 'image/png' } });
+    });
+    await service.reconcileAutomatic([automatic({ type: DownloadAreaType.GisGeometry, objectId: 'geometry-1', sourceKey: 'gis-geometry:geometry-1' })]);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    try {
+      await service.removeGisGeometrySources(['geometry-1']);
+      expect((await readDownloadAreaCatalog()).areas).toEqual([]);
+    } finally {
+      release();
+    }
+    await service.waitForIdle();
+    expect((await readDownloadAreaCatalog()).areas).toEqual([]);
+    expect(await getOfflineMapGenerations()).toEqual([]);
+    expect((await getTileCacheStats()).pinnedTileCount).toBe(0);
+  });
+
   it('downloads ordinary and polar sources together without rejecting the catalog', async () => {
     const polar = automaticAreaInputs(
       [],

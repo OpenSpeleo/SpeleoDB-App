@@ -7,6 +7,8 @@
  */
 
 import { API, GPS, HEADERS } from '../constants';
+import { GIS_GEOMETRY_ENDPOINT } from '../gisGeometry/constants';
+import { isGisGeometryId } from '../gisGeometry/validation';
 import { getInstanceBaseUrl } from '../utils/instanceUrl';
 import type { HttpClient, HttpResponse, HttpRequest } from './HttpClient';
 import type { AuthTokenResponse } from '../types';
@@ -88,6 +90,28 @@ export class SpeleoDBService {
       headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
       timeoutMs: options.timeoutMs,
       signal: options.signal,
+    });
+  }
+
+  /** Metadata-first, token-only GIS reads. No permission or mutation operations. */
+  async getGisGeometries(instance: string, token: string, options: ServiceRequestOptions = {}): Promise<HttpResponse<unknown>> {
+    return this.gisGeometryGet(instance, token, GIS_GEOMETRY_ENDPOINT, options);
+  }
+
+  async getGisGeometry(instance: string, token: string, id: string, options: ServiceRequestOptions = {}): Promise<HttpResponse<unknown>> {
+    if (!isGisGeometryId(id)) throw new TypeError('Invalid GIS Geometry identifier.');
+    return this.gisGeometryGet(instance, token, `${GIS_GEOMETRY_ENDPOINT}${id}/`, options);
+  }
+
+  private gisGeometryGet(instance: string, token: string, endpoint: string, options: ServiceRequestOptions): Promise<HttpResponse<unknown>> {
+    return this.http.request({
+      url: getInstanceBaseUrl(instance) + endpoint,
+      method: 'GET',
+      headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}`, Accept: 'application/json' },
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+      requireJson: true,
+      cookiePolicy: 'omit',
     });
   }
 

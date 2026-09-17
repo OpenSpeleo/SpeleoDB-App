@@ -2,6 +2,12 @@
   "schemaVersion": 1,
   "classifications": [
     {
+      "id": "gis-contract-data",
+      "owner": "mobile",
+      "verification": ["source-contract-check", "unit", "build"],
+      "patterns": ["^src/gisGeometry/.*\\.json$"]
+    },
+    {
       "id": "production-typescript",
       "owner": "mobile",
       "verification": ["lint", "typecheck", "unit", "integration", "coverage", "e2e-as-applicable"],

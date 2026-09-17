@@ -99,10 +99,18 @@ is cancelled when the login page leaves the tree.
 
 Successful online login from either method uses one coordinator session-setup
 path. `SecureSessionStore` writes the normalized token to the native vault
-first, commits only non-secret metadata (`instance`, optional `email`, and a
-session-presence marker) to `PreferencesService`, and only then publishes the
-authenticated controller state. A storage failure leaves the caller
-unauthenticated and restores the previous secure token.
+first, commits only non-secret metadata (`instance`, optional `email`, random
+`cacheScopeId`, and a session-presence marker) to `PreferencesService`, and only
+then publishes the authenticated controller state. A storage failure leaves the
+caller unauthenticated and restores the previous secure token.
+
+`cacheScopeId` isolates GIS Geometry catalog/detail keys even for token sessions
+without an email. It survives restoration and instance normalization, rotates on
+a new successful login, and is assigned once when restoring older metadata. It
+is a random cache namespace, not a credential or a server user identifier. GIS
+reads omit Django cookies so session-first server authentication cannot select a
+different account from the intended token; see [GIS Geometry](gis-geometry.md)
+for the native transport boundary.
 
 Controller-wide application invalidation is a required cross-account safety gate
 and completes before the secure credential commit. If it fails, no new session
