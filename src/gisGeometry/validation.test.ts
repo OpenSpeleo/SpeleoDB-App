@@ -27,6 +27,11 @@ describe('GIS Geometry API validation', () => {
       can_write: level >= 2, can_delete: level === 3, can_manage_permissions: level === 3,
     })])).toHaveLength(1);
   });
+  it('counts Unicode code points like the backend name limit', () => {
+    const name = '🦇'.repeat(255);
+    expect(parseGisGeometryList([geometryMetadata({ name })])[0].name).toBe(name);
+    expect(() => parseGisGeometryList([geometryMetadata({ name: `${name}x` })])).toThrow();
+  });
   it.each([
     { revision: Number.MAX_SAFE_INTEGER + 1 }, { revision: 0 }, { id: '../../other' }, { color: 'url(evil)' },
     { user_permission_level: 0 }, { user_permission_level_label: 'ADMIN' }, { creation_date: '2026-01-01' },

@@ -8,8 +8,9 @@ failure can leave all tile counts at zero.
 Represent authority per source type (or per identity when the provider supports
 it). Replace authoritative inputs, retain saved rows for unresolved inputs and
 plan their combined union. A valid empty collection can remove rows; a transport
-failure cannot. Slow optional sources must not delay publication of ready core
-areas. Keep the number of publications bounded and use the same catalog/engine.
+failure cannot. A slow source type must not delay publication of any ready type,
+regardless of which feature introduced it. Keep the number of publications
+bounded and use the same catalog/engine.
 
 Pre-area legacy generations lack reconstructable rectangle ownership. Keep their
 pins until every automatic source is authoritative and the new union completes.

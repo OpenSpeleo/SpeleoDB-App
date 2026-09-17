@@ -1,7 +1,7 @@
 import Foundation
 
 /// A scoped GET transport: shared browser sessions never participate in token reads.
-final class GisGeometryHttpClient: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+final class GisGeometryHttpClient: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     struct Response {
         let status: Int
         let body: String
@@ -12,6 +12,10 @@ final class GisGeometryHttpClient: NSObject, URLSessionTaskDelegate, @unchecked 
     private struct Pending {
         let task: URLSessionDataTask
         let session: URLSession
+        let completion: (Result<Response, Error>) -> Void
+        var headerResponse: Response?
+        var data = Data()
+        var cancelled = false
     }
     private let lock = NSLock()
     private var pending: [String: Pending] = [:]
@@ -54,29 +58,15 @@ final class GisGeometryHttpClient: NSObject, URLSessionTaskDelegate, @unchecked 
             session.invalidateAndCancel()
             throw RequestError.invalidRequest
         }
-        let task = session.dataTask(with: request) { [weak self] data, response, error in
-            self?.lock.lock()
-            let completed = self?.pending.removeValue(forKey: id)
-            self?.lock.unlock()
-            completed?.session.finishTasksAndInvalidate()
-            if let error = error { completion(.failure(error)); return }
-            guard let response = response as? HTTPURLResponse else {
-                completion(.failure(RequestError.invalidResponse)); return
-            }
-            completion(.success(Response(
-                status: response.statusCode,
-                body: (200..<300).contains(response.statusCode)
-                    ? String(data: data ?? Data(), encoding: .utf8) ?? "" : "",
-                contentType: response.value(forHTTPHeaderField: "Content-Type") ?? ""
-            )))
-        }
-        pending[id] = Pending(task: task, session: session)
+        let task = session.dataTask(with: request)
+        pending[id] = Pending(task: task, session: session, completion: completion)
         lock.unlock()
         task.resume()
     }
 
     func cancel(id: String) {
         lock.lock()
+        pending[id]?.cancelled = true
         let task = pending[id]?.task
         lock.unlock()
         task?.cancel()
@@ -84,9 +74,59 @@ final class GisGeometryHttpClient: NSObject, URLSessionTaskDelegate, @unchecked 
 
     func cancelAll() {
         lock.lock()
+        for id in pending.keys { pending[id]?.cancelled = true }
         let sessions = pending.values.map(\.session)
         lock.unlock()
         sessions.forEach { $0.invalidateAndCancel() }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                    didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard let http = response as? HTTPURLResponse else {
+            completionHandler(.cancel)
+            return
+        }
+        // Access denial is authoritative as soon as headers arrive. Reading its
+        // body could turn a received 403/404 into a misleading network timeout.
+        lock.lock()
+        if let id = pending.first(where: { $0.value.task === dataTask })?.key,
+           pending[id]?.cancelled == false {
+            pending[id]?.headerResponse = Response(
+                status: http.statusCode, body: "",
+                contentType: http.value(forHTTPHeaderField: "Content-Type") ?? ""
+            )
+        }
+        lock.unlock()
+        completionHandler((200..<300).contains(http.statusCode) ? .allow : .cancel)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
+        if let id = pending.first(where: { $0.value.task === dataTask })?.key,
+           pending[id]?.cancelled == false {
+            pending[id]?.data.append(data)
+        }
+        lock.unlock()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let id = pending.first(where: { $0.value.task === task })?.key
+        let completed = id.flatMap { pending.removeValue(forKey: $0) }
+        lock.unlock()
+        guard let completed else { return }
+        completed.session.finishTasksAndInvalidate()
+        if completed.cancelled { completed.completion(.failure(URLError(.cancelled))); return }
+        if let response = completed.headerResponse, !(200..<300).contains(response.status) {
+            completed.completion(.success(response)); return
+        }
+        if let error { completed.completion(.failure(error)); return }
+        guard let response = completed.headerResponse else {
+            completed.completion(.failure(RequestError.invalidResponse)); return
+        }
+        completed.completion(.success(Response(status: response.status,
+            body: String(data: completed.data, encoding: .utf8) ?? "", contentType: response.contentType)))
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask,

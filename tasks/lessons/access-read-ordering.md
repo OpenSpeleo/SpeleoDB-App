@@ -15,3 +15,10 @@ Test both response arrival orders with deferred requests at the authority seam,
 including durable cleanup, failed writes, absence of automatic detail retries,
 and a subsequent legitimate regrant. See the
 [GIS Geometry review](../todos/gis-geometry.md).
+
+Monotonic content recovery must preserve access ordering too. If an atomic cache
+write returns newer durable content after an interrupted prior write, merge the
+latest accepted permission metadata onto that content before publication. Also
+detach queued/in-flight identity deduplication on revocation: regranting an ID
+must not reuse work belonging to its old access epoch. Keep old work tracked and
+fenced until it settles.

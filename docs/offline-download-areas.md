@@ -246,11 +246,13 @@ unavailable types and explicitly retained identities keep their existing rows.
 Omitted types remain untouched. A stale snapshot cannot restore revoked rows.
 Latest layer preferences apply to all results in that same transaction.
 
-`TileCoordinator` collects source types independently. If GIS is still pending
-when core sources are ready, it publishes those core results immediately, then
-merges GIS in one final reconciliation. Both use the same standard rectangles,
-canonical union and queue; there is no geometry-specific tile engine. Unresolved
-sources report a retryable error without claiming their saved data is current.
+`TileCoordinator` collects all eight source types independently and publishes
+newly ready batches while other types remain pending. Completions arriving
+together are coalesced, so publication count is bounded by source types rather
+than record count. Every batch uses the same standard rectangles, canonical
+union and queue; there is no geometry-specific tile engine. Only the final full
+snapshot requests force refresh. Unresolved sources report a retryable error
+without claiming their saved data is current.
 
 ## Replacement, overlap, recovery and migration
 

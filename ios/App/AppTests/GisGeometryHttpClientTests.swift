@@ -132,6 +132,73 @@ final class GisGeometryHttpClientTests: XCTestCase {
         XCTAssertEqual(server.requests.count, 1)
     }
 
+    func testAccessDenialCompletesFromHeadersWithoutWaitingForItsBody() throws {
+        for status in [403, 404] {
+            let releaseBody = DispatchSemaphore(value: 0)
+            let server = try LoopbackHttpServer { _ in
+                .init(status: status, contentType: "text/html", body: "private error",
+                      headers: [:], beforeBody: { XCTAssertEqual(releaseBody.wait(timeout: .now() + 5), .success) })
+            }
+            defer { releaseBody.signal(); server.close() }
+            let completed = expectation(description: "HTTP denial before body")
+            completed.assertForOverFulfill = true
+            // Reuse the identity to prove completion released the prior task.
+            try client.get(id: "held-access", url: server.url(route), headers: headers, timeoutMs: 1000) { result in
+                switch result {
+                case .success(let response):
+                    XCTAssertEqual(response.status, status)
+                    XCTAssertEqual(response.body, "")
+                case .failure(let error): XCTFail("Received denial headers must survive a stalled body: \(error)")
+                }
+                completed.fulfill()
+            }
+            wait(for: [completed], timeout: 3)
+        }
+    }
+
+    func testSuccessfulHeadersStillRequireTheBodyBeforeTheDeadline() throws {
+        let releaseBody = DispatchSemaphore(value: 0)
+        let server = try LoopbackHttpServer { _ in
+            .init(status: 200, contentType: "application/json", body: "[]", headers: [:],
+                  beforeBody: { XCTAssertEqual(releaseBody.wait(timeout: .now() + 5), .success) })
+        }
+        defer { releaseBody.signal(); server.close() }
+        let completed = expectation(description: "successful body deadline")
+        completed.assertForOverFulfill = true
+        try client.get(id: "held-success", url: server.url(route), headers: headers, timeoutMs: 1000) { result in
+            switch result {
+            case .success: XCTFail("Successful headers cannot replace a missing JSON body")
+            case .failure(let error): XCTAssertEqual((error as? URLError)?.code, .timedOut)
+            }
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 3)
+    }
+
+    func testCancellationAfterSuccessfulHeadersCannotPublishPartialData() throws {
+        let started = expectation(description: "successful body started")
+        let releaseBody = DispatchSemaphore(value: 0)
+        let server = try LoopbackHttpServer { _ in
+            .init(status: 200, contentType: "application/json", body: "[]", headers: [:], beforeBody: {
+                started.fulfill()
+                XCTAssertEqual(releaseBody.wait(timeout: .now() + 5), .success)
+            })
+        }
+        defer { releaseBody.signal(); server.close() }
+        let completed = expectation(description: "cancelled partial response")
+        completed.assertForOverFulfill = true
+        try client.get(id: "partial-cancel", url: server.url(route), headers: headers, timeoutMs: 5000) { result in
+            switch result {
+            case .success: XCTFail("Caller cancellation must reject a partial response")
+            case .failure(let error): XCTAssertEqual((error as? URLError)?.code, .cancelled)
+            }
+            completed.fulfill()
+        }
+        wait(for: [started], timeout: 3)
+        client.cancel(id: "partial-cancel")
+        wait(for: [completed], timeout: 3)
+    }
+
     func testDuplicateRequestIdCannotReplaceLiveRequestAndCancellationSettlesIt() throws {
         let started = expectation(description: "request reached server")
         let release = DispatchSemaphore(value: 0)
@@ -191,7 +258,13 @@ final class GisGeometryHttpClientTests: XCTestCase {
 /// Local TCP server exercises the real Foundation networking/cookie/delegate path.
 private final class LoopbackHttpServer: @unchecked Sendable {
     struct Request { let line: String; let headers: [String: String] }
-    struct Reply { let status: Int; let contentType: String; let body: String; let headers: [String: String] }
+    struct Reply {
+        let status: Int
+        let contentType: String
+        let body: String
+        let headers: [String: String]
+        var beforeBody: (() -> Void)? = nil
+    }
     private let descriptor: Int32
     private let port: UInt16
     private let work = DispatchGroup()
@@ -250,9 +323,8 @@ private final class LoopbackHttpServer: @unchecked Sendable {
                     let response = reply(request)
                     let body = Data(response.body.utf8)
                     let extra = response.headers.map { "\($0.key): \($0.value)\r\n" }.joined()
-                    var output = Data("HTTP/1.1 \(response.status) Test\r\nContent-Type: \(response.contentType)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\(extra)\r\n".utf8)
-                    output.append(body)
-                    output.withUnsafeBytes { raw in
+                    let head = Data("HTTP/1.1 \(response.status) Test\r\nContent-Type: \(response.contentType)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\(extra)\r\n".utf8)
+                    func send(_ output: Data) { output.withUnsafeBytes { raw in
                         guard let base = raw.baseAddress else { return }
                         var sent = 0
                         while sent < raw.count {
@@ -260,7 +332,15 @@ private final class LoopbackHttpServer: @unchecked Sendable {
                             guard count > 0 else { return }
                             sent += count
                         }
-                    }
+                    } }
+                    send(head)
+                    if let beforeBody = response.beforeBody {
+                        // Foundation can defer header delivery until the first
+                        // body byte. Hold the rest to exercise a stalled body.
+                        send(body.prefix(1))
+                        beforeBody()
+                        send(body.dropFirst())
+                    } else { send(body) }
                 }
             }
         }

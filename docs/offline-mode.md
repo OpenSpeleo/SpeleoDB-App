@@ -228,9 +228,10 @@ areas. Manual rectangles share the same queue and storage lifecycle. See
   while healthy types update the shared union. Legacy GPS geometry remains
   usable for map display but is not accepted as current planning input. Failed
   GIS details retain the corresponding accessible identities; authoritative
-  absence removes them. Ready core areas begin downloading while GIS preparation
-  is pending, then GIS joins the same queue. Pre-area legacy pins retire only
-  after all automatic sources are authoritative and replacement finishes.
+  absence removes them. Each ready source type starts downloading while other
+  types remain pending, then later batches join the same queue. Legacy pins
+  retire only after all automatic sources are authoritative and replacement
+  finishes.
 
 Legacy project GeoJSON cache entries with a matching stored commit are
 bbox-audited even while offline before Dashboard reads them. Unversioned legacy

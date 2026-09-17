@@ -278,8 +278,16 @@ export class GisGeometryCoordinator {
         if (incoming.detail.revision < item.revision) throw new Error('A newer geometry version is available. Try again.');
         let record = readSequence < (this.accessReads.get(id) ?? 0)
           ? this.withMetadata(incoming, this.withAccess(this.metadata(incoming), item)) : incoming;
-        record = await this.cache.putDetail(session.cacheScopeId, record, signal, validate);
+        const accepted = await this.cache.putDetail(session.cacheScopeId, record, signal, validate);
         validate();
+        if (accepted !== record) {
+          // An interrupted catalog write can leave newer content on disk. Keep
+          // that content, but never restore its older access metadata over this
+          // accepted read. Persist both together before publishing membership.
+          record = this.withMetadata(accepted, this.withAccess(this.metadata(accepted), record.detail));
+          record = await this.cache.putDetail(session.cacheScopeId, record, signal, validate);
+          validate();
+        }
         const items = this.snapshot.items.map(value => value.id === id ? this.metadata(record) : value);
         const catalog: GisGeometryCatalog = { schemaVersion: 1, scope: session.cacheScopeId, items, revokedIds: this.catalog?.revokedIds ?? [] };
         await this.cache.putCatalog(catalog, signal, validate);
@@ -319,12 +327,19 @@ export class GisGeometryCoordinator {
     for (const id of ids) {
       this.epochs.set(id, (this.epochs.get(id) ?? 0) + 1);
       this.accessReads.set(id, readSequence);
+      // A later regrant must not share a task from the revoked access epoch.
+      // Its underlying work remains tracked and fenced until it settles.
+      const task = this.tasks.get(id);
+      if (task) {
+        this.tasks.delete(id);
+        if (!task.started) task.reject(new Error(UNAVAILABLE));
+      }
     }
     const records = { ...this.snapshot.records };
     for (const id of ids) delete records[id];
     this.catalog = catalog;
     this.currentMetadata = false;
-    this.publish({ items, records });
+    this.publish({ items, records, loadingIds: [...this.tasks.keys()] });
     return catalog;
   }
 

@@ -65,13 +65,15 @@ server geometry is refreshed with three-way bounded concurrency. Missing SHA,
 URL, valid response or successful cache write preserves saved track rectangles
 instead of replacing them with unverified geometry.
 
-GIS preparation runs concurrently. Ready core sources publish first when GIS is
-pending; the final GIS snapshot merges through the same catalog transaction,
-union planner and download queue. There are at most two publications per source
-collection. Explicit refresh retries failed GIS metadata. Source freshness is
-checked inside the catalog transaction, so revocation can remove its own rows
-without cancelling unrelated preparation. Old pre-area generations remain pinned
-until every automatic type is authoritative and replacement completes.
+All eight source types prepare concurrently. Each newly ready batch merges
+through the same catalog transaction, union planner and download queue while
+pending types retain their saved rows. Completions arriving together are
+coalesced; a collection publishes at most once per source type, not per record.
+Only the final snapshot applies force refresh. Explicit refresh retries failed
+GIS metadata. Source freshness is checked inside the catalog transaction, so
+revocation can remove its own rows without cancelling unrelated preparation. Old
+pre-area generations remain pinned until every automatic type is authoritative
+and replacement completes.
 
 Source identity is an asynchronous SHA-256 over sorted, length-delimited input
 parts. `TileCoordinator` assigns every request a monotonic ownership version, so

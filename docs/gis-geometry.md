@@ -59,9 +59,11 @@ The bounded validator ports upstream read/measurement logic. It accepts only
 bare LineString or single-exterior-ring Polygon objects, validates topology,
 finite two-dimensional positions, closure, vertex count, 30 km² bounding-box
 limit, safe positive integer revisions, UUIDs, color and offset-bearing dates.
-Coordinates retain received numeric precision. A malformed list cannot become an
-authoritative empty list. Cached records cross the same validation boundary on
-restoration; validated online reads can repair corrupt detail entries.
+Name length counts Unicode code points like the backend, rather than UTF-16
+units. Coordinates retain received numeric precision. A malformed list cannot
+become an authoritative empty list. Cached records cross the same validation
+boundary on restoration; validated online reads can repair corrupt detail
+entries.
 
 **GIS uses ordinary min/max longitude bounds.** This is a deliberate exception
 to project/GPS shortest-wrapped-interval behavior: a wide line's bounding box
@@ -94,6 +96,12 @@ later accepted access reads. Network/5xx failures preserve usable cached data
 with a stale/error state. Explicit denial or authoritative omission removes the
 geometry from the map and cache authority and schedules collection revalidation
 without a denial retry loop.
+
+Content revision and access metadata remain separate even after an interrupted
+detail/catalog write: recovering newer durable coordinates must merge the latest
+accepted permission fields. Revocation detaches pending work from its resource
+identity so a later regrant can fetch independently; old responses remain
+epoch-fenced and tracked until they settle.
 
 Confirmed revocation removes usable in-memory membership before fallible cache
 writes. Catalog persistence, detail deletion and automatic-area cleanup are
@@ -132,8 +140,11 @@ Capacitor's cookie plugin and before WebView startup. GIS requests use raw-body
 HttpURLConnection GETs, ignore response cookies and refuse redirects. Unrelated
 routes retain the existing cookie handler. iOS uses ephemeral URLSessions with
 request/configuration cookie handling disabled and a redirect-denying delegate.
-Both implement cancellation, deadlines and fixed error text. No dependency
-source patches or new native networking dependencies are required.
+Both classify non-success status from response headers without waiting for an
+error body. iOS still waits for the complete body on success; an incomplete
+success body times out. Explicit caller cancellation takes precedence over a
+header-only completion. Both implement deadlines and fixed error text. No
+dependency source patches or new native networking dependencies are required.
 
 ## Rendering and offline coverage
 
@@ -159,10 +170,12 @@ bounds use existing rolling replacement across enabled layers.
 Automatic source authority is scoped to each source type. Unavailable GIS
 metadata preserves its saved rectangles; failed accessible details preserve only
 those identities while healthy peers update. Failure is never an authoritative
-empty collection. Ready projects, points and tracks enter the standard catalog
-and start tile downloads while GIS metadata/details are pending; GIS joins the
-same union in one final reconciliation. Fast GIS needs only one publication;
-slow GIS needs at most two, never one rebuild per detail response.
+empty collection. Each ready source type enters the standard catalog while other
+types are still pending, including when GPS, project or overlay reads stall.
+Completions that arrive together are coalesced; one collection has at most eight
+publications (one per source type), never one rebuild per record. Only the final
+full snapshot requests a forced refresh or establishes complete source
+authority.
 
 Explicit tile refresh retries GIS metadata after a failed read without an
 automatic denial retry loop. Confirmed revocation removes only the corresponding
@@ -209,4 +222,6 @@ Physical-device verification remains distinct: actual Android/iOS WebView
 rendering, touch/safe areas, airplane-mode tiles, force-quit recovery and
 background transitions require device evidence. Exact executed commands, results
 and limitations are recorded in the
-[task review](../tasks/todos/gis-geometry.md).
+[task review](../tasks/todos/gis-geometry.md). The
+[deep failure-mode review](../tasks/todos/gis-geometry-deep-review.md) records
+additional interrupted-write, regrant, stalled-source and native-body evidence.

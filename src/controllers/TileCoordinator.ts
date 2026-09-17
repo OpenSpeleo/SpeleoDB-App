@@ -216,8 +216,8 @@ export class TileCoordinator {
       };
       const sources = await this.collectCoverageSources(context, projects, forceRefresh, async ready => {
         this.assertCoverageRequestCurrent(requestVersion, context);
-        // Start the existing automatic sources while GIS coordinates are still
-        // loading. Omitted source types retain their committed catalog intent.
+        // Publish ready source families without waiting for unrelated reads.
+        // Omitted source types retain their committed catalog intent.
         await this.areas.reconcileAutomaticSources(ready.sources,
           () => this.assertCoverageRequestCurrent(requestVersion, context));
       });
@@ -478,17 +478,16 @@ export class TileCoordinator {
       failedProjectCount: built.failedCount,
       landmarkCount,
     });
-    let geometrySource: AutomaticDownloadAreaSource | undefined;
-    const geometryRead = this.trackSourceWork(collect(DownloadAreaType.GisGeometry, async () => {
-      const snapshot = await this.dependencies.getGisPrefetchSnapshot(context.signal, { refresh: refreshGeometry });
-      return {
-        inputs: automaticAreaInputs([], [], [], layers, snapshot.sources),
-        complete: snapshot.complete,
-        retainedSourceKeys: snapshot.retainedSourceKeys,
-        isCurrent: snapshot.isCurrent,
-      };
-    }).then(source => { geometrySource = source; return source; }));
-    const sources = await Promise.all([
+    const reads = [
+      collect(DownloadAreaType.GisGeometry, async () => {
+        const snapshot = await this.dependencies.getGisPrefetchSnapshot(context.signal, { refresh: refreshGeometry });
+        return {
+          inputs: automaticAreaInputs([], [], [], layers, snapshot.sources),
+          complete: snapshot.complete,
+          retainedSourceKeys: snapshot.retainedSourceKeys,
+          isCurrent: snapshot.isCurrent,
+        };
+      }),
       collect(DownloadAreaType.Project, async () => {
         built = await this.buildProjectInputs(context, projects);
         return { inputs: automaticAreaInputs(built.inputs, [], [], layers), complete: true };
@@ -502,15 +501,34 @@ export class TileCoordinator {
         inputs: automaticAreaInputs([], [], await this.dependencies.getGpsPrefetchSources(context.signal), layers),
         complete: true,
       })),
-    ]);
-    context.throwIfAborted();
-    await this.yieldForRendering(context);
-    // At most two catalog publications: a ready core batch, then the complete
-    // collection. Never rebuild the union for each individual geometry response.
-    if (!geometrySource) await onReady(result(sources));
-    const geometry = await geometryRead;
-    context.throwIfAborted();
-    return result([...sources, geometry]);
+    ];
+    const settled: AutomaticDownloadAreaSource[] = [];
+    const pending = new Set<Promise<void>>();
+    let failure: { error: unknown } | undefined;
+    const throwIfFailed = () => { if (failure) throw failure.error; };
+    for (const read of reads) {
+      // Handle rejection immediately, including cancellation between batches.
+      // Every admitted read remains owned until it actually settles.
+      const work = this.trackSourceWork(read.then(
+        source => { settled.push(source); },
+        error => { failure ??= { error }; },
+      ).finally(() => { pending.delete(work); }));
+      pending.add(work);
+    }
+    let publishedCount = 0;
+    while (true) {
+      if (settled.length === publishedCount && !failure) await Promise.race(pending);
+      context.throwIfAborted();
+      throwIfFailed();
+      // Coalesce families that settle together. There is at most one additional
+      // publication per newly ready family, never one per geometry or tile.
+      await this.yieldForRendering(context);
+      throwIfFailed();
+      if (settled.length === reads.length) return result(settled);
+      const ready = [...settled];
+      await onReady(result(ready));
+      publishedCount = ready.length;
+    }
   }
 
   private async loadOverlay(context: CancellationContext, id: MapOverlayId): Promise<GeoJSON.FeatureCollection> {

@@ -15,7 +15,7 @@ function date(value: unknown): value is string {
 export function parseGisGeometryMetadata(value: unknown): GisGeometryMetadata {
   const v = object(value);
   const levels = ['READ_ONLY', 'READ_AND_WRITE', 'ADMIN'];
-  if (!isGisGeometryId(v.id) || typeof v.name !== 'string' || !v.name.trim() || v.name.length > rules.name_max_length
+  if (!isGisGeometryId(v.id) || typeof v.name !== 'string' || !v.name.trim() || Array.from(v.name).length > rules.name_max_length
     || typeof v.color !== 'string' || !/^#[\da-f]{6}$/i.test(v.color)
     || typeof v.created_by !== 'string' || !rules.types.includes(v.geometry_type as string)
     || !Number.isSafeInteger(v.revision) || (v.revision as number) < 1

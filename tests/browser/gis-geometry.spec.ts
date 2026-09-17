@@ -344,3 +344,48 @@ test('automatic landmark downloads finish while GIS details are still pending', 
   expect(app.requests).toHaveLength(3);
   expect(app.errors).toEqual([]);
 });
+
+test('healthy geometry and landmark tiles finish while a GPS source is still pending', async ({ page }) => {
+  const app = await geometryFixture(page);
+  await automaticLandmark(page);
+  const headers = { 'access-control-allow-origin': '*' };
+  const trackId = '32345678-1234-4234-8234-123456789abc';
+  const fileUrl = 'https://offline-maps.test/fixtures/delayed-track.geojson';
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let trackReads = 0;
+  await page.route('https://offline-maps.test/api/v2/gps_tracks/', route => route.fulfill({
+    headers, json: [{ id: trackId, name: 'Delayed GPS track', color: '#22c55e',
+      file: fileUrl, sha256_hash: 'current-track-content',
+      creation_date: LINE.creation_date, modified_date: LINE.modified_date }],
+  }));
+  await page.route(fileUrl, async route => {
+    trackReads++;
+    await held;
+    await route.fulfill({ headers, json: { type: 'FeatureCollection', features: [{
+      type: 'Feature', properties: {},
+      geometry: { type: 'LineString', coordinates: [[-87.501, 20.1], [-87.5, 20.1]] },
+    }] } });
+  });
+  let initial: DownloadAreaCatalog | null = null;
+  try {
+    await page.goto('/dashboard');
+    await expect.poll(() => trackReads).toBeGreaterThan(0);
+    await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+    await expectCompletedTiles(page);
+    await expect.poll(() => offlineGeometryReady(page)).toBe(true);
+    initial = await downloadAreaCatalog(page);
+    expect(initial?.areas).toHaveLength(3);
+    expect(initial?.areas.some(area => area.type === 'track')).toBe(false);
+  } finally {
+    release();
+  }
+  await expect.poll(async () => (await downloadAreaCatalog(page))?.areas.length).toBe(4);
+  await expectCompletedTiles(page);
+  const final = await downloadAreaCatalog(page);
+  for (const area of initial!.areas) expect(final?.areas.find(value => value.areaId === area.areaId)).toEqual(area);
+  expect(final?.areas.find(area => area.type === 'track')).toMatchObject({
+    objectId: trackId, sourceKey: `gps-track-server:${trackId}`, sourceRevision: 'current-track-content',
+  });
+  expect(app.errors).toEqual([]);
+});

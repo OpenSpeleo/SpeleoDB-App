@@ -13,6 +13,7 @@ import { evictLayerTilesRuntime } from '../services/TileCacheRuntime';
 import type { Project } from '../types/project';
 import type { GisGeometryPrefetchSource, GisGeometryPrefetchSnapshot } from '../types/gisGeometry';
 import { readDownloadAreaCatalog } from '../services/tileCache/DownloadAreaRepository';
+import { OfflineMapSyncEngine } from '../services/OfflineMapSyncEngine';
 
 function expectRebuildRequest(
   request: OfflineMapSyncRequest,
@@ -85,7 +86,7 @@ const coordinators: TileCoordinator[] = [];
 beforeEach(async () => { await clearCachedTiles(); });
 afterEach(async () => { for (const coordinator of coordinators.splice(0)) { coordinator.cancel(); await coordinator.stopForLogout(); } });
 
-function createHarness(options: { deferWork?: (work: () => void) => void } = {}) {
+function createHarness(options: { deferWork?: (work: () => void) => void; engine?: OfflineMapSyncEngineLike } = {}) {
   let progressListener: () => void = () => {};
   const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
     coordinateCount: 1,
@@ -152,7 +153,7 @@ function createHarness(options: { deferWork?: (work: () => void) => void } = {})
     notifyStateChanged,
     deferWork: options.deferWork ?? ((work) => work()),
     yieldToMainThread: async () => {},
-  }, service);
+  }, options.engine ?? service);
   coordinators.push(coordinator);
   return {
     coordinator,
@@ -178,6 +179,90 @@ describe('TileCoordinator offline coverage', () => {
     sourceRevision: '3',
     bounds: { west: 6, east: 6.001, south: 6, north: 6.001, crossesDateline: false },
   };
+
+  it.each(['GPS', 'project', 'overlay'] as const)('downloads ready GIS coverage before a delayed %s source settles', async (held) => {
+    const engine = new OfflineMapSyncEngine({ isOnline: () => true });
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([7, 8, 9]), {
+      status: 200, headers: { 'content-type': 'image/png' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const h = createHarness({ engine });
+    h.gisSources.push(geometrySource);
+    const gate = deferred<void>();
+    const projects = held === 'project' ? [projectFixture('project-1')] : [];
+    if (held === 'GPS') h.getGpsPrefetchSources.mockImplementationOnce(async () => {
+      await gate.promise;
+      return h.gpsSources;
+    });
+    if (held === 'project') h.cache.getProjectGeoJSONRecord = vi.fn(async () => {
+      await gate.promise;
+      return { state: 'active', commitId: 'commit-project-1', analysis: { bounds: geometrySource.bounds } } as never;
+    });
+    if (held === 'overlay') {
+      const original = h.cache.getOverlayGeoJSONForOfflineMap;
+      h.cache.getOverlayGeoJSONForOfflineMap = vi.fn(async (id, options) => {
+        if (id === 'landmarks') await gate.promise;
+        return original(id, options);
+      });
+    }
+    const pending = h.coordinator.scheduleSyncPhase(new CancellationContext(1, 'independent source readiness'), projects);
+    try {
+      await vi.waitFor(async () => {
+        expect((await readDownloadAreaCatalog()).areas.some(area => area.objectId === geometrySource.id)).toBe(true);
+        expect(h.coordinator.snapshot.totalTiles).toBeGreaterThan(0);
+        expect(h.coordinator.snapshot.completedTiles).toBeGreaterThan(0);
+      });
+      expect(fetchMock).toHaveBeenCalled();
+    } finally {
+      gate.resolve();
+      await pending;
+      await h.coordinator.waitForIdle();
+      vi.unstubAllGlobals();
+    }
+    const areas = (await readDownloadAreaCatalog()).areas;
+    expect(areas.some(area => area.type === ({ GPS: DownloadAreaType.Track, project: DownloadAreaType.Project, overlay: DownloadAreaType.Landmark }[held]))).toBe(true);
+    expect(h.coordinator.snapshot.completedTiles).toBe(h.coordinator.snapshot.totalTiles);
+  });
+
+  it('bounds independently settled families to eight publications and forces only the final full snapshot', async () => {
+    const h = createHarness();
+    const families = ['GIS', 'project', ...MAP_OVERLAYS.map(overlay => overlay.id), 'GPS'];
+    const gates = new Map(families.map(family => [family, deferred<void>()]));
+    const reconcile = vi.spyOn(h.coordinator.areas, 'reconcileAutomaticSources');
+    h.getGisPrefetchSources.mockImplementationOnce(async () => {
+      await gates.get('GIS')!.promise;
+      return [geometrySource];
+    });
+    h.getGpsPrefetchSources.mockImplementationOnce(async () => {
+      await gates.get('GPS')!.promise;
+      return h.gpsSources;
+    });
+    h.cache.getProjectGeoJSONRecord = vi.fn(async () => {
+      await gates.get('project')!.promise;
+      return { state: 'active', commitId: 'commit-project-1', analysis: { bounds: geometrySource.bounds } } as never;
+    });
+    const original = h.cache.getOverlayGeoJSONForOfflineMap;
+    h.cache.getOverlayGeoJSONForOfflineMap = vi.fn(async (id, options) => {
+      await gates.get(id)!.promise;
+      return original(id, options);
+    });
+    const pending = h.coordinator.scheduleSyncPhase(new CancellationContext(1, 'bounded publication'), [projectFixture('project-1')], true);
+    try {
+      for (const [index, family] of families.entries()) {
+        gates.get(family)!.resolve();
+        await vi.waitFor(() => expect(reconcile).toHaveBeenCalledTimes(index + 1));
+      }
+      expect((await pending).status).toBe('applied');
+      expect(reconcile.mock.calls.map(([sources]) => sources.length)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(reconcile.mock.calls.filter(([, , force]) => force)).toHaveLength(1);
+      expect(reconcile.mock.calls[7][2]).toBe(true);
+      expect((await readDownloadAreaCatalog()).areas).toHaveLength(7);
+    } finally {
+      for (const gate of gates.values()) gate.resolve();
+      await pending;
+      await h.coordinator.waitForIdle();
+    }
+  });
 
   it('waits for admitted deferred source reads before reporting offline-map idleness', async () => {
     let runDeferred!: () => void;
@@ -511,12 +596,16 @@ describe('TileCoordinator offline coverage', () => {
 
     const first = coordinator.scheduleSyncPhase(new CancellationContext(1, 'older'), []);
     await vi.waitFor(() => expect(getGpsPrefetchSources).toHaveBeenCalledOnce());
+    await vi.waitFor(async () => expect((await readDownloadAreaCatalog()).areas).toHaveLength(3));
+    await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
     await coordinator.scheduleSyncPhase(new CancellationContext(2, 'newer'), []);
+    const current = await readDownloadAreaCatalog();
     resolveFirst(gpsSources);
 
     await expect(first).rejects.toMatchObject({ name: 'AbortError' });
     await coordinator.areas.waitForIdle();
-    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(await readDownloadAreaCatalog()).toEqual(current);
+    expect(schedule).toHaveBeenCalledTimes(2);
   });
 
   it('enables a layer without inventing geometry when the catalog is empty', async () => {
@@ -539,8 +628,15 @@ describe('TileCoordinator offline coverage', () => {
     await coordinator.areas.waitForIdle();
     expect(getGpsPrefetchSources).toHaveBeenCalledOnce();
     expect(cache.getOverlayGeoJSONForOfflineMap).toHaveBeenCalledTimes(MAP_OVERLAYS.length);
-    expect(schedule.mock.calls.map(([request]) => request.layers[0].id)).toEqual(['esri-satellite', 'esri-world-hillshade-dark']);
-    expect(new Set(schedule.mock.calls.map(([request]) => request.coverageKey)).size).toBe(1);
+    // The ready points can now download while GPS is held. The final union uses
+    // the latest preferences without re-reading any source or retaining a
+    // disabled layer in that replacement.
+    const finalRequests = schedule.mock.calls.map(([request]) => request).filter(request => {
+      expectRebuildRequest(request);
+      return request.plan.projects.length === 5;
+    });
+    expect(finalRequests.map(request => request.layers[0].id)).toEqual(['esri-satellite', 'esri-world-hillshade-dark']);
+    expect(new Set(finalRequests.map(request => request.coverageKey)).size).toBe(1);
     expect(coordinator.areas.getSnapshot().areas.every((area) => area.layerIds.join(',') === 'esri-satellite,esri-world-hillshade-dark')).toBe(true);
   });
 

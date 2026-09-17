@@ -21,6 +21,55 @@ function harness() {
   return { service, coordinator, cache, revoked, setOnline: (value: boolean) => { online = value; }, setSession: (value: StoredSession | null) => { session = value; } };
 }
 describe('GIS Geometry shared read coordinator', () => {
+  it('persists fresh access when newer durable content survived an interrupted catalog write', async () => {
+    const h = harness();
+    const admin = { user_permission_level: 3 as const, user_permission_level_label: 'ADMIN' as const,
+      can_write: true, can_delete: true, can_manage_permissions: true };
+    h.service.getGisGeometry.mockResolvedValue({ status: 200, data: geometryDetail({ revision: 2, name: 'New content', ...admin }) });
+    const putCatalog = h.cache.putCatalog.bind(h.cache);
+    const writes = vi.spyOn(h.cache, 'putCatalog').mockImplementation(async (...args) => {
+      if (args[0].items.some(item => item.revision === 2)) throw new Error('Catalog storage unavailable');
+      return putCatalog(...args);
+    });
+    await h.coordinator.refresh(); await h.coordinator.waitForIdle();
+    expect((await h.cache.getDetail('account-a', GEOMETRY_ID))?.detail.revision).toBe(2);
+    expect(h.coordinator.getSnapshot().items[0].revision).toBe(1);
+    writes.mockImplementation(putCatalog);
+    h.service.getGisGeometry.mockResolvedValue({ status: 200, data: geometryDetail() });
+    const record = await h.coordinator.ensureDetail(GEOMETRY_ID);
+    await h.coordinator.waitForIdle();
+    expect(record.detail).toMatchObject({ revision: 2, name: 'New content', can_delete: false, user_permission_level: 1 });
+    expect(h.coordinator.getSnapshot().items[0].can_delete).toBe(false);
+    expect((await h.cache.getDetail('account-a', GEOMETRY_ID))?.detail.can_delete).toBe(false);
+    const reopened = harness(); reopened.setOnline(false); await reopened.coordinator.load();
+    expect(reopened.coordinator.getSnapshot().records[GEOMETRY_ID].detail).toMatchObject({ revision: 2, can_delete: false });
+  });
+
+  it.each([200, 403, 404, 503])('loads a fresh regrant before a revoked detail task finishes with %s', async status => {
+    const h = harness(), oldRead = deferred<HttpResponse<unknown>>();
+    h.service.getGisGeometry.mockReturnValueOnce(oldRead.promise);
+    await h.coordinator.refresh();
+    const obsoleteRead = h.coordinator.ensureDetail(GEOMETRY_ID);
+    const rejected = expect(obsoleteRead).rejects.toMatchObject({ name: 'AbortError' });
+    h.service.getGisGeometries.mockResolvedValueOnce({ status: 200, data: [] });
+    await h.coordinator.refresh();
+    expect(h.coordinator.getSnapshot().loadingIds).toEqual([]);
+    await h.coordinator.refresh();
+    const freshRead = h.coordinator.ensureDetail(GEOMETRY_ID);
+    try {
+      await vi.waitFor(() => expect(h.service.getGisGeometry).toHaveBeenCalledTimes(2));
+      expect((await freshRead).detail.id).toBe(GEOMETRY_ID);
+    } finally {
+      oldRead.resolve({ status, data: status === 200 ? geometryDetail({ revision: 99 }) : {} });
+      await Promise.allSettled([freshRead]);
+      await rejected; await h.coordinator.waitForIdle();
+    }
+    expect(h.coordinator.getSnapshot().records[GEOMETRY_ID].detail.revision).toBe(1);
+    expect(h.coordinator.getSnapshot().errors[GEOMETRY_ID]).toBeUndefined();
+    expect((await h.cache.getDetail('account-a', GEOMETRY_ID))?.detail.revision).toBe(1);
+    expect((await h.cache.getCatalog('account-a'))?.revokedIds).toEqual([]);
+  });
+
   it('returns healthy geometry sources while retaining only failed accessible members', async () => {
     const h = harness();
     const failedId = '12345678-1234-4234-8234-000000000002';
