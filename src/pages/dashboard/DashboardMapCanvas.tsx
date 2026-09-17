@@ -10,6 +10,7 @@ import DistanceScale from '../../components/map/DistanceScale';
 import DepthGauge from '../../components/map/DepthGauge';
 import { UserLocationIndicator } from '../../components/map/UserLocationIndicator';
 import { MapCompass } from '../../components/map/MapCompass';
+import { MapControlLayout } from '../../components/map/MapControlLayout';
 import GeolocationErrorModal from '../../components/GeolocationErrorModal';
 import { useAppForeground } from '../../hooks/useAppForeground';
 import type { MapColorMode } from '../../types/mapColorMode';
@@ -66,6 +67,8 @@ interface MapViewportProps {
   headingActive: boolean;
   compassVisible: boolean;
   runtimeActive: boolean;
+  depthMode: boolean;
+  toolbarVisible: boolean;
   iconsLoaded: boolean;
   iconAvailability: OverlayMapLayersProps['iconAvailability'];
   gestures: DashboardMapGestures;
@@ -84,6 +87,8 @@ function MapViewport({
   headingActive,
   compassVisible,
   runtimeActive,
+  depthMode,
+  toolbarVisible,
   iconsLoaded,
   iconAvailability,
   gestures,
@@ -122,6 +127,7 @@ function MapViewport({
       <GpsMapLayers {...gpsLayers} />
       <UserLocationIndicator location={userLocation} headingActive={headingActive} />
       {compassVisible && <MapCompass active={runtimeActive} />}
+      <MapControlLayout compassVisible={compassVisible} depthMode={depthMode} toolbarVisible={toolbarVisible} />
     </Map>
   );
 }
@@ -259,7 +265,7 @@ export function DashboardMapCanvas({
   return (
     <>
       <div
-        className={`relative w-full h-full dashboard-map-touch-surface${colorMode === 'depth' ? ' dashboard-map-touch-surface--depth' : ''}`}
+        className="relative w-full h-full dashboard-map-touch-surface"
         onPointerDownCapture={editingArea ? undefined : gestures.onStart}
         onPointerMoveCapture={editingArea ? undefined : gestures.onMove}
         onPointerUpCapture={editingArea ? undefined : gestures.onEnd}
@@ -276,13 +282,15 @@ export function DashboardMapCanvas({
           headingActive={headingActive}
           compassVisible={compassVisible && !editingArea}
           runtimeActive={runtimeActive}
+          depthMode={colorMode === 'depth'}
+          toolbarVisible={!editingArea}
           iconsLoaded={shell.overlayIconsLoaded}
           iconAvailability={shell.overlayIconAvailability}
           gestures={gestures}
           onLoad={handleMapLoad}
           onMove={shell.handleMapMove}
         />
-        <div className="absolute bottom-2 left-2 z-10">
+        <div className="absolute bottom-2 left-2 z-10 dashboard-map-distance-scale">
           <DistanceScale
             zoom={shell.mapViewMetrics.zoom}
             latitude={shell.mapViewMetrics.latitude}
@@ -291,7 +299,7 @@ export function DashboardMapCanvas({
         </div>
         {colorMode === 'depth' && (
           <div
-            className="absolute right-[68px] z-10"
+            className="absolute right-[68px] z-10 dashboard-map-depth-gauge"
             style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 64px)' }}
           >
             <DepthGauge

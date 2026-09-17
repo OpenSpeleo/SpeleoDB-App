@@ -313,6 +313,7 @@ vi.mock('react-map-gl/maplibre', () => {
 
   return {
     default: MapMock,
+    useMap: () => ({ current: { getContainer: () => screen.getByTestId('map') } }),
     useControl: function useControl<T extends { onAdd(map: { getContainer(): HTMLElement }): HTMLElement; onRemove(): void }>(
       createControl: () => T,
     ): T {

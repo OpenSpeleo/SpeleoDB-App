@@ -106,26 +106,8 @@
   outline-offset: 3px;
 }
 
-/* Shift credits with the dial so neither overlaps the toolbar on short screens. */
-@media (max-height: 540px) {
-  .dashboard-map-touch-surface .maplibregl-ctrl-bottom-right {
-    right: 56px;
-  }
-
-  .dashboard-map-touch-surface--depth .maplibregl-ctrl-bottom-right {
-    right: 136px;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .map-compass__rotation {
     transition: none;
-  }
-}
-
-/* Shifted credits share the scale's column on narrow screens; reserve its row. */
-@media (max-width: 400px) and (max-height: 540px) {
-  .dashboard-map-touch-surface .maplibregl-ctrl-bottom-right {
-    bottom: 44px;
   }
 }

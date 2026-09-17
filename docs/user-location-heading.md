@@ -74,7 +74,10 @@ asynchronous teardown, and readings received without consumers cannot repopulate
 the cache. Setup failure, an unsupported sensor, or a web runtime publishes no
 heading and leaves the dot usable without showing another modal.
 `useDeviceHeading` owns wrap-safe display animation state and keeps frequent
-heading renders inside the indicator.
+heading renders inside the indicator. Subscription cleanup clears both its
+unwrapped angle and displayed heading. Returning from an inactive route or app
+therefore cannot commit a previous-session reading before the new subscription
+has supplied its initial value.
 
 `DashboardMapCanvas` combines route visibility with Capacitor app foreground
 state and passes that runtime gate to both sensor paths. `AuthenticatedAppShell`

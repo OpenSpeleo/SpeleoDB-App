@@ -19,4 +19,11 @@ before reconciliation. At the real service boundary, hold bridge promises open,
 deliver old callbacks during and after teardown, then assert both the resumed
 consumer's initial state and its current reading.
 
-Evidence and corrective scope: [compass review](../todos/map-compass-review.md).
+Clear the consumer hook's displayed state during subscription cleanup too.
+Masking a retained value while inactive is insufficient: the first active render
+can commit that old value before the passive subscription effect clears it.
+Observe every committed value across suspend/resume with a layout-effect probe;
+an assertion made only after passive effects settle misses the flash.
+
+Evidence and corrective scope: [compass review](../todos/map-compass-review.md)
+and [fresh compass review](../todos/map-compass-fresh-review.md).

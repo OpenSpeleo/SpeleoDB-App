@@ -30,6 +30,8 @@ export function useDeviceHeading(
     return () => {
       unwrappedRef.current = null;
       unsubscribe();
+      // Do not expose the previous session before the next subscription effect.
+      setHeading(null);
     };
   }, [active, provider]);
 

@@ -421,6 +421,11 @@ test('long offline area lists scroll below fixed controls in a smaller sheet', a
     const rail = sheet.locator('.offline-map-scroll-rail');
     const thumb = sheet.locator('.offline-map-scroll-thumb');
     await expect(rail).toBeVisible();
+    // scrollTop changes before the browser delivers the scroll event that
+    // updates the thumb. Establish its rendered starting position first.
+    await expect.poll(() => thumb.evaluate((element) =>
+      element.getBoundingClientRect().top - element.parentElement!.getBoundingClientRect().top,
+    )).toBe(0);
     const start = await thumb.boundingBox();
     const addBox = await add.boundingBox();
     const listBox = await rows.boundingBox();
@@ -874,11 +879,16 @@ for (const viewport of [
   { width: 320, height: 480 },
   { width: 320, height: 480, depth: true },
   { width: 320, height: 400, depth: true },
+  { width: 400, height: 480, depth: true },
+  { width: 401, height: 480, depth: true },
+  { width: 568, height: 541, depth: true },
   { width: 568, height: 320 },
   { width: 568, height: 320, depth: true },
 ]) {
   const depth = 'depth' in viewport && viewport.depth;
   test(`compass stays above sources and clear of map controls at ${viewport.width}x${viewport.height}${depth ? ' in depth mode' : ''}`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
     await fixture(page, true, true, depth);
     await page.setViewportSize(viewport);
     await page.goto('/dashboard');
@@ -959,8 +969,71 @@ for (const viewport of [
     });
     await page.getByRole('button', { name: 'Hide compass', exact: true }).tap();
     await expect(dial).toHaveCount(0);
+    await expectMapControlClearance(page);
+    expect(errors).toEqual([]);
   });
 }
+
+async function expectMapControlClearance(page: import('@playwright/test').Page) {
+  await expect.poll(() => page.evaluate(() => {
+    const overlays = [...document.querySelectorAll('.map-control-stack, .dashboard-map-depth-gauge, .dashboard-map-distance-scale')];
+    const controls = [...document.querySelectorAll('.map-compass, .maplibregl-ctrl-attrib')];
+    return controls.flatMap((control) => {
+      const a = control.getBoundingClientRect();
+      return overlays.filter((overlay) => {
+        const b = overlay.getBoundingClientRect();
+        return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+      }).map((overlay) => `${control.className} overlaps ${overlay.className}`);
+    });
+  })).toEqual([]);
+}
+
+test('map controls reflow on credit, compass, depth and viewport changes without observer errors', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await fixture(page, true, true);
+  await page.setViewportSize({ width: 568, height: 320 });
+  await page.goto('/dashboard');
+  const attribution = page.locator('.maplibregl-ctrl-attrib');
+  const attributionButton = attribution.locator('.maplibregl-ctrl-attrib-button');
+  await expect(attribution).toBeVisible();
+  await expectMapControlClearance(page);
+  if (!await attribution.evaluate((element) => element.classList.contains('maplibregl-compact-show'))) {
+    await attributionButton.tap();
+  }
+  await expect(attribution.locator('.maplibregl-ctrl-attrib-inner')).toBeVisible();
+  await expectMapControlClearance(page);
+  await page.getByRole('button', { name: 'Show compass', exact: true }).tap();
+  await emitCompassHeading(page, 260);
+  await expectMapControlClearance(page);
+  await attributionButton.tap();
+  await expect(attribution.locator('.maplibregl-ctrl-attrib-inner')).not.toBeVisible();
+  await expectMapControlClearance(page);
+  await attributionButton.tap();
+  await expect(attribution.locator('.maplibregl-ctrl-attrib-inner')).toBeVisible();
+  await page.getByRole('tab', { name: 'Settings', exact: true }).tap();
+  await page.getByRole('combobox', { name: 'Color mode', exact: true }).selectOption('depth');
+  await page.getByRole('tab', { name: 'Map', exact: true }).tap();
+  await expect(page.getByTestId('depth-gauge')).toBeVisible();
+  await expectMapControlClearance(page);
+  for (const viewport of [{ width: 414, height: 480 }, { width: 568, height: 541 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await expectMapControlClearance(page);
+  }
+  const corner = page.locator('.maplibregl-ctrl-bottom-right');
+  await expect(corner).toHaveCSS('right', '0px');
+  await expect(corner).toHaveCSS('bottom', '0px');
+  await page.getByRole('button', { name: 'Hide compass', exact: true }).tap();
+  await expect(page.locator('.map-compass-control')).toHaveCount(0);
+  await expectMapControlClearance(page);
+  await page.getByRole('button', { name: 'Offline Maps', exact: true }).tap();
+  await page.getByRole('button', { name: 'Add new offline area', exact: true }).tap();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).tap();
+  await expect(page.getByRole('button', { name: 'Show compass', exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 568, height: 320 });
+  await expectMapControlClearance(page);
+  expect(errors).toEqual([]);
+});
 
 async function savedAreas(page: import('@playwright/test').Page) {
   return page.evaluate(async () => {

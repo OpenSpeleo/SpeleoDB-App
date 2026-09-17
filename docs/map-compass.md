@@ -39,13 +39,23 @@ unmounts only the compass consumer, preserving any location-cone subscription.
 The compass uses `useControl` and a React portal to join MapLibre's bottom-right
 control stack. This gives the source credits their actual required height,
 including when expanded, instead of assuming a fixed attribution height.
-Unmounting removes both the control element and heading subscription. On short
-screens the dial and credits shift left of the toolbar column, with additional
-clearance in depth mode, while keeping labels readable. The depth gauge sits
-beside the toolbar so the fourth button cannot cover its lower labels. The dial
-is pointer-transparent, so dragging its area still pans the map. On narrow,
-short screens the shifted control stack also reserves the distance scale's
-bottom row, keeping expanded credits above it.
+Unmounting removes both the control element and heading subscription.
+`MapControlLayout` remains mounted independently so source credits stay clear of
+the four-button toolbar even with the compass hidden. It measures the actual
+map, toolbar, depth gauge, distance scale, and MapLibre control stack, reserving
+an overlay's column or bottom row only when their rectangles overlap. This
+avoids viewport breakpoints that fail with a slightly wider phone, changed
+safe-area insets, or wrapped attribution. The depth gauge sits beside the
+toolbar so the fourth button cannot cover its lower labels. The dial is
+pointer-transparent, so dragging its area still pans the map.
+
+The layout owner observes container and control dimensions, refreshes its
+observed elements when compass visibility, depth mode, or editor toolbar
+visibility changes, and coalesces resize callbacks into one animation-frame
+task. Deferring writes avoids a ResizeObserver feedback loop when moving the
+credits changes their wrapping. This is event-driven layout work, with no
+polling or work on heading ticks. Cleanup disconnects the observer, cancels a
+queued task, and releases offsets.
 
 The control measures its map container and observes container resizes with
 `ResizeObserver`. It sets the diameter to the smaller of 172px and 40% of the
@@ -80,6 +90,10 @@ the native sensor likewise show the neutral state. See
   all sixteen directions, normalization, rounding, sector boundaries, north
   crossings, unavailable readings, subscription cleanup, and StrictMode
   remounts, plus map-relative sizing and resize-observer cleanup.
+- `MapControlLayout.test.tsx` exercises the layout owner's real effect and
+  observer boundary: actual overlay reservations, coalescing, reclaiming space,
+  hidden-compass ownership, changed overlay subscriptions, and cleanup. Browser
+  tests remain authoritative for rendered geometry.
 - `Dashboard.test.tsx` drives the real shared heading service through its plugin
   boundary. It proves default visibility, action semantics, independent
   operation, shared ownership in both removal orders, route/app suspension,
@@ -99,7 +113,10 @@ the native sensor likewise show the neutral state. See
   startup and retry, the browser's actual CSS interpolation across north in both
   directions, a changed reduced-motion preference, and real map dragging through
   the dial. Geometry checks include 320×400 and 320×480 depth layouts with
-  expanded credits.
+  expanded credits. Regression cases cross the former 400px width and 540px
+  height breakpoints and verify source-credit clearance with the compass hidden,
+  expanded/collapsed credits, live depth-mode changes and viewport resizing,
+  without browser or ResizeObserver errors.
 
 The browser fixture proves presentation and integration, not physical sensor
 accuracy. Release checks on physical iOS and Android must cover cardinal
