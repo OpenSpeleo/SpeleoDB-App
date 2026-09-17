@@ -141,3 +141,21 @@ diagnostic runs preserved the rapid sequence. The mobile fixture now uses native
 taps and asserts all four emitted switch intents before verifying the unchanged
 union plan and durable layer state. No sleeps, retries, relaxed assertions, or
 application changes were added for this correction.
+
+### Bottom menu spacing follow-up
+
+Added 12 px of side padding to the shared tab bar at the user's request. Items
+sit slightly closer together while retaining 44 px minimum touch targets and
+horizontal scrolling for seven tabs or enlarged text. This is a CSS-only layout
+adjustment; no navigation, data, or native code changed.
+
+- Independent review: no actionable findings.
+- `npm run test.unit -- --run src/components/AppTabBar.test.tsx --no-file-parallelism`:
+  23 passed.
+- `npx playwright test tests/browser/gis-geometry.spec.ts --grep 'keeps six and seven tab targets'`:
+  both Chromium/WebKit cases passed. Inspected the WebKit 320 px screenshot;
+  side spacing and labels remain clear.
+- `make ci`: passed inventory, lint, TypeScript, all 2,240 tests with coverage
+  and the production build. Log: `/tmp/speleodb-menu-spacing-ci.log`.
+- `npx prek run -a`: code hooks passed; Markdown normalized and rechecked.
+- Physical-device verification was not performed for this CSS adjustment.

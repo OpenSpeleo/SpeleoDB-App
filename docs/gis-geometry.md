@@ -32,6 +32,7 @@ The sidebar shell is shared with Projects and GPS; domain-specific rows and
 actions remain separate. Panels support focus entry/return, Escape and backdrop
 close. Bottom navigation preserves at least 44-pixel targets with horizontal
 overflow when enlarged labels cannot fit, including the optional Pending tab.
+The tab bar has 12-pixel side padding to keep its items inset from both edges.
 
 ## API and validation boundary
 

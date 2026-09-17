@@ -1,5 +1,6 @@
 /* Preserve touch targets when Pending adds a seventh tab or text is enlarged. */
 .app-tab-bar {
+  padding-inline: 12px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   flex-shrink: 0;
