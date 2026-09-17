@@ -245,6 +245,48 @@ describe('OfflineMapSyncEngine', () => {
     expect(engine.getSnapshot()).toMatchObject({ phase: 'cancelled', queuedTiles: 0 });
   });
 
+  it('owns backpressured workers until ignored cancellation settles before starting replacement work', async () => {
+    vi.useFakeTimers();
+    const gates: Array<() => void> = [];
+    let active = 0;
+    let peak = 0;
+    const fetchTile = vi.fn(async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => gates.push(resolve));
+      active -= 1;
+      return { downloadedBytes: 1, cacheDeltaBytes: 1 };
+    });
+    const { engine } = harness({ count: 100, fetchTile });
+    let replacement: Promise<unknown> | undefined;
+    try {
+      await engine.schedule(request(100));
+      await vi.runAllTimersAsync();
+      expect(engine.getSnapshot().queuedTiles).toBe(64);
+      expect(active).toBe(6);
+      engine.cancel();
+      let idle = false;
+      const waiting = engine.waitForIdle().then(() => { idle = true; });
+      await vi.runAllTimersAsync();
+      expect(idle).toBe(false);
+      replacement = engine.schedule(request(100)).catch(() => {});
+      await vi.runAllTimersAsync();
+      expect(active).toBe(6);
+      expect(peak).toBe(6);
+      engine.cancel();
+      while (gates.length) gates.shift()!();
+      await replacement;
+      await waiting;
+      expect(active).toBe(0);
+    } finally {
+      engine.dispose();
+      while (gates.length) gates.shift()!();
+      await replacement;
+      await engine.waitForIdle();
+      vi.useRealTimers();
+    }
+  });
+
   it('uses one manifest lookup and performs no audit or network work for fresh active coverage', async () => {
     const active: OfflineMapGenerationRecord = {
       id: 'active-satellite',
@@ -534,9 +576,10 @@ describe('OfflineMapSyncEngine', () => {
 
     await engine.schedule(request(1));
     await vi.waitFor(() => expect(fetchTile).toHaveBeenCalledOnce());
-    await engine.schedule(request(1));
-    await vi.waitFor(() => expect(fetchTile).toHaveBeenCalledTimes(2));
+    const replacement = engine.schedule(request(1));
     settleFirst();
+    await replacement;
+    await vi.waitFor(() => expect(fetchTile).toHaveBeenCalledTimes(2));
     await engine.waitForIdle();
 
     expect(engine.getSnapshot()).toMatchObject({ phase: 'completed', completedTiles: 1 });

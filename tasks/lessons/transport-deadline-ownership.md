@@ -20,3 +20,8 @@ For binary raster validation, the same deadline must cover response headers,
 body settlement, content-type/non-empty checks, and any configured digest. Race
 each phase as one operation and consume late settlement; a header-only timeout
 leaves pending bodies or hashing able to outlive their publication authority.
+
+Native requests must also own their deadline. WebView timers may pause in the
+background, and socket read timeouts reset when bytes arrive. Test a
+continuously streaming incomplete success at the native networking boundary;
+cancel its native watchdog on every terminal path.

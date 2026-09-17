@@ -659,7 +659,13 @@ test('a real drag beginning on the compass pans the underlying map without chang
   const y = box.y + box.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
-  await page.mouse.move(x, y - 180, { steps: 12 });
+  // WebKit can dispatch mouse.move({ steps }) within one render frame.
+  // MapLibre applies gesture changes on render frames, so pace this real drag
+  // through that boundary before releasing the button.
+  for (let step = 1; step <= 12; step++) {
+    await page.mouse.move(x, y - 180 * step / 12);
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  }
   await page.mouse.up();
   await expect.poll(async () => Math.abs(await scale.evaluate((element) => element.getBoundingClientRect().width) - originalWidth)).toBeGreaterThan(1);
   await expect(page.getByRole('img', { name: 'Compass heading 260 degrees, W', exact: true })).toBeVisible();

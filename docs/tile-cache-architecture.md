@@ -78,8 +78,13 @@ and replacement completes.
 Source identity is an asynchronous SHA-256 over sorted, length-delimited input
 parts. `TileCoordinator` assigns every request a monotonic ownership version, so
 an older source read cannot supersede newer geometry or a refresh even when the
-older dependency ignores cancellation. Layer preference commits are ordered
-separately and do not invalidate geometry reads.
+older dependency ignores cancellation. Engine sessions retain ownership of every
+admitted download through settlement, including cancellation while the producer
+waits for queue capacity. Replacement sessions wait for those workers before
+starting, maintaining the six-worker limit across rolling updates. Generation
+cleanup and engine idleness occur after the worker drain, so logout cannot purge
+storage while admitted downloads are still finishing. Layer preference commits
+are ordered separately and do not invalidate geometry reads.
 
 Project-sync preparation is queued on a later WebView task after foreground data
 publication. Project cache records are read through a four-worker bounded pool

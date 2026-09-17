@@ -106,7 +106,11 @@ epoch-fenced and tracked until they settle.
 Confirmed revocation removes usable in-memory membership before fallible cache
 writes. Catalog persistence, detail deletion and automatic-area cleanup are
 attempted independently; failures retain the runtime denial and a retryable
-error. Explicit refresh retries the pending cleanup.
+error. Explicit refresh retries pending cleanup even if access is still denied
+and runtime membership is already empty. Startup also attempts detail and area
+cleanup independently. Retrying a failed startup load uses accepted runtime
+membership, so an older catalog left by a failed write cannot restore revoked
+access.
 
 Token sessions may have no email or stable user ID. Secure session metadata
 therefore carries a random non-secret `cacheScopeId`, retained on restoration
@@ -145,6 +149,9 @@ error body. iOS still waits for the complete body on success; an incomplete
 success body times out. Explicit caller cancellation takes precedence over a
 header-only completion. Both implement deadlines and fixed error text. No
 dependency source patches or new native networking dependencies are required.
+Android owns an overall native request deadline independently of WebView timers:
+streaming bytes cannot reset that deadline or occupy its request workers
+indefinitely when JavaScript is paused.
 
 ## Rendering and offline coverage
 
@@ -225,3 +232,6 @@ and limitations are recorded in the
 [task review](../tasks/todos/gis-geometry.md). The
 [deep failure-mode review](../tasks/todos/gis-geometry-deep-review.md) records
 additional interrupted-write, regrant, stalled-source and native-body evidence.
+
+The [fresh independent review](../tasks/todos/gis-geometry-fresh-review.md) adds
+failed-cleanup recovery, worker-drain and native streaming-deadline regressions.

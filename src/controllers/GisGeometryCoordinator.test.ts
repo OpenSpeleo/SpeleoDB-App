@@ -213,6 +213,66 @@ describe('GIS Geometry shared read coordinator', () => {
     expect(h.service.getGisGeometries).toHaveBeenCalledTimes(2);
     await h.coordinator.waitForIdle();
   });
+  it.each([401, 403])('retries failed durable revocation when an explicit collection refresh is still denied with %s', async status => {
+    const h = harness();
+    await h.coordinator.refresh(); await h.coordinator.waitForIdle();
+    vi.spyOn(h.cache, 'putCatalog').mockRejectedValueOnce(new Error('Catalog storage temporarily unavailable'));
+    vi.spyOn(h.cache, 'removeDetails').mockRejectedValueOnce(new Error('Detail storage temporarily unavailable'));
+    h.service.getGisGeometries.mockResolvedValue({ status, data: {} });
+    await expect(h.coordinator.refresh()).rejects.toThrow();
+    expect(h.coordinator.getSnapshot().items).toEqual([]);
+    expect((await h.cache.getCatalog('account-a'))?.items).toHaveLength(1);
+    expect(await h.cache.getDetail('account-a', GEOMETRY_ID)).not.toBeNull();
+
+    // Storage has recovered, but access remains denied. An explicit retry must
+    // persist the existing denial even though no runtime members remain.
+    await expect(h.coordinator.refresh()).rejects.toThrow();
+    expect((await h.cache.getCatalog('account-a'))?.items).toEqual([]);
+    expect(await h.cache.getDetail('account-a', GEOMETRY_ID)).toBeNull();
+    expect(h.revoked).toHaveBeenCalledTimes(2);
+    const reopened = harness(); reopened.setOnline(false);
+    await reopened.coordinator.load();
+    expect(reopened.coordinator.getSnapshot().items).toEqual([]);
+    expect(reopened.coordinator.getSnapshot().records).toEqual({});
+  });
+  it('does not restore denied membership when retrying a failed startup cleanup after a failed catalog write', async () => {
+    const seed = harness();
+    await seed.coordinator.refresh(); await seed.coordinator.waitForIdle();
+    const previouslyRevoked = '12345678-1234-4234-8234-000000000002';
+    await seed.cache.putCatalog({ schemaVersion: 1, scope: 'account-a', items: [geometryMetadata()], revokedIds: [previouslyRevoked] });
+    const h = harness();
+    h.revoked.mockRejectedValueOnce(new Error('Offline area cleanup temporarily unavailable'));
+    const removeDetails = h.cache.removeDetails.bind(h.cache);
+    vi.spyOn(h.cache, 'removeDetails').mockImplementationOnce(removeDetails)
+      .mockRejectedValueOnce(new Error('Detail storage temporarily unavailable'));
+    vi.spyOn(h.cache, 'putCatalog').mockRejectedValueOnce(new Error('Catalog storage temporarily unavailable'));
+    h.service.getGisGeometries.mockResolvedValue({ status: 200, data: [] });
+    await expect(h.coordinator.refresh()).rejects.toThrow();
+    expect(h.coordinator.getSnapshot().items).toEqual([]);
+    expect((await h.cache.getCatalog('account-a'))?.items).toHaveLength(1);
+    expect(await h.cache.getDetail('account-a', GEOMETRY_ID)).not.toBeNull();
+
+    await h.coordinator.load();
+    expect(h.coordinator.getSnapshot().items).toEqual([]);
+    expect(h.coordinator.getSnapshot().records).toEqual({});
+    await expect(h.coordinator.ensureDetail(GEOMETRY_ID)).rejects.toThrow('no longer available');
+    expect(h.service.getGisGeometry).not.toHaveBeenCalled();
+  });
+
+  it('attempts independent startup area cleanup when revoked detail deletion fails', async () => {
+    const seed = harness();
+    await seed.coordinator.refresh(); await seed.coordinator.waitForIdle();
+    const previouslyRevoked = '12345678-1234-4234-8234-000000000002';
+    await seed.cache.putCatalog({ schemaVersion: 1, scope: 'account-a', items: [geometryMetadata()], revokedIds: [previouslyRevoked] });
+    const h = harness(); h.setOnline(false);
+    vi.spyOn(h.cache, 'removeDetails').mockRejectedValueOnce(new Error('Detail deletion temporarily unavailable'));
+    await expect(h.coordinator.load()).rejects.toThrow();
+    expect(h.revoked).toHaveBeenCalledWith([previouslyRevoked], 'account-a', expect.any(Function));
+    expect(h.coordinator.getSnapshot().records).toEqual({});
+    await h.coordinator.load();
+    expect(h.coordinator.getSnapshot().records[GEOMETRY_ID]).toBeDefined();
+    expect(h.coordinator.getSnapshot().records[previouslyRevoked]).toBeUndefined();
+  });
   it('publishes metadata before coordinates and shares concurrent list and UI/background detail reads', async () => {
     const h = harness(), detail = deferred<HttpResponse<unknown>>();
     h.service.getGisGeometry.mockReturnValue(detail.promise);

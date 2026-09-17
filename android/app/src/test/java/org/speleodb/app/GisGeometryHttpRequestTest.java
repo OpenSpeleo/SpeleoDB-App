@@ -162,6 +162,34 @@ public final class GisGeometryHttpRequestTest {
         }
     }
 
+    @Test public void overallDeadlineStopsAContinuouslyStreamingSuccessWithoutJavascriptCancellation() throws Exception {
+        CountDownLatch release = new CountDownLatch(1);
+        try (Loopback server = new Loopback((sent, socket) -> {
+            try {
+                socket.getOutputStream().write(("HTTP/1.1 200 Test\r\nContent-Type: application/json\r\n"
+                    + "Connection: close\r\n\r\n[").getBytes(StandardCharsets.US_ASCII));
+                // Keep every socket read active, but deliberately never complete the JSON.
+                // The latch also releases the server immediately when the test finishes.
+                do {
+                    socket.getOutputStream().write(' ');
+                    socket.getOutputStream().flush();
+                } while (!release.await(25, TimeUnit.MILLISECONDS));
+            } catch (IOException expectedDisconnect) { /* The native deadline closes the stream. */ }
+        })) {
+            GisGeometryHttpRequest request = new GisGeometryHttpRequest(
+                server.uri(COLLECTION), Collections.emptyMap(), 200);
+            Future<GisGeometryHttpRequest.Response> result = client.submit(request::execute);
+            try {
+                ExecutionException failure = assertThrows(ExecutionException.class,
+                    () -> result.get(2, TimeUnit.SECONDS));
+                assertTrue(failure.getCause() instanceof IOException);
+            } finally {
+                release.countDown();
+                request.cancel();
+            }
+        }
+    }
+
     @Test public void rejectsRoutesAndCredentialsOutsideTheReadOnlyContract() throws Exception {
         URI origin = new URI("https://example.test");
         for (String path : new String[] { "/api/v2/gis-geometries", COLLECTION + "not-a-uuid/", COLLECTION + "?page=2", COLLECTION + "#fragment", "/api/v2/gis-layers/" }) {

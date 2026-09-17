@@ -84,16 +84,15 @@ export class GisGeometryCoordinator {
     const generation = this.generation;
     const validate = () => this.assertCurrent(session.cacheScopeId, generation);
     const operation = this.track((async () => {
-      const catalog = await this.cache.getCatalog(session.cacheScopeId);
+      // Cleanup retries must retain accepted runtime authority: a failed
+      // catalog write can leave older, already-revoked membership on disk.
+      const catalog = this.catalog ?? await this.cache.getCatalog(session.cacheScopeId);
       validate();
       if (!catalog) return;
       this.catalog = catalog;
       this.publish({ items: catalog.items, status: 'stale' });
       if (catalog.revokedIds.length) {
-        await this.cache.removeDetails(catalog.scope, catalog.revokedIds, this.context.signal);
-        validate();
-        await this.dependencies.onRevoked?.(catalog.revokedIds, catalog.scope, validate);
-        validate();
+        await this.cleanupRevoked(catalog, this.context.signal, validate);
       }
       const records: Record<string, GisGeometryMapRecord> = {};
       const errors: Record<string, string> = {};
@@ -312,7 +311,12 @@ export class GisGeometryCoordinator {
       const validate = () => this.assertCurrent(scope, generation);
       validate();
       const currentIds = ids.filter(id => readSequence >= (this.accessReads.get(id) ?? 0));
-      if (!currentIds.length) return false;
+      if (!currentIds.length) {
+        // A previous denial may have removed runtime membership before its
+        // durable cleanup failed. Explicit denied refreshes must retry it.
+        if (this.catalog?.revokedIds.length) await this.persistMembership(this.catalog, this.context.signal, validate);
+        return false;
+      }
       const catalog = this.applyRevocation(currentIds, scope, readSequence);
       await this.persistMembership(catalog, this.context.signal, validate);
       return true;
@@ -349,9 +353,7 @@ export class GisGeometryCoordinator {
     try { await this.cache.putCatalog(catalog, signal, validate); } catch (error) { failure = error; }
     validate();
     if (catalog.revokedIds.length) {
-      try { await this.cache.removeDetails(catalog.scope, catalog.revokedIds, signal); } catch (error) { failure ??= error; }
-      validate();
-      try { await this.dependencies.onRevoked?.(catalog.revokedIds, catalog.scope, validate); } catch (error) { failure ??= error; }
+      try { await this.cleanupRevoked(catalog, signal, validate); } catch (error) { failure ??= error; }
       validate();
     }
     if (failure) {
@@ -359,6 +361,15 @@ export class GisGeometryCoordinator {
       this.publish({ status: 'error', error: 'GIS Geometry access changes could not be saved. Try again.' });
       throw failure;
     }
+  }
+
+  private async cleanupRevoked(catalog: GisGeometryCatalog, signal: AbortSignal, validate: () => void): Promise<void> {
+    let failure: unknown;
+    try { await this.cache.removeDetails(catalog.scope, catalog.revokedIds, signal); } catch (error) { failure = error; }
+    validate();
+    try { await this.dependencies.onRevoked?.(catalog.revokedIds, catalog.scope, validate); } catch (error) { failure ??= error; }
+    validate();
+    if (failure) throw failure;
   }
 
   async getPrefetchSources(signal?: AbortSignal): Promise<GisGeometryPrefetchSource[]> {

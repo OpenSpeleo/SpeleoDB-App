@@ -340,7 +340,11 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
     if (request.signal?.aborted) controller.abort(request.signal.reason);
 
     const ready = deferred<OfflineMapSyncResult>();
-    const promise = this.runSession(request, controller, ready)
+    // Transport may ignore abort. Keep the six-worker limit across replacements,
+    // including sessions still draining after their producer was cancelled.
+    const predecessors = [...this.operations];
+    const promise = Promise.allSettled(predecessors)
+      .then(() => this.runSession(request, controller, ready))
       .catch((error) => {
         ready.reject(error);
         if (!isAbortError(error)) console.warn('Offline-map synchronization failed:', error);
@@ -434,6 +438,8 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
     let queuedTiles = 0;
     let coordinateCount: number | null = null;
     const pendingGenerations: OfflineMapGenerationRecord[] = [];
+    let sessionQueue: TileWorkQueue | undefined;
+    let workers: Promise<void>[] = [];
 
     const publish = (immediate = false) => {
       if (this.destroyed || this.activeController !== controller) return;
@@ -576,8 +582,9 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
       }
 
       const queue = new TileWorkQueue();
+      sessionQueue = queue;
       this.activeQueue = queue;
-      const workers = Array.from({ length: DOWNLOAD_CONCURRENCY }, () => (async () => {
+      workers = Array.from({ length: DOWNLOAD_CONCURRENCY }, () => (async () => {
         while (!signal.aborted) {
           const task = await queue.take();
           if (!task) return;
@@ -769,6 +776,11 @@ export class OfflineMapSyncEngine implements OfflineMapSyncEngineLike {
         for (const layer of layers.values()) layer.queuedTiles = 0;
         publish(true);
       }
+      // Producer failure/cancellation can bypass the normal worker join (for
+      // example while enqueue is backpressured). Drain before releasing storage.
+      controller.abort(error);
+      sessionQueue?.cancel();
+      await Promise.allSettled(workers);
       await this.checkpointTail;
       for (const generation of pendingGenerations) {
         generation.status = 'failed';
