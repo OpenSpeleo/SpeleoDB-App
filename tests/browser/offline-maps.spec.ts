@@ -5,10 +5,12 @@ import { expect, test } from '@playwright/test';
 async function fixture(
   page: import('@playwright/test').Page,
   connected = true,
+  compass = false,
+  depth = false,
 ) {
   let online = connected;
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.addInitScript(() => {
+  await page.addInitScript(({ withCompass, withDepth }: { withCompass: boolean; withDepth: boolean }) => {
     if (!localStorage.getItem('speleo_user_preferences'))
       localStorage.setItem(
         'speleo_user_preferences',
@@ -17,12 +19,33 @@ async function fixture(
           instance: 'https://offline-maps.test',
           email: 'fixture@example.test',
           hasCompletedGuidedTour: true,
+          colorMode: withDepth ? 'depth' : undefined,
         }),
       );
     const bridge = window as unknown as Record<string, unknown>;
+    const compassListeners = new Map<string, (event: { value: number }) => void>();
+    let compassListenerId = 0;
+    if (withCompass) {
+      bridge.compassFixtureListening = false;
+      bridge.compassFixtureListenerCount = 0;
+      bridge.compassFixtureStartCount = 0;
+      bridge.compassFixtureFailStart = false;
+      window.addEventListener('fixture-compass-heading', (event) => {
+        for (const listener of compassListeners.values()) {
+          listener({ value: (event as CustomEvent<number>).detail });
+        }
+      });
+    }
     bridge.CapacitorCustomPlatform = { name: 'ios' };
     bridge.Capacitor = {
       PluginHeaders: [
+        ...(withCompass ? [{
+          name: 'CapgoCompass',
+          methods: [
+            { name: 'addListener', rtype: 'callback' },
+            ...['removeListener', 'startListening', 'stopListening'].map((name) => ({ name, rtype: 'promise' })),
+          ],
+        }] : []),
         {
           name: 'SentryCapacitor',
           methods: [
@@ -57,11 +80,38 @@ async function fixture(
           methods: [{ name: 'request', rtype: 'promise' }],
         },
       ],
+      nativeCallback: (
+        plugin: string,
+        method: string,
+        options: { eventName?: string },
+        callback: (event: { value: number }) => void,
+      ) => {
+        if (plugin === 'CapgoCompass' && method === 'addListener' && options.eventName === 'headingChange') {
+          const id = `fixture-compass-listener-${++compassListenerId}`;
+          compassListeners.set(id, callback);
+          bridge.compassFixtureListenerCount = compassListeners.size;
+          return id;
+        }
+        return undefined;
+      },
       nativePromise: async (
         plugin: string,
         method: string,
-        options: { url?: string },
+        options: { url?: string; callbackId?: string },
       ) => {
+        if (plugin === 'CapgoCompass') {
+          if (method === 'startListening') {
+            bridge.compassFixtureStartCount = Number(bridge.compassFixtureStartCount) + 1;
+            if (bridge.compassFixtureFailStart) throw new Error('Compass unavailable');
+            bridge.compassFixtureListening = true;
+          }
+          if (method === 'stopListening') bridge.compassFixtureListening = false;
+          if (method === 'removeListener') {
+            compassListeners.delete(options.callbackId!);
+            bridge.compassFixtureListenerCount = compassListeners.size;
+          }
+          return {};
+        }
         if (plugin === 'SentryCapacitor')
           return method === 'initNativeSdk'
             ? true
@@ -83,7 +133,7 @@ async function fixture(
         return {};
       },
     };
-  });
+  }, { withCompass: compass, withDepth: depth });
   await page.route('https://offline-maps.test/**', async (route) => {
     if (!online) {
       await route.fulfill({
@@ -535,9 +585,10 @@ test('map controls share geometry and stay below Layers with safe-area insets', 
     name: 'Offline Maps',
     exact: true,
   });
+  const compass = page.getByRole('button', { name: 'Show compass', exact: true });
   await expect(downloads).toBeVisible();
   const controls = [];
-  for (const control of [location, layers, downloads]) {
+  for (const control of [location, layers, downloads, compass]) {
     controls.push(
       await control.evaluate((element) => {
         const rect = element.getBoundingClientRect();
@@ -581,6 +632,335 @@ test('map controls share geometry and stay below Layers with safe-area insets', 
     page.getByRole('dialog', { name: 'Offline Maps' }),
   ).toBeVisible();
 });
+
+async function emitCompassHeading(page: import('@playwright/test').Page, heading: number) {
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { compassFixtureListening: boolean }
+  ).compassFixtureListening)).toBe(true);
+  await page.evaluate((value) => window.dispatchEvent(
+    new CustomEvent('fixture-compass-heading', { detail: value }),
+  ), heading);
+}
+
+test('compass toggles live headings independently of location and restores after area editing', async ({ page }) => {
+  // Only native sensor delivery is emulated; the shipped service, hook, control,
+  // map and rendering remain real. This does not establish device accuracy.
+  await fixture(page, true, true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/dashboard');
+  const dial = page.getByTestId('map-compass');
+  const show = page.getByRole('button', { name: 'Show compass', exact: true });
+  const hide = page.getByRole('button', { name: 'Hide compass', exact: true });
+  const heading = page.getByTestId('compass-heading');
+  await expect(show).toHaveAttribute('aria-pressed', 'false');
+  await expect(dial).toHaveCount(0);
+  await show.tap();
+  await expect(hide).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('compass-toggle-slash')).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Compass heading unavailable', exact: true })).toBeVisible();
+  await emitCompassHeading(page, 260);
+  await expect(heading).toHaveText('260°');
+  await expect(page.getByRole('img', { name: 'Compass heading 260 degrees, W', exact: true })).toBeVisible();
+  await expect(page.getByTestId('my-location-button')).toHaveAttribute('aria-pressed', 'false');
+  await expect(dial.locator('svg text')).toHaveCount(8);
+  for (const direction of ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']) {
+    await expect(dial.locator('svg text').filter({ hasText: new RegExp(`^${direction}$`) }).first()).toBeVisible();
+  }
+  await emitCompassHeading(page, 337.5);
+  await expect(dial.locator('.map-compass__direction')).toHaveText('NNW');
+  await expect(dial.locator('svg text').filter({ hasText: /^NNW$/ })).toHaveCount(0);
+  await expect(page.getByTestId('compass-heading-pointer')).toHaveCSS('transition-duration', '0s');
+  await emitCompassHeading(page, 359);
+  await expect(heading).toHaveText('359°');
+  await emitCompassHeading(page, 1);
+  await expect(heading).toHaveText('1°');
+  await expect(page.getByRole('img', { name: 'Compass heading 1 degrees, N', exact: true })).toBeVisible();
+  await hide.tap();
+  await expect(dial).toHaveCount(0);
+  await expect(show).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('compass-toggle-slash')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { compassFixtureListening: boolean }
+  ).compassFixtureListening)).toBe(false);
+  await show.tap();
+  await expect(page.getByRole('img', { name: 'Compass heading unavailable', exact: true })).toBeVisible();
+  await emitCompassHeading(page, 260);
+  await expect(heading).toHaveText('260°');
+  await page.getByRole('button', { name: 'Offline Maps', exact: true }).tap();
+  await page.getByRole('button', { name: 'Add new offline area' }).tap();
+  await expect(dial).toHaveCount(0);
+  await expect(hide).toHaveCount(0);
+  await page.getByRole('dialog', { name: 'Select offline area' }).getByRole('button', { name: 'Cancel', exact: true }).tap();
+  await expect(dial).toBeVisible();
+  await expect(hide).toHaveAttribute('aria-pressed', 'true');
+});
+
+async function compassSensorState(page: import('@playwright/test').Page) {
+  return page.evaluate(() => {
+    const bridge = window as unknown as {
+      compassFixtureListening: boolean;
+      compassFixtureListenerCount: number;
+    };
+    return { listening: bridge.compassFixtureListening, listeners: bridge.compassFixtureListenerCount };
+  });
+}
+
+test('compass supports keyboard activation, focus visibility and complete listener cleanup', async ({ page }) => {
+  await fixture(page, true, true);
+  await page.goto('/dashboard');
+  const toggle = page.getByTestId('compass-toggle');
+  await toggle.focus();
+  await toggle.press('Enter');
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveCSS('outline-style', 'solid');
+  await expect(toggle).toHaveCSS('outline-width', '2px');
+  await expect(toggle).toHaveAttribute('aria-label', 'Hide compass');
+  await emitCompassHeading(page, 22.5);
+  await expect(page.getByRole('img', { name: 'Compass heading 23 degrees, NNE', exact: true })).toBeVisible();
+  await expect.poll(() => compassSensorState(page)).toEqual({ listening: true, listeners: 1 });
+  await toggle.press('Space');
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveAttribute('aria-label', 'Show compass');
+  await expect(page.getByTestId('map-compass')).toHaveCount(0);
+  await expect(page.locator('.map-compass-control')).toHaveCount(0);
+  await expect.poll(() => compassSensorState(page)).toEqual({ listening: false, listeners: 0 });
+  await toggle.press('Enter');
+  await expect(page.getByRole('img', { name: 'Compass heading unavailable', exact: true })).toBeVisible();
+  await emitCompassHeading(page, 90);
+  await expect(page.getByRole('img', { name: 'Compass heading 90 degrees, E', exact: true })).toBeVisible();
+  await expect(page.locator('.map-compass-control')).toHaveCount(1);
+  await expect.poll(() => compassSensorState(page)).toEqual({ listening: true, listeners: 1 });
+});
+
+test('compass releases its native listener off-route and restores its selection with a fresh heading', async ({ page }) => {
+  await fixture(page, true, true);
+  await page.goto('/dashboard');
+  await page.getByRole('button', { name: 'Show compass', exact: true }).tap();
+  await emitCompassHeading(page, 260);
+  await expect(page.getByTestId('compass-heading')).toHaveText('260°');
+  await page.getByRole('tab', { name: 'Settings', exact: true }).tap();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByTestId('map-compass')).not.toBeVisible();
+  await expect.poll(() => compassSensorState(page)).toEqual({ listening: false, listeners: 0 });
+  // A native delivery while Dashboard is hidden must not seed the next session.
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-compass-heading', { detail: 90 })));
+  await page.getByRole('tab', { name: 'Map', exact: true }).tap();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole('button', { name: 'Hide compass', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('img', { name: 'Compass heading unavailable', exact: true })).toBeVisible();
+  await expect.poll(() => compassSensorState(page)).toEqual({ listening: true, listeners: 1 });
+  await emitCompassHeading(page, 180);
+  await expect(page.getByRole('img', { name: 'Compass heading 180 degrees, S', exact: true })).toBeVisible();
+  await expect(page.locator('.map-compass-control')).toHaveCount(1);
+});
+
+test('compass keeps an unavailable native sensor neutral and retries after hide and show', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await fixture(page, true, true);
+  await page.goto('/dashboard');
+  await page.evaluate(() => { (window as unknown as { compassFixtureFailStart: boolean }).compassFixtureFailStart = true; });
+  await page.getByRole('button', { name: 'Show compass', exact: true }).tap();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { compassFixtureStartCount: number }).compassFixtureStartCount)).toBe(1);
+  await expect.poll(() => compassSensorState(page)).toEqual({ listening: false, listeners: 0 });
+  await expect(page.getByRole('img', { name: 'Compass heading unavailable', exact: true })).toBeVisible();
+  await expect(page.getByTestId('map-compass').getByText('No heading', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('compass-heading-pointer')).toHaveCount(0);
+  await expect(page.getByTestId('my-location-button')).toHaveAttribute('aria-pressed', 'false');
+  await page.getByRole('button', { name: 'Hide compass', exact: true }).tap();
+  await page.evaluate(() => { (window as unknown as { compassFixtureFailStart: boolean }).compassFixtureFailStart = false; });
+  await page.getByRole('button', { name: 'Show compass', exact: true }).tap();
+  await emitCompassHeading(page, 292.5);
+  await expect(page.getByRole('img', { name: 'Compass heading 293 degrees, WNW', exact: true })).toBeVisible();
+  await expect.poll(() => compassSensorState(page)).toEqual({ listening: true, listeners: 1 });
+  expect(errors).toEqual([]);
+});
+
+test('compass animates across north without rotating through south and respects a changed motion preference', async ({ page }) => {
+  await fixture(page, true, true);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/dashboard');
+  await page.getByRole('button', { name: 'Show compass', exact: true }).tap();
+  await emitCompassHeading(page, 359);
+  const pointer = page.getByTestId('compass-heading-pointer');
+  await expect(pointer).toHaveCSS('transition-duration', '0.16s');
+  // Observe the browser's actual CSS interpolation at its midpoint. Pausing
+  // on transitionrun avoids relying on machine speed or a timed screenshot.
+  for (const heading of [1, 359]) {
+    const midpoint = await pointer.evaluate((element, nextHeading) => new Promise<{ a: number; b: number }>((resolve) => {
+      void getComputedStyle(element).transform;
+      element.addEventListener('transitionrun', () => {
+        const animation = element.getAnimations()[0];
+        animation.pause();
+        animation.currentTime = Number(animation.effect!.getComputedTiming().duration) / 2;
+        const matrix = new DOMMatrixReadOnly(getComputedStyle(element).transform);
+        animation.finish();
+        resolve({ a: matrix.a, b: matrix.b });
+      }, { once: true });
+      window.dispatchEvent(new CustomEvent('fixture-compass-heading', { detail: nextHeading }));
+    }), heading);
+    expect(midpoint.a).toBeCloseTo(1, 3);
+    expect(midpoint.b).toBeCloseTo(0, 3);
+    await expect(page.getByTestId('compass-heading')).toHaveText(`${heading}°`);
+  }
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(pointer).toHaveCSS('transition-duration', '0s');
+  await emitCompassHeading(page, 90);
+  await expect(page.getByTestId('compass-heading')).toHaveText('90°');
+  expect(await pointer.evaluate((element) => element.getAnimations().length)).toBe(0);
+});
+
+test('a real drag beginning on the compass pans the underlying map without changing device heading', async ({ page }) => {
+  await fixture(page, true, true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/dashboard');
+  await page.getByRole('button', { name: 'Show compass', exact: true }).tap();
+  await emitCompassHeading(page, 260);
+  await mapSizeSettled(page);
+  // The production distance scale derives its rendered width from MapLibre's
+  // latitude, so its change proves that the gesture moved the actual map.
+  const scale = page.getByTestId('distance-scale').locator('[style]');
+  const originalWidth = await scale.evaluate((element) => element.getBoundingClientRect().width);
+  const box = (await page.getByTestId('map-compass').boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y - 180, { steps: 12 });
+  await page.mouse.up();
+  await expect.poll(async () => Math.abs(await scale.evaluate((element) => element.getBoundingClientRect().width) - originalWidth)).toBeGreaterThan(1);
+  await expect(page.getByRole('img', { name: 'Compass heading 260 degrees, W', exact: true })).toBeVisible();
+});
+
+test('compass stays within forty percent of the actual map width through viewport and container resizes', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await fixture(page, true, true);
+  await page.setViewportSize({ width: 840, height: 844 });
+  await page.goto('/dashboard');
+  await page.getByRole('button', { name: 'Show compass', exact: true }).tap();
+  await emitCompassHeading(page, 292.5);
+  const map = page.locator('.maplibregl-map');
+  const dial = page.getByTestId('map-compass');
+  const assertSize = async (diameter: number) => {
+    await expect(dial).toHaveCSS('width', `${diameter}px`);
+    await expect(dial).toHaveCSS('height', `${diameter}px`);
+    const mapBox = (await map.boundingBox())!;
+    const compassBox = (await dial.boundingBox())!;
+    expect(compassBox.width).toBeLessThanOrEqual(mapBox.width * 0.4);
+    expect(compassBox.width).toBeLessThanOrEqual(172);
+    await expect(page.getByRole('img', { name: 'Compass heading 293 degrees, WNW', exact: true })).toBeVisible();
+    await expect(page.locator('.map-compass-control')).toHaveCount(1);
+    await expect.poll(() => compassSensorState(page)).toEqual({ listening: true, listeners: 1 });
+  };
+  await assertSize(172);
+  await page.setViewportSize({ width: 320, height: 568 });
+  await assertSize(128);
+  await page.setViewportSize({ width: 840, height: 844 });
+  await assertSize(172);
+  // Change only the actual MapLibre container, keeping the viewport at 840px.
+  // A 40vw implementation would incorrectly keep the dial 172px wide here.
+  await map.evaluate((element) => { element.style.width = '300.5px'; });
+  await assertSize(120);
+  await map.evaluate((element) => { element.style.width = '100%'; });
+  await assertSize(172);
+  expect(await page.evaluate(() => (window as unknown as { compassFixtureStartCount: number }).compassFixtureStartCount)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+for (const viewport of [
+  { width: 390, height: 844 },
+  { width: 320, height: 568 },
+  { width: 320, height: 480 },
+  { width: 320, height: 480, depth: true },
+  { width: 320, height: 400, depth: true },
+  { width: 568, height: 320 },
+  { width: 568, height: 320, depth: true },
+]) {
+  const depth = 'depth' in viewport && viewport.depth;
+  test(`compass stays above sources and clear of map controls at ${viewport.width}x${viewport.height}${depth ? ' in depth mode' : ''}`, async ({ page }, testInfo) => {
+    await fixture(page, true, true, depth);
+    await page.setViewportSize(viewport);
+    await page.goto('/dashboard');
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--safe-area-inset-top', '24px');
+      document.documentElement.style.setProperty('--safe-area-inset-right', '12px');
+      document.documentElement.style.setProperty('--safe-area-inset-bottom', '20px');
+    });
+    await page.getByRole('button', { name: 'Show compass', exact: true }).tap();
+    await emitCompassHeading(page, 260);
+    const dial = page.getByTestId('map-compass');
+    await expect(dial).toBeInViewport({ ratio: 1 });
+    await expect(page.getByTestId('compass-heading')).toHaveText('260°');
+    const attribution = page.locator('.maplibregl-ctrl-attrib');
+    const attributionButton = attribution.locator('.maplibregl-ctrl-attrib-button');
+    if (!await attribution.evaluate((element) => element.classList.contains('maplibregl-compact-show'))) {
+      await attributionButton.tap();
+    }
+    await expect(attribution.locator('.maplibregl-ctrl-attrib-inner')).toBeVisible();
+    // Compare real rendered rectangles, including expanded/wrapped source text.
+    await expect.poll(async () => {
+      const compassBox = await dial.boundingBox();
+      const sourcesBox = await attribution.boundingBox();
+      return compassBox !== null && sourcesBox !== null && compassBox.y + compassBox.height <= sourcesBox.y;
+    }).toBe(true);
+    const compassBox = (await dial.boundingBox())!;
+    const sourcesBox = (await attribution.boundingBox())!;
+    const mapBox = (await page.locator('.maplibregl-map').boundingBox())!;
+    expect(compassBox.width).toBeGreaterThan(100);
+    expect(compassBox.height).toBe(compassBox.width);
+    expect(compassBox.width).toBeLessThanOrEqual(172);
+    expect(compassBox.width).toBeLessThanOrEqual(mapBox.width * 0.4);
+    expect(compassBox.x).toBeGreaterThanOrEqual(mapBox.x);
+    expect(compassBox.y).toBeGreaterThanOrEqual(mapBox.y);
+    expect(compassBox.x + compassBox.width).toBeLessThanOrEqual(mapBox.x + mapBox.width);
+    for (const obstacle of [
+      page.getByTestId('my-location-button'),
+      page.getByTestId('map-layer-button'),
+      page.getByRole('button', { name: 'Offline Maps', exact: true }),
+      page.getByRole('button', { name: 'Hide compass', exact: true }),
+      page.getByTestId('distance-scale'),
+      ...(depth ? [page.getByTestId('depth-gauge')] : []),
+    ]) {
+      const box = (await obstacle.boundingBox())!;
+      expect(
+        compassBox.x + compassBox.width <= box.x || box.x + box.width <= compassBox.x ||
+        compassBox.y + compassBox.height <= box.y || box.y + box.height <= compassBox.y,
+        `Compass ${JSON.stringify(compassBox)} overlaps ${obstacle} ${JSON.stringify(box)}`,
+      ).toBe(true);
+      expect(
+        sourcesBox.x + sourcesBox.width <= box.x || box.x + box.width <= sourcesBox.x ||
+        sourcesBox.y + sourcesBox.height <= box.y || box.y + box.height <= sourcesBox.y,
+        `Sources ${JSON.stringify(sourcesBox)} overlap ${obstacle} ${JSON.stringify(box)}`,
+      ).toBe(true);
+    }
+    expect(await dial.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)?.classList.contains('maplibregl-canvas');
+    })).toBe(true);
+    if (depth) {
+      const gaugeBox = (await page.getByTestId('depth-gauge').boundingBox())!;
+      for (const control of [
+        page.getByTestId('my-location-button'),
+        page.getByTestId('map-layer-button'),
+        page.getByRole('button', { name: 'Offline Maps', exact: true }),
+        page.getByRole('button', { name: 'Hide compass', exact: true }),
+      ]) {
+        const box = (await control.boundingBox())!;
+        expect(
+          gaugeBox.x + gaugeBox.width <= box.x || box.x + box.width <= gaugeBox.x ||
+          gaugeBox.y + gaugeBox.height <= box.y || box.y + box.height <= gaugeBox.y,
+        ).toBe(true);
+      }
+    }
+    await testInfo.attach(`compass-${viewport.width}x${viewport.height}`, {
+      body: await page.screenshot({ path: testInfo.outputPath(`compass-${viewport.width}x${viewport.height}.png`) }),
+      contentType: 'image/png',
+    });
+    await page.getByRole('button', { name: 'Hide compass', exact: true }).tap();
+    await expect(dial).toHaveCount(0);
+  });
+}
 
 async function savedAreas(page: import('@playwright/test').Page) {
   return page.evaluate(async () => {

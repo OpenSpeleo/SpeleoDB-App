@@ -313,6 +313,17 @@ vi.mock('react-map-gl/maplibre', () => {
 
   return {
     default: MapMock,
+    useControl: function useControl<T extends { onAdd(map: { getContainer(): HTMLElement }): HTMLElement; onRemove(): void }>(
+      createControl: () => T,
+    ): T {
+      const [control] = React.useState(createControl);
+      React.useEffect(() => {
+        const container = screen.getByTestId('map');
+        container.appendChild(control.onAdd({ getContainer: () => container }));
+        return () => control.onRemove();
+      }, [control]);
+      return control;
+    },
     Source: ({ children, id, data }: {
       children?: React.ReactNode;
       id?: string;
@@ -3102,6 +3113,259 @@ describe('Dashboard -- User location dot', () => {
       expect(mockWatchPosition).toHaveBeenCalledTimes(3);
       expect(mockStartHeading).toHaveBeenCalledTimes(3);
     });
+  });
+});
+
+describe('Dashboard -- Map compass', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    });
+    // Flush the prior subscriber's queued teardown before resetting plugin spies.
+    await act(async () => {});
+    vi.clearAllMocks();
+    mockGetCachedLayerStyle.mockResolvedValue({ version: 8, sources: {}, layers: [] });
+    mockIsAuthenticated.mockReturnValue(true);
+    mockDownloadAreas = EMPTY_DOWNLOAD_AREAS;
+    mockGpsRecordingState = 'idle';
+    mockGpsTracks = [];
+    mockController.currentTrackPoints = [];
+    mockIsOfflineLocked = false;
+    headingCallbackRef.current = null;
+    locationWatchCallbackRef.current = null;
+    appStateCallbackRef.current = null;
+    mockStartHeading.mockReset().mockResolvedValue(undefined);
+    mockStopHeading.mockReset().mockResolvedValue(undefined);
+    mockRequestPermissions.mockReset().mockResolvedValue({ location: 'granted' });
+    mockWatchPosition.mockReset().mockImplementation(
+      async (_options: unknown, callback: (position: unknown, error?: unknown) => void) => {
+        locationWatchCallbackRef.current = callback;
+        return 'live-location-watch';
+      },
+    );
+    mockClearWatch.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('starts hidden, places the toggle fourth, and crosses the icon while visible', async () => {
+    renderDashboard();
+    const toggle = await screen.findByRole('button', { name: 'Show compass' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('map-compass')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compass-toggle-slash')).not.toBeInTheDocument();
+    expect(mockStartHeading).not.toHaveBeenCalled();
+    const controls = Array.from(document.querySelectorAll('.map-control-stack button'));
+    expect(controls).toHaveLength(4);
+    expect(controls[2]).toHaveAccessibleName('Offline Maps');
+    expect(controls[3]).toBe(toggle);
+
+    await userEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Hide compass' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('compass-toggle-slash')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Compass heading unavailable' })).toBeInTheDocument();
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAccessibleName('Show compass');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('map-compass')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compass-toggle-slash')).not.toBeInTheDocument();
+    await waitFor(() => expect(mockStopHeading).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows native phone heading without enabling location, recording, or moving the map', async () => {
+    renderDashboard();
+    await userEvent.click(await screen.findByRole('button', { name: 'Show compass' }));
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+    act(() => headingCallbackRef.current?.({ value: 260 }));
+    expect(screen.getByRole('img', { name: 'Compass heading 260 degrees, W' })).toBeInTheDocument();
+    expect(screen.getByTestId('compass-heading')).toHaveTextContent('260°');
+    expect(screen.getByTestId('compass-heading-pointer')).toHaveStyle({ transform: 'rotate(260deg)' });
+    expect(mockWatchPosition).not.toHaveBeenCalled();
+    expect(mockRequestPermissions).not.toHaveBeenCalled();
+    expect(mockMapFlyTo).not.toHaveBeenCalled();
+    expect(mockGpsRecordingState).toBe('idle');
+    expect(screen.getByTestId('my-location-button')).toHaveAttribute('aria-pressed', 'false');
+    expect(document.querySelector('[data-layer-id="user-location-dot"]')).toBeNull();
+    expect(screen.queryByTestId('user-location-heading-cone')).not.toBeInTheDocument();
+  });
+
+  it('keeps heading updates inside the compass and ignores invalid native samples', async () => {
+    renderDashboard();
+    await userEvent.click(await screen.findByRole('button', { name: 'Show compass' }));
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+    const mapProps = mapPropsRef.current;
+    act(() => headingCallbackRef.current?.({ value: 337.5 }));
+    expect(screen.getByRole('img', { name: 'Compass heading 338 degrees, NNW' })).toBeInTheDocument();
+    expect(screen.getByText('NNW', { selector: '.map-compass__direction' })).toBeInTheDocument();
+    expect(screen.getByTestId('map-compass').querySelectorAll('text')).toHaveLength(8);
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      act(() => headingCallbackRef.current?.({ value }));
+      expect(screen.getByTestId('compass-heading')).toHaveTextContent('338°');
+    }
+    act(() => headingCallbackRef.current?.({ value: 45 }));
+    expect(screen.getByTestId('compass-heading')).toHaveTextContent('45°');
+    expect(mapPropsRef.current).toBe(mapProps);
+    expect(mockMapFlyTo).not.toHaveBeenCalled();
+  });
+
+  it('recovers from failed native startup by toggling without opening location permissions', async () => {
+    mockStartHeading.mockRejectedValueOnce(new Error('Sensor unavailable'));
+    renderDashboard();
+    await userEvent.click(await screen.findByRole('button', { name: 'Show compass' }));
+    await waitFor(() => expect(mockStopHeading).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('img', { name: 'Compass heading unavailable' })).toBeInTheDocument();
+    expect(screen.queryByTestId('compass-heading-pointer')).not.toBeInTheDocument();
+    expect(mockRequestPermissions).not.toHaveBeenCalled();
+    expect(mockWatchPosition).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Hide compass' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Show compass' }));
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(2));
+    act(() => headingCallbackRef.current?.({ value: 260 }));
+    expect(screen.getByTestId('compass-heading')).toHaveTextContent('260°');
+  });
+
+  it.each(['hide', 'route', 'background'] as const)(
+    'cancels pending compass startup on %s and resumes only with fresh events',
+    async (reason) => {
+      const startup = deferred<void>();
+      mockStartHeading.mockReturnValueOnce(startup.promise);
+      const view = renderDashboard();
+      await userEvent.click(await screen.findByRole('button', { name: 'Show compass' }));
+      await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+      const staleCallback = headingCallbackRef.current!;
+      if (reason === 'hide') await userEvent.click(screen.getByRole('button', { name: 'Hide compass' }));
+      else if (reason === 'route') act(() => view.setDashboardActive(false));
+      else act(() => appStateCallbackRef.current?.({ isActive: false }));
+      await act(async () => { startup.resolve(); });
+      await waitFor(() => expect(mockStopHeading).toHaveBeenCalledTimes(1));
+      act(() => staleCallback({ value: 300 }));
+      expect(screen.queryByTestId('compass-heading-pointer')).not.toBeInTheDocument();
+
+      if (reason === 'hide') await userEvent.click(screen.getByRole('button', { name: 'Show compass' }));
+      else if (reason === 'route') act(() => view.setDashboardActive(true));
+      else act(() => appStateCallbackRef.current?.({ isActive: true }));
+      await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(2));
+      expect(screen.getByRole('img', { name: 'Compass heading unavailable' })).toBeInTheDocument();
+      act(() => headingCallbackRef.current?.({ value: 45 }));
+      act(() => staleCallback({ value: 300 }));
+      expect(screen.getByTestId('compass-heading')).toHaveTextContent('45°');
+      expect(mockWatchPosition).not.toHaveBeenCalled();
+      expect(mockRequestPermissions).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['compass', 'location'] as const)(
+    'shares one sensor with the location cone when %s is hidden first',
+    async (firstHidden) => {
+      renderDashboard();
+      await userEvent.click(await screen.findByRole('button', { name: 'Show compass' }));
+      await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+      await userEvent.click(screen.getByTestId('my-location-button'));
+      await waitFor(() => expect(mockWatchPosition).toHaveBeenCalledTimes(1));
+      act(() => locationWatchCallbackRef.current?.({
+        coords: { latitude: 46.6, longitude: 2.3, accuracy: 10 },
+        timestamp: Date.now(),
+      }));
+      act(() => headingCallbackRef.current?.({ value: 90 }));
+      expect(await screen.findByTestId('user-location-heading-cone')).toBeInTheDocument();
+      expect(screen.getByTestId('compass-heading')).toHaveTextContent('90°');
+      expect(mockStartHeading).toHaveBeenCalledTimes(1);
+
+      const compassToggle = screen.getByTestId('compass-toggle');
+      const locationToggle = screen.getByTestId('my-location-button');
+      await userEvent.click(firstHidden === 'compass' ? compassToggle : locationToggle);
+      expect(mockStopHeading).not.toHaveBeenCalled();
+      act(() => headingCallbackRef.current?.({ value: 120 }));
+      if (firstHidden === 'compass') {
+        expect(screen.queryByTestId('map-compass')).not.toBeInTheDocument();
+        expect(screen.getByTestId('user-location-heading-cone')).toBeInTheDocument();
+      } else {
+        expect(screen.getByTestId('compass-heading')).toHaveTextContent('120°');
+        expect(screen.queryByTestId('user-location-heading-cone')).not.toBeInTheDocument();
+      }
+      await userEvent.click(firstHidden === 'compass' ? locationToggle : compassToggle);
+      await waitFor(() => expect(mockStopHeading).toHaveBeenCalledTimes(1));
+      expect(mockStartHeading).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('suspends standalone heading on route and app inactivity and retains the visible preference', async () => {
+    const view = renderDashboard();
+    await userEvent.click(await screen.findByRole('button', { name: 'Show compass' }));
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+    act(() => headingCallbackRef.current?.({ value: 260 }));
+
+    act(() => view.setDashboardActive(false));
+    await waitFor(() => expect(mockStopHeading).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('compass-toggle')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('img', { name: 'Compass heading unavailable' })).toBeInTheDocument();
+    act(() => view.setDashboardActive(true));
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(2));
+    act(() => headingCallbackRef.current?.({ value: 45 }));
+    expect(screen.getByTestId('compass-heading')).toHaveTextContent('45°');
+
+    act(() => appStateCallbackRef.current?.({ isActive: false }));
+    await waitFor(() => expect(mockStopHeading).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('img', { name: 'Compass heading unavailable' })).toBeInTheDocument();
+    act(() => appStateCallbackRef.current?.({ isActive: true }));
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(3));
+    act(() => headingCallbackRef.current?.({ value: 180 }));
+    expect(screen.getByTestId('compass-heading')).toHaveTextContent('180°');
+    expect(mockWatchPosition).not.toHaveBeenCalled();
+    expect(mockRequestPermissions).not.toHaveBeenCalled();
+    expect(mockMapFlyTo).not.toHaveBeenCalled();
+  });
+
+  it('keeps the standalone compass live when recording pauses and stops', async () => {
+    mockGpsRecordingState = 'recording';
+    mockController.currentTrackPoints = [{ latitude: 46.6, longitude: 2.3, timestamp: Date.now() }];
+    const view = renderDashboard();
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Show compass' }));
+    act(() => headingCallbackRef.current?.({ value: 90 }));
+    expect(screen.getByTestId('user-location-heading-cone')).toBeInTheDocument();
+
+    mockGpsRecordingState = 'paused';
+    view.rerenderDashboard();
+    expect(screen.queryByTestId('user-location-heading-cone')).not.toBeInTheDocument();
+    act(() => headingCallbackRef.current?.({ value: 120 }));
+    expect(screen.getByTestId('compass-heading')).toHaveTextContent('120°');
+    mockGpsRecordingState = 'idle';
+    view.rerenderDashboard();
+    act(() => headingCallbackRef.current?.({ value: 150 }));
+    expect(screen.getByTestId('compass-heading')).toHaveTextContent('150°');
+    expect(mockStopHeading).not.toHaveBeenCalled();
+    expect(mockStartHeading).toHaveBeenCalledTimes(1);
+    expect(mockWatchPosition).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Hide compass' }));
+    await waitFor(() => expect(mockStopHeading).toHaveBeenCalledTimes(1));
+  });
+
+  it('releases the compass while editing an offline area and restores it afterward', async () => {
+    mockDownloadAreas = {
+      ...EMPTY_DOWNLOAD_AREAS,
+      areas: [{
+        areaId: 'compass-edit', type: DownloadAreaType.Manual, objectId: null,
+        topLeft: [2, 46.001], bottomRight: [2.001, 46], visible: true,
+        revision: 1, sourceKey: 'compass-edit', sourceRevision: null,
+        layerIds: ['esri-satellite'],
+      }],
+    };
+    renderDashboard();
+    await userEvent.click(await screen.findByRole('button', { name: 'Show compass' }));
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Offline Maps' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit Area 1' }));
+    expect(screen.queryByTestId('map-compass')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compass-toggle')).not.toBeInTheDocument();
+    await waitFor(() => expect(mockStopHeading).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel area editing' }));
+    expect(screen.getByRole('button', { name: 'Hide compass' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('map-compass')).toBeInTheDocument();
+    await waitFor(() => expect(mockStartHeading).toHaveBeenCalledTimes(2));
+    expect(mockWatchPosition).not.toHaveBeenCalled();
   });
 });
 

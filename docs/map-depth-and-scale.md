@@ -151,6 +151,9 @@ The gauge is visible only when `colorMode === 'depth'`.
 - Current depth label is empty when no sample is active.
 - Min/max labels show `N/A` when the depth domain is unavailable.
 - Values display in meters by default and can switch to feet.
+- The gauge sits left of the map toolbar so all four controls and the depth
+  labels stay readable. On short screens the [compass](map-compass.md) and
+  source credits shift farther left to clear both the gauge and toolbar.
 
 Implementation:
 

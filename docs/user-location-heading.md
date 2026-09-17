@@ -8,6 +8,11 @@ showing the physical direction of the phone. The same indicator is used by the
 foreground **My Location** mode and by GPS track recording so those features
 cannot drift into different marker, compass, or lifecycle behavior.
 
+The independently toggled [map compass](map-compass.md) also consumes the shared
+heading service. It can keep heading active without a location dot, and hiding
+it does not interrupt the cone's subscription. The source policy below describes
+the dot/cone; the standalone compass has its own visibility reason.
+
 The cone is phone orientation, not direction of travel. GPS course/bearing is
 never used as a substitute because a stationary or slowly moving phone has no
 reliable travel direction.
@@ -63,10 +68,13 @@ cadence, persistence, background behavior, or storage schema.
 
 `DeviceHeadingService` owns one process-wide native compass listener. The first
 consumer starts it with a 100 ms minimum interval and 2-degree minimum change;
-additional consumers share it; the final unsubscribe stops it. Setup failure, an
-unsupported sensor, or a web runtime publishes no heading and leaves the dot
-usable without showing another modal. `useDeviceHeading` owns wrap-safe display
-animation state and keeps frequent heading renders inside the indicator.
+additional consumers share it; the final unsubscribe stops it. Listener
+generations fence callbacks from retired or failed native sessions before
+asynchronous teardown, and readings received without consumers cannot repopulate
+the cache. Setup failure, an unsupported sensor, or a web runtime publishes no
+heading and leaves the dot usable without showing another modal.
+`useDeviceHeading` owns wrap-safe display animation state and keeps frequent
+heading renders inside the indicator.
 
 `DashboardMapCanvas` combines route visibility with Capacitor app foreground
 state and passes that runtime gate to both sensor paths. `AuthenticatedAppShell`
@@ -98,7 +106,7 @@ the same orientation contract.
 
 ## Native compass integration
 
-`@capgo/capacitor-compass` is pinned to `8.1.17`. Android uses the device sensor
+`@capgo/capacitor-compass` is pinned to `8.1.20`. Android uses the device sensor
 and accounts for display rotation without another runtime permission. On iOS,
 Core Location provides true heading under the app's existing location purpose
 strings.

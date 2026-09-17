@@ -32,6 +32,7 @@ export class DeviceHeadingService implements HeadingProvider {
   private nativeHandle: HeadingListenerHandle | null = null;
   private transition: Promise<void> = Promise.resolve();
   private heading: number | null = null;
+  private listenerGeneration = 0;
 
   constructor(
     private readonly plugin: HeadingPlugin = CapgoCompass,
@@ -72,18 +73,22 @@ export class DeviceHeadingService implements HeadingProvider {
 
   private async startNativeListener(): Promise<void> {
     let handle: HeadingListenerHandle | null = null;
+    const generation = ++this.listenerGeneration;
     try {
       handle = await this.plugin.addListener('headingChange', ({ value }) => {
+        if (generation !== this.listenerGeneration || this.listeners.size === 0) return;
         const heading = normalizeHeading(value);
         if (heading !== null) this.publish(heading);
       });
       if (this.listeners.size === 0 || !this.isNativePlatform()) {
+        this.listenerGeneration++;
         await handle.remove().catch(() => {});
         return;
       }
       await this.plugin.startListening(LISTENING_OPTIONS);
       this.nativeHandle = handle;
     } catch {
+      this.listenerGeneration++;
       await handle?.remove().catch(() => {});
       await this.plugin.stopListening().catch(() => {});
       this.publish(null);
@@ -92,6 +97,8 @@ export class DeviceHeadingService implements HeadingProvider {
 
   private async stopNativeListener(): Promise<void> {
     const handle = this.nativeHandle;
+    // Retire callbacks before awaiting bridge teardown; delivery may be in flight.
+    this.listenerGeneration++;
     this.nativeHandle = null;
     this.heading = null;
     await this.plugin.stopListening().catch(() => {});

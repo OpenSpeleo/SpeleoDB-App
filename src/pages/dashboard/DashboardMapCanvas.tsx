@@ -1,6 +1,6 @@
 import { DownloadAreaMapLayers } from './DownloadAreaMapLayers';
 import type { DownloadArea } from '../../types/downloadArea';
-import { useCallback, type PointerEventHandler, type RefObject } from 'react';
+import { useCallback, useState, type PointerEventHandler, type RefObject } from 'react';
 import type { StyleSpecification } from 'maplibre-gl';
 import Map from 'react-map-gl/maplibre';
 import type { MapLayerMouseEvent, MapRef } from 'react-map-gl/maplibre';
@@ -9,6 +9,7 @@ import MapLayerControl from '../../components/map/MapLayerControl';
 import DistanceScale from '../../components/map/DistanceScale';
 import DepthGauge from '../../components/map/DepthGauge';
 import { UserLocationIndicator } from '../../components/map/UserLocationIndicator';
+import { MapCompass } from '../../components/map/MapCompass';
 import GeolocationErrorModal from '../../components/GeolocationErrorModal';
 import { useAppForeground } from '../../hooks/useAppForeground';
 import type { MapColorMode } from '../../types/mapColorMode';
@@ -63,6 +64,8 @@ interface MapViewportProps {
   gpsLayers: GpsMapLayersProps;
   userLocation: UserMapLocation | null;
   headingActive: boolean;
+  compassVisible: boolean;
+  runtimeActive: boolean;
   iconsLoaded: boolean;
   iconAvailability: OverlayMapLayersProps['iconAvailability'];
   gestures: DashboardMapGestures;
@@ -79,6 +82,8 @@ function MapViewport({
   gpsLayers,
   userLocation,
   headingActive,
+  compassVisible,
+  runtimeActive,
   iconsLoaded,
   iconAvailability,
   gestures,
@@ -116,6 +121,7 @@ function MapViewport({
       />
       <GpsMapLayers {...gpsLayers} />
       <UserLocationIndicator location={userLocation} headingActive={headingActive} />
+      {compassVisible && <MapCompass active={runtimeActive} />}
     </Map>
   );
 }
@@ -161,11 +167,15 @@ function MapChrome({
   isLocationModeActive,
   onLocate,
   onOpenOfflineMaps,
+  compassVisible,
+  onToggleCompass,
 }: Pick<DashboardMapCanvasProps, 'selectedMapLayerId' | 'isOfflineLocked' | 'layerOfflineSync' | 'onOpenOfflineMaps'> & {
   onSelectLayer: (layerId: string) => void;
   isLocating: boolean;
   isLocationModeActive: boolean;
   onLocate: () => void;
+  compassVisible: boolean;
+  onToggleCompass: () => void;
 }) {
   return (
     <div className="map-control-stack">
@@ -188,6 +198,20 @@ function MapChrome({
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" /></svg>
         </button>
       )}
+      <button
+        type="button"
+        className={`map-control-button${compassVisible ? ' map-control-button--active' : ''}`}
+        onClick={onToggleCompass}
+        aria-label={compassVisible ? 'Hide compass' : 'Show compass'}
+        aria-pressed={compassVisible}
+        data-testid="compass-toggle"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <path d="m16 8-2.5 5.5L8 16l2.5-5.5L16 8Z" />
+          {compassVisible && <path d="m3 3 18 18" strokeWidth="2.25" data-testid="compass-toggle-slash" />}
+        </svg>
+      </button>
     </div>
   );
 }
@@ -213,6 +237,7 @@ export function DashboardMapCanvas({
   onMapReady,
   dependencies,
 }: DashboardMapCanvasProps) {
+  const [compassVisible, setCompassVisible] = useState(false);
   const appForeground = useAppForeground();
   const runtimeActive = isActive && appForeground;
   const shell = useDashboardMapShell({
@@ -234,7 +259,7 @@ export function DashboardMapCanvas({
   return (
     <>
       <div
-        className="relative w-full h-full dashboard-map-touch-surface"
+        className={`relative w-full h-full dashboard-map-touch-surface${colorMode === 'depth' ? ' dashboard-map-touch-surface--depth' : ''}`}
         onPointerDownCapture={editingArea ? undefined : gestures.onStart}
         onPointerMoveCapture={editingArea ? undefined : gestures.onMove}
         onPointerUpCapture={editingArea ? undefined : gestures.onEnd}
@@ -249,6 +274,8 @@ export function DashboardMapCanvas({
           gpsLayers={gpsLayers}
           userLocation={userLocation}
           headingActive={headingActive}
+          compassVisible={compassVisible && !editingArea}
+          runtimeActive={runtimeActive}
           iconsLoaded={shell.overlayIconsLoaded}
           iconAvailability={shell.overlayIconAvailability}
           gestures={gestures}
@@ -264,7 +291,7 @@ export function DashboardMapCanvas({
         </div>
         {colorMode === 'depth' && (
           <div
-            className="absolute right-3 z-10"
+            className="absolute right-[68px] z-10"
             style={{ top: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top)) + 64px)' }}
           >
             <DepthGauge
@@ -284,6 +311,8 @@ export function DashboardMapCanvas({
         isLocationModeActive={shell.locationModeActive}
         onLocate={shell.toggleLocationMode}
         onOpenOfflineMaps={onOpenOfflineMaps}
+        compassVisible={compassVisible}
+        onToggleCompass={() => setCompassVisible((visible) => !visible)}
       />}
 
       <GeolocationErrorModal error={shell.geoError} onDismiss={shell.dismissGeoError} />

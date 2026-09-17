@@ -24,7 +24,13 @@ The shell owns:
   flight and haptic feedback, toggle state, and error dismissal;
 - route/app runtime gating for the foreground location and heading lifecycles;
 - MapLibre viewport composition and the My Location/layer-control chrome; and
-- map loading, distance-scale, depth-gauge, and geolocation-error surfaces.
+- map loading, distance-scale, depth-gauge, compass, and geolocation-error
+  surfaces.
+
+The fourth chrome action toggles the standalone [map compass](map-compass.md).
+Its session visibility belongs to `DashboardMapCanvas`; its frequent readings
+stay inside `MapCompass`, sharing the existing native heading service with the
+location cone. Its control joins MapLibre's bottom-right attribution layout.
 
 `Dashboard.tsx` supplies already-derived project, overlay, GPS, depth, and
 gesture inputs. The focused layer components still own their source/paint
@@ -63,7 +69,8 @@ Map style loading remains keyed only by layer selection. Icon registration
 remains a single sequential pass on map load. Distance-scale state updates only
 for finite, changed zoom/latitude pairs. Live location uses Android's one-second
 update hints and is stopped when the map is hidden/backgrounded. Heading updates
-are isolated to `UserLocationIndicator`; see `docs/user-location-heading.md`.
+are isolated to `UserLocationIndicator` and `MapCompass`; see
+`docs/user-location-heading.md` and `docs/map-compass.md`.
 
 The focused canvas, location hook, heading service, and indicator keep sensor
 state machines outside the Dashboard domain façade and avoid duplicating native

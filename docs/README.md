@@ -47,6 +47,8 @@ behaviors.
 - `user-location-heading.md`: live My Location toggle, shared recording/manual
   position selection, reference-counted phone heading, cone rendering, sensor
   lifecycle, privacy, performance, and physical-device verification.
+- `map-compass.md`: independently toggled device compass, eight-point rose,
+  shared heading ownership, attribution layout, accessibility and verification.
 - `dashboard-map-layers.md`: focused project, overlay, GPS-track, recording, and
   user-location MapLibre layer composition.
 - `dashboard-map-interactions.md`: touch/pen tap, long-press, empty-spot,
