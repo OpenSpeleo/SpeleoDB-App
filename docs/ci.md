@@ -76,6 +76,13 @@ node: bad option: --no-webstorage
 Do not call bare `npx vitest` from CI unless the wrapper behavior is also
 preserved.
 
+Vitest and `@vitest/coverage-v8` are upgraded together. Vitest 5 clears mock
+call history before each test. Fixtures that capture a module's one-time
+registration (such as the cached tile protocol) retain the registered callback
+in `beforeAll` and invoke it directly, rather than reading earlier tests' mock
+history. This preserves production lifecycle semantics and Vitest's default mock
+isolation.
+
 ## Coverage Enforcement
 
 The covered suite is a blocking gate, not a report-only artifact.
@@ -153,6 +160,40 @@ secrets, so CI uses a non-secret placeholder DSN. This workflow does not produce
 trusted releases, regardless of whether real DSNs are present.
 
 ## Local Verification
+
+### Dependency maintenance
+
+`make dependencies` reports drift without changing files. `make update` runs
+`npm-check-updates -u --peer --target minor --reject react,react-dom`, then a
+patch-only pass for `react,react-dom`, followed by `npm install` to update the
+root manifest and lockfile together. Routine updates stay within each declared
+major version; peer checks alone do not establish application API compatibility.
+For version-zero dependencies, minor updates can still be breaking and require
+review. See the
+[updater's version-target documentation](https://github.com/raineorshine/npm-check-updates#target).
+
+React and React DOM remain on 19.2 with patch updates: React 19.3 increased the
+production entry from approximately 443 KB to 473 KB, exceeding its 450 KB
+budget. An isolated build with all other updates and React 19.2.8 passes. A
+future React minor upgrade must address that startup cost before removing the
+patch-only exception; keep the existing bundle budgets enforced.
+
+Major upgrades require a dedicated migration with source and test changes. In
+particular, the current app owns navigation through React Router 5
+(`useHistory`) and History 4. Ionic React/React Router must remain on major 8
+until navigation and its integration tests are migrated together: Ionic Router 9
+requires React Router 6. Keep the Router 5 and History 4 type packages aligned
+with those runtime APIs. Do not bypass resolution with `--force` or
+`--legacy-peer-deps` or delete the lockfile to conceal a compatibility problem.
+
+`quality/dependency-update.test.ts` executes the actual Make target with local
+package-manager doubles to verify the update policy, install ordering, and
+failure propagation without registry traffic. Real `npm install`, `npm ci`,
+`npm ls`, and `make ci` provide resolution and application verification after an
+update. Native dependency changes additionally require the native/device gates
+above. The update policy adds no application runtime work.
+
+### Application checks
 
 Before changing CI-sensitive code, run the same core commands locally:
 

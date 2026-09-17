@@ -22,7 +22,7 @@ BUILD_DIR       := build
         pre-commit \
         sync ios-open ios-build ios-release ios-sim ios-sim-run ios-sim-boot \
         ios-sim-shutdown ios-device ios-live ios-log cap-doctor \
-        dependencies
+        dependencies update
 
 # ── Help ──────────────────────────────────────────────────────
 help: ## Show this help
@@ -190,6 +190,8 @@ ios-log: ## Stream logs from the booted simulator
 dependencies: ## Report dependency drift without modifying manifests or the lockfile
 	npm outdated
 
-update:
-	npx --yes npm-check-updates -u --peer
+update: ## Update dependencies within current majors, checking peer compatibility
+	# React minor upgrades need a bundle-budget review (19.3 exceeds the entry limit).
+	npx --yes npm-check-updates -u --peer --target minor --reject react,react-dom
+	npx --yes npm-check-updates -u --peer --target patch --filter react,react-dom
 	npm install

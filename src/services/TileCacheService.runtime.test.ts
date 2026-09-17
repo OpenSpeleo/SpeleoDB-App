@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 
 // Mock maplibre-gl before importing the module under test so we can capture the
 // `cached-https` protocol handler (the real runtime tile-fetch path).
@@ -60,6 +60,13 @@ function getProtocolHandler(): ProtocolHandler {
 describe('TileCacheService runtime magic-hash (cached-https protocol)', () => {
   const MAGIC_HASH = MAP.MISSING_TILE_SHA256_HASHES[0];
   let originalCrypto: Crypto;
+  let handler: ProtocolHandler;
+
+  beforeAll(() => {
+    // Registration is module-scoped and happens once. Capture its handler
+    // before Vitest clears mock call history between individual tests.
+    handler = getProtocolHandler();
+  });
 
   beforeEach(async () => {
     originalCrypto = globalThis.crypto;
@@ -83,7 +90,6 @@ describe('TileCacheService runtime magic-hash (cached-https protocol)', () => {
       arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
     });
 
-    const handler = getProtocolHandler();
     await expect(handler({ url: CACHED_TILE_URL })).rejects.toSatisfy(isMissingTileError);
 
     // No provider bytes are retained; only the authoritative null answer is.
@@ -104,7 +110,6 @@ describe('TileCacheService runtime magic-hash (cached-https protocol)', () => {
       arrayBuffer: () => Promise.resolve(new Uint8Array([9, 9, 9, 9]).buffer),
     });
 
-    const handler = getProtocolHandler();
     const result = await handler({ url: CACHED_TILE_URL });
     expect(new Uint8Array(result.data)).toEqual(new Uint8Array([9, 9, 9, 9]));
 
@@ -122,7 +127,7 @@ describe('TileCacheService runtime magic-hash (cached-https protocol)', () => {
     await __seedTileCacheEntryForTests(TILE_URL, bytes, { pinnedByAutoPrefetch: false, now: Date.now() });
     globalThis.fetch = vi.fn(() => new Promise<Response>(() => {}));
 
-    const result = await getProtocolHandler()({ url: CACHED_TILE_URL });
+    const result = await handler({ url: CACHED_TILE_URL });
 
     expect(new Uint8Array(result.data)).toEqual(new Uint8Array([7, 7, 7]));
     expect(globalThis.fetch).not.toHaveBeenCalled();
@@ -140,7 +145,6 @@ describe('TileCacheService runtime magic-hash (cached-https protocol)', () => {
       resolveFetch = resolve;
     }));
 
-    const handler = getProtocolHandler();
     const [first, second] = await Promise.all([
       handler({ url: CACHED_TILE_URL }),
       handler({ url: CACHED_TILE_URL }),
@@ -166,7 +170,7 @@ describe('TileCacheService runtime magic-hash (cached-https protocol)', () => {
     });
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
 
-    const result = await getProtocolHandler()({ url: CACHED_TILE_URL });
+    const result = await handler({ url: CACHED_TILE_URL });
     expect(new Uint8Array(result.data)).toEqual(new Uint8Array([3, 2, 1]));
     await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
     expect(new Uint8Array((await getTile(TILE_URL))!)).toEqual(new Uint8Array([3, 2, 1]));
@@ -183,7 +187,7 @@ describe('TileCacheService runtime magic-hash (cached-https protocol)', () => {
       resolveFetch = resolve;
     }));
 
-    await getProtocolHandler()({ url: CACHED_TILE_URL });
+    await handler({ url: CACHED_TILE_URL });
     await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
     await clearCachedTiles();
     resolveFetch(new Response(new Uint8Array([9]), {
@@ -209,7 +213,7 @@ describe('TileCacheService runtime magic-hash (cached-https protocol)', () => {
       resolveFetch = resolve;
     }));
 
-    await getProtocolHandler()({ url: CACHED_TILE_URL });
+    await handler({ url: CACHED_TILE_URL });
     await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
     setTileCacheOfflineMode(true);
     resolveFetch(new Response(new Uint8Array([9]), {
