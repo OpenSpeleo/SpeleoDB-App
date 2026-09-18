@@ -120,3 +120,61 @@ real login. No user data is cleared or migrated by this check.
 - Test setup repair commit: `dd038b6`. Final implementation: `7db65fd`.
   `CHANGELOG.md` Unreleased cites that implementation; the follow-up commit is
   named `[Changelog Update]`. All task-owned changes are committed locally.
+
+### Firewall-disabled revalidation
+
+User requested emulator restart and complete revalidation after disabling the
+host firewall. Preserve the supported and unsupported WebView comparison.
+
+- [x] Restart both Android emulators and verify their engine versions.
+- [x] Rerun lint, types, build, full coverage, browser, and Android checks.
+- [x] Verify authenticated test-instance network access, login, map/navigation,
+      and session restoration on the supported engine.
+- [x] Verify the older engine still displays the update recovery screen.
+- [x] Record results and any remaining limitations without publishing changes.
+
+#### Revalidation results (September 18, 2026)
+
+- Restarted Android 11/WebView 91 and Android 16/WebView 134; Android Studio
+  remains open. Android 16 stalled during the initial reboot, requiring a cold
+  start. The first Gradle run returned success despite executing zero tests on
+  that unavailable device. Checked the XML report and reran its three device
+  tests only after boot completion; all passed. A transient emulator System UI
+  not-responding dialog was dismissed, and subsequent app interaction worked.
+- `npm run lint`, `npm run typecheck`, `npm run quality:inventory`, and
+  `npm run build`: passed. `npm run test:ci`: 136 files / 2,274 tests passed,
+  statements 91.11%, branches 83.71%, functions 93.17%, lines 93.26%.
+- `npm run test:browser`: all 92 Chromium/WebKit tests passed, retries disabled.
+  All asset-writing builds finished before browser verification.
+- With Android Studio's JDK,
+  `./gradlew :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest :app:lintDebug :app:connectedDebugAndroidTest`
+  completed. Explicitly reran `:app:testDebugUnitTest --rerun` (22 passed), and
+  used `ANDROID_SERIAL` with
+  `:app:connectedDebugAndroidTest -x :app:buildWebAssetsWithAndroidSentry` to
+  verify each booted emulator: three passed on each, six total, no failures or
+  skipped tests.
+- Real OAuth login and manual Settings resync succeeded. Native HTTP monitoring
+  recorded only paths/status/counts/timing, never headers or payload contents:
+  all 17 requests returned HTTP 200. The test account has zero projects, tracks,
+  landmarks, stations, leads, and cylinder installations; the collection list
+  contains one item. Empty project lists reflect server data, not blocked
+  access.
+- Visually verified satellite imagery, recovery instructions, and Settings.
+  Projects, Geometries, Landmarks, GPS, Settings, and Map navigation worked.
+  Force-stop/reopen restored `/dashboard`, the session, and a map canvas without
+  an error boundary.
+- Reinstalled the original build on WebView 91 with the firewall disabled:
+  `TileCacheService-DMhFKo56.js` again failed to parse with
+  `SyntaxError: Unexpected token '{'`; the dashboard showed its error boundary
+  and no map canvas. Installing the fix on the same data showed the script-free
+  recovery page. Updating the engine to WebView 134 restored the existing
+  session and map without logging in again. Restored WebView 91 afterward to
+  keep the compatibility recovery example available.
+- Evidence: `/tmp/speleodb-7739578108/firewall-*` logs, JSON, and screenshots.
+  This follow-up changes verification documentation only; no product changes,
+  changelog entry, publication, or release were needed. The production fix
+  remains `7db65fd`. Live tests are limited by the empty test dataset; populated
+  data behavior has automated coverage. Physical-device and native iOS testing
+  remain outside the available evidence.
+- Repository hooks and `git diff --check` passed. Scanned the 17 new text
+  evidence files against the configured credentials: zero matches.
