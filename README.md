@@ -3,6 +3,8 @@
 A mobile-first speleology database app built with **Ionic**, **React**,
 **Capacitor**, and **Tailwind CSS**.
 
+Requires **iOS/iPadOS 16.4 or later** on Apple mobile devices.
+
 ## Tech Stack
 
 | Layer     | Technology                  |

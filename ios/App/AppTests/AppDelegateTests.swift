@@ -4,6 +4,10 @@ import XCTest
 
 @MainActor
 final class AppDelegateTests: XCTestCase {
+    func testPackagedAppRequiresIOS16_4() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "MinimumOSVersion") as? String, "16.4")
+    }
+
     func testLaunchDisablesShakeToEdit() {
         let application = UIApplication.shared
         let originalValue = application.applicationSupportsShakeToEdit
