@@ -67,6 +67,7 @@
       "patterns": [
         "^(?:AGENTS|CHANGELOG|DESCRIPTION|GPS_NATIVE_RELEASE_CHECKLIST|README)\\.md$",
         "^LICENSE$",
+        "^\\.agents/skills/[^/]+/SKILL\\.md$",
         "^(?:docs|tasks/(?:lessons|todos))/.*\\.md$"
       ]
     },
