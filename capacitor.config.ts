@@ -10,8 +10,11 @@ const config: CapacitorConfig = {
   server: {
     hostname: "www.speleodb.org",
     androidScheme: "https",
+    errorPath: "webview-update.html",
   },
   android: {
+    // Reject unsupported engines before loading any application JavaScript/CSS.
+    minWebViewVersion: 111,
     // Required by @capacitor-community/background-geolocation: without the
     // legacy bridge, Android halts WebView location updates ~5 min after the
     // app is backgrounded. See the plugin README / issue #89.

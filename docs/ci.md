@@ -30,6 +30,44 @@ builds. The workflow lives in `.github/workflows/ci.yml`.
    `npx cap sync ios`, archives the Xcode project, and verifies an IPA signed by
    a disposable CI identity. It is not an active verification gate.
 
+### Android WebView compatibility
+
+The Vite production target and Capacitor's `android.minWebViewVersion`
+explicitly set the Chromium/WebView 111 floor. A configuration contract test
+prevents these settings from drifting apart. Android OS/API level does not
+identify the installed WebView: Android 11 can still run WebView 91. That engine
+parses the login bundle but rejects MapLibre class static blocks in the lazy
+dashboard chunk with `SyntaxError: Unexpected token '{'`.
+
+Lowering JavaScript syntax is insufficient: WebView 91 also lacks APIs used by
+MapLibre and cannot render the Tailwind 4 layout. The supported engine floor
+therefore follows the existing
+[Tailwind browser requirements](https://tailwindcss.com/docs/upgrade-guide#browser-requirements)
+instead of introducing a partial compatibility layer or changing dependencies.
+
+Capacitor checks the installed engine natively, before executing app code. An
+unsupported Android WebView loads the packaged `webview-update.html` through
+`server.errorPath`. That page uses only static HTML and basic inline CSS: it
+requires no JavaScript, Tailwind, native plugins, credentials, or network
+access. It explains how to update the browser and reopen the app without
+uninstalling or clearing data. The page also serves as a generic
+startup-recovery page and includes iOS system-update guidance; the
+minimum-WebView gate itself is Android only. Capacitor's splash plugin already
+avoids holding its splash screen over this unsupported-engine recovery path.
+
+Configuration tests load the real Vite and Capacitor settings. Browser tests
+verify the packaged recovery page's layout and independence from app assets.
+`MainActivityWebViewCompatibilityTest` exercises the shipped Activity and native
+Capacitor gate on both WebView 91 and 134, asserting that the older engine loads
+only the recovery page and the newer engine loads the application bundle. Real
+test-instance OAuth login, map rendering, navigation, and force-stop restoration
+are verified separately on the supported emulator. This is emulator evidence; a
+physical affected device remains part of release validation.
+
+There is no dependency upgrade, compatibility shim, request, or additional
+background work. Supported engines retain the existing startup and rendering
+behavior.
+
 Pull requests and pushes to `master` run the four enabled stages. Version tags
 retain the explicitly named `*-ci-smoke-*` workflow artifacts for seven days.
 They are compile evidence only and are never attached to a GitHub release.

@@ -10,7 +10,13 @@ const IDENTIFIER_KEY = /(?:^id$|Id$|_id$)/;
 export function redactDiagnosticText(value: string): string {
   const redacted = value
     .replace(/\b(Authorization\s*[:=]\s*)(?:Token|Bearer)\s+[^\s,;]+/gi, `$1${REDACTED}`)
-    .replace(/\b(Token|Bearer)\s+[^\s,;]+/gi, `$1 ${REDACTED}`)
+    .replace(/\b(Token|Bearer)\s+('[^']*'|"[^"]*"|[^\s,;]+)/gi, (match, label: string, value: string, offset: number, text: string) => {
+      // Parser punctuation is not a credential. Only preserve a single quoted
+      // punctuation character after "Unexpected token", never input excerpts.
+      const parserPunctuation = /\bUnexpected $/i.test(text.slice(0, offset))
+        && /^(['"])[{}[\]().,:;?=+\-*/<>!&|%^~'"]\1$/.test(value);
+      return parserPunctuation ? match : `${label} ${REDACTED}`;
+    })
     .replace(/\b(password|secret|token|cookie)\s*[:=]\s*[^\s,;&]+/gi, `$1=${REDACTED}`)
     .replace(/([?&#](?:access_?token|auth|code|password|secret|signature|token)=)[^&#\s]*/gi, `$1${REDACTED}`)
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, REDACTED)
@@ -95,11 +101,56 @@ export function errorToLogDetails(
   return details;
 }
 
-/** Create a reporter-safe error with no original stack, cause, or enumerable data. */
+interface DiagnosticFrame {
+  filename?: string;
+  function?: string;
+  lineno?: number;
+  colno?: number;
+}
+
+/** Retain only bundled code locations; never URLs, source text, locals, or payloads. */
+export function sanitizeDiagnosticFrame(frame: DiagnosticFrame): DiagnosticFrame | undefined {
+  const asset = frame.filename?.match(
+    /^(?:(?:https?|capacitor|app):\/\/[^/?#\s]+)?(\/assets\/[A-Za-z0-9_-]{1,128}\.m?js)(?:[?#][^\s]*)?$/,
+  )?.[1];
+  if (!asset || !Number.isSafeInteger(frame.lineno) || frame.lineno! <= 0) return undefined;
+  const result: DiagnosticFrame = { filename: asset, lineno: frame.lineno };
+  if (Number.isSafeInteger(frame.colno) && frame.colno! >= 0) result.colno = frame.colno;
+  if (frame.function && /^(?:(?:async|new) )?[A-Za-z_$][\w$.]{0,100}$/.test(frame.function)) {
+    result.function = redactDiagnosticText(frame.function);
+  }
+  return result;
+}
+
+/** Normalize Chromium/WebKit/React stacks without retaining arbitrary stack text. */
+export function sanitizeDiagnosticStack(stack: string | undefined): string | undefined {
+  if (!stack) return undefined;
+  const frames: string[] = [];
+  for (const line of stack.slice(0, 16_384).split('\n').slice(0, 64)) {
+    const text = line.trim();
+    const chromium = text.match(/^at (?:(.*?) \()?([^\s()]+):(\d+):(\d+)\)?$/);
+    const webkit = text.match(/^(.*?)@([^\s()]+):(\d+):(\d+)$/);
+    const match = chromium ?? webkit;
+    if (!match) continue;
+    const frame = sanitizeDiagnosticFrame({
+      function: match[1], filename: match[2], lineno: Number(match[3]), colno: Number(match[4]),
+    });
+    if (!frame) continue;
+    const location = `${frame.filename}:${frame.lineno}:${frame.colno}`;
+    frames.push(`    at ${frame.function ? `${frame.function} (${location})` : location}`);
+    if (frames.length === 24) break;
+  }
+  return frames.length ? frames.join('\n') : undefined;
+}
+
+/** Copy safe error identity and original bundled frames, never causes or payloads. */
 export function toSafeDiagnosticError(error: unknown): Error {
   const details = errorToLogDetails(error);
   const safe = new Error(String(details.message ?? 'Unknown error'));
   safe.name = String(details.name ?? 'Error');
+  const frames = sanitizeDiagnosticStack(error instanceof Error ? error.stack : undefined);
+  // An empty original stack must not fabricate a stack at this reporting helper.
+  safe.stack = `${safe.name}: ${safe.message}${frames ? `\n${frames}` : ''}`;
   return safe;
 }
 

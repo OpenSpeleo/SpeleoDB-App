@@ -1,4 +1,9 @@
-import { redactDiagnosticText, toSafeDiagnosticError } from '../utils/errorDiagnostics'
+import {
+  redactDiagnosticText,
+  sanitizeDiagnosticFrame,
+  sanitizeDiagnosticStack,
+  toSafeDiagnosticError,
+} from '../utils/errorDiagnostics'
 
 function resolveDsn(): string | undefined {
   const dsn = import.meta.env.VITE_SENTRY_DSN?.trim()
@@ -55,13 +60,37 @@ export function initSentry(): void {
             }
           },
           beforeSend(event) {
+            const componentStack = event.contexts?.react?.componentStack
+            const safeComponentStack = typeof componentStack === 'string'
+              ? sanitizeDiagnosticStack(componentStack)
+              : undefined
             event.user = undefined
             event.request = undefined
             event.extra = undefined
-            event.contexts = undefined
+            event.contexts = safeComponentStack
+              ? { react: { componentStack: safeComponentStack } }
+              : undefined
+            // Keep the engine version needed to diagnose parser compatibility,
+            // without forwarding the full user agent or arbitrary SDK contexts.
+            const engine = navigator.userAgent.match(/\b(Chrome)\/(\d+(?:\.\d+){0,3})\b/)
+              ?? navigator.userAgent.match(/\b(AppleWebKit)\/(\d+(?:\.\d+){0,3})\b/)
+            if (engine) {
+              event.contexts = {
+                ...event.contexts,
+                browser: { name: engine[1] === 'Chrome' ? 'Chromium' : 'WebKit', version: engine[2] },
+              }
+            }
             if (event.message) event.message = redactDiagnosticText(event.message)
             for (const value of event.exception?.values ?? []) {
               if (value.value) value.value = redactDiagnosticText(value.value)
+              if (value.stacktrace) {
+                value.stacktrace = {
+                  frames: value.stacktrace.frames?.flatMap((frame) => {
+                    const safe = sanitizeDiagnosticFrame(frame)
+                    return safe ? [safe] : []
+                  }).slice(-24),
+                }
+              }
             }
             event.breadcrumbs = event.breadcrumbs?.map((breadcrumb) => ({
               ...breadcrumb,
@@ -89,8 +118,10 @@ export async function captureSentryException(
 
   try {
     const { native } = await loadSentryModules()
+    const safeComponentStack = sanitizeDiagnosticStack(componentStack)
     native.captureException(toSafeDiagnosticError(error), {
-      tags: componentStack ? { react_component_stack: 'available' } : undefined,
+      tags: safeComponentStack ? { react_component_stack: 'available' } : undefined,
+      contexts: safeComponentStack ? { react: { componentStack: safeComponentStack } } : undefined,
     })
   } catch (captureError) {
     console.warn('[sentry] failed to report captured exception.', captureError)

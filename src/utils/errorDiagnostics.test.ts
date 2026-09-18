@@ -32,6 +32,18 @@ describe('diagnostic redaction', () => {
     expect(redactDiagnosticText('x'.repeat(600)).endsWith('…[TRUNCATED]')).toBe(true);
   });
 
+  it.each(["'<'", "'{'", "';'", "','", "'?'", "'\"'"])(
+    'preserves parser punctuation %s without exempting credentials or input excerpts', (punctuation) => {
+      expect(redactDiagnosticText(`Unexpected token ${punctuation}`))
+        .toBe(`Unexpected token ${punctuation}`);
+      expect(redactDiagnosticText(`Token ${punctuation}`)).toBe('Token [REDACTED]');
+      expect(redactDiagnosticText("Unexpected token 'private-token'"))
+        .toBe('Unexpected token [REDACTED]');
+      expect(redactDiagnosticText("Unexpected token '<'; Authorization: Token private-token"))
+        .not.toContain('private-token');
+    },
+  );
+
   it('redacts secret, identifier, user, coordinate, and payload-shaped object fields', () => {
     const sanitized = sanitizeDiagnosticValue({
       phase: 'upload',

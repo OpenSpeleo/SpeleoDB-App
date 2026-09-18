@@ -86,10 +86,30 @@ from backup; launch fails closed if that policy cannot be applied.
 `installDiagnosticRedaction()` wraps every console method before monitoring or
 React starts. It bounds diagnostic size and redacts authorization values,
 tokens, passwords, cookies, emails, identifiers, project/track names,
-coordinates, geometry, headers, request bodies, and payload fields. Sentry drops
-HTTP breadcrumbs, request/user/context/extra data, and captures a newly created
-sanitized error rather than the original error object. Deep-link URLs are never
-logged.
+coordinates, geometry, headers, request bodies, and payload fields. Single
+quoted parser punctuation in `Unexpected token '{'` is retained; credential
+values and input excerpts do not receive that exception. Sentry drops HTTP
+breadcrumbs, request/user/extra data, and arbitrary contexts, and captures a
+newly created sanitized error rather than the original error object. Deep-link
+URLs are never logged.
+
+Error sanitization preserves the original **bundled code locations**, not a new
+stack pointing at the reporting helper. The shared diagnostic sanitizer accepts
+only `/assets/*.js` or `/assets/*.mjs` locations with positive line numbers,
+optional non-negative columns, and bounded code function names. It removes URL
+origins, query strings, fragments, arbitrary paths, source excerpts, frame
+variables, error causes, and payload properties. Chromium and WebKit stack
+formats normalize to at most 24 frames; an unusable stack remains empty instead
+of inventing a reporting location. The error boundary logs those same safe code
+locations, and Sentry's final event boundary also applies the frame allowlist to
+automatically captured errors.
+
+The only retained event contexts are sanitized React component code locations
+and the browser engine name/version parsed from the local user agent. The full
+user agent, device description, and arbitrary context fields are not forwarded.
+This allows post-login lazy-import failures to be associated with the original
+chunk, React owner, and affected WebView generation without collecting account
+or survey data. Processing is bounded and runs only when reporting an error.
 
 Legacy upgrades are transactional:
 

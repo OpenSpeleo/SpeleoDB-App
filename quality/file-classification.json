@@ -65,7 +65,7 @@
       "owner": "maintainers",
       "verification": ["documentation-review", "link-check", "source-contract-check"],
       "patterns": [
-        "^(?:AGENTS|DESCRIPTION|GPS_NATIVE_RELEASE_CHECKLIST|README)\\.md$",
+        "^(?:AGENTS|CHANGELOG|DESCRIPTION|GPS_NATIVE_RELEASE_CHECKLIST|README)\\.md$",
         "^LICENSE$",
         "^(?:docs|tasks/(?:lessons|todos))/.*\\.md$"
       ]

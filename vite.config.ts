@@ -166,6 +166,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
+      // Kept in sync with Capacitor's native minimum by webviewCompatibility.test.ts.
+      target: ['chrome111', 'edge111', 'firefox114', 'safari16.4', 'ios16.4'],
       // The app ships inside Capacitor, so cold-start parse/compile time matters
       // more than transfer size. The explicit bundle-budget plugin above enforces
       // measured limits for the main entry, the initial JS graph, and the

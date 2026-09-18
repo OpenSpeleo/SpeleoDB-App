@@ -1,6 +1,6 @@
 import React from 'react'
 import { captureSentryException } from './sentry'
-import { errorToLogDetails, redactDiagnosticText } from '../utils/errorDiagnostics'
+import { errorToLogDetails, sanitizeDiagnosticStack } from '../utils/errorDiagnostics'
 
 interface AppErrorBoundaryProps {
   children: React.ReactNode
@@ -24,10 +24,11 @@ export class AppErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     const componentStack = info.componentStack ?? undefined
-    console.error('[AppErrorBoundary] Uncaught render error:', errorToLogDetails(error))
-    if (componentStack && import.meta.env.DEV) {
-      console.error('[AppErrorBoundary] Component stack:', redactDiagnosticText(componentStack))
-    }
+    console.error('[AppErrorBoundary] Uncaught render error:', {
+      ...errorToLogDetails(error),
+      stack: sanitizeDiagnosticStack(error.stack),
+      componentStack: sanitizeDiagnosticStack(componentStack),
+    })
     this.setState({ componentStack: componentStack ?? null })
     void captureSentryException(error, componentStack)
   }
