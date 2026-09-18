@@ -2591,13 +2591,16 @@ describe('SpeleoDBController', () => {
       await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
       await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
+      // Initial sources publish independently. Drain their scheduling before
+      // measuring the exact work caused by the preference change below.
+      await controller.waitForOfflineMapsIdle();
       schedule.mockClear();
 
       await controller.setLayerOfflineSync('esri-world-hillshade', true);
 
       expect(prefs.getPreferences().layerOfflineSync?.['esri-world-hillshade']).toBe(true);
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
+      await controller.waitForOfflineMapsIdle();
+      expect(schedule).toHaveBeenCalledOnce();
       expect(schedule.mock.calls[0][0].layers.map((layer) => layer.id))
         .toContain('esri-world-hillshade');
     });
