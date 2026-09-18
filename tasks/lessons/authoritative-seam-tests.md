@@ -29,6 +29,13 @@ storage, concurrency, or UI path remains unsafe.
 7. Compilation is not runtime evidence. Record physical-device verification
    separately for WebView responsiveness, native modal dismissal, real network
    behavior, device logs, and persistence across force-quit.
+8. For monitoring transformations, assert the emitted envelope after the real
+   SDK parser and integrations have run, using an in-memory transport. Mocking
+   `captureException` alone cannot prove that stack locations or redacted fields
+   survive SDK rewriting and the final event filter together.
+9. Inspect native test reports for expected counts and failures on every
+   intended device. A Gradle success exit can coexist with incomplete or failed
+   instrumentation after a device interruption; it is not sufficient evidence.
 
 ## Review question
 

@@ -85,6 +85,12 @@ test-instance OAuth login, map rendering, navigation, and force-stop restoration
 are verified separately on the supported emulator. This is emulator evidence; a
 physical affected device remains part of release validation.
 
+This evidence covers the standard Chromium-numbered WebView providers. Capacitor
+uses a separate `minHuaweiWebViewVersion` setting for `com.huawei.webview`;
+Huawei's package version is not a Chromium version. No Huawei device or verified
+package-to-engine mapping was available for this validation, so do not extend
+the emulator compatibility claim to that provider.
+
 There is no dependency upgrade, compatibility shim, request, or additional
 background work. Supported engines retain the existing startup and rendering
 behavior.

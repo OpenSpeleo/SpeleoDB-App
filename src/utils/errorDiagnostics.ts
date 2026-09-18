@@ -111,7 +111,7 @@ interface DiagnosticFrame {
 /** Retain only bundled code locations; never URLs, source text, locals, or payloads. */
 export function sanitizeDiagnosticFrame(frame: DiagnosticFrame): DiagnosticFrame | undefined {
   const asset = frame.filename?.match(
-    /^(?:(?:https?|capacitor|app):\/\/[^/?#\s]+)?(\/assets\/[A-Za-z0-9_-]{1,128}\.m?js)(?:[?#][^\s]*)?$/,
+    /^(?:(?:https?|capacitor|app):\/\/[^/?#\s]+|app:\/\/)?(\/assets\/[A-Za-z0-9_-]{1,128}\.m?js)(?:[?#][^\s]*)?$/,
   )?.[1];
   if (!asset || !Number.isSafeInteger(frame.lineno) || frame.lineno! <= 0) return undefined;
   const result: DiagnosticFrame = { filename: asset, lineno: frame.lineno };

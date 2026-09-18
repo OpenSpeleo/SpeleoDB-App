@@ -26,7 +26,7 @@ export class AppErrorBoundary extends React.Component<
     const componentStack = info.componentStack ?? undefined
     console.error('[AppErrorBoundary] Uncaught render error:', {
       ...errorToLogDetails(error),
-      stack: sanitizeDiagnosticStack(error.stack),
+      stack: sanitizeDiagnosticStack(error instanceof Error ? error.stack : undefined),
       componentStack: sanitizeDiagnosticStack(componentStack),
     })
     this.setState({ componentStack: componentStack ?? null })

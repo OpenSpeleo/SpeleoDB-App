@@ -4,6 +4,7 @@ import {
   errorToLogDetails,
   installDiagnosticRedaction,
   redactDiagnosticText,
+  sanitizeDiagnosticFrame,
   sanitizeDiagnosticValue,
   toSafeDiagnosticError,
 } from './errorDiagnostics';
@@ -30,6 +31,20 @@ describe('diagnostic redaction', () => {
   it('bounds diagnostic strings', () => {
     expect(redactDiagnosticText('x'.repeat(600))).toHaveLength(524);
     expect(redactDiagnosticText('x'.repeat(600)).endsWith('…[TRUNCATED]')).toBe(true);
+  });
+
+  it('accepts SDK-rewritten bundled locations without admitting private app paths', () => {
+    expect(sanitizeDiagnosticFrame({
+      filename: 'app:///assets/Dashboard-AbCd1234.js?token=private#fragment', lineno: 11, colno: 42,
+    })).toEqual({ filename: '/assets/Dashboard-AbCd1234.js', lineno: 11, colno: 42 });
+    for (const filename of [
+      'app:///private/user@example.com',
+      'app:///assets/../private.js',
+      'file:///assets/Dashboard-AbCd1234.js',
+      'https:///assets/Dashboard-AbCd1234.js',
+    ]) {
+      expect(sanitizeDiagnosticFrame({ filename, lineno: 1 })).toBeUndefined();
+    }
   });
 
   it.each(["'<'", "'{'", "';'", "','", "'?'", "'\"'"])(

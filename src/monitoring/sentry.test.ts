@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BrowserClient, defaultStackParser } from '@sentry/browser';
+import type { Transport } from '@sentry/core';
 
 const sentryMocks = vi.hoisted(() => ({
   captureException: vi.fn(),
@@ -119,6 +121,55 @@ describe('Sentry diagnostic boundary', () => {
     expect(captured.stack).toBe("SyntaxError: Unexpected token '<'");
     expect(context).toEqual({ tags: undefined, contexts: undefined });
   });
+
+  it.each([
+    ['https://www.speleodb.org', 'captured'],
+    ['capacitor://localhost', 'captured'],
+    ['https://www.speleodb.org', 'automatic'],
+    ['capacitor://localhost', 'automatic'],
+  ])(
+    'keeps original frames through the real Capacitor SDK pipeline from %s (%s)', async (origin, report) => {
+      const { capacitorRewriteFramesIntegration } = await vi.importActual<typeof import('@sentry/capacitor')>(
+        '@sentry/capacitor',
+      );
+      initSentry();
+      await vi.waitFor(() => expect(sentryMocks.nativeInit).toHaveBeenCalledOnce());
+      const options = sentryMocks.nativeInit.mock.calls[0][0];
+      const send = vi.fn<Transport['send']>(async () => ({}));
+      const client = new BrowserClient({
+        dsn: 'https://public@example.invalid/1',
+        stackParser: defaultStackParser,
+        integrations: [capacitorRewriteFramesIntegration()],
+        beforeSend: options.beforeSend,
+        transport: () => ({ send, flush: async () => true }),
+      });
+      client.init();
+      try {
+        const error = new SyntaxError("Unexpected token '{'");
+        error.stack = `SyntaxError: Unexpected token '{'\n`
+          + `    at renderMap (${origin}/assets/Dashboard-AbCd1234.js:11:80764)`;
+        if (report === 'captured') {
+          await captureSentryException(error);
+          client.captureException(sentryMocks.captureException.mock.calls[0][0]);
+        } else {
+          // Automatic SDK errors reach the same pipeline without our Error copy.
+          client.captureException(error);
+        }
+        await client.flush();
+
+        expect(send).toHaveBeenCalledOnce();
+        const envelope = send.mock.calls[0][0];
+        expect(envelope[1][0][1]).toMatchObject({
+          exception: { values: [{ stacktrace: { frames: [{
+            filename: '/assets/Dashboard-AbCd1234.js',
+            function: 'renderMap', lineno: 11, colno: 80764,
+          }] } }] },
+        });
+      } finally {
+        await client.close();
+      }
+    },
+  );
 
   it('bounds stack frames and drops non-code stack text and invalid locations', async () => {
     const error = new Error('failure');

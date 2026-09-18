@@ -26,3 +26,16 @@ it('reports the original render exception and logs only safe bundled code locati
   });
   expect(JSON.stringify(diagnostic)).not.toMatch(/private|user@example/);
 });
+
+it.each([null, undefined])('retains recovery when a child throws %s', (thrown) => {
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+  function BrokenDashboard(): never { throw thrown; }
+
+  render(<AppErrorBoundary><BrokenDashboard /></AppErrorBoundary>);
+
+  expect(screen.getByTestId('app-error-boundary')).toHaveTextContent('Something went wrong.');
+  expect(captureSentryException).toHaveBeenCalledWith(thrown, expect.stringContaining('BrokenDashboard'));
+  expect(log).toHaveBeenCalledWith('[AppErrorBoundary] Uncaught render error:', {
+    thrown, stack: undefined, componentStack: undefined,
+  });
+});

@@ -104,6 +104,13 @@ of inventing a reporting location. The error boundary logs those same safe code
 locations, and Sentry's final event boundary also applies the frame allowlist to
 automatically captured errors.
 
+The allowlist also accepts the hostless `app:///assets/` URLs that Capacitor's
+Sentry integration produces before `beforeSend`. Regression tests run the real
+SDK parser, Capacitor frame rewriting, final redaction, and an in-memory
+transport together; mocking the SDK would miss frame loss at this boundary. Null
+or undefined thrown values do not have stacks and must not prevent the React
+recovery UI from remaining visible or reporting the original failure.
+
 The only retained event contexts are sanitized React component code locations
 and the browser engine name/version parsed from the local user agent. The full
 user agent, device description, and arbitrary context fields are not forwarded.
