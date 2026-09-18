@@ -11,7 +11,7 @@ install requirement must match the existing web bundle's engine floor.
 - [x] Pass lint, types/build, focused tests, full coverage, and inventory.
 - [x] Build the iOS app, inspect its packaged minimum OS, and run signed native
       simulator tests; record simulator/version limitations.
-- [ ] Commit the implementation and customer-facing changelog separately.
+- [x] Commit the implementation and customer-facing changelog separately.
 
 ## Verification scope
 
@@ -64,3 +64,6 @@ browser verification remains applicable; native iOS verification is required.
   ```
 
 - Final signed simulator run: 28 tests passed, zero failures, `TEST SUCCEEDED`.
+- All repository hooks passed. Implementation commit: `7d599f1`. The
+  customer-facing minimum OS change is recorded under Unreleased in a separate
+  `[Changelog Update]` commit. No version bump or publication was performed.

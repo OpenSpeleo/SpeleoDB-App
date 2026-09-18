@@ -4,6 +4,10 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ## Unreleased
 
+### Changes
+
+- iPhone and iPad now require iOS/iPadOS 16.4 or later. `7d599f1`
+
 ### Fixes
 
 - Show clear update instructions instead of crashing on Android devices with
