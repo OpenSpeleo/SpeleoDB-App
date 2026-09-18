@@ -20,7 +20,7 @@ print credentials.
 - [x] Run lint, typecheck/build, focused tests, full coverage suite, browser
       tests, and applicable Android checks. Document device/OS limitations
       explicitly.
-- [ ] Update feature/security/build docs and assess customer-facing changelog;
+- [x] Update feature/security/build docs and assess customer-facing changelog;
       inspect all native and staged/unstaged diffs before completion.
 
 ## Review
@@ -117,5 +117,6 @@ real login. No user data is cleared or migrated by this check.
 - `git diff --check`: passed; no dependency/lockfile or unrelated generated
   native changes remain. Evidence files were checked for `.env` credential
   values: zero matches.
-- Test setup repair commit: `dd038b6`. Implementation/changelog references
-  follow after the implementation commit.
+- Test setup repair commit: `dd038b6`. Final implementation: `7db65fd`.
+  `CHANGELOG.md` Unreleased cites that implementation; the follow-up commit is
+  named `[Changelog Update]`. All task-owned changes are committed locally.

@@ -4,6 +4,11 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ## Unreleased
 
+### Fixes
+
+- Show clear update instructions instead of crashing on Android devices with
+  outdated system browsers. `7db65fd`
+
 ## v1.6.0 - 2026-09-18
 
 ### Features
