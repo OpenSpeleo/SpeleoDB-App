@@ -15,7 +15,7 @@ repository-wide verification. Review baseline: `dd038b6^`; review head:
       inventory.
 - [x] Finish with `npx prek run -a`; inspect all resulting changes.
 - [x] Record actionable findings, fixes, limitations, and commit references.
-- [ ] Commit all task-owned changes and any required public changelog update.
+- [x] Commit all task-owned changes and any required public changelog update.
 
 ## Verification ownership
 
@@ -95,3 +95,9 @@ No automated retries are configured, and no regression cases are skipped.
   details stay internal.
 - `npx prek run -a` passed every applicable hook after Markdown formatting.
   Inventory passed, including the review plans. No unrelated hook edits remain.
+- Final manual OAuth login on Android 16/WebView 151 reached the dashboard with
+  one map canvas and no error boundary. Both emulators have the final debug APK
+  installed. Evidence scan found no configured credentials in the 14 text logs.
+- Corrections and review evidence committed as `5460510`; the customer-facing
+  recovery fix is recorded in the separate `[Changelog Update]` commit. No
+  release, push, or publication was performed.

@@ -10,6 +10,8 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ### Fixes
 
+- Prevent unexpected errors from crashing the recovery screen. `5460510`
+
 - Show clear update instructions instead of crashing on Android devices with
   outdated system browsers. `7db65fd`
 

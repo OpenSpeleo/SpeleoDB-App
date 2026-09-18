@@ -16,7 +16,7 @@ integrated verification, full tests, `prek run -a`, and final commits.
 - [x] Audit remaining changes, including provider-specific native admission,
       against actual dependency behavior. Only promote evidenced defects.
 - [x] Run focused regressions and update the affected diagnostic documentation.
-- [ ] Complete repository lint/types/build, full coverage, browser/native gates,
+- [x] Complete repository lint/types/build, full coverage, browser/native gates,
       and `prek run -a`; inspect final diffs and commit explicit owned paths.
 
 ## Plan challenge
@@ -82,3 +82,6 @@ inventory, and `npx prek run -a`. The interrupted Android emulator run is
 explicitly excluded; resource diagnosis, preserved evidence, and successful
 verification after cold-starting with more RAM are recorded in
 [the integration report](review-dd038b6-verification.md).
+
+Implementation and review commit: `5460510`. Public changelog maintenance is
+recorded in the following `[Changelog Update]` commit.
