@@ -11,8 +11,8 @@
 
 ## Review
 
-Both `npm ci --workspaces=false` in this subtree and root `npm ci` complete
-successfully. Standalone lint/build use the subtree lock (Vite 8.1.4); root
+Both `npm ci --workspaces=false` in this repository and root `npm ci` complete
+successfully. Standalone lint/build use the standalone lock (Vite 8.1.4); root
 lint/build use the workspace lock (Vite 8.1.5), keep Capacitor packages under
-this subtree's `node_modules`, and complete Capacitor sync without native path
-drift. The root coverage run passes 1,926 tests with 13 intentional skips.
+this repository's `node_modules`, and complete Capacitor sync without native
+path drift. The root coverage run passes 1,926 tests with 13 intentional skips.
