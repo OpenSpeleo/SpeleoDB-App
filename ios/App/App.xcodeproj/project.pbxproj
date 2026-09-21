@@ -23,6 +23,8 @@
 		A10000000000000000000004 /* SensitiveDataProtection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SensitiveDataProtection.swift */; };
 		A10000000000000000000005 /* PerformanceTimingLogFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* PerformanceTimingLogFormatter.swift */; };
 		A10000000000000000000006 /* PerformanceDiagnosticsPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* PerformanceDiagnosticsPlugin.swift */; };
+		A10000000000000000000007 /* GisGeometryHttpClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* GisGeometryHttpClient.swift */; };
+		A10000000000000000000008 /* GisGeometryHttpPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* GisGeometryHttpPlugin.swift */; };
 		B10000000000000000000001 /* KeychainCredentialStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* KeychainCredentialStoreTests.swift */; };
 		B10000000000000000000002 /* SensitiveDataProtectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* SensitiveDataProtectionTests.swift */; };
 		B10000000000000000000003 /* AppBridgeViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* AppBridgeViewControllerTests.swift */; };
@@ -30,8 +32,6 @@
 		B10000000000000000000005 /* PerformanceTimingLogFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* PerformanceTimingLogFormatterTests.swift */; };
 		B10000000000000000000006 /* AppDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* AppDelegateTests.swift */; };
 		B10000000000000000000007 /* GisGeometryHttpClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* GisGeometryHttpClientTests.swift */; };
-		A10000000000000000000007 /* GisGeometryHttpClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* GisGeometryHttpClient.swift */; };
-		A10000000000000000000008 /* GisGeometryHttpPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* GisGeometryHttpPlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +63,8 @@
 		A10000000000000000000014 /* SensitiveDataProtection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataProtection.swift; sourceTree = "<group>"; };
 		A10000000000000000000015 /* PerformanceTimingLogFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTimingLogFormatter.swift; sourceTree = "<group>"; };
 		A10000000000000000000016 /* PerformanceDiagnosticsPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceDiagnosticsPlugin.swift; sourceTree = "<group>"; };
+		A10000000000000000000017 /* GisGeometryHttpClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisGeometryHttpClient.swift; sourceTree = "<group>"; };
+		A10000000000000000000018 /* GisGeometryHttpPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisGeometryHttpPlugin.swift; sourceTree = "<group>"; };
 		B10000000000000000000010 /* AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000000000000000000011 /* KeychainCredentialStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCredentialStoreTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000012 /* SensitiveDataProtectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataProtectionTests.swift; sourceTree = "<group>"; };
@@ -71,8 +73,6 @@
 		B10000000000000000000015 /* PerformanceTimingLogFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTimingLogFormatterTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000016 /* AppDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
 		B10000000000000000000017 /* GisGeometryHttpClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisGeometryHttpClientTests.swift; sourceTree = "<group>"; };
-		A10000000000000000000017 /* GisGeometryHttpClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisGeometryHttpClient.swift; sourceTree = "<group>"; };
-		A10000000000000000000018 /* GisGeometryHttpPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GisGeometryHttpPlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
