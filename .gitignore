@@ -42,3 +42,5 @@ yarn-error.log*
 
 resources/ios/**/*
 resources/android/**/*
+
+*.salive
