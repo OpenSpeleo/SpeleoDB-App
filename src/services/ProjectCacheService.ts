@@ -18,8 +18,10 @@ import type {
   ProjectGeoJSONContentFailureReason,
   ProjectGeoJSONFailureDiagnostics,
   ProjectGeoJSONFileFailureReason,
+  ProjectGeoJSONRejectedReplacement,
 } from '../types/projectGeoJSON';
 import { isAbortError, throwIfAborted } from '../utils/abort';
+import { normalizeGeoJSONRevision } from '../utils/geojsonRevision';
 import {
   longitudeIntervalSpanDegrees,
   webMercatorSpanKm,
@@ -50,6 +52,8 @@ const GEOJSON_ANALYSIS_META_KEY = 'projectGeoJSONAnalysis';
 const GEOJSON_FAILURE_DIAGNOSTICS_META_KEY = 'projectGeoJSONFailureDiagnostics';
 const GEOJSON_FAILURE_REASON_META_KEY = 'projectGeoJSONFailureReason';
 const GEOJSON_WARNING_ACKNOWLEDGED_META_KEY = 'projectGeoJSONWarningAcknowledged';
+const GEOJSON_REVISION_META_KEY = 'projectGeoJSONRevision';
+const GEOJSON_REJECTED_REPLACEMENT_META_KEY = 'projectGeoJSONRejectedReplacement';
 // Schema-v2 builds before the deadline policy correction persisted timeout
 // quarantines at this threshold. Keep them readable so they can be retried.
 const LEGACY_BBOX_TIMEOUT_MS = 500;
@@ -102,15 +106,23 @@ function parseProjectGeoJSONCacheRecord(
 
   const rawCommitId = entry.meta?.commitId;
   const commitId = isCommitId(rawCommitId) ? rawCommitId : null;
+  const revision = normalizeGeoJSONRevision(entry.meta?.[GEOJSON_REVISION_META_KEY]);
+  const identity = revision ? { geojsonRevision: revision } : {};
   const version = entry.meta?.[GEOJSON_VALIDATION_VERSION_META_KEY];
   const state = entry.meta?.[GEOJSON_STATE_META_KEY];
   if (version !== String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION) || !commitId) {
-    return { state: 'legacy', commitId, data: entry.data };
+    return { state: 'legacy', commitId, data: entry.data, ...identity };
   }
 
   const analysis = parseAnalysis(entry.meta?.[GEOJSON_ANALYSIS_META_KEY]);
   if (state === 'active' && analysis && isFeatureCollection(entry.data)) {
-    return { state: 'active', commitId, data: entry.data, analysis };
+    const rejectedReplacement = parseRejectedReplacement(
+      entry.meta?.[GEOJSON_REJECTED_REPLACEMENT_META_KEY],
+    );
+    return {
+      state: 'active', commitId, data: entry.data, analysis, ...identity,
+      ...(rejectedReplacement ? { rejectedReplacement } : {}),
+    };
   }
 
   const reason = entry.meta?.[GEOJSON_FAILURE_REASON_META_KEY];
@@ -135,10 +147,28 @@ function parseProjectGeoJSONCacheRecord(
       reason,
       diagnostics,
       warningAcknowledged,
+      ...identity,
     };
   }
 
-  return { state: 'legacy', commitId, data: entry.data };
+  return { state: 'legacy', commitId, data: entry.data, ...identity };
+}
+
+function parseRejectedReplacement(value: string | undefined): ProjectGeoJSONRejectedReplacement | null {
+  if (!value) return null;
+  try {
+    const candidate = JSON.parse(value) as Partial<ProjectGeoJSONRejectedReplacement> | null;
+    if (
+      !candidate || !normalizeGeoJSONRevision(candidate.geojsonRevision)
+      || !isContentFailureReason(candidate.reason)
+      || !isFailureDiagnostics(candidate.diagnostics)
+      || !isFailureDiagnosticsForReason(candidate.reason, candidate.diagnostics)
+      || typeof candidate.warningAcknowledged !== 'boolean'
+    ) return null;
+    return candidate as ProjectGeoJSONRejectedReplacement;
+  } catch {
+    return null;
+  }
 }
 
 function isProjectedFootprintSafe(bounds: ProjectGeoJSONAnalysis['bounds']): boolean {
@@ -245,6 +275,10 @@ function isFeatureCollection(value: unknown): value is GeoJSON.FeatureCollection
 
 export interface CacheOperationOptions {
   signal?: AbortSignal
+}
+
+export interface ProjectGeoJSONWriteOptions extends CacheOperationOptions {
+  geojsonRevision?: string | null;
 }
 
 export class ProjectCacheService {
@@ -367,18 +401,20 @@ export class ProjectCacheService {
     data: GeoJSON.FeatureCollection,
     commitId: string,
     analysis: ProjectGeoJSONAnalysis,
-    options: CacheOperationOptions = {},
+    options: ProjectGeoJSONWriteOptions = {},
   ): Promise<boolean> {
     throwIfAborted(options.signal);
     if (!isCommitId(commitId) || !isFeatureCollection(data) || !isAnalysis(analysis)) {
       return false;
     }
+    const geojsonRevision = normalizeGeoJSONRevision(options.geojsonRevision);
     try {
       await this.store.set('geojson', projectId, {
         data,
         cachedAt: Date.now(),
         meta: {
           commitId,
+          ...(geojsonRevision ? { [GEOJSON_REVISION_META_KEY]: geojsonRevision } : {}),
           [GEOJSON_STATE_META_KEY]: 'active',
           [GEOJSON_VALIDATION_VERSION_META_KEY]:
             String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION),
@@ -388,13 +424,19 @@ export class ProjectCacheService {
       throwIfAborted(options.signal);
       this.projectRecords.publish(projectId, {
         state: 'active',
+        ...(geojsonRevision ? { geojsonRevision } : {}),
         commitId,
         data,
         analysis,
       });
       return true;
     } catch (error) {
-      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
+      if (isAbortError(error) || options.signal?.aborted) {
+        // A transaction may have committed immediately before cancellation.
+        // Reload its durable identity instead of retaining an older memory record.
+        this.projectRecords.invalidate(projectId);
+        throwIfAborted(options.signal);
+      }
       console.error('ProjectCacheService.setValidatedProjectGeoJSON failed:', error);
       return false;
     }
@@ -406,7 +448,7 @@ export class ProjectCacheService {
     commitId: string,
     reason: ProjectGeoJSONContentFailureReason,
     diagnostics: ProjectGeoJSONFailureDiagnostics,
-    options: CacheOperationOptions = {},
+    options: ProjectGeoJSONWriteOptions = {},
   ): Promise<boolean> {
     throwIfAborted(options.signal);
     if (
@@ -417,12 +459,14 @@ export class ProjectCacheService {
     ) {
       return false;
     }
+    const geojsonRevision = normalizeGeoJSONRevision(options.geojsonRevision);
     try {
       await this.store.set('geojson', projectId, {
         data: null,
         cachedAt: Date.now(),
         meta: {
           commitId,
+          ...(geojsonRevision ? { [GEOJSON_REVISION_META_KEY]: geojsonRevision } : {}),
           [GEOJSON_STATE_META_KEY]: 'quarantined',
           [GEOJSON_VALIDATION_VERSION_META_KEY]:
             String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION),
@@ -434,6 +478,7 @@ export class ProjectCacheService {
       throwIfAborted(options.signal);
       this.projectRecords.publish(projectId, {
         state: 'quarantined',
+        ...(geojsonRevision ? { geojsonRevision } : {}),
         commitId,
         data: null,
         reason,
@@ -442,21 +487,82 @@ export class ProjectCacheService {
       });
       return true;
     } catch (error) {
-      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
+      if (isAbortError(error) || options.signal?.aborted) {
+        // A transaction may have committed immediately before cancellation.
+        // Reload its durable identity instead of retaining an older memory record.
+        this.projectRecords.invalidate(projectId);
+        throwIfAborted(options.signal);
+      }
       console.error('ProjectCacheService.setQuarantinedProjectGeoJSON failed:', error);
       return false;
     }
   }
 
-  /** Acknowledge only the quarantine version the user actually saw. */
+  /** Retain a validated same-commit map when its replacement is unsafe. */
+  async rejectProjectGeoJSONReplacement(
+    projectId: string,
+    commitId: string,
+    rejection: ProjectGeoJSONRejectedReplacement,
+    options: CacheOperationOptions = {},
+  ): Promise<boolean> {
+    throwIfAborted(options.signal);
+    if (!parseRejectedReplacement(JSON.stringify(rejection))) return false;
+    try {
+      const updated = await this.store.update('geojson', projectId, (entry) => {
+        const record = parseProjectGeoJSONCacheRecord(entry);
+        if (
+          !entry || record.state !== 'active' || record.commitId !== commitId
+          || normalizeGeoJSONRevision(record.geojsonRevision) === rejection.geojsonRevision
+        ) return null;
+        return {
+          ...entry,
+          meta: {
+            ...entry.meta,
+            [GEOJSON_REJECTED_REPLACEMENT_META_KEY]: JSON.stringify(rejection),
+          },
+        };
+      }, options);
+      throwIfAborted(options.signal);
+      if (updated) this.projectRecords.invalidate(projectId);
+      return updated;
+    } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) {
+        // A transaction may have committed immediately before cancellation.
+        // Reload its durable identity instead of retaining an older memory record.
+        this.projectRecords.invalidate(projectId);
+        throwIfAborted(options.signal);
+      }
+      console.error('ProjectCacheService.rejectProjectGeoJSONReplacement failed:', error);
+      return false;
+    }
+  }
+
+  /** Acknowledge only the quarantine artifact the user actually saw. */
   async acknowledgeProjectGeoJSONQuarantine(
     projectId: string,
     commitId: string,
-    options: CacheOperationOptions = {},
+    options: ProjectGeoJSONWriteOptions = {},
   ): Promise<boolean> {
     throwIfAborted(options.signal);
     try {
       const updated = await this.store.update('geojson', projectId, (entry) => {
+        const record = parseProjectGeoJSONCacheRecord(entry);
+        const revision = normalizeGeoJSONRevision(options.geojsonRevision);
+        if (entry && record.state === 'active') {
+          const rejection = record.rejectedReplacement;
+          if (record.commitId !== commitId || !rejection || rejection.geojsonRevision !== revision) {
+            return null;
+          }
+          return {
+            ...entry,
+            meta: {
+              ...entry.meta,
+              [GEOJSON_REJECTED_REPLACEMENT_META_KEY]: JSON.stringify({
+                ...rejection, warningAcknowledged: true,
+              }),
+            },
+          };
+        }
         const reason = entry?.meta?.[GEOJSON_FAILURE_REASON_META_KEY];
         const diagnostics = parseFailureDiagnostics(
           entry?.meta?.[GEOJSON_FAILURE_DIAGNOSTICS_META_KEY],
@@ -468,6 +574,7 @@ export class ProjectCacheService {
           !entry
           || entry.data !== null
           || entry.meta?.commitId !== commitId
+          || normalizeGeoJSONRevision(entry.meta?.[GEOJSON_REVISION_META_KEY]) !== revision
           || entry.meta?.[GEOJSON_STATE_META_KEY] !== 'quarantined'
           || entry.meta?.[GEOJSON_VALIDATION_VERSION_META_KEY]
             !== String(PROJECT_GEOJSON_VALIDATION.CACHE_SCHEMA_VERSION)
@@ -492,6 +599,7 @@ export class ProjectCacheService {
         if (
           cached?.state === 'quarantined'
           && cached.commitId === commitId
+          && normalizeGeoJSONRevision(cached.geojsonRevision) === normalizeGeoJSONRevision(options.geojsonRevision)
         ) {
           this.projectRecords.publish(projectId, {
             ...cached,
@@ -503,7 +611,12 @@ export class ProjectCacheService {
       }
       return updated;
     } catch (error) {
-      if (isAbortError(error) || options.signal?.aborted) throwIfAborted(options.signal);
+      if (isAbortError(error) || options.signal?.aborted) {
+        // A transaction may have committed immediately before cancellation.
+        // Reload its durable identity instead of retaining an older memory record.
+        this.projectRecords.invalidate(projectId);
+        throwIfAborted(options.signal);
+      }
       console.error(
         `ProjectCacheService.acknowledgeProjectGeoJSONQuarantine(${projectId}) failed:`,
         error,

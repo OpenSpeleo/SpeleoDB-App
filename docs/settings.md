@@ -104,9 +104,11 @@ replacements commit.
   layers on the map. Persisted in `UserPreferences.showLandmarks` via
   `PreferencesService`. Default: `true`. Changes propagate to Dashboard in real
   time via a shared React state in `App.tsx`.
-- **Color mode** selector: `By Project` / `By Depth`. `By Project` uses the
-  standard project color palette; `By Depth` enables depth-based coloring and
-  the dashboard depth gauge. Persisted in `UserPreferences.colorMode` via
+- **Color mode** selector: `By Project` / `By Depth` / `By Shot`. `By Project`
+  uses the standard project color palette; `By Depth` enables depth-based
+  coloring and the dashboard depth gauge. `By Shot` uses exported feature colors
+  with project color fallback, including offline; see
+  [Shot colors](shot-colors.md). Persisted in `UserPreferences.colorMode` via
   `PreferencesService`. Default: `project`. Changes propagate to Dashboard in
   real time via shared React state in `App.tsx`.
 - **Map unit** selector: `Meters` / `Feet`. Controls display units for both

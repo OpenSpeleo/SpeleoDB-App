@@ -54,7 +54,9 @@ upgrades.
 - `Dashboard`: `<Layer>` `paint['line-color']` and `paint['fill-color']` in
   project color mode. In depth color mode the same color feeds
   `createDepthColorExpression` as the no-depth fallback so projects without
-  depth data still render in their model color.
+  depth data still render in their model color. By Shot similarly uses this
+  color whenever a feature has no valid exported color; panel dots always retain
+  the project color. See [Shot colors](shot-colors.md).
 
 ## Why no JS palette?
 

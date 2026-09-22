@@ -580,7 +580,7 @@ vi.mock('../context/useSpeleoDB', () => ({
 
 function renderDashboard(options?: {
   showLandmarks?: boolean;
-  colorMode?: 'project' | 'depth';
+  colorMode?: 'project' | 'depth' | 'shot';
   measurementUnit?: 'feet' | 'meters';
   selectedMapLayerId?: 'esri-satellite' | 'esri-world-hillshade' | 'esri-world-hillshade-dark';
   layerOfflineSync?: Record<string, boolean>;
@@ -1128,8 +1128,8 @@ describe('Dashboard', () => {
     });
   });
 
-  it('does not render depth gauge in project mode', async () => {
-    renderDashboard({ colorMode: 'project' });
+  it.each(['project', 'shot'] as const)('does not render depth gauge in %s mode', async (colorMode) => {
+    renderDashboard({ colorMode });
     await waitFor(() => {
       expect(screen.queryByTestId('depth-gauge')).not.toBeInTheDocument();
     });

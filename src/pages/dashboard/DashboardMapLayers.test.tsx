@@ -100,6 +100,52 @@ const PROJECT: Project = {
 };
 
 describe('Dashboard map layers', () => {
+  it('evaluates shot colors and project fallback in both production paint expressions', () => {
+    const { container, rerender } = render(<ProjectMapLayers
+      projects={[PROJECT]}
+      activeProjectIds={new Set([PROJECT.id])}
+      geoJsonData={{ [PROJECT.id]: POINT_FEATURE_COLLECTION }}
+      projectColorsById={{ [PROJECT.id]: PROJECT.color }}
+      colorMode="shot"
+      depthDomain={null}
+    />);
+    for (const [suffix, property, spec] of [
+      ['line', 'line-color', latest.paint_line['line-color']],
+      ['fill', 'fill-color', latest.paint_fill['fill-color']],
+    ] as const) {
+      const layer = container.querySelector(`[data-layer-id="project-${PROJECT.id}-${suffix}"]`)!;
+      expect(layer).toHaveAttribute('data-layer-source-id', `project-${PROJECT.id}`);
+      const expression = JSON.parse(layer.getAttribute('data-paint')!)[property];
+      const compiled = createExpression(expression, property, spec as StylePropertySpecification);
+      expect(compiled.result).toBe('success');
+      if (compiled.result !== 'success') throw new Error('Invalid project color expression');
+      const cases = [
+        [{ color: '#112233' }, 'rgba(17,34,51,1)'],
+        [{ color: 'rgba(17,34,51,0.5)' }, 'rgba(17,34,51,0.5)'],
+        [{ color: 'rgba(0,0,0,0)' }, 'rgba(0,0,0,0)'],
+        ...[undefined, null, '', 'invalid', '0x112233ff', 42, {}, [2], [300, 0, 0], [255, 0, 0, 2]]
+          .map((color) => [{ color }, 'rgba(55,126,184,1)']),
+        [{}, 'rgba(55,126,184,1)'],
+        [null, 'rgba(55,126,184,1)'],
+      ];
+      for (const [properties, expected] of cases) {
+        const color = compiled.value.evaluateWithoutErrorHandling(
+          { zoom: 15 }, { ...POINT_FEATURE_COLLECTION.features[0], properties } as never, {},
+        );
+        expect(color.toString()).toBe(expected);
+      }
+    }
+    expect(JSON.parse(container.querySelector(`[data-layer-id="project-${PROJECT.id}-point"]`)!.getAttribute('data-paint')!))
+      .toMatchObject({ 'text-color': '#F5E027' });
+    rerender(<ProjectMapLayers
+      projects={[PROJECT]} activeProjectIds={new Set([PROJECT.id])}
+      geoJsonData={{ [PROJECT.id]: POINT_FEATURE_COLLECTION }}
+      projectColorsById={{ [PROJECT.id]: '#abcdef' }} colorMode="shot" depthDomain={null}
+    />);
+    expect(JSON.parse(container.querySelector(`[data-layer-id="project-${PROJECT.id}-line"]`)!.getAttribute('data-paint')!))
+      .toMatchObject({ 'line-color': ['to-color', ['get', 'color'], '#abcdef'] });
+  });
+
   it('binds all GIS styles directly to one source below the stable GIS anchor', () => {
     const { container } = render(<GisGeometryMapLayers featureCollection={EMPTY_FEATURE_COLLECTION} />);
     const styles = [

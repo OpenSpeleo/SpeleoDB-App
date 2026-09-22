@@ -99,6 +99,8 @@ behaviors.
   installation/store validation, hashes, approval, and rollback.
 - `settings.md`: Settings page sections (event-driven sync stats, map settings,
   tutorial, account), state ownership, progress lifecycle, and offline behavior.
+- `shot-colors.md`: per-shot coloring, project fallback, and revision-aware
+  GeoJSON refresh that preserves validated offline maps.
 - `map-depth-and-scale.md`: dashboard distance scale, project/depth color mode
   selector, depth gauge behavior, and touch-first depth probe contract.
 - `depth-domain-per-project-cache.md`: design rationale, performance analysis,

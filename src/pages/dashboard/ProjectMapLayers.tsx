@@ -1,4 +1,5 @@
 import { Layer, Source } from 'react-map-gl/maplibre';
+import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { PROJECT_LAYERS } from '../../constants';
 import type { MapColorMode } from '../../types/mapColorMode';
 import type { Project } from '../../types/project';
@@ -28,9 +29,11 @@ function ProjectMapSource({
 }: ProjectMapSourceProps) {
   const sourceId = `project-${project.id}`;
   const fallbackColor = getProjectColor(project.id, projectColorsById);
-  const lineAndFillColor = colorMode === 'depth'
+  const lineAndFillColor: ExpressionSpecification | string = colorMode === 'depth'
     ? createDepthColorExpression(depthDomain, fallbackColor, DEPTH_PROPERTY_KEY)
-    : fallbackColor;
+    : colorMode === 'shot'
+      ? ['to-color', ['get', 'color'], fallbackColor]
+      : fallbackColor;
 
   return (
     <Source id={sourceId} type="geojson" data={data}>

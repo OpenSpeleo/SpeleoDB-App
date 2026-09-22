@@ -10,7 +10,8 @@ expand the Dashboard state machine.
 ## Ownership
 
 - `ProjectMapLayers.tsx` owns the ordering anchor and per-project fill, line,
-  and point layers, including depth-color expressions.
+  and point layers, including depth and shot-color expressions (see
+  [Shot colors](shot-colors.md)).
 - `OverlayMapLayers.tsx` owns landmark, surface/subsurface station, exploration
   lead, and cylinder layers, labels, icon availability, and visual fallbacks.
 - `GpsMapLayers.tsx` owns saved-track and active-recording line sources/layers.
@@ -60,9 +61,11 @@ heading provider only while its explicit `headingActive` input is true.
 `Children.map`/`cloneElement` and proves that every project geometry layer,
 subsurface icon, and GPS line receives its owning source ID. It also compiles
 the production landmark color expression with MapLibre's style engine and proves
-an empty pending-personal collection color resolves to a valid fallback.
-`UserLocationIndicator.test.tsx` proves the same direct source-injection
-contract for the dot plus its fixed SVG geometry and dot-only fallback. The
-Dashboard characterization suite verifies surrounding source selection,
-lifecycle, and map readiness. Heading updates rerender only the indicator; the
-cone is a fixed-size DOM marker and creates no zoom-dependent GeoJSON work.
+an empty pending-personal collection color resolves to a valid fallback. Both
+project line/fill shot expressions are evaluated for valid opaque/alpha colors
+and missing/malformed values. `UserLocationIndicator.test.tsx` proves the same
+direct source-injection contract for the dot plus its fixed SVG geometry and
+dot-only fallback. The Dashboard characterization suite verifies surrounding
+source selection, lifecycle, and map readiness. Heading updates rerender only
+the indicator; the cone is a fixed-size DOM marker and creates no zoom-dependent
+GeoJSON work.

@@ -39,7 +39,9 @@ Global landmarks and surface stations remain independent of project toggles.
   metadata. A zero `mapDataRevision` cannot hide an already validated,
   commit-matched record when startup or a later sync phase is interrupted.
 - A project is published only when normalized GeoJSON is non-empty and its
-  loaded `commitId` equals the current `latest_commit.id`.
+  loaded `commitId` equals the current `latest_commit.id`. An older artifact
+  revision for that same source commit remains usable during refresh; see
+  [Shot colors](shot-colors.md).
 - GeoJSON and bounds are projected from one atomic map-data record; consumers
   cannot observe bounds from one commit with geometry from another.
 - A changed project list hides an old commit synchronously, before the

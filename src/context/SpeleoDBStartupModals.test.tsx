@@ -137,6 +137,18 @@ describe('SpeleoDBStartupModals storage consent', () => {
     expect(mockController.acknowledgeProjectGeoJSONWarnings).toHaveBeenCalledOnce();
   });
 
+  it('explains when a rejected update preserves the previously validated map', () => {
+    mockProjectGeoJSONWarnings = [{
+      projectId: 'cave', projectName: 'Cave', commitId: 'commit', geojsonRevision: 'rejected',
+      reason: 'invalid_geojson', widthKm: null, heightKm: null, durationMs: null,
+      persistent: true, preservesCachedMap: true,
+    }];
+    render(<SpeleoDBStartupModals startupUi={makeStartupUi({ showProjectGeoJSONWarningModal: true })} />);
+    expect(screen.getByText('Project map updates unavailable')).toBeInTheDocument();
+    expect(screen.getByText('The previously validated map remains available.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Acknowledge project map warnings' })).toBeInTheDocument();
+  });
+
   it.each([
     ['bbox_timeout', /previous validation timed out.*retried when online/i],
     ['invalid_geojson', /not a valid GeoJSON FeatureCollection/],

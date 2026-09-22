@@ -18,6 +18,7 @@ import type {
 import type { GeoJSONSyncPhaseResult } from '../types/sync';
 import { isAbortError, throwIfAborted } from '../utils/abort';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
+import { normalizeGeoJSONRevision } from '../utils/geojsonRevision';
 import { isProjectGeoJSONOversized } from '../utils/projectGeoJSONBounds';
 import { CancellationContext } from './CancellationContext';
 import { ProjectGeoJSONRunTiming } from './ProjectGeoJSONRunTiming';
@@ -34,6 +35,7 @@ interface SessionProjectGeoJSONDisposition {
   diagnostics: ProjectGeoJSONFailureDiagnostics;
   warningAcknowledged: boolean;
   retryWhenOnline: boolean;
+  preserveActive: boolean;
 }
 
 interface ProjectGeoJSONCoordinatorDependencies {
@@ -66,8 +68,8 @@ export class ProjectGeoJSONCoordinator {
     this.blockedCommits.clear();
   }
 
-  isBlocked(projectId: string, commitId: string): boolean {
-    return this.blockedCommits.has(this.key(projectId, commitId));
+  isBlocked(projectId: string, commitId: string, revision?: string | null): boolean {
+    return this.blockedCommits.has(this.key(projectId, commitId, revision));
   }
 
   async getMapData(
@@ -79,14 +81,17 @@ export class ProjectGeoJSONCoordinator {
     const project = projects.find((candidate) => candidate.id === projectId);
     if (!project) return null;
     const commitId = project.latest_commit.id;
-    if (this.isBlocked(projectId, commitId)) return null;
+    const disposition = this.blockedCommits.get(this.key(projectId, commitId, project.geojson_revision));
+    if (disposition && !disposition.preserveActive) return null;
     const record = await this.dependencies.cache.getProjectGeoJSONRecord(projectId, { signal });
     throwIfAborted(signal);
     if (record.state !== 'active' || record.commitId !== commitId) return null;
+    if (this.isBlocked(projectId, commitId, record.geojsonRevision)) return null;
     return {
       commitId,
       featureCollection: record.data,
       bounds: record.analysis.bounds,
+      ...(record.geojsonRevision ? { geojsonRevision: record.geojsonRevision } : {}),
     };
   }
 
@@ -94,7 +99,7 @@ export class ProjectGeoJSONCoordinator {
     throwIfAborted(signal);
     const warnings = [...this._warnings];
     const results = await Promise.all(warnings.map(async (warning) => {
-      const key = this.key(warning.projectId, warning.commitId);
+      const key = this.key(warning.projectId, warning.commitId, warning.geojsonRevision);
       if (!warning.persistent) {
         const disposition = this.blockedCommits.get(key);
         if (disposition) disposition.warningAcknowledged = true;
@@ -103,7 +108,7 @@ export class ProjectGeoJSONCoordinator {
       const persisted = await this.dependencies.cache.acknowledgeProjectGeoJSONQuarantine(
         warning.projectId,
         warning.commitId,
-        { signal },
+        { signal, geojsonRevision: warning.geojsonRevision },
       );
       return persisted ? key : null;
     }));
@@ -113,7 +118,7 @@ export class ProjectGeoJSONCoordinator {
       return { acknowledgedCount: 0, failedCount: warnings.length };
     }
     this._warnings = this._warnings.filter((warning) => !acknowledged.has(
-      this.key(warning.projectId, warning.commitId),
+      this.key(warning.projectId, warning.commitId, warning.geojsonRevision),
     ));
     this.dependencies.notifyStateChanged();
     return {
@@ -219,7 +224,8 @@ export class ProjectGeoJSONCoordinator {
     if (!allowDownloads || !this.dependencies.hasNetworkAccess()) {
       return { ...NO_OUTCOME, skipped: 1 };
     }
-    return this.downloadAndValidate(context, project);
+    return this.downloadAndValidate(context, project,
+      record.state === 'active' && record.commitId === project.latest_commit.id);
   }
 
   private async applySessionDisposition(
@@ -227,17 +233,17 @@ export class ProjectGeoJSONCoordinator {
     project: Project,
     allowDownloads: boolean,
   ): Promise<ProjectOutcome | null> {
-    const commitKey = this.key(project.id, project.latest_commit.id);
+    const commitKey = this.key(project.id, project.latest_commit.id, project.geojson_revision);
     const disposition = this.blockedCommits.get(commitKey);
     if (!disposition) return null;
     if (disposition.retryWhenOnline && allowDownloads && this.dependencies.hasNetworkAccess()) {
       this.blockedCommits.delete(commitKey);
       return null;
     }
-    await this.removePrefetchTarget(project.id, context);
+    if (!disposition.preserveActive) await this.removePrefetchTarget(project.id, context);
     this.log(project, disposition.diagnostics, 'cache', 'quarantined', disposition.reason);
     if (!disposition.warningAcknowledged) {
-      this.addWarning(project, disposition.reason, disposition.diagnostics, false);
+      this.addWarning(project, disposition.reason, disposition.diagnostics, false, disposition.preserveActive);
     }
     return { ...NO_OUTCOME, quarantined: 1, failed: 1, skipped: 1 };
   }
@@ -261,11 +267,24 @@ export class ProjectGeoJSONCoordinator {
     record: ProjectGeoJSONCacheRecord,
     allowDownloads: boolean,
   ): Promise<ProjectOutcome | null> {
+    const revision = normalizeGeoJSONRevision(project.geojson_revision);
+    const outdated = revision !== null
+      && revision !== normalizeGeoJSONRevision(record.state === 'missing' ? null : record.geojsonRevision);
     if (record.state === 'active') {
+      const rejected = record.rejectedReplacement;
+      if (outdated && rejected?.geojsonRevision === revision) {
+        this.log(project, rejected.diagnostics, 'cache', 'quarantined', rejected.reason);
+        if (!rejected.warningAcknowledged) {
+          this.addWarning(project, rejected.reason, rejected.diagnostics, true, true);
+        }
+        return { ...NO_OUTCOME, quarantined: 1, failed: 1, skipped: 1 };
+      }
+      if (outdated) return null;
       this.log(project, record.analysis, 'cache', 'active');
       return { ...NO_OUTCOME, skipped: 1 };
     }
     if (record.state === 'quarantined') {
+      if (outdated) return null;
       if (
         record.reason === 'bbox_timeout'
         && allowDownloads
@@ -279,11 +298,14 @@ export class ProjectGeoJSONCoordinator {
       this.log(project, record.diagnostics, 'cache', 'quarantined', record.reason);
       await this.removePrefetchTarget(project.id, context);
       if (!record.warningAcknowledged) {
-        this.addWarning(project, record.reason, record.diagnostics, true);
+        this.addWarning({ ...project, geojson_revision: record.geojsonRevision }, record.reason, record.diagnostics, true);
       }
       return { ...NO_OUTCOME, quarantined: 1, failed: 1, skipped: 1 };
     }
     if (record.state !== 'legacy') return null;
+    if (outdated && allowDownloads && this.dependencies.hasNetworkAccess()) return null;
+    // An offline audit validates the cached artifact, never the advertised replacement.
+    const cachedProject = { ...project, geojson_revision: record.geojsonRevision };
 
     const normalized = this.runTiming.measureSynchronous(
       context.runId,
@@ -293,18 +315,19 @@ export class ProjectGeoJSONCoordinator {
     if (!normalized) {
       await this.quarantine(
         context,
-        project,
+        cachedProject,
         'invalid_geojson',
         this.emptyDiagnostics(),
       );
       return { ...NO_OUTCOME, quarantined: 1, failed: 1, localWork: true };
     }
-    return this.validateOutcome(context, project, normalized, 0);
+    return this.validateOutcome(context, cachedProject, normalized, 0);
   }
 
   private async downloadAndValidate(
     context: CancellationContext,
     project: Project,
+    preserveActive: boolean,
   ): Promise<ProjectOutcome> {
     const response = await this.runTiming.measure(
       context.runId,
@@ -325,10 +348,10 @@ export class ProjectGeoJSONCoordinator {
       () => normalizeGeoJSON(response.data),
     );
     if (!normalized) {
-      await this.quarantine(context, project, 'invalid_geojson', this.emptyDiagnostics());
+      await this.quarantine(context, project, 'invalid_geojson', this.emptyDiagnostics(), preserveActive);
       return { ...NO_OUTCOME, downloaded: 1, quarantined: 1, failed: 1, localWork: true };
     }
-    return this.validateOutcome(context, project, normalized, 1);
+    return this.validateOutcome(context, project, normalized, 1, preserveActive);
   }
 
   private async validateOutcome(
@@ -336,8 +359,9 @@ export class ProjectGeoJSONCoordinator {
     project: Project,
     featureCollection: GeoJSON.FeatureCollection,
     downloaded: number,
+    preserveActive = false,
   ): Promise<ProjectOutcome> {
-    const outcome = await this.validate(context, project, featureCollection);
+    const outcome = await this.validate(context, project, featureCollection, preserveActive);
     return outcome === 'active'
       ? { ...NO_OUTCOME, downloaded, validated: 1, localWork: true }
       : { ...NO_OUTCOME, downloaded, quarantined: 1, failed: 1, localWork: true };
@@ -347,6 +371,7 @@ export class ProjectGeoJSONCoordinator {
     context: CancellationContext,
     project: Project,
     featureCollection: GeoJSON.FeatureCollection,
+    preserveActive: boolean,
   ): Promise<'active' | 'quarantined'> {
     let analysis: ProjectGeoJSONAnalysis;
     try {
@@ -365,7 +390,7 @@ export class ProjectGeoJSONCoordinator {
       const diagnostics = error instanceof ProjectGeoJSONAnalysisError
         ? error.diagnostics
         : this.emptyDiagnostics();
-      await this.quarantine(context, project, reason, diagnostics);
+      await this.quarantine(context, project, reason, diagnostics, preserveActive);
       return 'quarantined';
     }
 
@@ -375,6 +400,7 @@ export class ProjectGeoJSONCoordinator {
         project,
         'bbox_too_large',
         this.diagnosticsFromAnalysis(analysis),
+        preserveActive,
       );
       return 'quarantined';
     }
@@ -386,7 +412,7 @@ export class ProjectGeoJSONCoordinator {
         featureCollection,
         project.latest_commit.id,
         analysis,
-        { signal: context.signal },
+        { signal: context.signal, geojsonRevision: project.geojson_revision },
       ),
     );
     context.throwIfAborted();
@@ -396,10 +422,11 @@ export class ProjectGeoJSONCoordinator {
         project,
         'validation_unavailable',
         this.diagnosticsFromAnalysis(analysis),
+        preserveActive,
       );
       return 'quarantined';
     }
-    this.blockedCommits.delete(this.key(project.id, project.latest_commit.id));
+    this.blockedCommits.delete(this.key(project.id, project.latest_commit.id, project.geojson_revision));
     this._warnings = this._warnings.filter((warning) => warning.projectId !== project.id);
     this.log(project, analysis, 'computed', 'active');
     return 'active';
@@ -410,30 +437,39 @@ export class ProjectGeoJSONCoordinator {
     project: Project,
     reason: ProjectGeoJSONFailureReason,
     diagnostics: ProjectGeoJSONFailureDiagnostics,
+    preserveActive = false,
   ): Promise<void> {
-    const key = this.key(project.id, project.latest_commit.id);
+    const key = this.key(project.id, project.latest_commit.id, project.geojson_revision);
+    const geojsonRevision = normalizeGeoJSONRevision(project.geojson_revision);
     const fileScoped = this.isContentFailure(reason);
     let persisted = false;
     if (fileScoped) {
       persisted = await this.runTiming.measure(
         context.runId,
         'cache_write_work',
-        () => this.dependencies.cache.setQuarantinedProjectGeoJSON(
+        () => preserveActive && geojsonRevision
+          ? this.dependencies.cache.rejectProjectGeoJSONReplacement(
+            project.id,
+            project.latest_commit.id,
+            { geojsonRevision, reason, diagnostics, warningAcknowledged: false },
+            { signal: context.signal },
+          )
+          : this.dependencies.cache.setQuarantinedProjectGeoJSON(
           project.id,
           project.latest_commit.id,
           reason,
           diagnostics,
-          { signal: context.signal },
+          { signal: context.signal, geojsonRevision },
         ),
       );
       context.throwIfAborted();
     }
     if (persisted) this.blockedCommits.delete(key);
-    else this.blockForSession(project, reason, diagnostics);
+    else this.blockForSession(project, reason, diagnostics, false, preserveActive);
 
-    await this.removePrefetchTarget(project.id, context);
+    if (!preserveActive) await this.removePrefetchTarget(project.id, context);
     this.log(project, diagnostics, 'computed', 'quarantined', reason);
-    this.addWarning(project, reason, diagnostics, persisted);
+    this.addWarning(project, reason, diagnostics, persisted, preserveActive);
     if (fileScoped && !persisted) {
       console.warn('[project-geojson:quarantine-persistence-failed]', {
         projectId: project.id,
@@ -458,18 +494,24 @@ export class ProjectGeoJSONCoordinator {
   }
 
   private pruneStaleState(projects: Project[]): void {
-    const currentKeys = new Set(projects.map((project) => this.key(
-      project.id,
-      project.latest_commit.id,
-    )));
-    const retainedWarnings = this._warnings.filter((warning) => currentKeys.has(
-      this.key(warning.projectId, warning.commitId),
+    const currentProjects = new Map(projects.map((project) => [project.id, project]));
+    const isCurrent = (projectId: string, commitId: string, revision?: string | null): boolean => {
+      const project = currentProjects.get(projectId);
+      if (!project || project.latest_commit.id !== commitId) return false;
+      const advertisedRevision = normalizeGeoJSONRevision(project.geojson_revision);
+      // Older servers still identify artifacts by source commit. Keep the cached
+      // artifact's actual identity so warnings remain stable and acknowledgeable.
+      return advertisedRevision === null || advertisedRevision === normalizeGeoJSONRevision(revision);
+    };
+    const retainedWarnings = this._warnings.filter((warning) => isCurrent(
+      warning.projectId, warning.commitId, warning.geojsonRevision,
     ));
     if (retainedWarnings.length !== this._warnings.length) {
       this._warnings = retainedWarnings;
     }
     for (const key of this.blockedCommits.keys()) {
-      if (!currentKeys.has(key)) this.blockedCommits.delete(key);
+      const [projectId, commitId, revision] = JSON.parse(key) as [string, string, string | null];
+      if (!isCurrent(projectId, commitId, revision)) this.blockedCommits.delete(key);
     }
   }
 
@@ -478,6 +520,7 @@ export class ProjectGeoJSONCoordinator {
     reason: ProjectGeoJSONFailureReason,
     diagnostics: ProjectGeoJSONFailureDiagnostics,
     persistent: boolean,
+    preservesCachedMap = false,
   ): void {
     const warning: ProjectGeoJSONWarning = {
       projectId: project.id,
@@ -488,6 +531,8 @@ export class ProjectGeoJSONCoordinator {
       heightKm: diagnostics.heightKm,
       durationMs: diagnostics.durationMs,
       persistent,
+      ...(project.geojson_revision ? { geojsonRevision: project.geojson_revision } : {}),
+      ...(preservesCachedMap ? { preservesCachedMap } : {}),
     };
     const existing = this._warnings.find((candidate) => (
       candidate.projectId === warning.projectId && candidate.commitId === warning.commitId
@@ -506,7 +551,9 @@ export class ProjectGeoJSONCoordinator {
       && left.widthKm === right.widthKm
       && left.heightKm === right.heightKm
       && left.durationMs === right.durationMs
-      && left.persistent === right.persistent;
+      && left.persistent === right.persistent
+      && left.preservesCachedMap === right.preservesCachedMap
+      && normalizeGeoJSONRevision(left.geojsonRevision) === normalizeGeoJSONRevision(right.geojsonRevision);
   }
 
   private blockForSession(
@@ -514,12 +561,14 @@ export class ProjectGeoJSONCoordinator {
     reason: ProjectGeoJSONFailureReason,
     diagnostics: ProjectGeoJSONFailureDiagnostics,
     retryWhenOnline = false,
+    preserveActive = false,
   ): void {
-    this.blockedCommits.set(this.key(project.id, project.latest_commit.id), {
+    this.blockedCommits.set(this.key(project.id, project.latest_commit.id, project.geojson_revision), {
       reason,
       diagnostics,
       warningAcknowledged: false,
       retryWhenOnline,
+      preserveActive,
     });
   }
 
@@ -564,8 +613,8 @@ export class ProjectGeoJSONCoordinator {
     };
   }
 
-  private key(projectId: string, commitId: string): string {
-    return `${projectId}\u0000${commitId}`;
+  private key(projectId: string, commitId: string, revision?: string | null): string {
+    return JSON.stringify([projectId, commitId, normalizeGeoJSONRevision(revision)]);
   }
 
   private emptyDiagnostics(): ProjectGeoJSONFailureDiagnostics {

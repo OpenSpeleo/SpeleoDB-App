@@ -63,7 +63,7 @@ vi.mock('./pages/Dashboard', () => ({
     activeDashboardPanel,
   }: {
     showLandmarks: boolean;
-    colorMode: 'project' | 'depth';
+    colorMode: 'project' | 'depth' | 'shot';
     measurementUnit: 'feet' | 'meters';
     activeDashboardPanel: DashboardPanel;
   }) => (
@@ -85,7 +85,7 @@ vi.mock('./pages/Settings', () => ({
     onDashboardPanelChange,
   }: {
     onShowLandmarksChange: (visible: boolean) => void;
-    onColorModeChange: (mode: 'project' | 'depth') => void;
+    onColorModeChange: (mode: 'project' | 'depth' | 'shot') => void;
     onMeasurementUnitChange: (unit: 'feet' | 'meters') => void;
     onDashboardPanelChange: (panel: DashboardPanel) => void;
   }) => (
@@ -96,6 +96,9 @@ vi.mock('./pages/Settings', () => ({
         onClick={() => onShowLandmarksChange(false)}
       >
         Hide landmarks
+      </button>
+      <button type="button" data-testid="settings-enable-shot-mode" onClick={() => onColorModeChange('shot')}>
+        Enable shot mode
       </button>
       <button
         type="button"
@@ -127,14 +130,14 @@ describe('App shared state wiring', () => {
     historyRef.current = createMemoryHistory({ initialEntries: ['/settings'] });
   });
 
-  it('propagates settings changes to dashboard state', async () => {
+  it.each(['depth', 'shot'])('propagates %s settings changes to dashboard state', async (mode) => {
     const user = userEvent.setup();
     render(<App />);
 
     await screen.findByTestId('mock-settings');
 
     await user.click(screen.getByTestId('settings-hide-landmarks'));
-    await user.click(screen.getByTestId('settings-enable-depth-mode'));
+    await user.click(screen.getByTestId(`settings-enable-${mode}-mode`));
     await user.click(screen.getByTestId('settings-enable-feet'));
     await user.click(screen.getByTestId('settings-open-panel'));
 
@@ -145,7 +148,7 @@ describe('App shared state wiring', () => {
     const dashboard = await screen.findByTestId('mock-dashboard');
     await waitFor(() => {
       expect(dashboard).toHaveAttribute('data-show-landmarks', 'false');
-      expect(dashboard).toHaveAttribute('data-color-mode', 'depth');
+      expect(dashboard).toHaveAttribute('data-color-mode', mode);
       expect(dashboard).toHaveAttribute('data-measurement-unit', 'feet');
       expect(dashboard).toHaveAttribute('data-active-panel', 'projects');
     });

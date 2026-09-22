@@ -100,6 +100,25 @@ afterEach(() => {
 });
 
 describe('useDashboardMapData', () => {
+  it('preserves colors and older same-commit artifacts while a replacement is pending', async () => {
+    const project = createProject('colored', 'Colored cave', { geojson_revision: 'new' });
+    const projects = [project];
+    const data = {
+      ...mapData(project, collection(pointFeature('shot', { color: '#112233', depth: 5 }))),
+      geojsonRevision: 'old',
+    };
+    const source = createSource({ getProjectMapData: async () => data });
+    const { result, rerender } = renderHook(({ revision }) => useDashboardMapData({
+      source, projects, mapDataRevision: revision, landmarksRevision: 0,
+    }), { initialProps: { revision: 1 } });
+    await waitFor(() => expect(result.current.geoJsonData.colored).toBeDefined());
+    const enriched = result.current.geoJsonData.colored;
+    expect(enriched.features[0].properties).toMatchObject({ color: '#112233', _speleoDepth: 5 });
+    expect(result.current.currentProjectMapData.colored.geojsonRevision).toBe('old');
+    rerender({ revision: 2 });
+    await waitFor(() => expect(result.current.geoJsonData.colored).toBe(enriched));
+  });
+
   it('logs cache, normalization, and next-paint latency without project identity', async () => {
     const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
     const project = createProject('private-project');

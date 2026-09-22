@@ -378,6 +378,14 @@ describe('PreferencesService', () => {
       expect(getColorMode()).toBe('depth');
     });
 
+    it('persists shot mode across unrelated preference writes', () => {
+      seedValidAuth();
+      setColorMode('shot');
+      setPreferences({ instance: 'https://example.org' });
+      expect(getColorMode()).toBe('shot');
+      expect(JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY)!)).toMatchObject({ colorMode: 'shot' });
+    });
+
     it('stores and reads project', () => {
       seedValidAuth();
       setColorMode('depth');

@@ -88,6 +88,7 @@ function normalizeProjectMapData(
     commitId: mapData.commitId,
     featureCollection: attachProjectDepth(featureCollection),
     bounds: mapData.bounds,
+    ...(mapData.geojsonRevision ? { geojsonRevision: mapData.geojsonRevision } : {}),
   };
 }
 

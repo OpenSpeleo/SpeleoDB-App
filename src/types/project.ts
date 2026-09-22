@@ -51,6 +51,8 @@ export interface Project {
   fork_from: string | null;
   exclude_geojson: boolean;
   geojson_file: string | null;
+  /** Stable artifact identity; older servers and cached project lists may omit it. */
+  geojson_revision?: string | null;
   latitude?: number;
   longitude?: number;
   latest_commit: ProjectCommit;

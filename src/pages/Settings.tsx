@@ -437,6 +437,7 @@ const Settings: React.FC<SettingsProps> = ({
               >
                 <option value="project">By Project</option>
                 <option value="depth">By Depth</option>
+                <option value="shot">By Shot</option>
               </select>
               <IonIcon
                 icon={chevronDownOutline}

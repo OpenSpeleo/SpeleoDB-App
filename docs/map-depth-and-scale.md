@@ -14,24 +14,23 @@ including the touch-first depth gauge behavior used on mobile devices.
 
 - Dashboard map:
   - always-visible distance scale overlay,
-  - project layer coloring mode (`project` or `depth`),
+  - project layer coloring mode (`project`, `depth`, or `shot`),
   - depth gauge overlay (visible only in `depth` mode).
 - Settings:
   - map setting selectors for color mode and map unit with persistence.
 
 ## Parity note
 
-The Django `map_viewer.html` source is not in this repository. This
-implementation reproduces the same feature intent with app-native logic and
-keeps depth/scale internals isolated so parity tuning is straightforward if
-website source is later provided.
+Mobile and the private website map viewer share exported feature colors and
+model-stored project colors. Each client owns its controls and rendering; the
+mobile implementation remains usable in a standalone clone and offline.
 
 ## Settings contract
 
 Map color mode is controlled from `Settings` -> `Map Settings`:
 
 - Selector label: `Color mode`.
-- Options: `By Project` (default value) and `By Depth`.
+- Options: `By Project` (default value), `By Depth`, and `By Shot`.
 - Persistence key: `UserPreferences.colorMode` via `PreferencesService`.
 - Default when missing or invalid: `project`.
 
@@ -99,10 +98,10 @@ display-unit-formatted string out.
 
 ## Project layer coloring
 
-Project line/fill layers support two modes:
+Project line/fill layers support three modes:
 
 - `project` mode:
-  - existing palette behavior (`projectColorsById`).
+  - the model-stored project color (`projectColorsById`).
 - `depth` mode:
   - maplibre expression uses `_speleoDepth`,
   - depth color scale is 0-limited (`depth < 0` is clamped to `0`),
@@ -114,6 +113,10 @@ Project line/fill layers support two modes:
     - keeps gauge depth position linear while color distribution remains
       non-linear.
   - fallback to project color when feature depth is missing.
+
+- `shot` mode uses feature `properties.color` with a per-feature project-color
+  fallback. See [Shot colors](shot-colors.md) for source colors, alpha, and
+  artifact refresh behavior.
 
 Depth domain (`min`, `max`) is computed from active (visible) project feature
 collections only. When a project is shown or hidden via the project panel, the
@@ -207,8 +210,9 @@ Integration/component:
 
 E2E:
 
-- `cypress/e2e/test.cy.ts` includes map color mode persistence + dashboard
-  overlay visibility checks.
+- `tests/browser/shot-colors.spec.ts` covers color-mode selection, rendering,
+  persistence and offline reuse in Chromium and WebKit.
+- `tests/browser/offline-maps.spec.ts` covers depth-overlay layout.
 
 ## Change checklist
 

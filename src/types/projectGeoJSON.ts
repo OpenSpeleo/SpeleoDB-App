@@ -52,6 +52,16 @@ export interface ProjectGeoJSONActiveRecord {
   commitId: string;
   data: GeoJSON.FeatureCollection;
   analysis: ProjectGeoJSONAnalysis;
+  geojsonRevision?: string | null;
+  rejectedReplacement?: ProjectGeoJSONRejectedReplacement;
+}
+
+/** A rejected artifact never replaces a validated fallback from the same commit. */
+export interface ProjectGeoJSONRejectedReplacement {
+  geojsonRevision: string;
+  reason: ProjectGeoJSONContentFailureReason;
+  diagnostics: ProjectGeoJSONFailureDiagnostics;
+  warningAcknowledged: boolean;
 }
 
 export interface ProjectGeoJSONQuarantinedRecord {
@@ -61,12 +71,14 @@ export interface ProjectGeoJSONQuarantinedRecord {
   reason: ProjectGeoJSONFileFailureReason;
   diagnostics: ProjectGeoJSONFailureDiagnostics;
   warningAcknowledged: boolean;
+  geojsonRevision?: string | null;
 }
 
 export interface ProjectGeoJSONLegacyRecord {
   state: 'legacy';
   commitId: string | null;
   data: unknown;
+  geojsonRevision?: string | null;
 }
 
 export interface ProjectGeoJSONMissingRecord {
@@ -85,6 +97,7 @@ export interface ProjectGeoJSONMapData {
   commitId: string;
   featureCollection: GeoJSON.FeatureCollection;
   bounds: ProjectGeoJSONBounds;
+  geojsonRevision?: string | null;
 }
 
 export interface ProjectGeoJSONWarning {
@@ -96,6 +109,8 @@ export interface ProjectGeoJSONWarning {
   heightKm: number | null;
   durationMs: number | null;
   persistent: boolean;
+  geojsonRevision?: string | null;
+  preservesCachedMap?: boolean;
 }
 
 export interface ProjectGeoJSONAcknowledgementResult {

@@ -85,7 +85,8 @@ descriptive Settings steps (3-5) advanced via Next, then completion.
 
 - **Target**: `[data-tour="settings-color-mode"]` (the `<IonItem>` row wrapping
   the color mode `<select>`).
-- **Popover**: Bottom-center. Descriptive text with a Next button.
+- **Popover**: Bottom-center. Explains project, depth, and shot coloring, with
+  project-color fallback for shots without a color; includes a Next button.
 - **Interaction**: User taps Next; no gesture detection on the row itself.
 
 ### Step 4: "Show landmarks"

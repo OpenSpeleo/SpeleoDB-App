@@ -199,7 +199,7 @@ vi.mock('@ionic/react', () => ({
 function renderSettings(
   initialShowLandmarks = true,
   initialPath = '/settings',
-  initialColorMode: 'project' | 'depth' = 'project',
+  initialColorMode: 'project' | 'depth' | 'shot' = 'project',
   initialMeasurementUnit: 'feet' | 'meters' = 'meters',
 ) {
   const history = createMemoryHistory({ initialEntries: [initialPath] });
@@ -635,6 +635,16 @@ describe('Settings page', () => {
     expect(selector.value).toBe('project');
     expect(screen.getByRole('option', { name: 'By Project' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'By Depth' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'By Shot' })).toBeInTheDocument();
+  });
+
+  it('selects shot mode offline and explains the project fallback', async () => {
+    const user = userEvent.setup();
+    renderSettings(false, '/settings', 'depth');
+    await user.selectOptions(screen.getByTestId('color-mode-selector'), 'shot');
+    expect(mockPersistColorMode).toHaveBeenCalledWith('shot');
+    expect(screen.getByTestId('color-mode-selector')).toHaveValue('shot');
+    expect(screen.getByText(/Shots without a color use their project color/)).toBeVisible();
   });
 
   it('updates color mode selector state when changed', async () => {

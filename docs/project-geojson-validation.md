@@ -9,8 +9,8 @@ therefore passes one validation boundary before any map or prefetch consumer can
 see it.
 
 The project record itself is never disabled. Quarantine applies only to the
-GeoJSON file identified by `(project id, latest_commit.id)` so project metadata
-and unrelated synchronization continue normally.
+GeoJSON artifact identified by project, source commit, and optional artifact
+revision, so project metadata and unrelated synchronization continue normally.
 
 ## Threat model and ownership boundary
 
@@ -94,6 +94,13 @@ completed measurement without inventing missing values.
 
 ## Cache state machine
 
+Artifact freshness additionally tracks the optional API `geojson_revision`. When
+a replacement of the same source commit is rejected, an active record retains
+safe geometry and stores a revision-specific `rejectedReplacement` marker. The
+marker has independent acknowledgement and does not disable the validated
+fallback. Missing revision metadata remains compatible with existing active
+entries; see [Shot colors](shot-colors.md).
+
 Project GeoJSON continues to use its existing key in the `geojson` IndexedDB
 store; no database-version migration is required. Validation metadata schema
 version 2 distinguishes:
@@ -117,13 +124,13 @@ identity: it remains fail-closed offline and is never attributed to the current
 server commit. It is replaced only by an online 2xx download of that canonical
 commit.
 
-For the same active commit, sync logs and reuses stored bounds without
-recomputing. For the same quarantined commit, sync performs no download or
-analysis, except for historical `bbox_timeout` records written by clients using
-the old 500 ms policy. Those records are retained until an online retry of the
-same commit validates and atomically replaces them. A newer `latest_commit.id`
-is a new file version and is validated normally; a valid replacement atomically
-reactivates the project map layer.
+For the same active commit and advertised artifact revision, sync logs and
+reuses stored bounds without recomputing. For the same quarantined artifact,
+sync performs no download or analysis, except for historical `bbox_timeout`
+records written by clients using the old 500 ms policy. Those records are
+retained until an online retry of the same commit validates and atomically
+replaces them. A newer `latest_commit.id` is a new file version and is validated
+normally; a valid replacement atomically reactivates the project map layer.
 
 If IndexedDB cannot persist quarantine, the controller retains a session-only
 typed per-commit disposition. Read failures and validation-infrastructure

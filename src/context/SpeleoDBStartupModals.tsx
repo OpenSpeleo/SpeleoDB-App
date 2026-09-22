@@ -19,6 +19,7 @@ export function SpeleoDBStartupModals({
   const [isAcknowledgingProjectWarnings, setIsAcknowledgingProjectWarnings] = useState(false)
   const [projectWarningError, setProjectWarningError] = useState<string | null>(null)
   const warningCount = projectGeoJSONWarnings.length
+  const preservesCachedMaps = projectGeoJSONWarnings.some((warning) => warning.preservesCachedMap)
 
   const warningReason = (warning: (typeof projectGeoJSONWarnings)[number]): string => {
     if (
@@ -266,23 +267,28 @@ export function SpeleoDBStartupModals({
                 id="project-geojson-warning-title"
                 className="text-xl font-semibold text-slate-100 mb-2"
               >
-                Project map data disabled
+                {preservesCachedMaps ? 'Project map updates unavailable' : 'Project map data disabled'}
               </h2>
               <p id="project-geojson-warning-description" className="text-slate-400 text-sm">
-                {warningCount === 1
+                {preservesCachedMaps
+                  ? 'Some project map files could not be loaded. Previously validated maps remain available where indicated.'
+                  : warningCount === 1
                   ? 'The following project GeoJSON file will not be displayed or used for offline map downloads.'
                   : `The following ${warningCount} project GeoJSON files will not be displayed or used for offline map downloads.`}
               </p>
             </div>
-            <ul className="space-y-3 mb-6" aria-label="Disabled project map data">
+            <ul className="space-y-3 mb-6" aria-label={preservesCachedMaps ? 'Project map warnings' : 'Disabled project map data'}>
               {projectGeoJSONWarnings.map((warning) => (
                 <li
-                  key={`${warning.projectId}:${warning.commitId}`}
+                  key={JSON.stringify([warning.projectId, warning.commitId, warning.geojsonRevision])}
                   className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4"
                 >
                   <p className="font-semibold text-slate-100">{warning.projectName}</p>
                   <p className="text-xs text-slate-400 break-all">Project ID: {warning.projectId}</p>
                   <p className="text-sm text-slate-300 mt-2">{warningReason(warning)}</p>
+                  {warning.preservesCachedMap && (
+                    <p className="text-sm text-slate-300 mt-2">The previously validated map remains available.</p>
+                  )}
                 </li>
               ))}
             </ul>
@@ -300,7 +306,7 @@ export function SpeleoDBStartupModals({
               expand="block"
               color="warning"
               disabled={isAcknowledgingProjectWarnings}
-              aria-label="Acknowledge disabled project map data"
+              aria-label={preservesCachedMaps ? 'Acknowledge project map warnings' : 'Acknowledge disabled project map data'}
               data-testid="project-geojson-warning-acknowledge"
               onClick={() => { void acknowledgeProjectWarnings() }}
             >
