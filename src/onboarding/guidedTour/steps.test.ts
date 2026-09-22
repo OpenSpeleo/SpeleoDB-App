@@ -13,8 +13,8 @@ describe('buildTourSteps', () => {
       'openProjectPanel',
       'goToSettings',
       'settingsColorMode',
-      'settingsShowLandmarks',
       'settingsMeasurementUnit',
+      'settingsMapVisibility',
       'completion',
     ]);
     expect(steps).toHaveLength(6);
@@ -31,6 +31,17 @@ describe('buildTourSteps', () => {
     expect(steps[2].popover?.showButtons).toEqual(['next', 'close']);
     expect(steps[3].popover?.showButtons).toEqual(['next', 'close']);
     expect(steps[4].popover?.showButtons).toEqual(['next', 'close']);
+  });
+
+  it('follows the visible settings order and targets the collapsed visibility summary', () => {
+    const { steps } = buildTourSteps({});
+    expect(steps.slice(2, 5).map((step) => step.element)).toEqual([
+      '[data-tour="settings-color-mode"]',
+      '[data-tour="settings-measurement-unit"]',
+      '[data-tour="settings-map-visibility"]',
+    ]);
+    expect(steps[4].popover?.title).toBe('Map visibility');
+    expect(steps[4].popover?.description).toContain('individual project and item selections are preserved');
   });
 
   it('places the project-panel step popover at top-start', () => {

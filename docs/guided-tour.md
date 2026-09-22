@@ -70,11 +70,10 @@ descriptive Settings steps (3-5) advanced via Next, then completion.
   button.
 - **Handoff behavior**: Same handoff as step 1 — consume + hide chrome + re-emit
   native click.
-- **Page-route gate**: Both Dashboard and Settings stay mounted via `App.tsx`'s
-  visibility toggle. The advance check requires
+- **Page-route gate**: `AuthenticatedAppShell` keeps Dashboard mounted and
+  mounts Settings only on its active route. The advance check requires
   `window.location.pathname === '/settings'` **and** all three Settings
-  selectors to resolve, otherwise the highlight could land on the hidden
-  Settings DOM while Dashboard is still visible.
+  selectors to resolve, so the tour waits for the intended page and controls.
 - **Timeout**: If the Settings DOM never appears within ~6s after the click
   (e.g. the user backed out), the tour jumps to completion.
 - **Clickthrough guard**: Reuses `tour-step-tab-clickthrough` so the same
@@ -89,19 +88,21 @@ descriptive Settings steps (3-5) advanced via Next, then completion.
   project-color fallback for shots without a color; includes a Next button.
 - **Interaction**: User taps Next; no gesture detection on the row itself.
 
-### Step 4: "Show landmarks"
-
-- **Target**: `[data-tour="settings-show-landmarks"]` (the `<IonItem>` row
-  wrapping the landmark toggle).
-- **Popover**: Bottom-center. Descriptive text with a Next button.
-- **Interaction**: User taps Next.
-
-### Step 5: "Map unit"
+### Step 4: "Map unit"
 
 - **Target**: `[data-tour="settings-measurement-unit"]` (the `<IonItem>` row
   wrapping the unit `<select>`).
 - **Popover**: Bottom-center. Descriptive text with a Next button.
 - **Interaction**: User taps Next.
+
+### Step 5: "Map visibility"
+
+- **Target**: `[data-tour="settings-map-visibility"]` (the always-visible
+  disclosure summary in Map Settings).
+- **Popover**: Bottom-center. Explains marker visibility and preservation of
+  individual project/item selections, with a Next button.
+- **Interaction**: User taps Next. The tour does not expand advanced controls or
+  target a landmark switch hidden inside the disclosure.
 
 ### Step 6: "Tour complete"
 
@@ -160,8 +161,9 @@ The tour popover is styled to match the app's dark slate/purple theme in
   - `[data-tour="menu-toggle"]`, `[data-tour="settings-tab"]` --
     `src/components/AppTabBar.tsx`
   - `[data-tour="settings-color-mode"]`,
-    `[data-tour="settings-show-landmarks"]`,
-    `[data-tour="settings-measurement-unit"]` -- `src/pages/Settings.tsx`
+    `[data-tour="settings-map-visibility"]`,
+    `[data-tour="settings-measurement-unit"]` --
+    `src/components/MapDisplaySettings.tsx`
   - `[data-tour="project-panel"]`, `data-tour-open` --
     `src/components/ProjectPanel.tsx`
 - Tour re-trigger: `src/pages/Settings.tsx` ("Show Tutorial" button)

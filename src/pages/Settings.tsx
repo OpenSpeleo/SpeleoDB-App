@@ -15,18 +15,19 @@ import {
   IonToggle,
   IonToolbar,
 } from '@ionic/react';
-import { chevronDownOutline, syncOutline, warningOutline } from 'ionicons/icons';
+import { syncOutline, warningOutline } from 'ionicons/icons';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 import { useOfflineMapSync, useSpeleoDB } from '../context/useSpeleoDB';
 import { MAP, MAP_LAYERS } from '../constants';
 import AppTabBar from '../components/AppTabBar';
+import MapDisplaySettings from '../components/MapDisplaySettings';
 import ReconnectFailedModal from '../components/ReconnectFailedModal';
 import {
   setColorMode as persistColorMode,
   setMeasurementUnit as persistMeasurementUnit,
-  setShowLandmarks as persistShowLandmarks,
 } from '../services/PreferencesService';
+import type { MapDisplayPreferences, MapDisplayPreferencesPatch } from '../types/mapDisplayPreferences';
 import { restartGuidedTourFromHelp } from '../onboarding/guidedTour/runtime';
 import { isMapColorMode, DEFAULT_MAP_COLOR_MODE, type MapColorMode } from '../types/mapColorMode';
 import { isMeasurementUnit, DEFAULT_MEASUREMENT_UNIT, type MeasurementUnit } from '../types/measurementUnit';
@@ -56,13 +57,11 @@ function formatEta(etaSeconds: number | null): string | null {
   return `${totalSeconds}s left`;
 }
 
-const MAP_SELECT_CLASS = 'appearance-none min-w-[148px] rounded-lg border border-slate-500/70 bg-slate-800/90 text-sm text-slate-100 px-3 py-2 pr-9 shadow-inner shadow-black/20 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-cyan-400/60 focus:border-cyan-400/60';
-
 const TILE_CACHE_CAP_MB = Math.round(MAP.TILE_CACHE_MAX_BYTES / (1024 * 1024));
 
 interface SettingsProps {
-  showLandmarks: boolean;
-  onShowLandmarksChange: (visible: boolean) => void;
+  mapDisplayPreferences: MapDisplayPreferences;
+  onMapDisplayPreferencesChange: (patch: MapDisplayPreferencesPatch) => void;
   colorMode: MapColorMode;
   onColorModeChange: (mode: MapColorMode) => void;
   measurementUnit: MeasurementUnit;
@@ -74,8 +73,8 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({
-  showLandmarks,
-  onShowLandmarksChange,
+  mapDisplayPreferences,
+  onMapDisplayPreferencesChange,
   colorMode,
   onColorModeChange,
   measurementUnit,
@@ -119,15 +118,6 @@ const Settings: React.FC<SettingsProps> = ({
       history.push('/login');
     }
   }, [history, controller]);
-
-  const handleToggleLandmarks = useCallback(
-    (checked: boolean) => {
-      persistShowLandmarks(checked);
-      onShowLandmarksChange(checked);
-      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
-    },
-    [onShowLandmarksChange],
-  );
 
   const handleSync = useCallback(async () => {
     try {
@@ -410,63 +400,14 @@ const Settings: React.FC<SettingsProps> = ({
           </IonList>
         )}
 
-        {/* Map Settings */}
-        <IonList inset>
-          <IonListHeader>
-            <IonLabel>Map Settings</IonLabel>
-          </IonListHeader>
-
-          <IonItem data-tour="settings-show-landmarks">
-            <IonToggle
-              checked={showLandmarks}
-              onIonChange={(e) => handleToggleLandmarks(e.detail.checked)}
-              data-testid="landmark-toggle"
-            >
-              Show landmarks
-            </IonToggle>
-          </IonItem>
-          <IonItem data-tour="settings-color-mode">
-            <IonLabel>Color mode</IonLabel>
-            <div slot="end" className="relative">
-              <select
-                value={colorMode}
-                onChange={(e) => handleSelectColorMode(e.target.value)}
-                data-testid="color-mode-selector"
-                aria-label="Color mode"
-                className={MAP_SELECT_CLASS}
-              >
-                <option value="project">By Project</option>
-                <option value="depth">By Depth</option>
-                <option value="shot">By Shot</option>
-              </select>
-              <IonIcon
-                icon={chevronDownOutline}
-                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"
-                aria-hidden="true"
-              />
-            </div>
-          </IonItem>
-          <IonItem data-tour="settings-measurement-unit">
-            <IonLabel>Map unit</IonLabel>
-            <div slot="end" className="relative">
-              <select
-                value={measurementUnit}
-                onChange={(e) => handleSelectMeasurementUnit(e.target.value)}
-                data-testid="measurement-unit-selector"
-                aria-label="Map unit"
-                className={MAP_SELECT_CLASS}
-              >
-                <option value="meters">Meters</option>
-                <option value="feet">Feet</option>
-              </select>
-              <IonIcon
-                icon={chevronDownOutline}
-                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"
-                aria-hidden="true"
-              />
-            </div>
-          </IonItem>
-        </IonList>
+        <MapDisplaySettings
+          preferences={mapDisplayPreferences}
+          onChange={onMapDisplayPreferencesChange}
+          colorMode={colorMode}
+          onColorModeChange={handleSelectColorMode}
+          measurementUnit={measurementUnit}
+          onMeasurementUnitChange={handleSelectMeasurementUnit}
+        />
 
         <IonList inset>
           <IonItem button onClick={() => { onDashboardPanelChange('offline-maps'); history.push('/dashboard'); }} detail>

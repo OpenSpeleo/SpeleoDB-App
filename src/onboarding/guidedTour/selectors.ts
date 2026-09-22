@@ -3,7 +3,7 @@ export const TOUR_SELECTORS = {
   projectPanel: '[data-tour="project-panel"]',
   settingsTab: '[data-tour="settings-tab"]',
   settingsColorMode: '[data-tour="settings-color-mode"]',
-  settingsShowLandmarks: '[data-tour="settings-show-landmarks"]',
+  settingsMapVisibility: '[data-tour="settings-map-visibility"]',
   settingsMeasurementUnit: '[data-tour="settings-measurement-unit"]',
 } as const;
 
@@ -22,7 +22,7 @@ export function queryTourElement(selector: string): Element | null {
 export function hasSettingsTourTargets(): boolean {
   return Boolean(
     queryTourElement(TOUR_SELECTORS.settingsColorMode) &&
-      queryTourElement(TOUR_SELECTORS.settingsShowLandmarks) &&
+      queryTourElement(TOUR_SELECTORS.settingsMapVisibility) &&
       queryTourElement(TOUR_SELECTORS.settingsMeasurementUnit),
   );
 }

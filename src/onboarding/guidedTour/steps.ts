@@ -8,7 +8,7 @@ export type GuidedTourStepId =
   | 'openProjectPanel'
   | 'goToSettings'
   | 'settingsColorMode'
-  | 'settingsShowLandmarks'
+  | 'settingsMapVisibility'
   | 'settingsMeasurementUnit'
   | 'completion';
 
@@ -36,8 +36,8 @@ export function buildTourSteps(
     'openProjectPanel',
     'goToSettings',
     'settingsColorMode',
-    'settingsShowLandmarks',
     'settingsMeasurementUnit',
+    'settingsMapVisibility',
     'completion',
   ];
 
@@ -91,22 +91,6 @@ export function buildTourSteps(
       },
     },
     {
-      element: TOUR_SELECTORS.settingsShowLandmarks,
-      onHighlightStarted: () => {
-        options.onEnterSettingsContentStep?.();
-      },
-      onDeselected: () => {
-        options.onExitSettingsContentStep?.();
-      },
-      popover: {
-        title: 'Show landmarks',
-        description: 'Toggle map landmarks on or off.',
-        side: 'bottom',
-        align: 'center',
-        showButtons: ['next', 'close'],
-      },
-    },
-    {
       element: TOUR_SELECTORS.settingsMeasurementUnit,
       onHighlightStarted: () => {
         options.onEnterSettingsContentStep?.();
@@ -117,6 +101,22 @@ export function buildTourSteps(
       popover: {
         title: 'Map unit',
         description: 'Switch between meters and feet for distances and depths.',
+        side: 'bottom',
+        align: 'center',
+        showButtons: ['next', 'close'],
+      },
+    },
+    {
+      element: TOUR_SELECTORS.settingsMapVisibility,
+      onHighlightStarted: () => {
+        options.onEnterSettingsContentStep?.();
+      },
+      onDeselected: () => {
+        options.onExitSettingsContentStep?.();
+      },
+      popover: {
+        title: 'Map visibility',
+        description: 'Choose which markers appear on your map. Your individual project and item selections are preserved.',
         side: 'bottom',
         align: 'center',
         showButtons: ['next', 'close'],

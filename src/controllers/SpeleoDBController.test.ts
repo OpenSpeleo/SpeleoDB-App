@@ -2384,6 +2384,18 @@ describe('SpeleoDBController', () => {
   });
 
   describe('syncProjects tile prefetch', () => {
+    // These tests assert one final plan per layer. Hold downloader admission
+    // while independent source families publish, then exercise the settled plan.
+    // Progressive publication timing is covered by TileCoordinator tests.
+    async function syncSettledSources() {
+      controller.setOfflineDownloadsForeground(false);
+      const result = await controller.syncProjects();
+      await controller.waitForOfflineMapsIdle();
+      controller.setOfflineDownloadsForeground(true);
+      await controller.waitForOfflineMapsIdle();
+      return result;
+    }
+
     it('enqueues prefetch jobs after geojson sync', async () => {
       const schedule = vi.fn(async (_request: OfflineMapSyncRequest) => ({
         coordinateCount: 1,
@@ -2403,9 +2415,7 @@ describe('SpeleoDBController', () => {
       });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
-      await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
-
+      await syncSettledSources();
       expect(schedule).toHaveBeenCalledOnce();
       const request = schedule.mock.calls[0][0];
       expectRebuildRequest(request);
@@ -2443,8 +2453,8 @@ describe('SpeleoDBController', () => {
       await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
-      const result = await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(1));
+      const result = await syncSettledSources();
+      expect(schedule).toHaveBeenCalledTimes(1);
 
       const landmarkAreas = controller.downloadAreasSnapshot.areas.filter((area) => area.type === 'landmark');
       expect(landmarkAreas).toHaveLength(2);
@@ -2465,8 +2475,8 @@ describe('SpeleoDBController', () => {
       await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
-      const result = await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
+      const result = await syncSettledSources();
+      expect(schedule).toHaveBeenCalledOnce();
 
       const request = schedule.mock.calls[0][0];
       expectRebuildRequest(request);
@@ -2539,8 +2549,8 @@ describe('SpeleoDBController', () => {
       prefs.setPreferences({ layerOfflineSync: { 'esri-world-hillshade': true } });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
-      await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(2));
+      await syncSettledSources();
+      expect(schedule).toHaveBeenCalledTimes(2);
 
       const request = schedule.mock.calls[0][0];
       expectRebuildRequest(request);
@@ -2568,8 +2578,8 @@ describe('SpeleoDBController', () => {
       await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
 
-      await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
+      await syncSettledSources();
+      expect(schedule).toHaveBeenCalledOnce();
 
       const layerIds = schedule.mock.calls[0][0].layers.map((layer) => layer.id);
       expect(layerIds).toEqual(['esri-satellite']);
@@ -2666,8 +2676,8 @@ describe('SpeleoDBController', () => {
 
       await prefs.session.establish({ token: 'tok', instance: 'https://www.speleodb.org' });
       controller = new SpeleoDBController(service, prefs, cache, mockTilePrefetch);
-      await controller.syncProjects();
-      await vi.waitFor(() => expect(schedule).toHaveBeenCalledOnce());
+      await syncSettledSources();
+      expect(schedule).toHaveBeenCalledOnce();
       schedule.mockClear();
 
       // Hang the active-plan reuse request so logout can invalidate it.

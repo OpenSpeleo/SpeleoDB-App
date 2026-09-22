@@ -41,6 +41,15 @@ heading provider only while its explicit `headingActive` input is true.
   anchor, including after visibility changes.
 - Project layers mount only when both effective visibility and current GeoJSON
   are present.
+- Cave entrance visibility changes only the project point/star layer's
+  `layout.visibility`. Linework, fill, GeoJSON, depth domains, and the camera
+  remain unchanged.
+- Global marker categories and station subtypes use layer visibility and the
+  shared station-label filter. Sources stay mounted with the same data objects;
+  toggles do not fetch data or reconstruct GeoJSON. Parent station visibility
+  composes with each subtype without resetting subtype choices. Missing/null
+  station types use Sensor. Icon loads and source refreshes receive the latest
+  preferences on every render.
 - Overlay icon layers mount only after icon loading completes. Exploration and
   cylinder fallbacks remain mutually exclusive with their icon layers.
 - Landmark marker and label colors use MapLibre `to-color` with the app
@@ -63,9 +72,12 @@ subsurface icon, and GPS line receives its owning source ID. It also compiles
 the production landmark color expression with MapLibre's style engine and proves
 an empty pending-personal collection color resolves to a valid fallback. Both
 project line/fill shot expressions are evaluated for valid opaque/alpha colors
-and missing/malformed values. `UserLocationIndicator.test.tsx` proves the same
-direct source-injection contract for the dot plus its fixed SVG geometry and
-dot-only fallback. The Dashboard characterization suite verifies surrounding
-source selection, lifecycle, and map readiness. Heading updates rerender only
-the indicator; the cone is a fixed-size DOM marker and creates no zoom-dependent
-GeoJSON work.
+and missing/malformed values. Category tests retain source/data identity while
+checking every symbol, label and fallback; subtype tests evaluate the production
+label expression, including legacy null/missing Sensor types. Depth expressions
+are evaluated below, at and above a configured maximum.
+`UserLocationIndicator.test.tsx` proves the same direct source-injection
+contract for the dot plus its fixed SVG geometry and dot-only fallback. The
+Dashboard characterization suite verifies surrounding source selection,
+lifecycle, and map readiness. Heading updates rerender only the indicator; the
+cone is a fixed-size DOM marker and creates no zoom-dependent GeoJSON work.

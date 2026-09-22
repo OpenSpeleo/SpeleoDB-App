@@ -1,3 +1,4 @@
+import { createDefaultMapDisplayPreferences, mergeMapDisplayPreferences, type MapDisplayPreferencesPatch } from '../types/mapDisplayPreferences';
 import { DownloadAreaType, EMPTY_DOWNLOAD_AREAS, type DownloadArea, type DownloadAreasSnapshot } from '../types/downloadArea';
 import { EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT } from '../services/OfflineMapSyncStore';
 import React from 'react';
@@ -379,6 +380,7 @@ vi.mock('react-map-gl/maplibre', () => {
         <div
           data-testid="map-layer"
           data-layer-id={id}
+          data-layer-visibility={layout?.visibility ?? 'visible'}
           data-layer-color={layerColor}
           data-layer-color-expression={layerColorExpression ? JSON.stringify(layerColorExpression) : ''}
           data-layer-text-color={textColorValue}
@@ -432,7 +434,6 @@ const {
   mockGetGpsTrackVisibilityPreferences,
   mockSetGpsTrackVisibilityPreference,
   mockGetShowLandmarks,
-  mockSetShowLandmarks,
   mockSetSelectedMapLayerId,
 } = vi.hoisted(() => ({
   mockGetProjectVisibilityPreferences: vi.fn(() => ({}) as Record<string, boolean>),
@@ -451,7 +452,6 @@ const {
   mockGetGpsTrackVisibilityPreferences: vi.fn(() => ({}) as Record<string, boolean>),
   mockSetGpsTrackVisibilityPreference: vi.fn(),
   mockGetShowLandmarks: vi.fn(() => true),
-  mockSetShowLandmarks: vi.fn(),
   mockSetSelectedMapLayerId: vi.fn(),
 }));
 
@@ -475,8 +475,6 @@ vi.mock('../services/PreferencesService', () => ({
   setLandmarkCollectionCollapsedPreference: mockSetLandmarkCollectionCollapsedPreference,
   getGpsTrackVisibilityPreferences: mockGetGpsTrackVisibilityPreferences,
   setGpsTrackVisibilityPreference: mockSetGpsTrackVisibilityPreference,
-  getShowLandmarks: mockGetShowLandmarks,
-  setShowLandmarks: mockSetShowLandmarks,
   setSelectedMapLayerId: mockSetSelectedMapLayerId,
 }));
 
@@ -580,6 +578,7 @@ vi.mock('../context/useSpeleoDB', () => ({
 
 function renderDashboard(options?: {
   showLandmarks?: boolean;
+  mapDisplayPreferences?: MapDisplayPreferencesPatch;
   colorMode?: 'project' | 'depth' | 'shot';
   measurementUnit?: 'feet' | 'meters';
   selectedMapLayerId?: 'esri-satellite' | 'esri-world-hillshade' | 'esri-world-hillshade-dark';
@@ -596,14 +595,15 @@ function renderDashboard(options?: {
   const Harness: React.FC = () => {
     const [activeDashboardPanel, setActiveDashboardPanel] =
       React.useState<DashboardPanel>(null);
-    const [showLandmarks] = React.useState(initialShowLandmarks);
+    const [mapDisplayPreferences, setMapDisplayPreferences] = React.useState(() => mergeMapDisplayPreferences(createDefaultMapDisplayPreferences(), { categories: { landmarks: initialShowLandmarks }, ...options?.mapDisplayPreferences }));
     const [selectedMapLayerId, setSelectedMapLayerId] = React.useState(initialLayerId);
     return (
       <Dashboard
         isActive={routeActive}
         activeDashboardPanel={activeDashboardPanel}
         onDashboardPanelChange={setActiveDashboardPanel}
-        showLandmarks={showLandmarks}
+        mapDisplayPreferences={mapDisplayPreferences}
+        onMapDisplayPreferencesChange={(patch) => setMapDisplayPreferences((current) => mergeMapDisplayPreferences(current, patch))}
         colorMode={initialColorMode}
         measurementUnit={initialMeasurementUnit}
         selectedMapLayerId={selectedMapLayerId}
@@ -1545,6 +1545,24 @@ describe('Dashboard', () => {
     );
   });
 
+  it('dismisses transient map details on leaving the map without resurrecting them on return', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Route Lifecycle Cave' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    const view = renderDashboard();
+    await waitFor(() => expect(document.querySelector('[data-layer-id="project-p1-point"]')).not.toBeNull());
+    mockQueryRenderedFeatures.mockReturnValueOnce([{
+      layer: { id: 'project-p1-point' },
+      properties: { name: 'Entrance' },
+      geometry: { type: 'Point', coordinates: [-87.5, 20.1] },
+    }]);
+    simulatePointerTap(getMapTouchSurface());
+    expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
+    act(() => view.setDashboardActive(false));
+    expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+    act(() => view.setDashboardActive(true));
+    expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+  });
+
   it('does not open marker details modal when pointer interaction is a drag', async () => {
     mockProjects = [makeProject({ id: 'p1', name: 'Drag Project' })];
     mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
@@ -2053,6 +2071,28 @@ describe('Dashboard', () => {
     expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('N/A');
     expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent('N/A');
     expect(screen.getByTestId('overlay-marker-gps')).toHaveTextContent('N/A');
+  });
+
+  it('cancels an unfinished long press when navigating away from the retained dashboard', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Pending Press Cave' })];
+    mockGetProjectGeoJSON.mockResolvedValue(pointFeatureCollection());
+    const view = renderDashboard();
+    await waitFor(() => expect(document.querySelector('.dashboard-map-touch-surface')).not.toBeNull());
+    await settleAsyncEffects();
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerDown(getMapTouchSurface(), {
+        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      });
+      act(() => vi.advanceTimersByTime(MAP.LONG_PRESS_RING_REVEAL_DELAY_MS));
+      act(() => view.setDashboardActive(false));
+      act(() => vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS));
+      act(() => view.setDashboardActive(true));
+      expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
+      expect(mockMapUnproject).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not open GPS modal before long press duration completes', async () => {
@@ -2831,8 +2871,10 @@ describe('Dashboard', () => {
       expect(mockGetOverlayGeoJSON).toHaveBeenCalledWith('landmarks');
     });
 
-    expect(document.querySelector('[data-layer-id="landmarks-layer"]')).toBeNull();
-    expect(document.querySelector('[data-layer-id="landmarks-labels"]')).toBeNull();
+    await waitFor(() => {
+      expect(document.querySelector('[data-layer-id="landmarks-layer"]')).toHaveAttribute('data-layer-visibility', 'none');
+      expect(document.querySelector('[data-layer-id="landmarks-labels"]')).toHaveAttribute('data-layer-visibility', 'none');
+    });
   });
 
   it('uses the same project color in panel dot and map layer', async () => {

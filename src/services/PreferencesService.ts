@@ -16,6 +16,13 @@ import {
   isMeasurementUnit,
   type MeasurementUnit,
 } from '../types/measurementUnit';
+import {
+  createDefaultMapDisplayPreferences,
+  mergeMapDisplayPreferences,
+  normalizeMapDisplayPreferences,
+  type MapDisplayPreferences,
+  type MapDisplayPreferencesPatch,
+} from '../types/mapDisplayPreferences';
 import type { SessionMetadataStore } from './SecureSessionStore';
 
 const LEGACY_PLAINTEXT_CREDENTIALS_KEY = 'speleo_users_db';
@@ -37,7 +44,7 @@ export interface UserPreferences {
    */
   gpsTrackVisibility?: Record<string, boolean>;
   hasCompletedGuidedTour?: boolean;
-  showLandmarks?: boolean;
+  mapDisplayPreferences?: MapDisplayPreferences;
   colorMode?: MapColorMode;
   measurementUnit?: MeasurementUnit;
   /** Currently selected map tile layer id. */
@@ -59,6 +66,8 @@ export interface UserPreferences {
 }
 
 interface StoredPreferences extends UserPreferences {
+  /** Read-only migration input; all writes use mapDisplayPreferences. */
+  showLandmarks?: boolean;
   /** Legacy-only migration input. Normal preference writes preserve but never create it. */
   token?: string;
 }
@@ -96,11 +105,6 @@ const normalizeGpsTrackVisibility = normalizeBooleanRecord;
 const normalizeLandmarkCollectionCollapsed = normalizeBooleanRecord;
 
 function normalizeGuidedTourCompletion(value: unknown): boolean | undefined {
-  if (typeof value === 'boolean') return value;
-  return undefined;
-}
-
-function normalizeShowLandmarks(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value;
   return undefined;
 }
@@ -144,7 +148,7 @@ function emptyPreferences(): StoredPreferences {
     landmarkCollectionCollapsed: {},
     gpsTrackVisibility: {},
     hasCompletedGuidedTour: undefined,
-    showLandmarks: undefined,
+    mapDisplayPreferences: createDefaultMapDisplayPreferences(),
     colorMode: undefined,
     measurementUnit: undefined,
     selectedMapLayerId: undefined,
@@ -185,7 +189,7 @@ function readRawPreferences(): StoredPreferences {
       ),
       gpsTrackVisibility: normalizeGpsTrackVisibility(parsed.gpsTrackVisibility),
       hasCompletedGuidedTour: normalizeGuidedTourCompletion(parsed.hasCompletedGuidedTour),
-      showLandmarks: normalizeShowLandmarks(parsed.showLandmarks),
+      mapDisplayPreferences: normalizeMapDisplayPreferences(parsed.mapDisplayPreferences, parsed.showLandmarks),
       colorMode: normalizeColorMode(parsed.colorMode),
       measurementUnit: normalizeMeasurementUnit(parsed.measurementUnit),
       selectedMapLayerId: normalizeSelectedMapLayerId(parsed.selectedMapLayerId),
@@ -249,7 +253,7 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
         ),
         gpsTrackVisibility: normalizeGpsTrackVisibility(mutated.gpsTrackVisibility),
         hasCompletedGuidedTour: normalizeGuidedTourCompletion(mutated.hasCompletedGuidedTour),
-        showLandmarks: normalizeShowLandmarks(mutated.showLandmarks),
+        mapDisplayPreferences: normalizeMapDisplayPreferences(mutated.mapDisplayPreferences),
         colorMode: normalizeColorMode(mutated.colorMode),
         measurementUnit: normalizeMeasurementUnit(mutated.measurementUnit),
         selectedMapLayerId: normalizeSelectedMapLayerId(mutated.selectedMapLayerId),
@@ -347,10 +351,10 @@ export function setPreferences(prefs: Partial<UserPreferences>): void {
       prefs.hasCompletedGuidedTour === undefined
         ? current.hasCompletedGuidedTour
         : normalizeGuidedTourCompletion(prefs.hasCompletedGuidedTour),
-    showLandmarks:
-      prefs.showLandmarks === undefined
-        ? current.showLandmarks
-        : normalizeShowLandmarks(prefs.showLandmarks),
+    mapDisplayPreferences:
+      prefs.mapDisplayPreferences === undefined
+        ? current.mapDisplayPreferences
+        : normalizeMapDisplayPreferences(prefs.mapDisplayPreferences),
     colorMode:
       prefs.colorMode === undefined
         ? current.colorMode
@@ -580,17 +584,23 @@ export function setHasCompletedGuidedTour(completed: boolean): void {
 }
 
 /**
- * Read landmark visibility preference. Defaults to true (shown) when missing.
+ * Read validated presentation preferences, including legacy landmark migration.
  */
-export function getShowLandmarks(): boolean {
-  return getPreferences().showLandmarks !== false;
+export function getMapDisplayPreferences(): MapDisplayPreferences {
+  return normalizeMapDisplayPreferences(getPreferences().mapDisplayPreferences);
 }
 
 /**
- * Persist landmark visibility preference.
+ * Merge display edits against the latest queued record, preserving sibling settings.
  */
-export function setShowLandmarks(visible: boolean): void {
-  setPreferences({ showLandmarks: visible });
+export function setMapDisplayPreferences(patch: MapDisplayPreferencesPatch): void {
+  enqueuePreferencesMutation((current) => ({
+    ...current,
+    mapDisplayPreferences: mergeMapDisplayPreferences(
+      normalizeMapDisplayPreferences(current.mapDisplayPreferences),
+      patch,
+    ),
+  }));
 }
 
 /**

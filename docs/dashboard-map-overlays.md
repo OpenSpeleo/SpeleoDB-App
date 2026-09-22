@@ -93,6 +93,16 @@ Project GeoJSON drawing order is pinned below marker-oriented layers:
 - Project fill/line/point layers are anchored below overlay marker/label layers.
 - This ordering remains stable after project toggle/show/hide cycles.
 
+Settings → Map Settings → Map visibility controls cave entrance stars, survey
+stations, surface stations, landmarks, exploration leads, and safety cylinders.
+All default shown. Survey stations has independent Sensor, Biology, Bones,
+Artifact, and Geology switches. Category gates apply to every matching symbol,
+label, and icon fallback; station labels additionally filter enabled types,
+treating missing/null types as Sensor. Parent off/on retains subtype choices.
+Existing project/country and landmark-collection visibility remain independent
+gates. These local preferences work offline and never change sync, cached data,
+per-item selections, or the camera. See [Settings](settings.md).
+
 - Landmarks:
   - symbol marker `▼`,
   - color driven by the landmark's collection (`properties.collection_color`),
@@ -153,6 +163,11 @@ legend panel.
 
 All overlay markers and project GeoJSON point features are interactive. Tapping
 a marker opens a read-only detail modal.
+
+Hidden categories and station types do not appear in rendered-feature hit
+queries. They cannot open details or block long presses on otherwise empty map
+space. Leaving Dashboard dismisses transient marker details independently from
+authored landmark form drafts.
 
 **Minimum zoom gate**: all marker interactions that open a modal (marker taps
 and long-press GPS) require `zoom >= MAP.MARKER_INTERACTION_MIN_ZOOM` (`15`).
@@ -371,23 +386,18 @@ Zoom levels and marker sizes are sourced from `MAP_OVERLAYS` in
   effectively-visible projects. Depth gauge labels and layer color expressions
   update immediately.
 
-## Landmark visibility toggle
+## Landmark visibility
 
-The Settings page includes a "Show landmarks" toggle under the "Map Settings"
-section. This is the **global master gate**: when off, no landmark layers render
-regardless of per-collection state.
+Settings → Map visibility → Landmarks is the global overlay gate. It lives in
+`UserPreferences.mapDisplayPreferences.categories.landmarks` and defaults on.
+`AuthenticatedAppShell` shares the preference with Settings and the retained
+Dashboard; Settings itself mounts only on its active route. Legacy
+`showLandmarks` preferences migrate without changing the user's choice.
 
-- Persisted in `UserPreferences.showLandmarks` via `PreferencesService`.
-- Default: `true` (landmarks shown when preference is missing or undefined).
-- Settings communicates the toggle state to Dashboard in real time via shared
-  React state in `App.tsx` since both pages stay mounted simultaneously.
-- Implementation: `src/pages/Settings.tsx`, `src/pages/Dashboard.tsx`,
-  `src/services/PreferencesService.ts`.
-
-Finer-grained, **per-collection** visibility (plus the Landmarks tab/panel that
-hosts those toggles) is documented in `docs/landmark-collections.md`. The map
-draws a landmark only when the global toggle is on **and** its collection is not
-toggled off.
+The global gate updates marker and label visibility without replacing their
+source data. Per-collection choices remain independent, as documented in
+[Landmark collections](landmark-collections.md). Explicit Locate reveals the
+requested landmark's category and collection before moving the camera.
 
 ## Share functionality
 

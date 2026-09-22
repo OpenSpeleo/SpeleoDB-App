@@ -1,6 +1,7 @@
 import { Layer, Source } from 'react-map-gl/maplibre';
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { COLORS, MAP_OVERLAYS } from '../../constants';
+import type { MapDisplayPreferences } from '../../types/mapDisplayPreferences';
 import type {
   MapOverlayGeoJsonRecord,
   MapOverlayId,
@@ -40,13 +41,13 @@ function overlaySizes(overlayId: MapOverlayId): MapOverlaySizes {
   return MAP_OVERLAYS.find((overlay) => overlay.id === overlayId)!.sizes;
 }
 
-interface LandmarkMapLayersProps {
+interface VisibleOverlayMapLayersProps {
   visible: boolean;
   data?: GeoJSON.FeatureCollection;
 }
 
-function LandmarkMapLayers({ visible, data }: LandmarkMapLayersProps) {
-  if (!visible || !data) return null;
+function LandmarkMapLayers({ visible, data }: VisibleOverlayMapLayersProps) {
+  if (!data) return null;
   const sizes = overlaySizes('landmarks');
   return (
     <Source id="landmarks-source" type="geojson" data={data}>
@@ -55,6 +56,7 @@ function LandmarkMapLayers({ visible, data }: LandmarkMapLayersProps) {
         type="symbol"
         minzoom={markerMinZoom('landmarks')}
         layout={{
+          visibility: visible ? 'visible' : 'none',
           'text-field': '▼',
           'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
           'text-size': sizes.markerTextSize,
@@ -73,6 +75,7 @@ function LandmarkMapLayers({ visible, data }: LandmarkMapLayersProps) {
         type="symbol"
         minzoom={labelMinZoom('landmarks')}
         layout={{
+          visibility: visible ? 'visible' : 'none',
           'text-field': ['get', 'name'],
           'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
           'text-offset': [0, 1.5],
@@ -91,7 +94,7 @@ function LandmarkMapLayers({ visible, data }: LandmarkMapLayersProps) {
   );
 }
 
-function SurfaceStationMapLayers({ data }: { data?: GeoJSON.FeatureCollection }) {
+function SurfaceStationMapLayers({ visible, data }: VisibleOverlayMapLayersProps) {
   if (!data) return null;
   const sizes = overlaySizes('surfaceStations');
   return (
@@ -101,6 +104,7 @@ function SurfaceStationMapLayers({ data }: { data?: GeoJSON.FeatureCollection })
         type="symbol"
         minzoom={markerMinZoom('surfaceStations')}
         layout={{
+          visibility: visible ? 'visible' : 'none',
           'text-field': '◆',
           'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
           'text-size': sizes.markerTextSize,
@@ -119,6 +123,7 @@ function SurfaceStationMapLayers({ data }: { data?: GeoJSON.FeatureCollection })
         type="symbol"
         minzoom={labelMinZoom('surfaceStations')}
         layout={{
+          visibility: visible ? 'visible' : 'none',
           'text-field': ['get', 'name'],
           'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
           'text-offset': [0, 1.2],
@@ -139,7 +144,7 @@ function SurfaceStationMapLayers({ data }: { data?: GeoJSON.FeatureCollection })
 
 const SUBSURFACE_ICON_LAYERS: ReadonlyArray<{
   layerId: string;
-  stationType: string;
+  stationType: keyof MapDisplayPreferences['stationTypes'];
   iconId: OverlayIconId;
 }> = [
   {
@@ -165,12 +170,16 @@ const SUBSURFACE_ICON_LAYERS: ReadonlyArray<{
 ];
 
 interface SubsurfaceStationMapLayersProps {
+  visible: boolean;
+  stationTypes: MapDisplayPreferences['stationTypes'];
   data?: GeoJSON.FeatureCollection;
   iconsLoaded: boolean;
   iconAvailability: OverlayIconAvailability;
 }
 
 function SubsurfaceStationMapLayers({
+  visible,
+  stationTypes,
   data,
   iconsLoaded,
   iconAvailability,
@@ -189,6 +198,7 @@ function SubsurfaceStationMapLayers({
           ['==', ['get', 'type'], 'sensor'],
         ]}
         minzoom={markerMinZoom('subsurfaceStations')}
+        layout={{ visibility: visible && stationTypes.sensor ? 'visible' : 'none' }}
         paint={{
           'circle-radius': sizes.markerCircleRadius,
           'circle-color': ['coalesce', ['get', 'color'], '#fb923c'],
@@ -206,6 +216,7 @@ function SubsurfaceStationMapLayers({
             filter={['==', ['get', 'type'], stationType]}
             minzoom={markerMinZoom('subsurfaceStations')}
             layout={{
+              visibility: visible && stationTypes[stationType] ? 'visible' : 'none',
               'icon-image': iconId,
               'icon-size': sizes.markerIconSize,
               'icon-allow-overlap': true,
@@ -219,7 +230,15 @@ function SubsurfaceStationMapLayers({
         id="subsurface-stations-labels"
         type="symbol"
         minzoom={labelMinZoom('subsurfaceStations')}
+        filter={[
+          'in',
+          ['coalesce', ['get', 'type'], 'sensor'],
+          ['literal', Object.keys(stationTypes).filter(
+            (type) => stationTypes[type as keyof typeof stationTypes],
+          )],
+        ]}
         layout={{
+          visibility: visible ? 'visible' : 'none',
           'text-field': ['get', 'name'],
           'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
           'text-offset': [0, 1.2],
@@ -239,12 +258,14 @@ function SubsurfaceStationMapLayers({
 }
 
 interface IconFallbackMapLayerProps {
+  visible: boolean;
   data?: GeoJSON.FeatureCollection;
   iconsLoaded: boolean;
   iconAvailable: boolean;
 }
 
 function ExplorationLeadMapLayers({
+  visible,
   data,
   iconsLoaded,
   iconAvailable,
@@ -259,6 +280,7 @@ function ExplorationLeadMapLayers({
           type="symbol"
           minzoom={markerMinZoom('explorationLeads')}
           layout={{
+            visibility: visible ? 'visible' : 'none',
             'icon-image': 'exploration-lead-icon',
             'icon-size': sizes.markerIconSize,
             'icon-allow-overlap': true,
@@ -272,6 +294,7 @@ function ExplorationLeadMapLayers({
           id="exploration-leads-fallback-layer"
           type="circle"
           minzoom={markerMinZoom('explorationLeads')}
+          layout={{ visibility: visible ? 'visible' : 'none' }}
           paint={{
             'circle-radius': sizes.fallbackCircleRadius,
             'circle-color': '#EF4444',
@@ -286,6 +309,7 @@ function ExplorationLeadMapLayers({
 }
 
 function CylinderInstallMapLayers({
+  visible,
   data,
   iconsLoaded,
   iconAvailable,
@@ -300,6 +324,7 @@ function CylinderInstallMapLayers({
           type="symbol"
           minzoom={markerMinZoom('cylinderInstalls')}
           layout={{
+            visibility: visible ? 'visible' : 'none',
             'icon-image': 'cylinder-icon',
             'icon-size': sizes.markerIconSize,
             'icon-allow-overlap': true,
@@ -314,6 +339,7 @@ function CylinderInstallMapLayers({
           type="symbol"
           minzoom={markerMinZoom('cylinderInstalls')}
           layout={{
+            visibility: visible ? 'visible' : 'none',
             'text-field': '●',
             'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
             'text-size': sizes.fallbackTextSize,
@@ -332,6 +358,7 @@ function CylinderInstallMapLayers({
         type="symbol"
         minzoom={labelMinZoom('cylinderInstalls')}
         layout={{
+          visibility: visible ? 'visible' : 'none',
           'text-field': [
             'concat',
             ['coalesce', ['to-string', ['get', 'install_date']], ''],
@@ -360,7 +387,7 @@ function CylinderInstallMapLayers({
 export interface OverlayMapLayersProps {
   visibleOverlayGeoJsonData: MapOverlayGeoJsonRecord;
   visibleLandmarksGeoJSON?: GeoJSON.FeatureCollection;
-  showLandmarks: boolean;
+  mapDisplayPreferences: MapDisplayPreferences;
   iconsLoaded: boolean;
   iconAvailability: OverlayIconAvailability;
 }
@@ -368,25 +395,32 @@ export interface OverlayMapLayersProps {
 export function OverlayMapLayers({
   visibleOverlayGeoJsonData,
   visibleLandmarksGeoJSON,
-  showLandmarks,
+  mapDisplayPreferences,
   iconsLoaded,
   iconAvailability,
 }: OverlayMapLayersProps) {
   return (
     <>
-      <LandmarkMapLayers visible={showLandmarks} data={visibleLandmarksGeoJSON} />
-      <SurfaceStationMapLayers data={visibleOverlayGeoJsonData.surfaceStations} />
+      <LandmarkMapLayers visible={mapDisplayPreferences.categories.landmarks} data={visibleLandmarksGeoJSON} />
+      <SurfaceStationMapLayers
+        visible={mapDisplayPreferences.categories.surfaceStations}
+        data={visibleOverlayGeoJsonData.surfaceStations}
+      />
       <SubsurfaceStationMapLayers
+        visible={mapDisplayPreferences.categories.surveyStations}
+        stationTypes={mapDisplayPreferences.stationTypes}
         data={visibleOverlayGeoJsonData.subsurfaceStations}
         iconsLoaded={iconsLoaded}
         iconAvailability={iconAvailability}
       />
       <ExplorationLeadMapLayers
+        visible={mapDisplayPreferences.categories.explorationLeads}
         data={visibleOverlayGeoJsonData.explorationLeads}
         iconsLoaded={iconsLoaded}
         iconAvailable={iconAvailability['exploration-lead-icon']}
       />
       <CylinderInstallMapLayers
+        visible={mapDisplayPreferences.categories.cylinders}
         data={visibleOverlayGeoJsonData.cylinderInstalls}
         iconsLoaded={iconsLoaded}
         iconAvailable={iconAvailability['cylinder-icon']}

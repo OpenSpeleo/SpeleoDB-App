@@ -1,5 +1,5 @@
 import { useAppForeground } from './hooks/useAppForeground'
-import { Suspense, lazy, useContext, useEffect, useState, type ReactNode } from 'react'
+import { Suspense, lazy, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { IonApp, setupIonicReact } from '@ionic/react'
 
@@ -9,8 +9,10 @@ import {
   getLayerOfflineSyncPreferences,
   getMeasurementUnit,
   getSelectedMapLayerId,
-  getShowLandmarks,
+  getMapDisplayPreferences,
+  setMapDisplayPreferences as persistMapDisplayPreferences,
 } from './services/PreferencesService'
+import { mergeMapDisplayPreferences, type MapDisplayPreferencesPatch } from './types/mapDisplayPreferences'
 import type { DashboardPanel } from './types/dashboardPanel'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -28,7 +30,11 @@ function AuthenticatedRoutes(): ReactNode {
   const isSettings = path === '/settings'
   const isPending = path === '/pending'
   const [activeDashboardPanel, setActiveDashboardPanel] = useState<DashboardPanel>(null)
-  const [showLandmarks, setShowLandmarks] = useState(() => getShowLandmarks())
+  const [mapDisplayPreferences, setMapDisplayPreferences] = useState(() => getMapDisplayPreferences())
+  const handleMapDisplayPreferencesChange = useCallback((patch: MapDisplayPreferencesPatch) => {
+    setMapDisplayPreferences((current) => mergeMapDisplayPreferences(current, patch))
+    persistMapDisplayPreferences(patch)
+  }, [])
   const [colorMode, setColorMode] = useState(() => getColorMode())
   const [measurementUnit, setMeasurementUnit] = useState(() => getMeasurementUnit())
   const [selectedMapLayerId, setSelectedMapLayerId] = useState(() => getSelectedMapLayerId())
@@ -72,7 +78,8 @@ function AuthenticatedRoutes(): ReactNode {
             isActive={isDashboard}
             activeDashboardPanel={activeDashboardPanel}
             onDashboardPanelChange={setActiveDashboardPanel}
-            showLandmarks={showLandmarks}
+            mapDisplayPreferences={mapDisplayPreferences}
+            onMapDisplayPreferencesChange={handleMapDisplayPreferencesChange}
             colorMode={colorMode}
             measurementUnit={measurementUnit}
             selectedMapLayerId={selectedMapLayerId}
@@ -85,8 +92,8 @@ function AuthenticatedRoutes(): ReactNode {
         <div className="fixed inset-0">
           <Suspense fallback={null}>
             <Settings
-              showLandmarks={showLandmarks}
-              onShowLandmarksChange={setShowLandmarks}
+              mapDisplayPreferences={mapDisplayPreferences}
+              onMapDisplayPreferencesChange={handleMapDisplayPreferencesChange}
               colorMode={colorMode}
               onColorModeChange={setColorMode}
               measurementUnit={measurementUnit}

@@ -140,6 +140,7 @@ function renderActions(overrides: Record<string, unknown> = {}) {
   const controller = createController();
   const clearSelectedMarkerDetail = vi.fn();
   const onClosePanel = vi.fn();
+  const onRevealLandmarks = vi.fn();
   const writeVisibility = vi.fn();
   const writeVisibilityBatch = vi.fn();
   const writeCollapsed = vi.fn();
@@ -148,6 +149,7 @@ function renderActions(overrides: Record<string, unknown> = {}) {
     controller,
     clearSelectedMarkerDetail,
     onClosePanel,
+    onRevealLandmarks,
     writeVisibility,
     writeVisibilityBatch,
     writeCollapsed,
@@ -166,6 +168,7 @@ function renderActions(overrides: Record<string, unknown> = {}) {
       landmarks: options.landmarks as never,
       mapRef: options.mapRef as never,
       onClosePanel: options.onClosePanel as never,
+      onRevealLandmarks: options.onRevealLandmarks as never,
       initialVisibility: options.initialVisibility as never,
       initialCollapsed: options.initialCollapsed as never,
       writeVisibility: options.writeVisibility as never,
@@ -179,6 +182,7 @@ function renderActions(overrides: Record<string, unknown> = {}) {
     controller: options.controller as ReturnType<typeof createController>,
     clearSelectedMarkerDetail: options.clearSelectedMarkerDetail as ReturnType<typeof vi.fn>,
     onClosePanel: options.onClosePanel as ReturnType<typeof vi.fn>,
+    onRevealLandmarks: options.onRevealLandmarks as ReturnType<typeof vi.fn>,
     writeVisibility: options.writeVisibility as ReturnType<typeof vi.fn>,
     writeVisibilityBatch: options.writeVisibilityBatch as ReturnType<typeof vi.fn>,
     writeCollapsed: options.writeCollapsed as ReturnType<typeof vi.fn>,
@@ -261,6 +265,21 @@ describe('useDashboardLandmarkActions collections and toast', () => {
       result.current.hideAll();
     });
     expect(writeVisibilityBatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('reveals only the located landmark collection and global category before moving the camera', () => {
+    const hook = renderActions({ initialVisibility: { 'collection-1': false, '__personal__': false } });
+    const landmark = {
+      id: 'lm-1', name: 'Entrance', description: '', longitude: -73, latitude: 45,
+      collectionId: 'collection-1', collectionName: 'Survey A', collectionColor: '#123456', isPersonalCollection: false,
+    };
+    act(() => hook.result.current.locateLandmark(landmark));
+    expect(hook.onRevealLandmarks).toHaveBeenCalledOnce();
+    expect(hook.writeVisibility).toHaveBeenCalledWith('collection-1', true);
+    expect(hook.result.current.collectionVisibility).toEqual({ 'collection-1': true, '__personal__': false });
+    expect(hook.result.current.visibleLandmarks?.features).toHaveLength(1);
+    expect(hook.onRevealLandmarks.mock.invocationCallOrder[0]).toBeLessThan(hook.flyTo.mock.invocationCallOrder[0]);
+    expect(hook.writeVisibility.mock.invocationCallOrder[0]).toBeLessThan(hook.flyTo.mock.invocationCallOrder[0]);
   });
 
   it('closes the panel and flies to a landmark only when a map exists', () => {

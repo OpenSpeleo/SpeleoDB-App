@@ -86,4 +86,31 @@ describe('DepthGauge', () => {
     expect(screen.getByTestId('depth-gauge-min')).toHaveTextContent('N/A');
     expect(screen.queryByTestId('depth-gauge-marker')).not.toBeInTheDocument();
   });
+
+  it('displays a fractional limit exactly and never rounds the current reading above it', () => {
+    const { rerender } = render(<DepthGauge
+      depthDomain={{ min: 0, max: 0.04 }} currentDepth={100}
+      depthLimitFeet={0.04} measurementUnit="feet"
+    />);
+    expect(screen.getByTestId('depth-gauge-max')).toHaveTextContent('0.04 ft');
+    expect(screen.getByTestId('depth-gauge-current')).toHaveTextContent('0.04 ft');
+    expect(screen.getByTestId('depth-gauge-marker')).toHaveStyle({ top: '0%' });
+    rerender(<DepthGauge depthDomain={{ min: 0, max: 100 }} currentDepth={100}
+      depthLimitFeet={100} measurementUnit="meters" />);
+    expect(screen.getByTestId('depth-gauge-max')).toHaveTextContent('30.48 m');
+    expect(screen.getByTestId('depth-gauge-current')).toHaveTextContent('30.48 m');
+  });
+
+  it('keeps signed samples and shows N/A without data even if a limit is configured', () => {
+    const { rerender } = render(<DepthGauge
+      depthDomain={{ min: 0, max: 10 }} currentDepth={-22}
+      depthLimitFeet={10} measurementUnit="feet"
+    />);
+    expect(screen.getByTestId('depth-gauge-current')).toHaveTextContent('-22 ft');
+    rerender(<DepthGauge depthDomain={null} currentDepth={-22}
+      depthLimitFeet={10} measurementUnit="feet" />);
+    expect(screen.getByTestId('depth-gauge-current')).toHaveTextContent('');
+    expect(screen.getByTestId('depth-gauge-max')).toHaveTextContent('N/A');
+    expect(screen.queryByTestId('depth-gauge-marker')).not.toBeInTheDocument();
+  });
 });

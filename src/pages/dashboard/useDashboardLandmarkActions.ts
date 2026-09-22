@@ -47,6 +47,7 @@ export interface DashboardLandmarkActionOptions {
   landmarks: GeoJSON.FeatureCollection | undefined;
   mapRef: RefObject<MapRef | null>;
   onClosePanel: () => void;
+  onRevealLandmarks?: () => void;
   initialVisibility?: Record<string, boolean>;
   initialCollapsed?: Record<string, boolean>;
   writeVisibility?: VisibilityWriter;
@@ -105,6 +106,7 @@ interface CollectionActionOptions {
   landmarks: GeoJSON.FeatureCollection | undefined;
   mapRef: RefObject<MapRef | null>;
   onClosePanel: () => void;
+  onRevealLandmarks?: () => void;
   initialVisibility?: Record<string, boolean>;
   initialCollapsed?: Record<string, boolean>;
   writeVisibility: VisibilityWriter;
@@ -118,6 +120,7 @@ function useLandmarkCollectionActions(options: CollectionActionOptions) {
     landmarks,
     mapRef,
     onClosePanel,
+    onRevealLandmarks,
     initialVisibility,
     initialCollapsed,
     writeVisibility,
@@ -153,6 +156,10 @@ function useLandmarkCollectionActions(options: CollectionActionOptions) {
   }, [groups, writeVisibilityBatch]);
 
   const locateLandmark = useCallback((landmark: LandmarkListItem) => {
+    onRevealLandmarks?.();
+    if (collectionVisibility[landmark.collectionId] === false) {
+      toggleCollection(landmark.collectionId, true);
+    }
     onClosePanel();
     const map = mapRef.current;
     if (!map) return;
@@ -161,7 +168,7 @@ function useLandmarkCollectionActions(options: CollectionActionOptions) {
       zoom: 16,
       duration: 1000,
     });
-  }, [mapRef, onClosePanel]);
+  }, [collectionVisibility, mapRef, onClosePanel, onRevealLandmarks, toggleCollection]);
 
   return {
     collectionVisibility,

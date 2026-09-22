@@ -138,6 +138,22 @@ describe('useDashboardMapInteractions', () => {
     throwingQuery.unmount();
   });
 
+  it('cancels the pending press, feedback and later pointer-up when leaving the map', () => {
+    const map = defaultMap({ getLayer: vi.fn(() => null) });
+    const { result } = renderInteractions(map);
+    act(() => result.current.handleMapGestureStart(pointerEvent({ type: 'pointerdown' })));
+    act(() => vi.advanceTimersByTime(MAP.LONG_PRESS_RING_REVEAL_DELAY_MS));
+    expect(result.current.longPressRing).not.toBeNull();
+    act(() => result.current.cancelMapInteractions());
+    expect(result.current.longPressRing).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.advanceTimersByTime(MAP.LONG_PRESS_DURATION_MS));
+    act(() => result.current.handleMapGestureEnd(pointerEvent()));
+    expect(result.current.selectedMarkerDetail).toBeNull();
+    expect(map.unproject).not.toHaveBeenCalled();
+    expect(mockImpact).not.toHaveBeenCalled();
+  });
+
   it('shows the ring and opens a GPS detail after an empty-map pen long press', async () => {
     mockImpact.mockRejectedValueOnce(new Error('haptics unavailable'));
     const map = defaultMap({ getLayer: vi.fn(() => null) });

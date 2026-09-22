@@ -18,6 +18,7 @@ interface ProjectMapSourceProps {
   colorMode: MapColorMode;
   depthDomain: DepthDomain | null;
   projectColorsById: Record<string, string>;
+  showCaveEntrances: boolean;
 }
 
 function ProjectMapSource({
@@ -26,6 +27,7 @@ function ProjectMapSource({
   colorMode,
   depthDomain,
   projectColorsById,
+  showCaveEntrances,
 }: ProjectMapSourceProps) {
   const sourceId = `project-${project.id}`;
   const fallbackColor = getProjectColor(project.id, projectColorsById);
@@ -77,6 +79,7 @@ function ProjectMapSource({
         ]}
         minzoom={PROJECT_LAYERS.entrySymbolMinZoom}
         layout={{
+          visibility: showCaveEntrances ? 'visible' : 'none',
           'text-field': '★',
           'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
           'text-size': PROJECT_LAYERS.entrySymbolTextSize,
@@ -100,6 +103,7 @@ export interface ProjectMapLayersProps {
   projectColorsById: Record<string, string>;
   colorMode: MapColorMode;
   depthDomain: DepthDomain | null;
+  showCaveEntrances: boolean;
 }
 
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -114,6 +118,7 @@ export function ProjectMapLayers({
   projectColorsById,
   colorMode,
   depthDomain,
+  showCaveEntrances,
 }: ProjectMapLayersProps) {
   return (
     <>
@@ -139,6 +144,7 @@ export function ProjectMapLayers({
             colorMode={colorMode}
             depthDomain={depthDomain}
             projectColorsById={projectColorsById}
+            showCaveEntrances={showCaveEntrances}
           />
         );
       })}

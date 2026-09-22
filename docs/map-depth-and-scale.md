@@ -46,7 +46,7 @@ Map measurement units are also controlled from `Settings` -> `Map Settings`:
 Related files:
 
 - `src/pages/Settings.tsx`
-- `src/App.tsx`
+- `src/AuthenticatedAppShell.tsx`
 - `src/services/PreferencesService.ts`
 - `src/types/mapColorMode.ts`
 - `src/types/measurementUnit.ts`
@@ -126,6 +126,42 @@ is instant regardless of feature count. The depth gauge min/max labels and all
 visible project layer color expressions update immediately to reflect the new
 domain.
 
+## Optional depth limit
+
+In By Depth mode, the inline **Depth limit** disclosure offers one optional
+positive maximum. It uses the existing Map unit preference; decimal points and
+decimal commas are accepted, but grouping separators and units in the field are
+not. Validation occurs while typing. Blur or Enter applies a valid draft;
+invalid input keeps the last applied value. Clearing the input or choosing
+**Reset to full range** restores automatic scaling.
+
+`UserPreferences.mapDisplayPreferences.depthLimitFeet` stores canonical feet, or
+`null` for the automatic range. Display-unit changes format that same value
+without writing a rounded conversion back to storage. The preference works
+offline and is retained when switching to another color mode.
+
+A limit fixes the effective color scale to **0–X**, even if all visible surveys
+are shallower than X. Deeper geometry stays visible at the maximum color.
+Positive depth probe readouts stop at X; existing negative readouts remain
+signed. The gauge and project line/fill colors use the same effective domain.
+Fractional caps retain more precision than normal one-decimal readings, and
+formatting never rounds a capped label above its physical maximum. With no
+visible depth data the gauge still shows N/A.
+
+`utils/depthLimit.ts` owns numeric parsing, unit formatting, and the pure domain
+override. `useDepthProbe` applies that override after merging cached project
+domains, so changing limits, visibility, or display units never scans features.
+Original GeoJSON values, per-project domains, exports, and the mobile
+square-root color ramp remain unchanged. Clearing the limit immediately uses the
+latest visible-project range, including data loaded after the limit was set.
+
+A sampled depth belongs to its query context: color mode, eligible project
+layers, and source revision. Changing that context discards an old reading even
+when another visible project still supplies depth data; returning to the former
+settings does not resurrect the sample. Limit changes reuse the raw sample and
+update its displayed cap immediately. Hidden entrance layers are excluded from
+sampling without changing the project depth-domain cache.
+
 ## Distance scale behavior
 
 - The scale is always visible on the map.
@@ -199,6 +235,9 @@ Long-press map-point constraints:
 Unit:
 
 - `src/utils/depthColoring.test.ts`
+- `src/utils/depthLimit.test.ts`
+- `src/hooks/useDepthProbe.test.ts`
+- `src/components/map/DepthGauge.test.tsx`
 - `src/components/map/DistanceScale.test.tsx`
 - `src/services/PreferencesService.test.ts`
 
@@ -210,6 +249,10 @@ Integration/component:
 
 E2E:
 
+- `tests/browser/map-display.spec.ts` checks actual map pixels, capped gauge
+  values, offline preference restoration, station controls, and depth-input
+  errors above the tab bar across phone, landscape, and tablet viewports in
+  Chromium and WebKit.
 - `tests/browser/shot-colors.spec.ts` covers color-mode selection, rendering,
   persistence and offline reuse in Chromium and WebKit.
 - `tests/browser/offline-maps.spec.ts` covers depth-overlay layout.

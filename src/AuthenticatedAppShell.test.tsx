@@ -7,6 +7,9 @@ import { createMemoryHistory } from 'history';
 import AuthenticatedAppShell from './AuthenticatedAppShell';
 import { SpeleoDBContext } from './context/useSpeleoDB';
 import type { DashboardPanel } from './types/dashboardPanel';
+import type { MapDisplayPreferences, MapDisplayPreferencesPatch } from './types/mapDisplayPreferences';
+import { PREFERENCES } from './constants';
+import { clearPreferences, getMapDisplayPreferences } from './services/PreferencesService';
 
 const pageLifecycle = vi.hoisted(() => ({
   settingsMounted: vi.fn(),
@@ -19,9 +22,11 @@ vi.mock('./pages/Dashboard', () => ({
   default: function MockDashboard({
     activeDashboardPanel,
     isActive,
+    mapDisplayPreferences,
   }: {
     activeDashboardPanel: DashboardPanel;
     isActive: boolean;
+    mapDisplayPreferences: MapDisplayPreferences;
   }) {
     const [mapState, setMapState] = React.useState(0);
     return (
@@ -29,6 +34,7 @@ vi.mock('./pages/Dashboard', () => ({
         data-testid="dashboard-page"
         data-active-panel={activeDashboardPanel ?? 'none'}
         data-route-active={isActive ? 'true' : 'false'}
+        data-display-preferences={JSON.stringify(mapDisplayPreferences)}
       >
         Dashboard
         <button onClick={() => setMapState((current) => current + 1)}>
@@ -42,8 +48,10 @@ vi.mock('./pages/Dashboard', () => ({
 vi.mock('./pages/Settings', () => ({
   default: function MockSettings({
     onDashboardPanelChange,
+    onMapDisplayPreferencesChange,
   }: {
     onDashboardPanelChange: (panel: DashboardPanel) => void;
+    onMapDisplayPreferencesChange: (patch: MapDisplayPreferencesPatch) => void;
   }) {
     React.useEffect(() => {
       pageLifecycle.settingsMounted();
@@ -57,6 +65,11 @@ vi.mock('./pages/Settings', () => ({
         <button onClick={() => onDashboardPanelChange('gps')}>Open GPS</button>
         <button onClick={() => onDashboardPanelChange('gis-geometries')}>Open GIS Geometry</button>
         <button onClick={() => onDashboardPanelChange(null)}>Close panels</button>
+        <button onClick={() => {
+          onMapDisplayPreferencesChange({ categories: { caveEntrances: false } });
+          onMapDisplayPreferencesChange({ stationTypes: { biology: false } });
+          onMapDisplayPreferencesChange({ depthLimitFeet: 80.25 });
+        }}>Customize display</button>
       </div>
     );
   },
@@ -75,6 +88,47 @@ vi.mock('./pages/PendingOps', () => ({
 describe('AuthenticatedAppShell', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearPreferences();
+  });
+
+  it('hydrates legacy visibility and merges rapid settings changes into the retained map and storage', async () => {
+    localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify({ showLandmarks: false }));
+    const history = createMemoryHistory({ initialEntries: ['/settings'] });
+    const view = render(<Router history={history}><AuthenticatedAppShell /></Router>);
+    const dashboard = await screen.findByTestId('dashboard-page');
+    expect(JSON.parse(dashboard.getAttribute('data-display-preferences')!).categories.landmarks).toBe(false);
+    await userEvent.click(await screen.findByRole('button', { name: 'Customize display' }));
+    const expected = {
+      categories: { caveEntrances: false, landmarks: false },
+      stationTypes: { biology: false }, depthLimitFeet: 80.25,
+    };
+    expect(JSON.parse(dashboard.getAttribute('data-display-preferences')!)).toMatchObject(expected);
+    expect(getMapDisplayPreferences()).toMatchObject(expected);
+    expect(JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY)!)).not.toHaveProperty('showLandmarks');
+    act(() => history.push('/dashboard'));
+    expect(JSON.parse(dashboard.getAttribute('data-display-preferences')!)).toMatchObject(expected);
+    view.unmount();
+    render(<Router history={history}><AuthenticatedAppShell /></Router>);
+    expect(JSON.parse((await screen.findByTestId('dashboard-page')).getAttribute('data-display-preferences')!)).toMatchObject(expected);
+  });
+
+  it('keeps map controls usable in memory when persistence is unavailable', async () => {
+    const history = createMemoryHistory({ initialEntries: ['/settings'] });
+    render(<Router history={history}><AuthenticatedAppShell /></Router>);
+    await screen.findByTestId('settings-page');
+    const storage = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('Storage unavailable'); });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await userEvent.click(screen.getByRole('button', { name: 'Customize display' }));
+      act(() => history.push('/dashboard'));
+      expect(JSON.parse(screen.getByTestId('dashboard-page').getAttribute('data-display-preferences')!)).toMatchObject({
+        categories: { caveEntrances: false }, stationTypes: { biology: false }, depthLimitFeet: 80.25,
+      });
+      expect(errors).toHaveBeenCalledTimes(3);
+    } finally {
+      storage.mockRestore();
+      errors.mockRestore();
+    }
   });
 
   it('surfaces GPS recording errors even when Dashboard is hidden', async () => {

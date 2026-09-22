@@ -4,6 +4,7 @@ import { createExpression, latest } from '@maplibre/maplibre-gl-style-spec';
 import type { StylePropertySpecification } from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it, vi } from 'vitest';
 import { COLORS } from '../../constants';
+import { createDefaultMapDisplayPreferences, type MapDisplayPreferences } from '../../types/mapDisplayPreferences';
 import type { Project } from '../../types/project';
 import type { OverlayIconAvailability } from './dashboardMapUtils';
 import { GpsMapLayers } from './GpsMapLayers';
@@ -11,14 +12,20 @@ import { OverlayMapLayers } from './OverlayMapLayers';
 import { ProjectMapLayers } from './ProjectMapLayers';
 import { GisGeometryMapLayers } from './GisGeometryMapLayers';
 
+const sourceInputs = vi.hoisted(() => ({ record: vi.fn() }));
+
 vi.mock('react-map-gl/maplibre', () => ({
   Source: ({
     id,
+    data,
     children,
   }: {
     id: string;
+    data: unknown;
     children?: React.ReactNode;
-  }) => (
+  }) => {
+    sourceInputs.record(id, data);
+    return (
     <div data-source-id={id}>
       {React.Children.map(children, (child) => (
         React.isValidElement(child)
@@ -26,12 +33,14 @@ vi.mock('react-map-gl/maplibre', () => ({
           : child
       ))}
     </div>
-  ),
-  Layer: ({ id, source, paint, filter, beforeId }: {
+    );
+  },
+  Layer: ({ id, source, paint, filter, layout, beforeId }: {
     id: string;
     source?: string;
     paint?: Record<string, unknown>;
     filter?: unknown;
+    layout?: unknown;
     beforeId?: string;
   }) => (
     <div
@@ -39,6 +48,7 @@ vi.mock('react-map-gl/maplibre', () => ({
       data-layer-source-id={source}
       data-paint={JSON.stringify(paint)}
       data-filter={JSON.stringify(filter)}
+      data-layout={JSON.stringify(layout)}
       data-before-id={beforeId}
       data-text-color-expression={JSON.stringify(paint?.['text-color'])}
     />
@@ -67,6 +77,9 @@ const NO_ICONS: OverlayIconAvailability = {
   'exploration-lead-icon': false,
   'cylinder-icon': false,
 };
+
+const ALL_ICONS = Object.fromEntries(Object.keys(NO_ICONS).map((id) => [id, true])) as OverlayIconAvailability;
+const DEFAULT_DISPLAY = createDefaultMapDisplayPreferences();
 
 const PROJECT: Project = {
   id: 'project-1',
@@ -99,9 +112,162 @@ const PROJECT: Project = {
   },
 };
 
+function layoutFor(container: HTMLElement, layerId: string): Record<string, unknown> {
+  const layer = container.querySelector(`[data-layer-id="${layerId}"]`);
+  expect(layer).not.toBeNull();
+  return JSON.parse(layer!.getAttribute('data-layout') ?? '{}');
+}
+
+function allOverlays(preferences: MapDisplayPreferences, icons = ALL_ICONS) {
+  return <OverlayMapLayers
+    visibleOverlayGeoJsonData={{
+      subsurfaceStations: POINT_FEATURE_COLLECTION,
+      surfaceStations: POINT_FEATURE_COLLECTION,
+      explorationLeads: POINT_FEATURE_COLLECTION,
+      cylinderInstalls: POINT_FEATURE_COLLECTION,
+    }}
+    visibleLandmarksGeoJSON={POINT_FEATURE_COLLECTION}
+    mapDisplayPreferences={preferences}
+    iconsLoaded
+    iconAvailability={icons}
+  />;
+}
+
 describe('Dashboard map layers', () => {
+  it('hides entrance stars without replacing the source, linework or fill', () => {
+    const props = {
+      projects: [PROJECT], activeProjectIds: new Set([PROJECT.id]),
+      geoJsonData: { [PROJECT.id]: POINT_FEATURE_COLLECTION },
+      projectColorsById: { [PROJECT.id]: PROJECT.color },
+      colorMode: 'depth' as const, depthDomain: { min: 0, max: 50 },
+    };
+    const { container, rerender } = render(<ProjectMapLayers {...props} showCaveEntrances />);
+    const source = container.querySelector(`[data-source-id="project-${PROJECT.id}"]`);
+    const line = container.querySelector(`[data-layer-id="project-${PROJECT.id}-line"]`);
+    const originalPaint = line?.getAttribute('data-paint');
+    sourceInputs.record.mockClear();
+    rerender(<ProjectMapLayers {...props} showCaveEntrances={false} />);
+    expect(container.querySelector(`[data-source-id="project-${PROJECT.id}"]`)).toBe(source);
+    expect(container.querySelector(`[data-layer-id="project-${PROJECT.id}-line"]`)).toBe(line);
+    expect(line).toHaveAttribute('data-paint', originalPaint!);
+    expect(layoutFor(container, `project-${PROJECT.id}-point`).visibility).toBe('none');
+    expect(sourceInputs.record).toHaveBeenCalledWith(`project-${PROJECT.id}`, POINT_FEATURE_COLLECTION);
+    rerender(<ProjectMapLayers {...props} showCaveEntrances />);
+    expect(layoutFor(container, `project-${PROJECT.id}-point`).visibility).toBe('visible');
+    expect(container.querySelector(`[data-source-id="project-${PROJECT.id}"]`)).toBe(source);
+  });
+
+  it.each([
+    ['landmarks', ['landmarks-layer', 'landmarks-labels']],
+    ['surfaceStations', ['surface-stations-layer', 'surface-stations-labels']],
+    ['surveyStations', ['subsurface-stations-circles', 'subsurface-stations-biology-icons', 'subsurface-stations-bone-icons', 'subsurface-stations-artifact-icons', 'subsurface-stations-geology-icons', 'subsurface-stations-labels']],
+    ['explorationLeads', ['exploration-leads-icon-layer']],
+    ['cylinders', ['cylinder-installs-icon-layer', 'cylinder-installs-labels']],
+  ] as const)('composes the %s gate across its layers while retaining the source data', (category, layerIds) => {
+    const { container, rerender } = render(allOverlays(DEFAULT_DISPLAY));
+    const sources = [...container.querySelectorAll('[data-source-id]')];
+    const layers = [...container.querySelectorAll('[data-layer-id]')];
+    const hidden = { ...DEFAULT_DISPLAY, categories: { ...DEFAULT_DISPLAY.categories, [category]: false } };
+    sourceInputs.record.mockClear();
+    rerender(allOverlays(hidden));
+    for (const layerId of layerIds) {
+      expect(layoutFor(container, layerId).visibility).toBe('none');
+    }
+    for (const layer of layers) {
+      expect(container.querySelector(`[data-layer-id="${layer.getAttribute('data-layer-id')}"]`)).toBe(layer);
+      expect(layer.getAttribute('data-layer-source-id')).toBeTruthy();
+      if (!(layerIds as readonly string[]).includes(layer.getAttribute('data-layer-id')!)) {
+        expect(layoutFor(container, layer.getAttribute('data-layer-id')!).visibility).toBe('visible');
+      }
+    }
+    expect([...container.querySelectorAll('[data-source-id]')]).toEqual(sources);
+    for (const [, data] of sourceInputs.record.mock.calls) expect(data).toBe(POINT_FEATURE_COLLECTION);
+    rerender(allOverlays(DEFAULT_DISPLAY));
+    for (const layerId of layerIds) expect(layoutFor(container, layerId).visibility).toBe('visible');
+  });
+
+  it('keeps fallback icons hidden when image loading finishes after a category was disabled', () => {
+    const preferences = { ...DEFAULT_DISPLAY, categories: { ...DEFAULT_DISPLAY.categories, explorationLeads: false, cylinders: false } };
+    const { container, rerender } = render(<OverlayMapLayers
+      visibleOverlayGeoJsonData={{}} mapDisplayPreferences={preferences}
+      iconsLoaded={false} iconAvailability={NO_ICONS}
+    />);
+    rerender(allOverlays(preferences, NO_ICONS));
+    for (const id of ['exploration-leads-fallback-layer', 'cylinder-installs-fallback-layer', 'cylinder-installs-labels']) {
+      expect(layoutFor(container, id).visibility).toBe('none');
+    }
+    rerender(allOverlays(preferences, ALL_ICONS));
+    expect(layoutFor(container, 'exploration-leads-icon-layer').visibility).toBe('none');
+    expect(layoutFor(container, 'cylinder-installs-icon-layer').visibility).toBe('none');
+  });
+
+  it.each(['sensor', 'biology', 'bone', 'artifact', 'geology'] as const)('filters %s labels and keeps its subtype off across a parent toggle', (type) => {
+    const preferences = { ...DEFAULT_DISPLAY, stationTypes: { ...DEFAULT_DISPLAY.stationTypes, [type]: false } };
+    const { container, rerender } = render(allOverlays(preferences));
+    const layerId = type === 'sensor' ? 'subsurface-stations-circles' : `subsurface-stations-${type}-icons`;
+    expect(layoutFor(container, layerId).visibility).toBe('none');
+    const expression = JSON.parse(container.querySelector('[data-layer-id="subsurface-stations-labels"]')!.getAttribute('data-filter')!);
+    const compiled = createExpression(expression, 'filter', { type: 'boolean' } as StylePropertySpecification);
+    expect(compiled.result).toBe('success');
+    if (compiled.result !== 'success') throw new Error('Invalid station label filter');
+    for (const featureType of ['sensor', 'biology', 'bone', 'artifact', 'geology', null, undefined]) {
+      const properties = featureType === undefined ? {} : { type: featureType };
+      expect(compiled.value.evaluateWithoutErrorHandling(
+        { zoom: 16 }, { ...POINT_FEATURE_COLLECTION.features[0], properties } as never, {},
+      )).toBe((featureType ?? 'sensor') !== type);
+    }
+    rerender(allOverlays({ ...preferences, categories: { ...preferences.categories, surveyStations: false } }));
+    expect(layoutFor(container, 'subsurface-stations-labels').visibility).toBe('none');
+    rerender(allOverlays(preferences));
+    expect(layoutFor(container, layerId).visibility).toBe('none');
+    expect(layoutFor(container, 'subsurface-stations-labels').visibility).toBe('visible');
+  });
+
+  it('evaluates the existing depth ramp with a configured maximum and leaves raw feature values intact', () => {
+    const { container } = render(<ProjectMapLayers
+      projects={[PROJECT]} activeProjectIds={new Set([PROJECT.id])}
+      geoJsonData={{ [PROJECT.id]: POINT_FEATURE_COLLECTION }}
+      projectColorsById={{ [PROJECT.id]: PROJECT.color }} colorMode="depth"
+      depthDomain={{ min: 0, max: 20 }} showCaveEntrances
+    />);
+    for (const [suffix, property, spec] of [
+      ['line', 'line-color', latest.paint_line['line-color']],
+      ['fill', 'fill-color', latest.paint_fill['fill-color']],
+    ] as const) {
+      const paint = JSON.parse(container.querySelector(`[data-layer-id="project-${PROJECT.id}-${suffix}"]`)!.getAttribute('data-paint')!);
+      const expression = createExpression(paint[property], property, spec as StylePropertySpecification);
+      expect(expression.result).toBe('success');
+      if (expression.result !== 'success') throw new Error('Invalid depth expression');
+      const colorAt = (depth: number | null) => expression.value.evaluateWithoutErrorHandling(
+        { zoom: 16 }, { ...POINT_FEATURE_COLLECTION.features[0], properties: depth === null ? {} : { _speleoDepth: depth } } as never, {},
+      ).toString();
+      expect(colorAt(80)).toBe(colorAt(20));
+      expect(colorAt(10)).not.toBe(colorAt(20));
+      expect(colorAt(-10)).toBe(colorAt(0));
+      expect(colorAt(null)).toBe('rgba(55,126,184,1)');
+    }
+  });
+
+  it('compiles an empty station-type selection without leaving labels behind', () => {
+    const preferences = {
+      ...DEFAULT_DISPLAY,
+      stationTypes: { sensor: false, biology: false, bone: false, artifact: false, geology: false },
+    };
+    const { container } = render(allOverlays(preferences));
+    const labels = container.querySelector('[data-layer-id="subsurface-stations-labels"]')!;
+    const compiled = createExpression(JSON.parse(labels.getAttribute('data-filter')!), 'filter', { type: 'boolean' } as StylePropertySpecification);
+    expect(compiled.result).toBe('success');
+    if (compiled.result !== 'success') throw new Error('Invalid empty station selection');
+    for (const type of ['sensor', 'biology', 'bone', 'artifact', 'geology', null]) {
+      expect(compiled.value.evaluateWithoutErrorHandling(
+        { zoom: 16 }, { ...POINT_FEATURE_COLLECTION.features[0], properties: { type } } as never, {},
+      )).toBe(false);
+    }
+  });
+
   it('evaluates shot colors and project fallback in both production paint expressions', () => {
     const { container, rerender } = render(<ProjectMapLayers
+      showCaveEntrances
       projects={[PROJECT]}
       activeProjectIds={new Set([PROJECT.id])}
       geoJsonData={{ [PROJECT.id]: POINT_FEATURE_COLLECTION }}
@@ -138,6 +304,7 @@ describe('Dashboard map layers', () => {
     expect(JSON.parse(container.querySelector(`[data-layer-id="project-${PROJECT.id}-point"]`)!.getAttribute('data-paint')!))
       .toMatchObject({ 'text-color': '#F5E027' });
     rerender(<ProjectMapLayers
+      showCaveEntrances
       projects={[PROJECT]} activeProjectIds={new Set([PROJECT.id])}
       geoJsonData={{ [PROJECT.id]: POINT_FEATURE_COLLECTION }}
       projectColorsById={{ [PROJECT.id]: '#abcdef' }} colorMode="shot" depthDomain={null}
@@ -167,6 +334,7 @@ describe('Dashboard map layers', () => {
   it('binds every active project layer to its GeoJSON source', () => {
     const { container } = render(
       <ProjectMapLayers
+        showCaveEntrances
         projects={[PROJECT]}
         activeProjectIds={new Set([PROJECT.id])}
         geoJsonData={{ [PROJECT.id]: POINT_FEATURE_COLLECTION }}
@@ -186,6 +354,7 @@ describe('Dashboard map layers', () => {
   it('omits project layers without active data', () => {
     const { container, rerender } = render(
       <ProjectMapLayers
+        showCaveEntrances
         projects={[PROJECT]}
         activeProjectIds={new Set()}
         geoJsonData={{ [PROJECT.id]: POINT_FEATURE_COLLECTION }}
@@ -198,6 +367,7 @@ describe('Dashboard map layers', () => {
 
     rerender(
       <ProjectMapLayers
+        showCaveEntrances
         projects={[PROJECT]}
         activeProjectIds={new Set([PROJECT.id])}
         geoJsonData={{}}
@@ -240,7 +410,7 @@ describe('Dashboard map layers', () => {
       <OverlayMapLayers
         visibleOverlayGeoJsonData={{ subsurfaceStations: POINT_FEATURE_COLLECTION }}
         visibleLandmarksGeoJSON={undefined}
-        showLandmarks={false}
+        mapDisplayPreferences={DEFAULT_DISPLAY}
         iconsLoaded
         iconAvailability={iconAvailability}
       />,
@@ -255,7 +425,7 @@ describe('Dashboard map layers', () => {
       <OverlayMapLayers
         visibleOverlayGeoJsonData={{ subsurfaceStations: POINT_FEATURE_COLLECTION }}
         visibleLandmarksGeoJSON={undefined}
-        showLandmarks={false}
+        mapDisplayPreferences={DEFAULT_DISPLAY}
         iconsLoaded
         iconAvailability={NO_ICONS}
       />,
@@ -284,7 +454,7 @@ describe('Dashboard map layers', () => {
       <OverlayMapLayers
         visibleOverlayGeoJsonData={{ landmarks: pendingPersonalLandmark }}
         visibleLandmarksGeoJSON={pendingPersonalLandmark}
-        showLandmarks
+        mapDisplayPreferences={DEFAULT_DISPLAY}
         iconsLoaded
         iconAvailability={NO_ICONS}
       />,

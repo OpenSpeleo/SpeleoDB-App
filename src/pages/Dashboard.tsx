@@ -29,6 +29,7 @@ import { useGisGeometries } from '../hooks/useGisGeometries';
 import { useDashboardGisGeometryActions } from './dashboard/useDashboardGisGeometryActions';
 import AppTabBar from '../components/AppTabBar';
 import type { MapColorMode } from '../types/mapColorMode';
+import type { MapDisplayPreferences, MapDisplayPreferencesPatch } from '../types/mapDisplayPreferences';
 import type { MeasurementUnit } from '../types/measurementUnit';
 import { useDepthProbe } from '../hooks/useDepthProbe';
 import { computeBounds } from './dashboard/dashboardMapUtils';
@@ -59,7 +60,8 @@ interface DashboardProps {
   isActive: boolean;
   activeDashboardPanel: DashboardPanel;
   onDashboardPanelChange: DashboardPanelChange;
-  showLandmarks: boolean;
+  mapDisplayPreferences: MapDisplayPreferences;
+  onMapDisplayPreferencesChange: (patch: MapDisplayPreferencesPatch) => void;
   colorMode: MapColorMode;
   measurementUnit: MeasurementUnit;
   selectedMapLayerId: MapLayerId;
@@ -71,7 +73,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   isActive,
   activeDashboardPanel,
   onDashboardPanelChange,
-  showLandmarks,
+  mapDisplayPreferences,
+  onMapDisplayPreferencesChange,
   colorMode,
   measurementUnit,
   selectedMapLayerId,
@@ -184,11 +187,11 @@ const Dashboard: React.FC<DashboardProps> = ({
   const projectGeometryLayerIds = useMemo(
     () =>
       [...effectiveActiveProjectIds].flatMap((id) => [
-        `project-${id}-point`,
+        ...(mapDisplayPreferences.categories.caveEntrances ? [`project-${id}-point`] : []),
         `project-${id}-line`,
         `project-${id}-fill`,
       ]),
-    [effectiveActiveProjectIds],
+    [effectiveActiveProjectIds, mapDisplayPreferences.categories.caveEntrances],
   );
 
   const {
@@ -204,11 +207,13 @@ const Dashboard: React.FC<DashboardProps> = ({
     effectiveActiveProjectIds,
     geoJsonData,
     projectGeometryLayerIds,
+    mapDisplayPreferences.depthLimitFeet,
   );
 
   const {
     selectedMarkerDetail: selectedOverlayMarkerDetail,
     clearSelectedMarkerDetail,
+    cancelMapInteractions,
     longPressRing,
     handleMapGestureStart,
     handleMapGestureMove,
@@ -220,6 +225,16 @@ const Dashboard: React.FC<DashboardProps> = ({
     clearProbedDepth,
     sampleDepthAtClientPoint,
   });
+  useEffect(() => {
+    if (!isActive) {
+      cancelMapInteractions();
+      clearProbedDepth();
+    }
+  }, [isActive, cancelMapInteractions, clearProbedDepth]);
+  const revealLandmarks = useCallback(
+    () => onMapDisplayPreferencesChange({ categories: { landmarks: true } }),
+    [onMapDisplayPreferencesChange],
+  );
   const closeLandmarkPanel = useCallback(
     () => onDashboardPanelChange(null),
     [onDashboardPanelChange],
@@ -258,6 +273,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     landmarks: visibleOverlayGeoJsonData.landmarks,
     mapRef,
     onClosePanel: closeLandmarkPanel,
+    onRevealLandmarks: revealLandmarks,
   });
 
   const closeGpsPanel = useCallback(
@@ -377,11 +393,12 @@ const Dashboard: React.FC<DashboardProps> = ({
               projectColorsById,
               colorMode,
               depthDomain,
+              showCaveEntrances: mapDisplayPreferences.categories.caveEntrances,
             }}
             overlayLayers={{
               visibleOverlayGeoJsonData,
               visibleLandmarksGeoJSON,
-              showLandmarks,
+              mapDisplayPreferences,
             }}
             gpsLayers={{
               savedTrackFeatureCollection,
@@ -399,6 +416,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             colorMode={colorMode}
             measurementUnit={measurementUnit}
             probedDepth={probedDepth}
+            depthLimitFeet={mapDisplayPreferences.depthLimitFeet}
             onMapReady={fitInitialProjectBounds}
           />
 
@@ -511,7 +529,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
           <DashboardLandmarkDialogs
             detail={{
-              value: selectedOverlayMarkerDetail,
+              value: isActive ? selectedOverlayMarkerDetail : null,
               onClose: clearSelectedMarkerDetail,
               onCreate: handleOpenCreateLandmark,
               onEdit: handleOpenEditLandmark,

@@ -36,11 +36,12 @@ bulk transfer) still exists only in the web viewer.
   so the two panels feel like siblings. The Projects and Landmarks panels share
   the same left-edge slot and are mutually exclusive.
 
-- **Two-level visibility.** A global master toggle (`showLandmarks`, in
-  Settings) gates the whole overlay; per-collection toggles refine it. A
-  landmark renders iff `showLandmarks` is on **and** its collection is not
-  toggled off. Missing per-collection keys imply visible (same default-visible
-  semantics as project visibility).
+- **Two-level visibility.** A global master toggle
+  (`mapDisplayPreferences.categories.landmarks`, in Settings → Map visibility)
+  gates the whole overlay; per-collection toggles refine it. A landmark renders
+  when the global category is on **and** its collection is not toggled off.
+  Missing per-collection keys imply visible (same default-visible semantics as
+  project visibility).
 
 ## Approach / data flow
 
@@ -52,9 +53,10 @@ bulk transfer) still exists only in the web viewer.
    landmarks alphabetical within a group; safe hex color fallback).
 3. `LandmarkPanel` (`src/components/LandmarkPanel.tsx`) renders collapsible
    collection groups: color swatch, name, "Private" badge, count, and a
-   per-collection visibility `IonToggle`. Each landmark row only flies the map
-   to that landmark; the read-only details modal is reachable solely by tapping
-   the marker on the map (see "Tap behavior" below).
+   per-collection visibility `IonToggle`. Each landmark row reveals its global
+   category and collection, then flies the map to that landmark; the read-only
+   details modal is reachable solely by tapping the marker on the map (see "Tap
+   behavior" below).
 4. `useDashboardLandmarkActions` filters drawn landmarks to visible collections,
    and `OverlayMapLayers` colors markers/labels by `collection_color`
    (`LANDMARK_COLLECTION_COLOR_EXPRESSION`).
@@ -66,7 +68,7 @@ flowchart TD
   panel -->|toggle| prefs["PreferencesService.landmarkCollectionVisibility"]
   prefs --> visible["useDashboardLandmarkActions visibility projection"]
   visible --> layers["landmarks-layer / labels (color = collection_color)"]
-  panel -->|locate row| fly["map.flyTo only (no details modal)"]
+  panel -->|locate row| fly["reveal category/collection + map.flyTo (no details modal)"]
 ```
 
 ## Key APIs / concepts
@@ -140,7 +142,8 @@ The app then surfaces a one-time consent prompt instead of silently failing:
 
 ### Tap behavior
 
-Tapping a landmark row in the panel only flies the map to that landmark (zoom).
+Tapping a landmark row reveals its global category and owning collection, then
+flies the map to that landmark (zoom). Other collection choices are preserved.
 The read-only details modal is reachable solely by physically tapping the marker
 on the map (`handleLocateLandmark` in `src/pages/Dashboard.tsx` deliberately
 does not open the modal).

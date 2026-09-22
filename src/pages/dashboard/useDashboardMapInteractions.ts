@@ -36,6 +36,7 @@ export interface DashboardMapInteractionOptions {
 export interface DashboardMapInteractionState {
   selectedMarkerDetail: OverlayMarkerDetails | null;
   clearSelectedMarkerDetail: () => void;
+  cancelMapInteractions: () => void;
   longPressRing: { x: number; y: number } | null;
   handleMapGestureStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   handleMapGestureMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -283,10 +284,17 @@ export function useDashboardMapInteractions({
   }, [clearLongPressTimer, clearProbedDepth, openMarkerDetailsAtClientPoint]);
 
   const clearSelectedMarkerDetail = useCallback(() => setSelectedMarkerDetail(null), []);
+  const cancelMapInteractions = useCallback(() => {
+    clearLongPressTimer();
+    pointerCandidateRef.current = null;
+    setLongPressRing(null);
+    setSelectedMarkerDetail(null);
+  }, [clearLongPressTimer]);
 
   return {
     selectedMarkerDetail,
     clearSelectedMarkerDetail,
+    cancelMapInteractions,
     longPressRing,
     handleMapGestureStart,
     handleMapGestureMove,

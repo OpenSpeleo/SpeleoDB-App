@@ -54,6 +54,7 @@ interface DashboardMapCanvasProps {
   colorMode: MapColorMode;
   measurementUnit: MeasurementUnit;
   probedDepth: number | null;
+  depthLimitFeet?: number | null;
   onMapReady?: () => void;
   dependencies?: DashboardMapShellDependencies;
 }
@@ -246,6 +247,7 @@ export function DashboardMapCanvas({
   colorMode,
   measurementUnit,
   probedDepth,
+  depthLimitFeet = null,
   onMapReady,
   dependencies,
 }: DashboardMapCanvasProps) {
@@ -312,6 +314,7 @@ export function DashboardMapCanvas({
             <DepthGauge
               depthDomain={projectLayers.depthDomain}
               currentDepth={probedDepth}
+              depthLimitFeet={depthLimitFeet}
               measurementUnit={measurementUnit}
             />
           </div>

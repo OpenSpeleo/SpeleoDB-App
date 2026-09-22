@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   getPreferences,
   setPreferences,
@@ -20,8 +20,8 @@ import {
   setGpsTrackVisibilityPreference,
   getHasCompletedGuidedTour,
   setHasCompletedGuidedTour,
-  getShowLandmarks,
-  setShowLandmarks,
+  getMapDisplayPreferences,
+  setMapDisplayPreferences,
   getTileCacheOverLimitApproved,
   setTileCacheOverLimitApproved,
   getTileCacheOverLimitPromptAcknowledged,
@@ -39,6 +39,7 @@ import {
   removeLegacyPlaintextCredentials,
   type UserPreferences,
 } from './PreferencesService';
+import { createDefaultMapDisplayPreferences } from '../types/mapDisplayPreferences';
 import { DEFAULT_MAP_LAYER_ID, PREFERENCES } from '../constants';
 
 describe('PreferencesService', () => {
@@ -270,7 +271,7 @@ describe('PreferencesService', () => {
       expect(prefs.email).toBeUndefined();
       expect(prefs.instance).toBeUndefined();
       expect(getHasCompletedGuidedTour()).toBe(false);
-      expect(getShowLandmarks()).toBe(true);
+      expect(getMapDisplayPreferences().categories.landmarks).toBe(true);
       expect(getColorMode()).toBe('project');
       expect(getMeasurementUnit()).toBe('meters');
       expect(getCountryVisibilityPreferences()).toEqual({});
@@ -321,20 +322,20 @@ describe('PreferencesService', () => {
 
   describe('show landmarks preferences', () => {
     it('defaults to true when missing', () => {
-      expect(getShowLandmarks()).toBe(true);
+      expect(getMapDisplayPreferences().categories.landmarks).toBe(true);
     });
 
     it('stores and reads false', () => {
       seedValidAuth();
-      setShowLandmarks(false);
-      expect(getShowLandmarks()).toBe(false);
+      setMapDisplayPreferences({ categories: { landmarks: false } });
+      expect(getMapDisplayPreferences().categories.landmarks).toBe(false);
     });
 
     it('stores and reads true', () => {
       seedValidAuth();
-      setShowLandmarks(false);
-      setShowLandmarks(true);
-      expect(getShowLandmarks()).toBe(true);
+      setMapDisplayPreferences({ categories: { landmarks: false } });
+      setMapDisplayPreferences({ categories: { landmarks: true } });
+      expect(getMapDisplayPreferences().categories.landmarks).toBe(true);
     });
 
     it('ignores non-boolean values from storage', () => {
@@ -342,20 +343,20 @@ describe('PreferencesService', () => {
         PREFERENCES.STORAGE_KEY,
         JSON.stringify({ showLandmarks: 'yes' }),
       );
-      expect(getShowLandmarks()).toBe(true);
+      expect(getMapDisplayPreferences().categories.landmarks).toBe(true);
     });
 
     it('preserves value across unrelated partial updates', () => {
       seedValidAuth();
-      setShowLandmarks(false);
+      setMapDisplayPreferences({ categories: { landmarks: false } });
       setPreferences({ instance: 'https://example.org' });
-      expect(getShowLandmarks()).toBe(false);
+      expect(getMapDisplayPreferences().categories.landmarks).toBe(false);
     });
 
     it('survives rapid sequential updates with other preferences', async () => {
       seedValidAuth();
       await Promise.all([
-        Promise.resolve().then(() => setShowLandmarks(false)),
+        Promise.resolve().then(() => setMapDisplayPreferences({ categories: { landmarks: false } })),
         Promise.resolve().then(() => setProjectVisibilityPreference('p1', true)),
         Promise.resolve().then(() => setPreferences({ email: 'user@example.com', instance: VALID_INSTANCE })),
       ]);
@@ -363,7 +364,95 @@ describe('PreferencesService', () => {
       const prefs = getPreferences();
       expect(prefs.email).toBe('user@example.com');
       expect(prefs.projectVisibility).toEqual({ p1: true });
-      expect(getShowLandmarks()).toBe(false);
+      expect(getMapDisplayPreferences().categories.landmarks).toBe(false);
+    });
+  });
+
+  describe('map display preferences', () => {
+    it('defaults all known categories and station types on without inventing a depth cap', () => {
+      expect(getMapDisplayPreferences()).toEqual(createDefaultMapDisplayPreferences());
+    });
+
+    it('migrates hidden landmarks on the next ordinary write without losing unrelated state', () => {
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify({
+        showLandmarks: false,
+        projectVisibility: { cave: false },
+        layerOfflineSync: { 'esri-world-hillshade': true },
+      }));
+      expect(getMapDisplayPreferences().categories.landmarks).toBe(false);
+      expect(JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY)!)).toHaveProperty('showLandmarks');
+      setMapDisplayPreferences({ categories: { caveEntrances: false } });
+      const stored = JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY)!);
+      expect(stored).not.toHaveProperty('showLandmarks');
+      expect(stored.mapDisplayPreferences.categories).toMatchObject({ landmarks: false, caveEntrances: false });
+      expect(stored.projectVisibility).toEqual({ cave: false });
+      expect(stored.layerOfflineSync).toEqual({ 'esri-world-hillshade': true });
+    });
+
+    it.each([
+      [{ landmarks: true }, false, true],
+      [{ landmarks: false }, true, false],
+      [{}, false, false],
+      [{ landmarks: 'invalid' }, false, true],
+    ])('resolves canonical and legacy landmark values independently', (categories, legacy, expected) => {
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify({
+        showLandmarks: legacy,
+        mapDisplayPreferences: { categories },
+      }));
+      expect(getMapDisplayPreferences().categories.landmarks).toBe(expected);
+    });
+
+    it('normalizes malformed fields individually and discards unknown controls', () => {
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify({
+        mapDisplayPreferences: {
+          categories: { caveEntrances: false, surveyStations: null, invented: false },
+          stationTypes: { biology: false, sensor: 'false', invented: false },
+          depthLimitFeet: -10,
+        },
+      }));
+      const preferences = getMapDisplayPreferences();
+      expect(preferences.categories).toEqual({ ...createDefaultMapDisplayPreferences().categories, caveEntrances: false });
+      expect(preferences.stationTypes).toEqual({ ...createDefaultMapDisplayPreferences().stationTypes, biology: false });
+      expect(preferences.depthLimitFeet).toBeNull();
+    });
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, '30', null])('rejects invalid persisted depth limit %s', (value) => {
+      localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify({ mapDisplayPreferences: { depthLimitFeet: value } }));
+      expect(getMapDisplayPreferences().depthLimitFeet).toBeNull();
+    });
+
+    it('preserves rapid nested patches through unrelated session, project and offline writes', async () => {
+      await Promise.all([
+        Promise.resolve().then(() => setMapDisplayPreferences({ categories: { caveEntrances: false } })),
+        Promise.resolve().then(() => setMapDisplayPreferences({ stationTypes: { biology: false } })),
+        Promise.resolve().then(() => setMapDisplayPreferences({ categories: { cylinders: false } })),
+        Promise.resolve().then(() => setMapDisplayPreferences({ depthLimitFeet: 12.345 })),
+        Promise.resolve().then(() => setProjectVisibilityPreference('project', false)),
+        Promise.resolve().then(() => setLayerOfflineSyncPreference('esri-world-hillshade', true)),
+        Promise.resolve().then(() => sessionMetadataStore.commit({ instance: VALID_INSTANCE, email: 'user@example.com' })),
+      ]);
+      expect(getMapDisplayPreferences()).toMatchObject({
+        categories: { caveEntrances: false, cylinders: false },
+        stationTypes: { biology: false }, depthLimitFeet: 12.345,
+      });
+      expect(getProjectVisibilityPreferences()).toEqual({ project: false });
+      expect(getPreferences()).toMatchObject({ email: 'user@example.com', layerOfflineSync: { 'esri-world-hillshade': true } });
+      setMapDisplayPreferences({ depthLimitFeet: null });
+      expect(getMapDisplayPreferences()).toMatchObject({ depthLimitFeet: null, categories: { caveEntrances: false } });
+    });
+
+    it('does not throw on a failed preference write and accepts later writes', () => {
+      const storage = vi.spyOn(localStorage, 'setItem').mockImplementationOnce(() => { throw new Error('full'); });
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        expect(() => setMapDisplayPreferences({ categories: { caveEntrances: false } })).not.toThrow();
+        expect(errors).toHaveBeenCalledOnce();
+        setMapDisplayPreferences({ stationTypes: { geology: false } });
+        expect(getMapDisplayPreferences().stationTypes.geology).toBe(false);
+      } finally {
+        storage.mockRestore();
+        errors.mockRestore();
+      }
     });
   });
 

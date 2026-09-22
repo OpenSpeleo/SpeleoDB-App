@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
@@ -8,6 +8,11 @@ import Settings from './Settings';
 import { formatLastSync } from '../utils/formatLastSync';
 import type { DashboardPanel } from '../types/dashboardPanel';
 import type { OfflineMapSyncSnapshot } from '../types/offlineMapSync';
+import {
+  createDefaultMapDisplayPreferences,
+  mergeMapDisplayPreferences,
+  type MapDisplayPreferencesPatch,
+} from '../types/mapDisplayPreferences';
 
 // ==================== Mocks ====================
 
@@ -19,6 +24,7 @@ const mockRequestStorageConsentPrompt = vi.fn();
 const mockRevokeTileCacheOverLimit = vi.fn();
 const mockSetLayerOfflineSync = vi.fn().mockResolvedValue(undefined);
 const mockRefreshOfflineMaps = vi.fn().mockResolvedValue(undefined);
+const mockMapDisplayChange = vi.fn();
 
 const {
   mockTilePrefetchJobs,
@@ -98,17 +104,14 @@ vi.mock('../components/AppTabBar', () => ({
 }));
 
 const {
-  mockPersistShowLandmarks,
   mockPersistColorMode,
   mockPersistMeasurementUnit,
 } = vi.hoisted(() => ({
-  mockPersistShowLandmarks: vi.fn(),
   mockPersistColorMode: vi.fn(),
   mockPersistMeasurementUnit: vi.fn(),
 }));
 
 vi.mock('../services/PreferencesService', () => ({
-  setShowLandmarks: mockPersistShowLandmarks,
   setColorMode: mockPersistColorMode,
   setMeasurementUnit: mockPersistMeasurementUnit,
 }));
@@ -201,10 +204,15 @@ function renderSettings(
   initialPath = '/settings',
   initialColorMode: 'project' | 'depth' | 'shot' = 'project',
   initialMeasurementUnit: 'feet' | 'meters' = 'meters',
+  initialDisplayPatch: MapDisplayPreferencesPatch = {},
 ) {
   const history = createMemoryHistory({ initialEntries: [initialPath] });
   const Harness: React.FC = () => {
-    const [showLandmarks, setShowLandmarks] = React.useState(initialShowLandmarks);
+    const [mapDisplayPreferences, setMapDisplayPreferences] = React.useState(() =>
+      mergeMapDisplayPreferences(createDefaultMapDisplayPreferences(), {
+        ...initialDisplayPatch,
+        categories: { landmarks: initialShowLandmarks, ...initialDisplayPatch.categories },
+      }));
     const [colorMode, setColorMode] = React.useState(initialColorMode);
     const [measurementUnit, setMeasurementUnit] = React.useState(initialMeasurementUnit);
     const [activeDashboardPanel, setActiveDashboardPanel] =
@@ -212,8 +220,11 @@ function renderSettings(
     const [layerOfflineSync, setLayerOfflineSync] = React.useState<Record<string, boolean>>({});
     return (
       <Settings
-        showLandmarks={showLandmarks}
-        onShowLandmarksChange={setShowLandmarks}
+        mapDisplayPreferences={mapDisplayPreferences}
+        onMapDisplayPreferencesChange={(patch) => {
+          mockMapDisplayChange(patch);
+          setMapDisplayPreferences((current) => mergeMapDisplayPreferences(current, patch));
+        }}
         colorMode={colorMode}
         onColorModeChange={setColorMode}
         measurementUnit={measurementUnit}
@@ -293,7 +304,7 @@ describe('Settings page', () => {
     mockIsTileCacheOverLimitApproved.current = false;
     mockRequestStorageConsentPrompt.mockReset();
     mockRevokeTileCacheOverLimit.mockReset();
-    mockPersistShowLandmarks.mockReset();
+    mockMapDisplayChange.mockReset();
     mockPersistColorMode.mockReset();
     mockPersistMeasurementUnit.mockReset();
     mockSetLayerOfflineSync.mockReset().mockResolvedValue(undefined);
@@ -621,12 +632,280 @@ describe('Settings page', () => {
   it('updates landmark toggle state when changed', async () => {
     const user = userEvent.setup();
     renderSettings(true);
+    await user.click(screen.getByTestId('map-visibility-summary'));
     const toggle = screen.getByTestId('landmark-toggle') as HTMLInputElement;
     expect(toggle.checked).toBe(true);
 
     await user.click(toggle);
     expect(toggle.checked).toBe(false);
-    expect(mockPersistShowLandmarks).toHaveBeenCalledWith(false);
+    expect(mockMapDisplayChange).toHaveBeenCalledWith({ categories: { landmarks: false } });
+  });
+
+  it('keeps marker controls in a collapsed disclosure with a visible tour target', () => {
+    renderSettings();
+    expect(screen.getByTestId('map-visibility-disclosure')).not.toHaveAttribute('open');
+    expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('All shown');
+    expect(screen.getByTestId('map-visibility-summary')).toHaveAttribute('data-tour', 'settings-map-visibility');
+    expect(screen.getByTestId('landmark-toggle')).not.toBeVisible();
+    expect(screen.queryByTestId('depth-limit-summary')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['caveEntrances', 'Cave entrances'],
+    ['surveyStations', 'Survey stations'],
+    ['surfaceStations', 'Surface stations'],
+    ['landmarks', 'Landmarks'],
+    ['explorationLeads', 'Exploration leads'],
+    ['cylinders', 'Safety cylinders'],
+  ])('changes only the %s category while offline', async (id, label) => {
+    mockIsOfflineLocked.current = true;
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByTestId('map-visibility-summary'));
+    const toggle = screen.getByRole('checkbox', { name: label });
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+    expect(toggle).not.toBeChecked();
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ categories: { [id]: false } });
+    expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('Custom');
+    expect(mockSyncProjects).not.toHaveBeenCalled();
+    expect(screen.getByTestId('map-visibility-disclosure')).toHaveAttribute('open');
+  });
+
+  it('preserves subtype choices through the survey-station parent gate', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByTestId('map-visibility-summary'));
+    await user.click(screen.getByText('Station types'));
+    const biology = screen.getByRole('checkbox', { name: 'Biology' });
+    await user.click(biology);
+    expect(screen.getByText('4 of 5 selected')).toBeVisible();
+    expect(mockMapDisplayChange).toHaveBeenLastCalledWith({ stationTypes: { biology: false } });
+    await user.click(screen.getByRole('checkbox', { name: 'Survey stations' }));
+    expect(biology).toBeDisabled();
+    expect(biology).not.toBeChecked();
+    expect(screen.getByText('Survey stations off')).toBeVisible();
+    await user.click(screen.getByRole('checkbox', { name: 'Survey stations' }));
+    expect(biology).not.toBeDisabled();
+    expect(biology).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Sensor' })).toBeChecked();
+    expect(screen.getByText('4 of 5 selected')).toBeVisible();
+  });
+
+  it.each([
+    ['sensor', 'Sensor'], ['biology', 'Biology'], ['bone', 'Bones'],
+    ['artifact', 'Artifact'], ['geology', 'Geology'],
+  ])('changes the %s subtype without changing its parent or siblings', async (id, label) => {
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByTestId('map-visibility-summary'));
+    await user.click(screen.getByText('Station types'));
+    await user.click(screen.getByRole('checkbox', { name: label }));
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ stationTypes: { [id]: false } });
+    expect(screen.getByRole('checkbox', { name: 'Survey stations' })).toBeChecked();
+    expect(screen.getByText('4 of 5 selected')).toBeVisible();
+  });
+
+  it('returns descendant focus to the visibility summary when collapsed', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    const disclosure = screen.getByTestId('map-visibility-disclosure') as HTMLDetailsElement;
+    const summary = screen.getByTestId('map-visibility-summary');
+    await user.click(summary);
+    screen.getByRole('checkbox', { name: 'Cave entrances' }).focus();
+    act(() => { disclosure.open = false; });
+    fireEvent(disclosure, new Event('toggle'));
+    expect(summary).toHaveFocus();
+  });
+
+  it('resets only visibility, preserving the depth cap, color and measurement unit', async () => {
+    const user = userEvent.setup();
+    renderSettings(false, '/settings', 'depth', 'feet', {
+      depthLimitFeet: 123.5,
+      categories: { caveEntrances: false },
+      stationTypes: { bone: false },
+    });
+    await user.click(screen.getByTestId('map-visibility-summary'));
+    await user.click(screen.getByRole('button', { name: 'Reset visibility' }));
+    expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('All shown');
+    expect(screen.getByRole('button', { name: 'Reset visibility' })).toBeDisabled();
+    const { categories, stationTypes } = createDefaultMapDisplayPreferences();
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ categories, stationTypes });
+    expect(screen.getByTestId('depth-limit-summary')).toHaveTextContent('123.5 ft');
+    expect(screen.getByTestId('color-mode-selector')).toHaveValue('depth');
+    expect(screen.getByTestId('measurement-unit-selector')).toHaveValue('feet');
+    expect(mockPersistColorMode).not.toHaveBeenCalled();
+    expect(mockPersistMeasurementUnit).not.toHaveBeenCalled();
+  });
+
+  it('commits a decimal depth draft once on Done without applying while typing', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'depth', 'feet');
+    const disclosure = screen.getByTestId('depth-limit-disclosure');
+    expect(disclosure).not.toHaveAttribute('open');
+    await user.click(screen.getByTestId('depth-limit-summary'));
+    const input = screen.getByRole('textbox', { name: 'Maximum depth' });
+    expect(input).toHaveAttribute('inputmode', 'decimal');
+    expect(input).toHaveAttribute('enterkeyhint', 'done');
+    await user.type(input, '120.25');
+    expect(mockMapDisplayChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('depth-limit-summary')).toHaveTextContent('Full range');
+    await user.keyboard('{Enter}');
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ depthLimitFeet: 120.25 });
+    expect(input).not.toHaveFocus();
+    expect(screen.getByTestId('depth-limit-summary')).toHaveTextContent('120.25 ft');
+  });
+
+  it('accepts a decimal comma and preserves the physical limit during unit changes', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'depth');
+    await user.click(screen.getByTestId('depth-limit-summary'));
+    const input = screen.getByRole('textbox', { name: 'Maximum depth' });
+    await user.type(input, '30,48');
+    await user.selectOptions(screen.getByTestId('measurement-unit-selector'), 'feet');
+    expect(mockMapDisplayChange).toHaveBeenCalledOnce();
+    expect(mockMapDisplayChange.mock.calls[0][0].depthLimitFeet).toBeCloseTo(100);
+    expect(input).toHaveValue('100');
+    await user.selectOptions(screen.getByTestId('measurement-unit-selector'), 'meters');
+    await user.selectOptions(screen.getByTestId('measurement-unit-selector'), 'feet');
+    expect(mockMapDisplayChange).toHaveBeenCalledOnce();
+    expect(input).toHaveValue('100');
+  });
+
+  it('retains the applied cap and old units when a draft is invalid', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'depth', 'feet', { depthLimitFeet: 42 });
+    await user.click(screen.getByTestId('depth-limit-summary'));
+    const input = screen.getByRole('textbox', { name: 'Maximum depth' });
+    await user.clear(input);
+    await user.type(input, '-1');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(mockMapDisplayChange).not.toHaveBeenCalled();
+    await user.keyboard('{Enter}');
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter a number greater than zero');
+    await user.selectOptions(screen.getByTestId('measurement-unit-selector'), 'meters');
+    expect(screen.getByTestId('measurement-unit-selector')).toHaveValue('feet');
+    expect(mockPersistMeasurementUnit).not.toHaveBeenCalled();
+    expect(mockMapDisplayChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('depth-limit-summary')).toHaveTextContent('42 ft');
+    await user.click(screen.getByRole('button', { name: 'Reset to full range' }));
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ depthLimitFeet: null });
+    expect(input).toHaveValue('');
+    expect(input).toHaveAttribute('aria-invalid', 'false');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('discards a valid draft directly when Reset to full range is tapped', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'depth', 'feet', { depthLimitFeet: 42 });
+    await user.click(screen.getByTestId('depth-limit-summary'));
+    const input = screen.getByRole('textbox', { name: 'Maximum depth' });
+    await user.clear(input);
+    await user.type(input, '80');
+    await user.click(screen.getByRole('button', { name: 'Reset to full range' }));
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ depthLimitFeet: null });
+    expect(input).toHaveValue('');
+  });
+
+  it('discards a reset draft when iOS blur omits its related target', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'depth', 'feet', { depthLimitFeet: 42 });
+    await user.click(screen.getByTestId('depth-limit-summary'));
+    const input = screen.getByRole('textbox', { name: 'Maximum depth' });
+    await user.clear(input);
+    await user.type(input, '80');
+    const reset = screen.getByRole('button', { name: 'Reset to full range' });
+    fireEvent.pointerDown(reset);
+    fireEvent.blur(input, { relatedTarget: null });
+    expect(mockMapDisplayChange).not.toHaveBeenCalled();
+    fireEvent.pointerUp(reset);
+    fireEvent.click(reset);
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ depthLimitFeet: null });
+    expect(input).toHaveValue('');
+  });
+
+  it('commits subsequent edits on blur after a reset press is released outside the button', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'depth', 'feet', { depthLimitFeet: 42 });
+    await user.click(screen.getByTestId('depth-limit-summary'));
+    const input = screen.getByRole('textbox', { name: 'Maximum depth' });
+    await user.clear(input);
+    await user.type(input, '80');
+    const reset = screen.getByRole('button', { name: 'Reset to full range' });
+    await user.pointer({ keys: '[MouseLeft>]', target: reset });
+    await user.pointer({ keys: '[/MouseLeft]', target: document.body });
+    expect(mockMapDisplayChange).not.toHaveBeenCalled();
+
+    await user.clear(input);
+    await user.type(input, '90');
+    await user.tab();
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ depthLimitFeet: 90 });
+    expect(screen.getByTestId('depth-limit-summary')).toHaveTextContent('90 ft');
+  });
+
+  it('reveals a collapsed invalid depth draft before restoring focus on unit change', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'depth', 'feet', { depthLimitFeet: 42 });
+    const disclosure = screen.getByTestId('depth-limit-disclosure');
+    const summary = screen.getByTestId('depth-limit-summary');
+    await user.click(summary);
+    const input = screen.getByRole('textbox', { name: 'Maximum depth' });
+    await user.clear(input);
+    await user.type(input, '-1');
+    await user.click(summary);
+    expect(disclosure).not.toHaveAttribute('open');
+    await user.selectOptions(screen.getByTestId('measurement-unit-selector'), 'meters');
+    expect(disclosure).toHaveAttribute('open');
+    expect(input).toBeVisible();
+    expect(input).toHaveFocus();
+    expect(screen.getByRole('alert')).toBeVisible();
+    expect(screen.getByTestId('measurement-unit-selector')).toHaveValue('feet');
+    expect(mockMapDisplayChange).not.toHaveBeenCalled();
+    expect(mockPersistMeasurementUnit).not.toHaveBeenCalled();
+  });
+
+  it('commits a valid draft on disclosure collapse and returns focus to its summary', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'depth', 'feet');
+    const disclosure = screen.getByTestId('depth-limit-disclosure') as HTMLDetailsElement;
+    const summary = screen.getByTestId('depth-limit-summary');
+    await user.click(summary);
+    await user.type(screen.getByRole('textbox', { name: 'Maximum depth' }), '90');
+    act(() => { disclosure.open = false; });
+    fireEvent(disclosure, new Event('toggle'));
+    expect(summary).toHaveFocus();
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ depthLimitFeet: 90 });
+    expect(summary).toHaveTextContent('90 ft');
+  });
+
+  it('clears the limit on blank blur and retains visibility choices', async () => {
+    const user = userEvent.setup();
+    renderSettings(false, '/settings', 'depth', 'feet', { depthLimitFeet: 80 });
+    await user.click(screen.getByTestId('depth-limit-summary'));
+    const input = screen.getByRole('textbox', { name: 'Maximum depth' });
+    await user.clear(input);
+    await user.tab();
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ depthLimitFeet: null });
+    expect(screen.getByTestId('depth-limit-summary')).toHaveTextContent('Full range');
+    expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('Custom');
+  });
+
+  it('preserves the applied cap when leaving depth mode with an invalid draft', async () => {
+    const user = userEvent.setup();
+    renderSettings(true, '/settings', 'depth', 'feet', { depthLimitFeet: 42 });
+    await user.click(screen.getByTestId('depth-limit-summary'));
+    const input = screen.getByRole('textbox', { name: 'Maximum depth' });
+    await user.clear(input);
+    await user.type(input, 'invalid');
+    await user.selectOptions(screen.getByTestId('color-mode-selector'), 'project');
+    expect(screen.queryByTestId('depth-limit-summary')).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByTestId('color-mode-selector'), 'depth');
+    await user.click(screen.getByTestId('depth-limit-summary'));
+    expect(screen.getByRole('textbox', { name: 'Maximum depth' })).toHaveValue('42');
+    expect(mockMapDisplayChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('renders color mode selector with project default state', () => {

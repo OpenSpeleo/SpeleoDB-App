@@ -3,11 +3,13 @@ import type { DepthDomain } from '../../utils/depthColoring';
 import { DEPTH_COLOR_STOPS, getDepthRatio } from '../../utils/depthColoring';
 import type { MeasurementUnit } from '../../types/measurementUnit';
 import { formatDepthValue } from '../../utils/measurementUnits';
+import { formatDepthLimitLabel, formatLimitedDepthValue } from '../../utils/depthLimit';
 
 interface DepthGaugeProps {
   depthDomain: DepthDomain | null;
   currentDepth: number | null;
   measurementUnit: MeasurementUnit;
+  depthLimitFeet?: number | null;
 }
 
 const DEPTH_GAUGE_GRADIENT = `linear-gradient(to top, ${DEPTH_COLOR_STOPS
@@ -16,7 +18,7 @@ const DEPTH_GAUGE_GRADIENT = `linear-gradient(to top, ${DEPTH_COLOR_STOPS
   .map((stop) => `${stop.color} ${(stop.ratio ** 2 * 100).toFixed(2)}%`)
   .join(', ')})`;
 
-const DepthGauge: React.FC<DepthGaugeProps> = React.memo(({ depthDomain, currentDepth, measurementUnit }) => {
+const DepthGauge: React.FC<DepthGaugeProps> = React.memo(({ depthDomain, currentDepth, measurementUnit, depthLimitFeet = null }) => {
   const hasDomain = Boolean(depthDomain);
   const hasProbedDepth = hasDomain && currentDepth !== null;
 
@@ -24,7 +26,9 @@ const DepthGauge: React.FC<DepthGaugeProps> = React.memo(({ depthDomain, current
     ? (1 - getDepthRatio(currentDepth, depthDomain)) * 100
     : null;
 
-  const depthLabel = hasProbedDepth ? formatDepthValue(currentDepth, measurementUnit) : '';
+  const depthLabel = hasProbedDepth
+    ? formatLimitedDepthValue(currentDepth, depthLimitFeet, measurementUnit)
+    : '';
 
   return (
     <div
@@ -56,7 +60,11 @@ const DepthGauge: React.FC<DepthGaugeProps> = React.memo(({ depthDomain, current
           data-testid="depth-gauge-labels"
         >
           <div data-testid="depth-gauge-max" className="pt-[1px]">
-            {depthDomain ? formatDepthValue(depthDomain.max, measurementUnit) : 'N/A'}
+            {depthDomain
+              ? depthLimitFeet === null
+                ? formatDepthValue(depthDomain.max, measurementUnit)
+                : formatDepthLimitLabel(depthDomain.max, measurementUnit)
+              : 'N/A'}
           </div>
           <div data-testid="depth-gauge-min" className="pb-[1px]">
             {depthDomain ? formatDepthValue(depthDomain.min, measurementUnit) : 'N/A'}

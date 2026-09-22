@@ -130,7 +130,7 @@ function renderTourTargets(options: RenderTourTargetsOptions = {}): void {
       includeSettingsTargets
         ? `
       <div data-tour="settings-color-mode"></div>
-      <div data-tour="settings-show-landmarks"></div>
+      <div data-tour="settings-map-visibility"></div>
       <div data-tour="settings-measurement-unit"></div>
     `
         : ''

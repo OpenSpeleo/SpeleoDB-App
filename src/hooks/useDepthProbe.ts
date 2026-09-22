@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import type { MapRef, MapLayerMouseEvent } from 'react-map-gl/maplibre';
 import type { MapColorMode } from '../types/mapColorMode';
 import type { InteractiveOverlayFeature } from '../utils/overlayMarkerDetails';
+import { applyDepthLimit, isValidDepthLimit } from '../utils/depthLimit';
 import {
   computeDepthDomain,
   mergeDepthDomains,
@@ -32,8 +33,9 @@ function hitQueryBounds(
   ];
 }
 
-function getFirstDepth(features: InteractiveOverlayFeature[]): number | null {
+function getFirstDepth(features: InteractiveOverlayFeature[], layerIds: ReadonlySet<string>): number | null {
   for (const feature of features) {
+    if (!feature.layer?.id || !layerIds.has(feature.layer.id)) continue;
     const depth = getFeatureDepth(feature as unknown as GeoJSON.Feature);
     if (depth !== null) return depth;
   }
@@ -55,8 +57,17 @@ export function useDepthProbe(
   activeProjectIds: Set<string>,
   geoJsonData: Record<string, GeoJSON.FeatureCollection>,
   projectGeometryLayerIds: string[],
+  depthLimitFeet: number | null = null,
 ): UseDepthProbeResult {
-  const [probedDepth, setProbedDepth] = useState<number | null>(null);
+  // A sample belongs to the exact source revision and eligible layers that were
+  // queried. Hiding/reloading a project or leaving depth mode invalidates it;
+  // restoring those settings cannot resurrect an old pointer reading.
+  const probeContext = useMemo(() => ({
+    geoJsonData,
+    layerIds: new Set(projectGeometryLayerIds),
+    colorMode,
+  }), [colorMode, geoJsonData, projectGeometryLayerIds]);
+  const [sample, setSample] = useState<{ depth: number; context: typeof probeContext } | null>(null);
   const lastSampleTimeRef = useRef(0);
 
   // Stage A: per-project domain cache — recomputes only when geoJsonData
@@ -70,7 +81,7 @@ export function useDepthProbe(
   }, [geoJsonData]);
 
   // Stage B: merge cached domains for visible projects — O(projects) per toggle.
-  const depthDomain = useMemo(() => {
+  const measuredDepthDomain = useMemo(() => {
     if (colorMode !== 'depth') return null;
     const activeDomains: (DepthDomain | null)[] = [];
     for (const projectId of activeProjectIds) {
@@ -80,18 +91,27 @@ export function useDepthProbe(
     }
     return mergeDepthDomains(activeDomains);
   }, [activeProjectIds, colorMode, projectDepthDomains]);
+  const depthDomain = useMemo(
+    () => applyDepthLimit(measuredDepthDomain, depthLimitFeet),
+    [depthLimitFeet, measuredDepthDomain],
+  );
 
   // Derive the exposed depth: mask the internal probe state when depth mode
   // is inactive or the domain is unavailable, avoiding a cascading-render
   // effect to clear it.
-  const effectiveProbedDepth = (colorMode === 'depth' && depthDomain) ? probedDepth : null;
+  const probedDepth = sample?.context === probeContext ? sample.depth : null;
+  const effectiveProbedDepth = colorMode === 'depth' && depthDomain && probedDepth !== null
+    ? depthLimitFeet !== null && isValidDepthLimit(depthLimitFeet)
+      ? Math.min(probedDepth, depthLimitFeet)
+      : probedDepth
+    : null;
 
   const sampleDepthAtMapPoint = useCallback((
     point: { x: number; y: number },
     hitRadiusPx: number,
   ) => {
     if (colorMode !== 'depth') {
-      setProbedDepth(null);
+      setSample(null);
       return;
     }
 
@@ -104,7 +124,7 @@ export function useDepthProbe(
       (id) => map.getLayer(id) != null,
     );
     if (existingLayers.length === 0) {
-      setProbedDepth(null);
+      setSample(null);
       return;
     }
 
@@ -119,12 +139,13 @@ export function useDepthProbe(
     }
 
     if (!features || features.length === 0) {
-      setProbedDepth(null);
+      setSample(null);
       return;
     }
 
-    setProbedDepth(getFirstDepth(features));
-  }, [colorMode, mapRef, projectGeometryLayerIds]);
+    const depth = getFirstDepth(features, probeContext.layerIds);
+    setSample(depth === null ? null : { depth, context: probeContext });
+  }, [colorMode, mapRef, probeContext, projectGeometryLayerIds]);
 
   const sampleDepthAtClientPoint = useCallback((
     clientX: number,
@@ -161,11 +182,11 @@ export function useDepthProbe(
   }, [colorMode, sampleDepthAtMapPoint]);
 
   const clearProbedDepth = useCallback(() => {
-    setProbedDepth(null);
+    setSample(null);
   }, []);
 
   const handleMapMouseLeave = useCallback(() => {
-    setProbedDepth(null);
+    setSample(null);
   }, []);
 
   return {

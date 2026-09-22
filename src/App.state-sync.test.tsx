@@ -4,6 +4,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryHistory } from 'history';
 import App from './App';
+import { createDefaultMapDisplayPreferences, type MapDisplayPreferences, type MapDisplayPreferencesPatch } from './types/mapDisplayPreferences';
 import type { DashboardPanel } from './types/dashboardPanel';
 
 const { historyRef } = vi.hoisted(() => ({
@@ -40,7 +41,8 @@ vi.mock('./context/SpeleoDBStartupGate', () => ({
 }));
 
 vi.mock('./services/PreferencesService', () => ({
-  getShowLandmarks: () => true,
+  getMapDisplayPreferences: () => createDefaultMapDisplayPreferences(),
+  setMapDisplayPreferences: vi.fn(),
   getColorMode: () => 'project',
   getMeasurementUnit: () => 'meters',
   getSelectedMapLayerId: () => 'esri-satellite',
@@ -57,19 +59,19 @@ vi.mock('./pages/PendingOps', () => ({
 
 vi.mock('./pages/Dashboard', () => ({
   default: ({
-    showLandmarks,
+    mapDisplayPreferences,
     colorMode,
     measurementUnit,
     activeDashboardPanel,
   }: {
-    showLandmarks: boolean;
+    mapDisplayPreferences: MapDisplayPreferences;
     colorMode: 'project' | 'depth' | 'shot';
     measurementUnit: 'feet' | 'meters';
     activeDashboardPanel: DashboardPanel;
   }) => (
     <div
       data-testid="mock-dashboard"
-      data-show-landmarks={String(showLandmarks)}
+      data-show-landmarks={String(mapDisplayPreferences.categories.landmarks)}
       data-color-mode={colorMode}
       data-measurement-unit={measurementUnit}
       data-active-panel={activeDashboardPanel ?? 'none'}
@@ -79,12 +81,12 @@ vi.mock('./pages/Dashboard', () => ({
 
 vi.mock('./pages/Settings', () => ({
   default: ({
-    onShowLandmarksChange,
+    onMapDisplayPreferencesChange,
     onColorModeChange,
     onMeasurementUnitChange,
     onDashboardPanelChange,
   }: {
-    onShowLandmarksChange: (visible: boolean) => void;
+    onMapDisplayPreferencesChange: (patch: MapDisplayPreferencesPatch) => void;
     onColorModeChange: (mode: 'project' | 'depth' | 'shot') => void;
     onMeasurementUnitChange: (unit: 'feet' | 'meters') => void;
     onDashboardPanelChange: (panel: DashboardPanel) => void;
@@ -93,7 +95,7 @@ vi.mock('./pages/Settings', () => ({
       <button
         type="button"
         data-testid="settings-hide-landmarks"
-        onClick={() => onShowLandmarksChange(false)}
+        onClick={() => onMapDisplayPreferencesChange({ categories: { landmarks: false } })}
       >
         Hide landmarks
       </button>

@@ -13,7 +13,7 @@ The hook receives the map ref, effectively visible project IDs, project names,
 and the depth-probe sample/clear callbacks. It returns:
 
 - the selected read-only marker or long-press detail;
-- an explicit detail-clear action;
+- an explicit detail-clear action and `cancelMapInteractions` for route changes;
 - the long-press loading-ring position;
 - pointer start, move, end, and cancel handlers.
 
@@ -27,11 +27,17 @@ centralized in the existing map utility and marker-detail modules.
 - Marker taps and long presses fail closed below the interaction zoom or when a
   required MapLibre capability, canvas rectangle, or rendered-layer query is
   unavailable.
-- Queries include only layers currently mounted in MapLibre.
+- Queries include only layers currently mounted in MapLibre. MapLibre rendered
+  queries exclude hidden markers and filtered station types, so invisible
+  content cannot open details or block an otherwise empty-map long press.
 - Long press succeeds only on an empty map spot; blocking features, query
   failures, movement, cancellation, multi-touch, and stale callbacks suppress
   both the loading ring and detail publication.
-- Timer handles are cleared on every terminal gesture and hook unmount.
+- Timer handles are cleared on every terminal gesture and hook unmount. Leaving
+  Dashboard also cancels the pending pointer candidate, both timers, feedback,
+  and transient detail. The detail portal is masked while the route is inactive;
+  returning cannot resurrect a stale sheet. Landmark authoring drafts are
+  separate and preserved.
 - Depth probing samples touch/pen movement and clears on terminal gestures.
 
 ## Map navigation gestures

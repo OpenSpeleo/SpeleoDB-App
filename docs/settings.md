@@ -100,23 +100,88 @@ replacements commit.
 
 ### Map Settings
 
-- **Show landmarks** toggle: controls visibility of landmark marker and label
-  layers on the map. Persisted in `UserPreferences.showLandmarks` via
-  `PreferencesService`. Default: `true`. Changes propagate to Dashboard in real
-  time via a shared React state in `App.tsx`.
-- **Color mode** selector: `By Project` / `By Depth` / `By Shot`. `By Project`
-  uses the standard project color palette; `By Depth` enables depth-based
-  coloring and the dashboard depth gauge. `By Shot` uses exported feature colors
-  with project color fallback, including offline; see
-  [Shot colors](shot-colors.md). Persisted in `UserPreferences.colorMode` via
-  `PreferencesService`. Default: `project`. Changes propagate to Dashboard in
-  real time via shared React state in `App.tsx`.
-- **Map unit** selector: `Meters` / `Feet`. Controls display units for both
-  distance scale and depth gauge values. Base values remain feet-based
-  internally and are converted for display when metric mode is active. Persisted
-  in `UserPreferences.measurementUnit` via `PreferencesService`. Default:
-  `meters`. Changes propagate to Dashboard in real time via shared React state
-  in `App.tsx`.
+`MapDisplaySettings` keeps appearance controls in the existing inset list and
+places less frequently used options in inline disclosures. The Settings tab,
+other sections, and map toolbar stay unchanged. Rows retain the 52px minimum
+height; controls and reset actions have at least 44px touch targets. Disclosure
+chevrons turn over 160ms, without height or camera animation; reduced motion
+removes the transition. Opening a group never focuses the numeric field or opens
+the keyboard. Native disclosure semantics provide keyboard expansion and
+collapsed-content accessibility, and collapsing a group returns descendant focus
+to its summary.
+
+The controls appear in this order:
+
+- **Color mode**: `By Project` / `By Depth` / `By Shot`, default `project`.
+  Project mode uses the model-stored project color. Depth mode shows the depth
+  gauge and **Depth limit** disclosure. Shot mode uses exported feature colors
+  with project-color fallback, including offline; see
+  [Shot colors](shot-colors.md).
+- **Depth limit**, present only in By Depth: collapsed by default with a **Full
+  range** or formatted maximum summary. Expansion exposes **Maximum depth**, a
+  decimal-keyboard input, explanatory text, and **Reset to full range**. The
+  existing Map unit determines its input and display unit.
+- **Map unit**: `Meters` / `Feet`, default `meters`. Controls the distance
+  scale, depth gauge, and depth-limit input. Canonical depths remain in feet.
+- **Map visibility**: collapsed by default with **All shown** when every
+  category and station type is on, otherwise **Custom**. These summaries
+  describe preferences, not feature availability at the current zoom.
+
+Map visibility contains **Cave entrances**, **Survey stations**, **Surface
+stations**, **Landmarks**, **Exploration leads**, and **Safety cylinders**. Each
+defaults on. Cave entrances controls the star symbols from project GeoJSONs. The
+inline **Station types** disclosure under Survey stations contains **Sensor**,
+**Biology**, **Bones**, **Artifact**, and **Geology**. Its summary reports **N
+of 5 selected** or **Survey stations off**. Turning the parent off disables
+subtype switches without changing their selections.
+
+Switches apply immediately, including offline, without a Save button, network
+request, loading overlay, or camera change. Individual project, network, and
+item selections are preserved. Labels follow their marker gates, and all
+existing zoom thresholds still apply. A single light haptic acknowledges a
+visibility change; opening groups and editing text are silent.
+
+**Reset visibility** restores only the six category and five subtype flags. It
+preserves color mode, map unit, depth limit, camera, cache, and individual
+selections. **Reset to full range** clears only the depth cap. Reset actions
+require no confirmation and are disabled when already at their default.
+
+#### Depth editing
+
+Depth values must be positive and finite; blank restores automatic scaling.
+Decimal dots and commas are accepted, without grouping separators. Validation
+runs while typing, but rendering and persistence change only on blur, Done, or
+collapse. Done commits once and dismisses the keyboard. Invalid drafts show an
+associated inline error and leave the last applied limit intact. An invalid
+unit-change attempt retains the previous unit and refocuses the field; a valid
+one first commits in the previous unit, then converts the presentation. Repeated
+unit switches never reconvert rounded display text into storage.
+
+Leaving depth mode keeps the applied cap and discards an invalid draft. Leaving
+Settings discards any uncommitted invalid draft without blocking navigation.
+Returning starts with collapsed groups and restored preferences.
+
+A configured cap fixes the color scale to **0–X**, even when visible surveys are
+shallower than X. Deeper geometry stays visible with saturated colors and capped
+readings; original GeoJSON depths remain unchanged. No visible depth data still
+produces N/A. See [Map depth and scale](map-depth-and-scale.md) for the domain
+and probe contracts.
+
+#### Ownership and verification
+
+`AuthenticatedAppShell` owns `mapDisplayPreferences` and persists partial
+patches through `PreferencesService`. The presentation component never writes
+storage directly. Color and unit selectors retain their existing persistence
+paths. Legacy `showLandmarks` values migrate into the new landmark category; new
+fields receive defaults. Map filtering composes display preferences with
+existing selection gates rather than changing cached feature collections.
+
+Settings tests exercise every category, subtype preservation, offline changes,
+local reset scope, decimal entry, validation, unit changes, and the guided-tour
+target. Browser tests verify real Ionic controls and map rendering. Visual QA
+covers 320/390px portrait, short landscape, tablet, larger text, keyboard-open
+input, and reduced motion; native checks must include iOS and Android WebViews,
+particularly keyboard dismissal and solid button backgrounds.
 
 ### Map layers
 
@@ -198,8 +263,9 @@ placed between the Tutorial and Account sections.
   controller-wide observer.
 - `lastSyncedAt`: owned by `SpeleoDBController`, persisted via
   `PreferencesService`, exposed through `useSpeleoDB()`. UI is read-only.
-- `showLandmarks`: shared state owned by `AuthenticatedAppShell`, passed via
-  props.
+- `mapDisplayPreferences`: shared state owned by `AuthenticatedAppShell`, passed
+  to Settings and Dashboard; partial visibility/depth patches update state and
+  persistence through the shell.
 - `colorMode`: shared state owned by `AuthenticatedAppShell`, passed via props.
 - `measurementUnit`: shared state owned by `AuthenticatedAppShell`, passed via
   props.
@@ -242,7 +308,9 @@ checkpoints continue without a hidden page timer.
 - Tab bar: `src/components/AppTabBar.tsx`
 - Offline-map engine/store: `src/services/OfflineMapSyncEngine.ts`,
   `src/services/OfflineMapSyncStore.ts`
-- Landmark persistence: `src/services/PreferencesService.ts`
+- Display controls: `src/components/MapDisplaySettings.tsx`
+- Display preference model: `src/types/mapDisplayPreferences.ts`
+- Display persistence: `src/services/PreferencesService.ts`
 - Color mode persistence: `src/services/PreferencesService.ts`
 - Measurement unit persistence: `src/services/PreferencesService.ts`
 - Last sync timestamp: tracked in `SpeleoDBController._lastSyncedAt`, persisted
@@ -251,6 +319,10 @@ checkpoints continue without a hidden page timer.
 - Tour runtime loader: `src/onboarding/guidedTour/runtime.ts`
 - Guided tour engine: `src/onboarding/guidedTour/engine.ts`
 - Tests: `src/pages/Settings.test.tsx`, `src/utils/formatLastSync.test.ts`
+- Browser coverage: `tests/browser/map-display.spec.ts` exercises the real
+  Settings route and retained map, offline restoration, and responsive depth
+  validation in Chromium and WebKit. Run after the production build with
+  `npx playwright test tests/browser/map-display.spec.ts` from this app.
 
 ## Change checklist
 
@@ -258,7 +330,8 @@ checkpoints continue without a hidden page timer.
 2. Verify Settings never polls IndexedDB and only the offline-map subscription
    updates per-tile rows.
 3. Verify the logout guard prevents double-submission.
-4. Verify landmark toggle propagates to Dashboard map layers in real time.
+4. Verify every visibility toggle propagates to markers and labels in real time,
+   retains individual selections, and survives offline use and relaunch.
 5. Verify color mode selector propagates to Dashboard map rendering in real
    time.
 6. Verify map unit selector changes depth gauge + distance scale labels on
