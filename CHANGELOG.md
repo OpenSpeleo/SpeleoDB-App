@@ -6,14 +6,18 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ### Features
 
-- Choose which map markers to show and fine-tune depth colors in Settings.
-  `570c284`
-
 ### UI/UX
 
 ### Fixes
 
 ### Performance
+
+## v1.7.0 - 2026-09-22
+
+### Features
+
+- Choose which map markers to show and fine-tune depth colors in Settings.
+  `570c284`
 
 ## v1.6.1 - 2026-09-18
 

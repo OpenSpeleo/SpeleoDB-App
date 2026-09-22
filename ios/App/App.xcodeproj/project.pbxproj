@@ -483,7 +483,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 161;
+				CURRENT_PROJECT_VERSION = 170;
 				DEVELOPMENT_TEAM = UDUF7J66TN;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SpeleoDB;
@@ -493,7 +493,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.6.1;
+				MARKETING_VERSION = 1.7.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
 				PRODUCT_BUNDLE_IDENTIFIER = org.speleodb.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -510,7 +510,7 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 161;
+				CURRENT_PROJECT_VERSION = 170;
 				DEVELOPMENT_TEAM = UDUF7J66TN;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SpeleoDB;
@@ -520,7 +520,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.6.1;
+				MARKETING_VERSION = 1.7.0;
 				PRODUCT_BUNDLE_IDENTIFIER = org.speleodb.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
