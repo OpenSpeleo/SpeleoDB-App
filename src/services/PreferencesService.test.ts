@@ -3,6 +3,7 @@ import {
   getPreferences,
   setPreferences,
   clearPreferences,
+  flushViewerPreferences,
   getProjectVisibilityPreferences,
   setProjectVisibilityPreference,
   setProjectVisibilityPreferences,
@@ -382,6 +383,7 @@ describe('PreferencesService', () => {
       expect(getMapDisplayPreferences().categories.landmarks).toBe(false);
       expect(JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY)!)).toHaveProperty('showLandmarks');
       setMapDisplayPreferences({ categories: { caveEntrances: false } });
+      flushViewerPreferences();
       const stored = JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY)!);
       expect(stored).not.toHaveProperty('showLandmarks');
       expect(stored.mapDisplayPreferences.categories).toMatchObject({ landmarks: false, caveEntrances: false });
@@ -446,6 +448,7 @@ describe('PreferencesService', () => {
       const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
         expect(() => setMapDisplayPreferences({ categories: { caveEntrances: false } })).not.toThrow();
+        flushViewerPreferences();
         expect(errors).toHaveBeenCalledOnce();
         setMapDisplayPreferences({ stationTypes: { geology: false } });
         expect(getMapDisplayPreferences().stationTypes.geology).toBe(false);
@@ -864,6 +867,7 @@ describe('PreferencesService', () => {
       seedValidAuth();
       setSelectedMapLayerId('esri-world-hillshade');
       expect(getSelectedMapLayerId()).toBe('esri-world-hillshade');
+      flushViewerPreferences();
 
       const stored = JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY) ?? '{}');
       stored.selectedMapLayerId = 'not-a-layer';
@@ -909,5 +913,50 @@ describe('PreferencesService', () => {
       expect(getSelectedMapLayerId()).toBe(DEFAULT_MAP_LAYER_ID);
       expect(getLayerOfflineSyncPreferences()).toEqual({});
     });
+  });
+});
+
+
+describe('deferred viewer preference persistence', () => {
+  beforeEach(() => clearPreferences());
+
+  it('publishes current intent synchronously but batches burst edits into one durable write', () => {
+    const write = vi.spyOn(localStorage, 'setItem');
+    setProjectVisibilityPreference('cave', false);
+    setMapDisplayPreferences({ categories: { landmarks: false } });
+    setColorMode('depth');
+    setColorMode('shot');
+    expect(write).not.toHaveBeenCalled();
+    expect(getColorMode()).toBe('shot');
+    expect(getProjectVisibilityPreferences()).toEqual({ cave: false });
+    expect(getMapDisplayPreferences().categories.landmarks).toBe(false);
+    flushViewerPreferences();
+    expect(write).toHaveBeenCalledOnce();
+    expect(JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY)!)).toMatchObject({ colorMode: 'shot', projectVisibility: { cave: false } });
+    write.mockRestore();
+  });
+
+  it('flushes before synchronous session changes and never resurrects cleared credentials', () => {
+    sessionMetadataStore.commit({ email: 'a@example.test', instance: 'https://a.test', cacheScopeId: 'account-a' });
+    setColorMode('depth');
+    sessionMetadataStore.clear();
+    flushViewerPreferences();
+    expect(sessionMetadataStore.read().hasStoredSession).toBe(false);
+    expect(getColorMode()).toBe('depth');
+    setColorMode('shot');
+    clearPreferences();
+    sessionMetadataStore.commit({ email: 'b@example.test', instance: 'https://b.test', cacheScopeId: 'account-b' });
+    flushViewerPreferences();
+    expect(getColorMode()).toBe('project');
+    expect(sessionMetadataStore.read().email).toBe('b@example.test');
+  });
+
+  it('persists queued choices at page suspension and preserves synchronous sibling mutations', () => {
+    setMapDisplayPreferences({ stationTypes: { sensor: false } });
+    window.dispatchEvent(new Event('pagehide'));
+    expect(JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY)!)).toMatchObject({ mapDisplayPreferences: { stationTypes: { sensor: false } } });
+    setProjectVisibilityPreference('a', false);
+    setPreferences({ lastSyncedAt: 100 });
+    expect(getPreferences()).toMatchObject({ lastSyncedAt: 100, projectVisibility: { a: false } });
   });
 });

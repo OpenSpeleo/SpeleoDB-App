@@ -51,6 +51,19 @@ if (typeof globalThis.PointerEvent === 'undefined') {
 
 // ==================== Mocks ====================
 
+const viewerWork = vi.hoisted(() => ({ frozen: false, pending: new Set<() => void>() }));
+vi.mock('../utils/scheduleViewerUpdate', async importOriginal => {
+  const original = await importOriginal<typeof import('../utils/scheduleViewerUpdate')>();
+  return {
+    ...original,
+    scheduleViewerUpdate: (work: () => void) => {
+      if (!viewerWork.frozen) return original.scheduleViewerUpdate(work);
+      viewerWork.pending.add(work);
+      return () => { viewerWork.pending.delete(work); };
+    },
+  };
+});
+
 type MockRenderedFeature = {
   id?: string | number;
   layer?: { id?: string };
@@ -679,6 +692,7 @@ function getMapTouchSurface(): Element {
  * Call this on REAL timers, before switching to fake timers.
  */
 async function settleAsyncEffects(): Promise<void> {
+  await screen.findByTestId('map');
   await act(async () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   });
@@ -841,7 +855,11 @@ function mixedProjectFeatureCollection(): GeoJSON.FeatureCollection {
 // ==================== Tests ====================
 
 describe('Dashboard', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    viewerWork.frozen = false;
+    viewerWork.pending.clear();
+    vi.unstubAllGlobals();
+  });
   beforeEach(() => {
   mockGisSnapshot = EMPTY_GIS_GEOMETRY_SNAPSHOT;
     vi.stubGlobal('ResizeObserver', class {
@@ -1016,7 +1034,7 @@ describe('Dashboard', () => {
 
     await waitFor(() => expect(screen.getByTestId('map')).toBeInTheDocument());
     await waitFor(() => expect(mockMapFitBounds).toHaveBeenCalledOnce());
-    expect(document.querySelector('[data-layer-id="project-cached-line"]')).not.toBeNull();
+    await waitFor(() => expect(document.querySelector('[data-layer-id="project-cached-line"]')).not.toBeNull());
   });
 
   it('redirects to /login when not authenticated', () => {
@@ -1039,6 +1057,7 @@ describe('Dashboard', () => {
     const id = record.detail.id;
     mockGisSnapshot = gisSnapshot({ records: { [id]: record } });
     renderDashboard();
+    await screen.findByTestId('map');
     await userEvent.click(screen.getByTestId('gis-geometries-tab'));
     const panel = screen.getByTestId('gis-geometry-panel');
     expect(panel).toHaveAttribute('aria-hidden', 'false');
@@ -1772,6 +1791,7 @@ describe('Dashboard', () => {
     await waitFor(() => {
       expect(document.querySelector('[data-layer-id="project-p1-line"]')).not.toBeNull();
     });
+    await settleAsyncEffects();
 
     mockQueryRenderedFeatures.mockReturnValueOnce([
       {
@@ -1909,7 +1929,7 @@ describe('Dashboard', () => {
     });
 
     renderDashboard();
-
+    await screen.findByTestId('map');
     const row = await screen.findByTestId('landmark-row-lm-1');
     await userEvent.click(row);
 
@@ -2417,14 +2437,52 @@ describe('Dashboard', () => {
     await userEvent.click(screen.getByLabelText('Toggle Alpha'));
 
     await waitFor(() => {
-      expect(document.querySelector('[data-layer-id="subsurface-stations-circles"]')).toBeNull();
-      expect(document.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).toBeNull();
-      expect(document.querySelector('[data-layer-id="exploration-leads-fallback-layer"]')).toBeNull();
-      expect(document.querySelector('[data-layer-id="cylinder-installs-icon-layer"]')).toBeNull();
-      expect(document.querySelector('[data-layer-id="cylinder-installs-fallback-layer"]')).toBeNull();
+      for (const id of ['subsurface-stations-circles', 'exploration-leads-icon-layer', 'cylinder-installs-icon-layer']) {
+        const layer = document.querySelector(`[data-layer-id="${id}"]`)!;
+        expect(layer).not.toBeNull();
+        expect(layer.getAttribute('data-layer-filter')).toContain('p2');
+        expect(layer.getAttribute('data-layer-filter')).not.toContain('p1');
+      }
       expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
       expect(document.querySelector('[data-layer-id="surface-stations-layer"]')).not.toBeNull();
     });
+  });
+
+  it('paints real project control intent before the memoized map applies the latest reversal', async () => {
+    mockProjects = [makeProject({ id: 'p1', name: 'Alpha' })];
+    mockGetProjectGeoJSON.mockResolvedValue(lineFeatureCollection());
+    renderDashboard();
+    await userEvent.click(screen.getByTestId('projects-tab'));
+    const layer = () => document.querySelector('[data-layer-id="project-p1-line"]');
+    await waitFor(() => expect(layer()).toHaveAttribute('data-layer-visibility', 'visible'));
+    await settleAsyncEffects();
+    const toggle = screen.getByTestId('project-toggle-p1').querySelector('input')!;
+    const source = document.querySelector('[data-source-id="project-p1"]');
+    const sourceData = source?.getAttribute('data-source-data');
+    const previousMapRender = mapPropsRef.current;
+    viewerWork.frozen = true;
+
+    fireEvent.click(toggle);
+    expect(toggle).not.toBeChecked();
+    expect(layer()).toHaveAttribute('data-layer-visibility', 'visible');
+    expect(mapPropsRef.current).toBe(previousMapRender);
+
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(toggle).not.toBeChecked();
+    expect(layer()).toHaveAttribute('data-layer-visibility', 'visible');
+    expect(mapPropsRef.current).toBe(previousMapRender);
+    expect(viewerWork.pending.size).toBeGreaterThan(0);
+
+    await act(async () => {
+      const pending = [...viewerWork.pending];
+      viewerWork.pending.clear();
+      pending.forEach(work => work());
+    });
+    expect(layer()).toHaveAttribute('data-layer-visibility', 'none');
+    expect(document.querySelector('[data-source-id="project-p1"]')).toBe(source);
+    expect(source?.getAttribute('data-source-data')).toBe(sourceData);
   });
 
   it('restores visibility from saved preferences on first load', async () => {
@@ -2443,8 +2501,9 @@ describe('Dashboard', () => {
     renderDashboard();
 
     await waitFor(() => {
-      expect(document.querySelectorAll('[data-layer-id$="-line"]')).toHaveLength(1);
+      expect(document.querySelector('[data-layer-id="project-p2-line"]')).toHaveAttribute('data-layer-visibility', 'visible');
     });
+    expect(document.querySelector('[data-source-id="project-p1"]')).toBeNull();
   });
 
   it('persists project visibility when toggled', async () => {
@@ -2547,12 +2606,11 @@ describe('Dashboard', () => {
       renderDashboard();
 
       await waitFor(() => {
-        expect(mockGetOverlayGeoJSON).toHaveBeenCalledWith('subsurfaceStations');
+        expect(document.querySelector('[data-layer-id="subsurface-stations-circles"]')).not.toBeNull();
       });
-
-      // Project is gated OFF -> the linked station feature is filtered out
-      // and the source/layer never mounts.
-      expect(document.querySelector('[data-layer-id="subsurface-stations-circles"]')).toBeNull();
+      const filter = document.querySelector('[data-layer-id="subsurface-stations-circles"]')!.getAttribute('data-layer-filter');
+      expect(filter).toContain('["literal",[]]');
+      expect(document.querySelector('[data-source-id="subsurface-stations-source"]')).not.toBeNull();
     });
 
     it('recomputes the depth domain when a country gate is OFF', async () => {
@@ -2591,6 +2649,7 @@ describe('Dashboard', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('country-toggle-FR')).toBeInTheDocument();
+        expect(document.querySelector('[data-layer-id="project-p1-line"]')).toHaveAttribute('data-layer-visibility', 'visible');
       });
 
       const countryToggleInput = screen
@@ -2601,7 +2660,7 @@ describe('Dashboard', () => {
       expect(mockSetCountryVisibilityPreference).toHaveBeenCalledWith('FR', false);
 
       await waitFor(() => {
-        expect(document.querySelector('[data-layer-id="project-p1-line"]')).toBeNull();
+        expect(document.querySelector('[data-layer-id="project-p1-line"]')).toHaveAttribute('data-layer-visibility', 'none');
       });
     });
 
@@ -2904,6 +2963,7 @@ describe('Dashboard', () => {
       expect(screen.getByTestId('project-color-dot-p-visible')).toBeInTheDocument();
     });
 
+    await waitFor(() => expect(document.querySelector('[data-layer-id="project-p-visible-line"]')).not.toBeNull());
     const lineLayer = document.querySelector(
       '[data-layer-id="project-p-visible-line"]',
     ) as HTMLElement | null;
@@ -2998,6 +3058,7 @@ describe('Dashboard -- User location dot', () => {
 
   it('toggles a continuously watched manual dot and heading cone', async () => {
     renderDashboard();
+    await screen.findByTestId('map');
 
     const btn = await screen.findByTestId('my-location-button');
     await userEvent.click(btn);
@@ -3147,6 +3208,7 @@ describe('Dashboard -- User location dot', () => {
 
   it('suspends native location and heading while the route or app is inactive', async () => {
     const view = renderDashboard();
+    await screen.findByTestId('map');
     await userEvent.click(await screen.findByTestId('my-location-button'));
     await waitFor(() => expect(mockWatchPosition).toHaveBeenCalledTimes(1));
     act(() => {
@@ -3230,6 +3292,7 @@ describe('Dashboard -- Map compass', () => {
 
   it('starts hidden, places the toggle fourth, and crosses the icon while visible', async () => {
     renderDashboard();
+    await screen.findByTestId('map');
     const toggle = await screen.findByRole('button', { name: 'Show compass' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByTestId('map-compass')).not.toBeInTheDocument();
@@ -3600,6 +3663,7 @@ describe('Dashboard -- Landmark CRUD', () => {
     );
 
     renderDashboard();
+    await screen.findByTestId('map');
 
     expect(await screen.findByTestId('landmark-row-local:pending-camp')).toHaveTextContent(
       'Pending Camp',
@@ -4144,6 +4208,35 @@ describe('Dashboard GPS panel', () => {
       expect(mockController.getGpsTrackPoints).toHaveBeenCalledWith('trk-zoom'),
     );
     await waitFor(() => expect(mockMapFitBounds).toHaveBeenCalled());
+  });
+
+  it.each(['gesture', 'programmatic', 'location'])('preserves the latest camera intent while GPS locate is pending (%s)', async cameraIntent => {
+    const points = deferred<RecordedPoint[]>();
+    mockProjects = [];
+    mockGpsTracks = [{ id: 'pending-locate', name: 'Pending traverse', color: '#984ea3',
+      origin: 'remote', createdAt: 1, updatedAt: 1 }];
+    mockController.getGpsTrackPoints.mockReturnValueOnce(points.promise);
+    renderDashboard();
+    await screen.findByTestId('map');
+    await userEvent.click(screen.getByTestId('gps-tab'));
+    await userEvent.click(screen.getByTestId('gps-track-zoom-pending-locate'));
+    await waitFor(() => expect(mockController.getGpsTrackPoints).toHaveBeenCalledWith('pending-locate'));
+    expect(mockMapFitBounds).not.toHaveBeenCalled();
+    if (cameraIntent === 'location') {
+      await userEvent.click(screen.getByTestId('my-location-button'));
+    } else {
+      act(() => {
+        const onMoveStart = mapPropsRef.current?.onMoveStart as (event: { originalEvent?: Event }) => void;
+        onMoveStart(cameraIntent === 'gesture' ? { originalEvent: new Event('pointerdown') } : {});
+      });
+    }
+    await act(async () => points.resolve([
+      { latitude: 45, longitude: -73, timestamp: 0 },
+      { latitude: 45.01, longitude: -73.02, timestamp: 0 },
+    ]));
+    await waitFor(() => expect(document.querySelector('[data-source-id="gps-tracks-source"]'))
+      .toHaveAttribute('data-source-data', expect.stringContaining('pending-locate')));
+    expect(mockMapFitBounds).toHaveBeenCalledTimes(cameraIntent === 'programmatic' ? 1 : 0);
   });
 
   it('marks the selected color in the edit modal with a contrasting checkmark', async () => {

@@ -232,6 +232,7 @@ describe('useDashboardGpsTrackActions', () => {
       .mockRejectedValueOnce(loadFailure);
     const { result, controller, writeVisibility, warn } = renderActions({
       controller: createController({ getGpsTrackPoints }),
+      tracks: [TRACK, { ...TRACK, id: 'track-failure' }],
     });
 
     act(() => result.current.toggleTrack(TRACK, true));
@@ -285,6 +286,7 @@ describe('useDashboardGpsTrackActions', () => {
       .mockRejectedValueOnce(new Error('missing'));
     const { result, fitBounds, onClosePanel, writeVisibility, mapRef, warn } = renderActions({
       controller: createController({ getGpsTrackPoints }),
+      tracks: [TRACK, ...['empty', 'invalid', 'failure'].map(id => ({ ...TRACK, id }))],
     });
 
     act(() => result.current.zoomToTrack(TRACK));
@@ -515,5 +517,112 @@ describe('useDashboardGpsTrackActions', () => {
     act(() => deleteHook.result.current.confirmDelete());
     deleteHook.unmount();
     await act(async () => remove.resolve());
+  });
+});
+
+describe('GPS viewer update concurrency', () => {
+  it('deduplicates rapid toggles and keeps prepared source geometry stable when visibility changes', async () => {
+    const pending = deferred<RecordedPoint[]>();
+    const controller = createController({ getGpsTrackPoints: vi.fn(() => pending.promise) });
+    const hook = renderActions({ controller });
+    act(() => {
+      hook.result.current.toggleTrack(TRACK, true);
+      hook.result.current.toggleTrack(TRACK, false);
+      hook.result.current.toggleTrack(TRACK, true);
+    });
+    expect(hook.result.current.trackVisibility[TRACK.id]).toBe(true);
+    expect(hook.result.current.savedTrackFeatureCollection.features).toHaveLength(0);
+    await waitFor(() => expect(controller.getGpsTrackPoints).toHaveBeenCalledOnce());
+    await act(async () => pending.resolve(POINTS));
+    await waitFor(() => expect(hook.result.current.savedTrackFeatureCollection.features).toHaveLength(1));
+    const source = hook.result.current.savedTrackFeatureCollection;
+    act(() => hook.result.current.toggleTrack(TRACK, false));
+    expect(hook.result.current.trackVisibility[TRACK.id]).toBe(false);
+    expect(hook.result.current.savedTrackFeatureCollection).toBe(source);
+    await waitFor(() => expect(hook.result.current.appliedTrackVisibility[TRACK.id]).toBe(false));
+    expect(controller.getGpsTrackPoints).toHaveBeenCalledOnce();
+  });
+
+  it('does not automatically retry a failed visible track, and explicit retry can recover', async () => {
+    const controller = createController({ getGpsTrackPoints: vi.fn()
+      .mockRejectedValueOnce(new Error('Unavailable')).mockResolvedValue(POINTS) });
+    const hook = renderActions({ controller });
+    act(() => hook.result.current.toggleTrack(TRACK, true));
+    await waitFor(() => expect(hook.warn).toHaveBeenCalledOnce());
+    await waitFor(() => expect(hook.result.current.loadingTrackIds.size).toBe(0));
+    expect(controller.getGpsTrackPoints).toHaveBeenCalledOnce();
+    act(() => hook.result.current.toggleTrack(TRACK, true));
+    await waitFor(() => expect(hook.result.current.savedTrackFeatureCollection.features).toHaveLength(1));
+    expect(controller.getGpsTrackPoints).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows only the newest locate action and cancels it on hide or panel departure', async () => {
+    const second = { ...TRACK, id: 'second' };
+    const older = deferred<RecordedPoint[]>();
+    const newer = deferred<RecordedPoint[]>();
+    const controller = createController({ getGpsTrackPoints: vi.fn((id: string) => id === TRACK.id ? older.promise : newer.promise) });
+    const fitBounds = vi.fn();
+    const options = { controller: controller as never, tracks: [TRACK, second], mapRef: createMapRef(fitBounds), onClosePanel: vi.fn(), showToast: vi.fn(), writeVisibility: vi.fn() };
+    const hook = renderHook(({ active }) => useDashboardGpsTrackActions({ ...options, panelActive: active }), { initialProps: { active: true } });
+    act(() => {
+      hook.result.current.zoomToTrack(TRACK);
+      hook.result.current.zoomToTrack(second);
+    });
+    await waitFor(() => expect(controller.getGpsTrackPoints).toHaveBeenCalledTimes(2));
+    await act(async () => newer.resolve(POINTS));
+    await waitFor(() => expect(fitBounds).toHaveBeenCalledOnce());
+    await act(async () => older.resolve(POINTS));
+    await waitFor(() => expect(hook.result.current.loadingTrackIds.size).toBe(0));
+    expect(fitBounds).toHaveBeenCalledOnce();
+    act(() => {
+      hook.result.current.zoomToTrack(TRACK);
+      hook.result.current.toggleTrack(TRACK, false);
+    });
+    await act(async () => {});
+    expect(fitBounds).toHaveBeenCalledOnce();
+    act(() => hook.result.current.zoomToTrack(second));
+    hook.rerender({ active: false });
+    await act(async () => {});
+    expect(fitBounds).toHaveBeenCalledOnce();
+  });
+
+  it.each(['background', 'navigation'] as const)('cancels a pending locate on %s without dropping geometry', async reason => {
+    const pending = deferred<RecordedPoint[]>();
+    const controller = createController({ getGpsTrackPoints: vi.fn(() => pending.promise) });
+    const fitBounds = vi.fn();
+    const options = { controller: controller as never, tracks: [TRACK], mapRef: createMapRef(fitBounds), onClosePanel: vi.fn(), showToast: vi.fn(), writeVisibility: vi.fn() };
+    const hook = renderHook(({ active }) => useDashboardGpsTrackActions({ ...options, runtimeActive: active }), { initialProps: { active: true } });
+    act(() => hook.result.current.zoomToTrack(TRACK));
+    await waitFor(() => expect(controller.getGpsTrackPoints).toHaveBeenCalledOnce());
+    if (reason === 'background') hook.rerender({ active: false });
+    else act(() => hook.result.current.cancelPendingZoom());
+    await act(async () => pending.resolve(POINTS));
+    await waitFor(() => expect(hook.result.current.loadingTrackIds.size).toBe(0));
+    expect(fitBounds).not.toHaveBeenCalled();
+    expect(options.onClosePanel).not.toHaveBeenCalled();
+    expect(hook.result.current.savedTrackFeatureCollection.features).toHaveLength(1);
+  });
+
+  it('gates changed revisions immediately and discards an old in-flight success', async () => {
+    const old = deferred<RecordedPoint[]>();
+    const fresh = deferred<RecordedPoint[]>();
+    const controller = createController({ getGpsTrackPoints: vi.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise) });
+    const original = { ...TRACK, geometryRevision: 'sha-old' };
+    const options = { controller: controller as never, mapRef: createMapRef(), onClosePanel: vi.fn(), showToast: vi.fn(), writeVisibility: vi.fn() };
+    const hook = renderHook(({ tracks }) => useDashboardGpsTrackActions({ ...options, tracks }), { initialProps: { tracks: [original] } });
+    act(() => hook.result.current.toggleTrack(original, true));
+    await waitFor(() => expect(controller.getGpsTrackPoints).toHaveBeenCalledOnce());
+    hook.rerender({ tracks: [{ ...original, geometryRevision: 'sha-new' }] });
+    await waitFor(() => expect(controller.getGpsTrackPoints).toHaveBeenCalledTimes(2));
+    await act(async () => old.resolve(POINTS));
+    expect(hook.result.current.savedTrackFeatureCollection.features).toHaveLength(0);
+    await act(async () => fresh.resolve(POINTS));
+    await waitFor(() => expect(hook.result.current.savedTrackFeatureCollection.features).toHaveLength(1));
+    const geometry = hook.result.current.savedTrackFeatureCollection.features[0].geometry;
+    hook.rerender({ tracks: [{ ...original, geometryRevision: 'sha-new', color: '#ff0000', updatedAt: 3 }] });
+    expect(hook.result.current.savedTrackFeatureCollection.features[0].geometry).toBe(geometry);
+    expect(controller.getGpsTrackPoints).toHaveBeenCalledTimes(2);
+    hook.rerender({ tracks: [] });
+    expect(hook.result.current.savedTrackFeatureCollection.features).toHaveLength(0);
   });
 });

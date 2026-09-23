@@ -88,6 +88,8 @@ export type GpsTrackPendingState = 'create' | 'update' | 'delete' | 'conflict' |
  * are merged into one list; `origin` makes the distinction explicit.
  */
 export interface GpsTrackListItem {
+  /** Geometry identity, independent of display-name/color edits. */
+  geometryRevision?: string;
   id: string;
   name: string;
   color: string;

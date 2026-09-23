@@ -30,26 +30,47 @@ function setup(initial = gisSnapshot()) {
   const fitBounds = vi.fn();
   const mapRef = { current: { fitBounds } as unknown as MapRef | null };
   const onClosePanel = vi.fn();
-  const hook = renderHook(({ active }) => {
+  const hook = renderHook(({ active, foreground = true }: { active: boolean; foreground?: boolean }) => {
     const snapshot = useGisGeometries(source);
-    return useDashboardGisGeometryActions({ source, snapshot, mapRef, panelActive: active, onClosePanel });
-  }, { initialProps: { active: true } });
+    return useDashboardGisGeometryActions({ source, snapshot, mapRef, panelActive: active, runtimeActive: foreground, onClosePanel });
+  }, { initialProps: { active: true } as { active: boolean; foreground?: boolean } });
   return { ...hook, source, publish, fitBounds, mapRef, onClosePanel, listeners };
 }
 
 describe('GIS Geometry display intent and zoom', () => {
-  it('starts hidden even with cached geometry and keeps toggling independent of the camera', () => {
+  it('paints checked intent before admitting cached geometry and retains the source on hide', async () => {
     const record = gisRecord();
     const state = setup(gisSnapshot({ records: { [record.detail.id]: record } }));
     expect(state.result.current.visibleCount).toBe(0);
     act(() => state.result.current.toggle(record.detail.id, true));
-    expect(state.result.current.featureCollection.features).toEqual([
-      { ...record.feature, properties: { name: record.detail.name, color: record.detail.color } },
-    ]);
+    expect(state.result.current.visibility[record.detail.id]).toBe(true);
+    expect(state.result.current.featureCollection.features).toEqual([]);
+    await waitFor(() => expect(state.result.current.featureCollection.features).toEqual([
+      { ...record.feature, properties: { id: record.detail.id, name: record.detail.name, color: record.detail.color } },
+    ]));
+    const source = state.result.current.featureCollection;
     act(() => state.result.current.toggle(record.detail.id, false));
     expect(state.result.current.visibleCount).toBe(0);
+    expect(state.result.current.featureCollection).toBe(source);
     expect(state.fitBounds).not.toHaveBeenCalled();
     expect(state.onClosePanel).not.toHaveBeenCalled();
+  });
+
+  it.each(['background', 'navigation'] as const)('cancels a pending locate on %s', async reason => {
+    const state = setup();
+    const pending = deferred<GisGeometryMapRecord>();
+    state.source.getGisGeometryDetail.mockReturnValue(pending.promise);
+    const record = gisRecord();
+    act(() => state.result.current.zoom(record.detail.id));
+    if (reason === 'background') state.rerender({ active: true, foreground: false });
+    else act(() => state.result.current.cancelPendingZoom());
+    await act(async () => {
+      state.publish({ records: { [record.detail.id]: record } });
+      pending.resolve(record);
+    });
+    expect(state.fitBounds).not.toHaveBeenCalled();
+    expect(state.onClosePanel).not.toHaveBeenCalled();
+    expect(state.result.current.visibility[record.detail.id]).toBe(true);
   });
 
   it('keeps a later hide when a requested geometry arrives and cancels its pending zoom', async () => {

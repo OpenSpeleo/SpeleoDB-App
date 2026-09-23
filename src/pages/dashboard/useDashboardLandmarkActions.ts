@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Map as MaplibreMap } from 'maplibre-gl';
 import type { MapRef } from 'react-map-gl/maplibre';
@@ -133,10 +133,8 @@ function useLandmarkCollectionActions(options: CollectionActionOptions) {
   const [collectionCollapsed, setCollectionCollapsed] = useState<Record<string, boolean>>(
     () => initialCollapsed ?? getLandmarkCollectionCollapsedPreferences(),
   );
-  const visibleLandmarks = useMemo(
-    () => filterVisibleLandmarks(landmarks, collectionVisibility),
-    [collectionVisibility, landmarks],
-  );
+  // Collection visibility belongs to the map filter; keep the source immutable.
+  const visibleLandmarks = landmarks;
 
   const toggleCollection = useCallback((collectionId: string, visible: boolean) => {
     setCollectionVisibility((previous) => ({ ...previous, [collectionId]: visible }));

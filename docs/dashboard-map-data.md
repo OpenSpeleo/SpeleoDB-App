@@ -29,9 +29,10 @@ offline landmark folding, and returning only validated project map records.
 `Dashboard.tsx` supplies controller revisions and consumes the derived records.
 `useDashboardProjectVisibility` remains the owner of project/country intent.
 
-`useVisibleDashboardOverlays` applies the effective project set to
-project-linked overlays after map data and visibility have both been derived.
-Global landmarks and surface stations remain independent of project toggles.
+The overlay renderer applies the latest scheduled project set through layer
+filters, retaining immutable source data. Global landmarks and surface stations
+remain independent of project toggles. See
+[Responsive viewer updates](viewer-update-scheduling.md).
 
 ## Publication invariants
 
@@ -81,12 +82,20 @@ revision-only reload reuses the enriched object without scanning every feature
 again. The weak cache does not retain data after the source record leaves both
 the bounded service cache and mounted UI.
 
+Survey depth enrichment and domain calculation share cancellable preparation in
+`prepareProjectDepth`. Its immutable-source cache survives visibility changes,
+and at most 1,000 feature/coordinate/container traversal steps run before
+yielding. The hook publishes the prepared source and `projectDepthDomains`
+together; the probe never rescans all previously loaded sources when another
+project finishes.
+
 Every project-data generation emits three sanitized aggregate timings under
-`[dashboard-map:timing]`: cache-read work, normalization/depth work, and wall
-clock from reader admission through the animation frame after final publication.
-The last value includes the device-only React/MapLibre commit-to-paint delay
-that fake IndexedDB and jsdom cannot reproduce. Logging retains no project
-identifiers, names, coordinates, or GeoJSON.
+`[dashboard-map:timing]`: cache-read latency, normalization/depth latency
+(including cooperative yields), and wall clock from reader admission through the
+animation frame after final publication. The last value includes the device-only
+React/MapLibre commit-to-paint delay that fake IndexedDB and jsdom cannot
+reproduce. Logging retains no project identifiers, names, coordinates, or
+GeoJSON.
 
 ## Verification
 
@@ -96,7 +105,7 @@ rendering-turn coalescing, concurrent overlay admission behind a deferred
 landmarks record, valid/empty/malformed/stale commits, depth attachment, every
 overlay shape, failure containment, default diagnostics, revision clearing,
 commit replacement, and all late-success/late-failure cancellation pairings. It
-also covers global and project-linked overlay visibility. The module has 100%
-statement, branch, function, and line coverage. `Dashboard.test.tsx` remains the
+also covers global and project-linked overlay visibility, and cancellation
+inside a single 100,000-coordinate survey. `Dashboard.test.tsx` remains the
 integration characterization seam for controller revisions, quarantine
 transitions, panels, layers, overlays, and fit behavior.

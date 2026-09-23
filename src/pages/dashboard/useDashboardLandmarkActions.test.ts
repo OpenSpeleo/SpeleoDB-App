@@ -242,21 +242,23 @@ describe('useDashboardLandmarkActions collections and toast', () => {
     });
   });
 
-  it('toggles, shows, hides, filters, and skips empty group batches', () => {
+  it('keeps landmark source identity while changing collection intent and skips empty batches', () => {
     const { result, rerender, writeVisibility, writeVisibilityBatch, writeCollapsed } = renderActions();
 
     act(() => {
       result.current.toggleCollection('collection-1', false);
       result.current.toggleCollectionCollapsed('collection-1', true);
     });
-    expect(result.current.visibleLandmarks?.features).toHaveLength(1);
+    expect(result.current.visibleLandmarks?.features).toHaveLength(2);
+    expect(result.current.collectionVisibility['collection-1']).toBe(false);
     expect(writeVisibility).toHaveBeenCalledWith('collection-1', false);
     expect(writeCollapsed).toHaveBeenCalledWith('collection-1', true);
 
     act(() => result.current.showAll());
     expect(result.current.visibleLandmarks?.features).toHaveLength(2);
     act(() => result.current.hideAll());
-    expect(result.current.visibleLandmarks?.features).toHaveLength(0);
+    expect(result.current.visibleLandmarks?.features).toHaveLength(2);
+    expect(Object.values(result.current.collectionVisibility).every(value => !value)).toBe(true);
     expect(writeVisibilityBatch).toHaveBeenCalledTimes(2);
 
     rerender({ selectedMarkerDetail: null, groups: [] });
@@ -277,7 +279,7 @@ describe('useDashboardLandmarkActions collections and toast', () => {
     expect(hook.onRevealLandmarks).toHaveBeenCalledOnce();
     expect(hook.writeVisibility).toHaveBeenCalledWith('collection-1', true);
     expect(hook.result.current.collectionVisibility).toEqual({ 'collection-1': true, '__personal__': false });
-    expect(hook.result.current.visibleLandmarks?.features).toHaveLength(1);
+    expect(hook.result.current.visibleLandmarks?.features).toHaveLength(2);
     expect(hook.onRevealLandmarks.mock.invocationCallOrder[0]).toBeLessThan(hook.flyTo.mock.invocationCallOrder[0]);
     expect(hook.writeVisibility.mock.invocationCallOrder[0]).toBeLessThan(hook.flyTo.mock.invocationCallOrder[0]);
   });

@@ -327,6 +327,19 @@ describe('useDashboardProjectVisibility actions', () => {
 });
 
 describe('useDashboardProjectVisibility zoom', () => {
+  it.each(['hide', 'navigation', 'unmount'] as const)('cancels queued camera work after %s', reason => {
+    const callbacks: Array<() => void> = [];
+    const { result, fitBounds, unmount } = renderVisibility({ schedule: callback => callbacks.push(callback) });
+    act(() => result.current.zoomToProject('a'));
+    if (reason === 'unmount') unmount();
+    else act(() => {
+      if (reason === 'hide') result.current.hideAll();
+      else result.current.cancelPendingZoom();
+    });
+    act(() => callbacks.forEach(callback => callback()));
+    expect(fitBounds).not.toHaveBeenCalled();
+  });
+
   it('reveals the target country, closes the panel, and fits validated bounds', async () => {
     const callbacks: Array<() => void> = [];
     const writeProjectVisibility = vi.fn();

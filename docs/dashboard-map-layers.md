@@ -26,10 +26,11 @@ expand the Dashboard state machine.
   layer paint/layout declaration. Pointer interaction orchestration is owned by
   `useDashboardMapInteractions`; see `docs/dashboard-map-interactions.md`.
 
-The GeoJSON layer components are deliberately data-in/render-out. They do not
-fetch, mutate storage, schedule work, register listeners, or retain local state.
-`UserLocationIndicator` is the narrow exception: it subscribes to the shared
-heading provider only while its explicit `headingActive` input is true.
+Layer components do not fetch or mutate storage. `ProjectMapLayers` retains
+source admission state and schedules at most four new sources per painted turn;
+see [Responsive viewer updates](viewer-update-scheduling.md).
+`UserLocationIndicator` it subscribes to the shared heading provider only while
+its explicit `headingActive` input is true.
 
 ## Invariants
 
@@ -39,8 +40,9 @@ heading provider only while its explicit `headingActive` input is true.
   creates an unbound layer declaration.
 - Project geometry remains below marker layers through the stable ordering
   anchor, including after visibility changes.
-- Project layers mount only when both effective visibility and current GeoJSON
-  are present.
+- Project sources are admitted only with applied visibility and current GeoJSON.
+  Once admitted they remain mounted while hidden, using layer visibility, and
+  are removed when their authoritative geometry disappears.
 - Cave entrance visibility changes only the project point/star layer's
   `layout.visibility`. Linework, fill, GeoJSON, depth domains, and the camera
   remain unchanged.
@@ -56,8 +58,9 @@ heading provider only while its explicit `headingActive` input is true.
   fallback. This is required for queued personal-landmark creates, whose
   collection color is empty until the server assigns the personal collection
   during replay.
-- Saved and active GPS tracks are separate sources; the active line is absent
-  when recording is idle or has no points.
+- Saved and active GPS tracks are separate sources. Saved visibility and colors
+  use filters/paint without replacing geometry; the active line is absent when
+  recording is idle or has no points.
 - `user-location-dot` remains a direct child of `user-location-source`; its ID
   remains stable for long-press collision protection.
 - The user-location indicator is absent when neither manual live mode nor an

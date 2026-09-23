@@ -6,6 +6,7 @@ import { IonApp, setupIonicReact } from '@ionic/react'
 import { SpeleoDBContext } from './context/useSpeleoDB'
 import {
   getColorMode,
+  flushViewerPreferences,
   getLayerOfflineSyncPreferences,
   getMeasurementUnit,
   getSelectedMapLayerId,
@@ -44,6 +45,7 @@ function AuthenticatedRoutes(): ReactNode {
   const [gpsErrorToast, setGpsErrorToast] = useState<string | null>(null)
   const gpsRecordingError = speleo?.gpsRecordingError ?? null
   const foreground = useAppForeground()
+  useEffect(() => { if (!foreground) flushViewerPreferences() }, [foreground])
   const controller = speleo?.controller
   useEffect(() => { controller?.setOfflineDownloadsForeground?.(foreground) }, [controller, foreground])
 

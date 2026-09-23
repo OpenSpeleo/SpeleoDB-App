@@ -314,7 +314,7 @@ describe('GpsTrackCoordinator', () => {
   it('uses valid cached geometry and rejects unavailable or malformed geometry', async () => {
     const cached = createHarness({ remote: [REMOTE] });
     await cached.coordinator.load();
-    cached.setCachedGeoJSON(GEOJSON);
+    cached.setCachedGeoJSON(GEOJSON, 'sha');
     expect(await cached.coordinator.getGeoJSON('remote-1')).toEqual(GEOJSON);
     expect(cached.transport.downloadJSON).not.toHaveBeenCalled();
     cached.setCachedGeoJSON(null);

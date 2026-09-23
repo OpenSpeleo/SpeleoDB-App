@@ -24,6 +24,7 @@ import {
   type MapDisplayPreferencesPatch,
 } from '../types/mapDisplayPreferences';
 import type { SessionMetadataStore } from './SecureSessionStore';
+import { scheduleViewerUpdate } from '../utils/scheduleViewerUpdate';
 
 const LEGACY_PLAINTEXT_CREDENTIALS_KEY = 'speleo_users_db';
 
@@ -219,6 +220,36 @@ function writePreferences(next: StoredPreferences): void {
 
 type PreferencesMutation = (current: StoredPreferences) => StoredPreferences;
 
+const viewerMutations: PreferencesMutation[] = [];
+let cancelViewerFlush: (() => void) | undefined;
+
+/** Flush at page/native suspension and before synchronous session mutations. */
+export function flushViewerPreferences(): void {
+  cancelViewerFlush?.();
+  cancelViewerFlush = undefined;
+  if (viewerMutations.length === 0) return;
+  const pending = viewerMutations.splice(0);
+  enqueuePreferencesMutation(current => pending.reduce((value, mutate) => mutate(value), current));
+}
+
+function discardViewerPreferences(): void {
+  cancelViewerFlush?.();
+  cancelViewerFlush = undefined;
+  viewerMutations.length = 0;
+}
+
+function enqueueViewerMutation(mutation: PreferencesMutation): void {
+  viewerMutations.push(mutation);
+  cancelViewerFlush ??= scheduleViewerUpdate(flushViewerPreferences);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushViewerPreferences);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) flushViewerPreferences();
+  });
+}
+
 const mutationQueue: PreferencesMutation[] = [];
 let isProcessingQueue = false;
 
@@ -227,6 +258,7 @@ let isProcessingQueue = false;
  * This queue is synchronous, deterministic, and safe for bursty UI updates.
  */
 function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
+  flushViewerPreferences();
   mutationQueue.push(mutation);
   if (isProcessingQueue) return;
 
@@ -277,7 +309,9 @@ function enqueuePreferencesMutation(mutation: PreferencesMutation): void {
  * Returns current preferences. Applies default instance when missing.
  */
 export function getPreferences(): UserPreferences {
-  const { token: _legacyToken, ...preferences } = readRawPreferences();
+  const { token: _legacyToken, ...preferences } = viewerMutations.reduce(
+    (current, mutate) => mutate(current), readRawPreferences(),
+  );
   return preferences;
 }
 
@@ -294,6 +328,7 @@ export const sessionMetadataStore: SessionMetadataStore = {
     };
   },
   commit: ({ email, instance, cacheScopeId }) => {
+    flushViewerPreferences();
     const current = readRawPreferences();
     writePreferences({
       ...current,
@@ -305,6 +340,7 @@ export const sessionMetadataStore: SessionMetadataStore = {
     });
   },
   clear: () => {
+    flushViewerPreferences();
     const current = readRawPreferences();
     writePreferences({
       ...current,
@@ -413,7 +449,7 @@ export function setProjectVisibilityPreferences(
   const safeUpdates = normalizeProjectVisibility(updates);
   if (Object.keys(safeUpdates).length === 0) return;
 
-  enqueuePreferencesMutation((current) => ({
+  enqueueViewerMutation((current) => ({
     ...current,
     projectVisibility: {
       ...(current.projectVisibility ?? {}),
@@ -452,7 +488,7 @@ export function setCountryVisibilityPreferences(
   const safeUpdates = normalizeCountryVisibility(updates);
   if (Object.keys(safeUpdates).length === 0) return;
 
-  enqueuePreferencesMutation((current) => ({
+  enqueueViewerMutation((current) => ({
     ...current,
     countryVisibility: {
       ...(current.countryVisibility ?? {}),
@@ -476,7 +512,7 @@ export function setCountryCollapsedPreference(
   collapsed: boolean,
 ): void {
   if (!country) return;
-  enqueuePreferencesMutation((current) => ({
+  enqueueViewerMutation((current) => ({
     ...current,
     countryCollapsed: {
       ...(current.countryCollapsed ?? {}),
@@ -514,7 +550,7 @@ export function setLandmarkCollectionVisibilityPreferences(
   const safeUpdates = normalizeLandmarkCollectionVisibility(updates);
   if (Object.keys(safeUpdates).length === 0) return;
 
-  enqueuePreferencesMutation((current) => ({
+  enqueueViewerMutation((current) => ({
     ...current,
     landmarkCollectionVisibility: {
       ...(current.landmarkCollectionVisibility ?? {}),
@@ -535,7 +571,7 @@ export function getGpsTrackVisibilityPreferences(): Record<string, boolean> {
 /** Persist visibility for one GPS track id. */
 export function setGpsTrackVisibilityPreference(trackId: string, visible: boolean): void {
   if (!trackId) return;
-  enqueuePreferencesMutation((current) => ({
+  enqueueViewerMutation((current) => ({
     ...current,
     gpsTrackVisibility: {
       ...(current.gpsTrackVisibility ?? {}),
@@ -560,7 +596,7 @@ export function setLandmarkCollectionCollapsedPreference(
   collapsed: boolean,
 ): void {
   if (!collectionId) return;
-  enqueuePreferencesMutation((current) => ({
+  enqueueViewerMutation((current) => ({
     ...current,
     landmarkCollectionCollapsed: {
       ...(current.landmarkCollectionCollapsed ?? {}),
@@ -594,7 +630,7 @@ export function getMapDisplayPreferences(): MapDisplayPreferences {
  * Merge display edits against the latest queued record, preserving sibling settings.
  */
 export function setMapDisplayPreferences(patch: MapDisplayPreferencesPatch): void {
-  enqueuePreferencesMutation((current) => ({
+  enqueueViewerMutation((current) => ({
     ...current,
     mapDisplayPreferences: mergeMapDisplayPreferences(
       normalizeMapDisplayPreferences(current.mapDisplayPreferences),
@@ -643,7 +679,7 @@ export function getColorMode(): MapColorMode {
  * Persist map color mode preference.
  */
 export function setColorMode(mode: MapColorMode): void {
-  setPreferences({ colorMode: mode });
+  enqueueViewerMutation(current => ({ ...current, colorMode: mode }));
 }
 
 /**
@@ -657,7 +693,7 @@ export function getMeasurementUnit(): MeasurementUnit {
  * Persist map measurement unit preference.
  */
 export function setMeasurementUnit(unit: MeasurementUnit): void {
-  setPreferences({ measurementUnit: unit });
+  enqueueViewerMutation(current => ({ ...current, measurementUnit: unit }));
 }
 
 /**
@@ -671,7 +707,7 @@ export function getSelectedMapLayerId(): MapLayerId {
  * Persist the selected map tile layer id.
  */
 export function setSelectedMapLayerId(layerId: MapLayerId): void {
-  setPreferences({ selectedMapLayerId: layerId });
+  enqueueViewerMutation(current => ({ ...current, selectedMapLayerId: layerId }));
 }
 
 /**
@@ -712,6 +748,7 @@ export function setLayerOfflineSyncPreference(layerId: string, enabled: boolean)
  * Clears all stored user preferences.
  */
 export function clearPreferences(): void {
+  discardViewerPreferences();
   try {
     localStorage.removeItem(getStorageKey());
   } catch (error) {

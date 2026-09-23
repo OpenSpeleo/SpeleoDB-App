@@ -114,9 +114,32 @@ describe('useDashboardMapData', () => {
     await waitFor(() => expect(result.current.geoJsonData.colored).toBeDefined());
     const enriched = result.current.geoJsonData.colored;
     expect(enriched.features[0].properties).toMatchObject({ color: '#112233', _speleoDepth: 5 });
+    expect(result.current.projectDepthDomains.colored).toEqual({ min: 0, max: 5 });
     expect(result.current.currentProjectMapData.colored.geojsonRevision).toBe('old');
     rerender({ revision: 2 });
     await waitFor(() => expect(result.current.geoJsonData.colored).toBe(enriched));
+  });
+
+  it('does not publish a large survey or its depth domain after preparation is superseded', async () => {
+    const project = createProject('large');
+    const projects = [project];
+    let preparing = false;
+    const coordinates = Array.from({ length: 100_000 }, () => [-73, 45, 9]);
+    const featureCollection = collection({ type: 'Feature', properties: {}, geometry: {
+      type: 'LineString', get coordinates() { preparing = true; return coordinates; },
+    } });
+    const source = createSource({ getProjectMapData: async () => mapData(project, featureCollection) });
+    const paused = deferred<void>();
+    const yieldWork = vi.fn(() => preparing ? paused.promise : Promise.resolve());
+    const { result, rerender } = renderHook(({ projects }) => useDashboardMapData({
+      source, projects, mapDataRevision: 1, landmarksRevision: 0, yieldWork,
+    }), { initialProps: { projects } });
+    await waitFor(() => expect(preparing).toBe(true));
+    expect(result.current.geoJsonData).toEqual({});
+    rerender({ projects: [] });
+    await act(async () => paused.resolve());
+    expect(result.current.geoJsonData).toEqual({});
+    expect(result.current.projectDepthDomains).toEqual({});
   });
 
   it('logs cache, normalization, and next-paint latency without project identity', async () => {

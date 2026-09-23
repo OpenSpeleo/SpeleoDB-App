@@ -16,7 +16,7 @@ const geometry: GeoJSON.FeatureCollection = {
     { color: '#ff00ff' }, { color: '#00ffff' }, {},
   ].map((properties, index) => ({ type: 'Feature', properties,
     geometry: { type: 'LineString', coordinates: [
-      [-87.5, 20.1 + index * 0.0003, 2], [-87.499, 20.1 + index * 0.0003, 8],
+      [-87.5, 20.1 + index * 0.003, 2], [-87.49, 20.1 + index * 0.003, 8],
     ] } })),
 };
 async function pixels(page: Page) {

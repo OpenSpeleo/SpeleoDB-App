@@ -6,7 +6,8 @@ import type {
 } from '../../types/mapOverlay';
 import type { Project } from '../../types/project';
 import type { ProjectGeoJSONMapData } from '../../types/projectGeoJSON';
-import { attachDepthToFeatureCollection, DEPTH_PROPERTY_KEY } from '../../utils/depthColoring';
+import type { DepthDomain } from '../../utils/depthColoring';
+import { prepareProjectDepth } from '../../utils/prepareProjectDepth';
 import { buildLandmarkCollectionGroups } from '../../utils/landmarkCollections';
 import { ensureLandmarkPropertyIds } from '../../utils/landmarkMutations';
 import { normalizeGeoJSON } from '../../utils/normalizeGeoJSON';
@@ -20,7 +21,8 @@ import {
 } from './dashboardMapUtils';
 
 type GeoJsonRecord = Record<string, GeoJSON.FeatureCollection>;
-type ProjectMapDataRecord = Record<string, ProjectGeoJSONMapData>;
+type PreparedProjectMapData = ProjectGeoJSONMapData & { depthDomain: DepthDomain | null };
+type ProjectMapDataRecord = Record<string, PreparedProjectMapData>;
 type StaleCheck = () => boolean;
 type WarningReporter = (message: string, error: unknown) => void;
 type MainThreadYield = () => Promise<void>;
@@ -62,31 +64,20 @@ const defaultAfterPaint: AfterPaint = () => new Promise((resolve) => {
   }
   setTimeout(resolve, 0);
 });
-const depthEnrichedCollections = new WeakMap<
-GeoJSON.FeatureCollection,
-GeoJSON.FeatureCollection
->();
-
-function attachProjectDepth(
-  featureCollection: GeoJSON.FeatureCollection,
-): GeoJSON.FeatureCollection {
-  const cached = depthEnrichedCollections.get(featureCollection);
-  if (cached) return cached;
-  const enriched = attachDepthToFeatureCollection(featureCollection, DEPTH_PROPERTY_KEY);
-  depthEnrichedCollections.set(featureCollection, enriched);
-  return enriched;
-}
-
-function normalizeProjectMapData(
+async function normalizeProjectMapData(
   project: Project,
   mapData: ProjectGeoJSONMapData | null,
-): ProjectGeoJSONMapData | null {
+  isStale: StaleCheck,
+  yieldWork: MainThreadYield,
+): Promise<PreparedProjectMapData | null> {
   const featureCollection = normalizeGeoJSON(mapData?.featureCollection);
   if (!featureCollection || featureCollection.features.length === 0) return null;
   if (mapData?.commitId !== project.latest_commit.id) return null;
+  const prepared = await prepareProjectDepth(featureCollection, isStale, yieldWork);
+  if (!prepared) return null;
   return {
     commitId: mapData.commitId,
-    featureCollection: attachProjectDepth(featureCollection),
+    ...prepared,
     bounds: mapData.bounds,
     ...(mapData.geojsonRevision ? { geojsonRevision: mapData.geojsonRevision } : {}),
   };
@@ -131,7 +122,7 @@ async function loadProjectMapData(
   projects: readonly Project[],
   isStale: StaleCheck,
   warn: WarningReporter,
-  publish: BatchPublisher<ProjectGeoJSONMapData>,
+  publish: BatchPublisher<PreparedProjectMapData>,
   yieldWork: MainThreadYield,
   runId: number,
   afterPaint: AfterPaint,
@@ -154,7 +145,7 @@ async function loadProjectMapData(
         await yieldWork();
         if (isStale()) return;
         const normalizationStartedAt = performance.now();
-        const normalized = normalizeProjectMapData(project, mapData);
+        const normalized = await normalizeProjectMapData(project, mapData, isStale, yieldWork);
         normalizationWorkMs += Math.max(0, performance.now() - normalizationStartedAt);
         if (normalized) await queuePublication(project.id, normalized);
         if (isStale()) return;
@@ -358,6 +349,9 @@ export function useDashboardMapData({
   const geoJsonData = useMemo<GeoJsonRecord>(() => Object.fromEntries(
     Object.entries(currentProjectMapData).map(([id, data]) => [id, data.featureCollection]),
   ), [currentProjectMapData]);
+  const projectDepthDomains = useMemo(() => Object.fromEntries(
+    Object.entries(currentProjectMapData).map(([id, data]) => [id, data.depthDomain]),
+  ), [currentProjectMapData]);
   const projectBounds = useMemo<ProjectBoundsRecord>(() => Object.fromEntries(
     Object.entries(currentProjectMapData).map(([id, data]) => [id, data.bounds]),
   ), [currentProjectMapData]);
@@ -379,6 +373,7 @@ export function useDashboardMapData({
     currentProjectMapData,
     geoJsonData,
     projectBounds,
+    projectDepthDomains,
     overlayGeoJsonData,
     landmarkCollectionGroups,
   };

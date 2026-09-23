@@ -9,7 +9,7 @@ import { SpeleoDBContext } from './context/useSpeleoDB';
 import type { DashboardPanel } from './types/dashboardPanel';
 import type { MapDisplayPreferences, MapDisplayPreferencesPatch } from './types/mapDisplayPreferences';
 import { PREFERENCES } from './constants';
-import { clearPreferences, getMapDisplayPreferences } from './services/PreferencesService';
+import { clearPreferences, flushViewerPreferences, getMapDisplayPreferences } from './services/PreferencesService';
 
 const pageLifecycle = vi.hoisted(() => ({
   settingsMounted: vi.fn(),
@@ -104,6 +104,7 @@ describe('AuthenticatedAppShell', () => {
     };
     expect(JSON.parse(dashboard.getAttribute('data-display-preferences')!)).toMatchObject(expected);
     expect(getMapDisplayPreferences()).toMatchObject(expected);
+    flushViewerPreferences();
     expect(JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY)!)).not.toHaveProperty('showLandmarks');
     act(() => history.push('/dashboard'));
     expect(JSON.parse(dashboard.getAttribute('data-display-preferences')!)).toMatchObject(expected);
@@ -124,7 +125,8 @@ describe('AuthenticatedAppShell', () => {
       expect(JSON.parse(screen.getByTestId('dashboard-page').getAttribute('data-display-preferences')!)).toMatchObject({
         categories: { caveEntrances: false }, stationTypes: { biology: false }, depthLimitFeet: 80.25,
       });
-      expect(errors).toHaveBeenCalledTimes(3);
+      flushViewerPreferences();
+      expect(errors).toHaveBeenCalledOnce();
     } finally {
       storage.mockRestore();
       errors.mockRestore();

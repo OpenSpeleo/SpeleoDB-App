@@ -1,5 +1,6 @@
 import { Layer, Source } from 'react-map-gl/maplibre';
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
+import { landmarkCollectionsFilter, visibleIdsFilter } from '../../utils/viewerFilters';
 import { COLORS, MAP_OVERLAYS } from '../../constants';
 import type { MapDisplayPreferences } from '../../types/mapDisplayPreferences';
 import type {
@@ -43,16 +44,18 @@ function overlaySizes(overlayId: MapOverlayId): MapOverlaySizes {
 
 interface VisibleOverlayMapLayersProps {
   visible: boolean;
+  filter?: ExpressionSpecification;
   data?: GeoJSON.FeatureCollection;
 }
 
-function LandmarkMapLayers({ visible, data }: VisibleOverlayMapLayersProps) {
+function LandmarkMapLayers({ visible, data, filter }: VisibleOverlayMapLayersProps) {
   if (!data) return null;
   const sizes = overlaySizes('landmarks');
   return (
     <Source id="landmarks-source" type="geojson" data={data}>
       <Layer
         id="landmarks-layer"
+        filter={filter}
         type="symbol"
         minzoom={markerMinZoom('landmarks')}
         layout={{
@@ -72,6 +75,7 @@ function LandmarkMapLayers({ visible, data }: VisibleOverlayMapLayersProps) {
       />
       <Layer
         id="landmarks-labels"
+        filter={filter}
         type="symbol"
         minzoom={labelMinZoom('landmarks')}
         layout={{
@@ -172,6 +176,7 @@ const SUBSURFACE_ICON_LAYERS: ReadonlyArray<{
 interface SubsurfaceStationMapLayersProps {
   visible: boolean;
   stationTypes: MapDisplayPreferences['stationTypes'];
+  filter?: ExpressionSpecification;
   data?: GeoJSON.FeatureCollection;
   iconsLoaded: boolean;
   iconAvailability: OverlayIconAvailability;
@@ -180,6 +185,7 @@ interface SubsurfaceStationMapLayersProps {
 function SubsurfaceStationMapLayers({
   visible,
   stationTypes,
+  filter,
   data,
   iconsLoaded,
   iconAvailability,
@@ -191,12 +197,12 @@ function SubsurfaceStationMapLayers({
       <Layer
         id="subsurface-stations-circles"
         type="circle"
-        filter={[
+        filter={['all', ...(filter ? [filter] : []), [
           'any',
           ['!', ['has', 'type']],
           ['==', ['get', 'type'], null],
           ['==', ['get', 'type'], 'sensor'],
-        ]}
+        ]]}
         minzoom={markerMinZoom('subsurfaceStations')}
         layout={{ visibility: visible && stationTypes.sensor ? 'visible' : 'none' }}
         paint={{
@@ -213,7 +219,7 @@ function SubsurfaceStationMapLayers({
             key={layerId}
             id={layerId}
             type="symbol"
-            filter={['==', ['get', 'type'], stationType]}
+            filter={['all', ...(filter ? [filter] : []), ['==', ['get', 'type'], stationType]]}
             minzoom={markerMinZoom('subsurfaceStations')}
             layout={{
               visibility: visible && stationTypes[stationType] ? 'visible' : 'none',
@@ -230,13 +236,13 @@ function SubsurfaceStationMapLayers({
         id="subsurface-stations-labels"
         type="symbol"
         minzoom={labelMinZoom('subsurfaceStations')}
-        filter={[
+        filter={['all', ...(filter ? [filter] : []), [
           'in',
           ['coalesce', ['get', 'type'], 'sensor'],
           ['literal', Object.keys(stationTypes).filter(
             (type) => stationTypes[type as keyof typeof stationTypes],
           )],
-        ]}
+        ]]}
         layout={{
           visibility: visible ? 'visible' : 'none',
           'text-field': ['get', 'name'],
@@ -259,12 +265,14 @@ function SubsurfaceStationMapLayers({
 
 interface IconFallbackMapLayerProps {
   visible: boolean;
+  filter?: ExpressionSpecification;
   data?: GeoJSON.FeatureCollection;
   iconsLoaded: boolean;
   iconAvailable: boolean;
 }
 
 function ExplorationLeadMapLayers({
+  filter,
   visible,
   data,
   iconsLoaded,
@@ -277,6 +285,7 @@ function ExplorationLeadMapLayers({
       {iconsLoaded && iconAvailable && (
         <Layer
           id="exploration-leads-icon-layer"
+        filter={filter}
           type="symbol"
           minzoom={markerMinZoom('explorationLeads')}
           layout={{
@@ -292,6 +301,7 @@ function ExplorationLeadMapLayers({
       {iconsLoaded && !iconAvailable && (
         <Layer
           id="exploration-leads-fallback-layer"
+        filter={filter}
           type="circle"
           minzoom={markerMinZoom('explorationLeads')}
           layout={{ visibility: visible ? 'visible' : 'none' }}
@@ -309,6 +319,7 @@ function ExplorationLeadMapLayers({
 }
 
 function CylinderInstallMapLayers({
+  filter,
   visible,
   data,
   iconsLoaded,
@@ -321,6 +332,7 @@ function CylinderInstallMapLayers({
       {iconsLoaded && iconAvailable && (
         <Layer
           id="cylinder-installs-icon-layer"
+        filter={filter}
           type="symbol"
           minzoom={markerMinZoom('cylinderInstalls')}
           layout={{
@@ -336,6 +348,7 @@ function CylinderInstallMapLayers({
       {iconsLoaded && !iconAvailable && (
         <Layer
           id="cylinder-installs-fallback-layer"
+        filter={filter}
           type="symbol"
           minzoom={markerMinZoom('cylinderInstalls')}
           layout={{
@@ -355,6 +368,7 @@ function CylinderInstallMapLayers({
       )}
       <Layer
         id="cylinder-installs-labels"
+        filter={filter}
         type="symbol"
         minzoom={labelMinZoom('cylinderInstalls')}
         layout={{
@@ -388,6 +402,8 @@ export interface OverlayMapLayersProps {
   visibleOverlayGeoJsonData: MapOverlayGeoJsonRecord;
   visibleLandmarksGeoJSON?: GeoJSON.FeatureCollection;
   mapDisplayPreferences: MapDisplayPreferences;
+  activeProjectIds?: ReadonlySet<string>;
+  collectionVisibility?: Readonly<Record<string, boolean>>;
   iconsLoaded: boolean;
   iconAvailability: OverlayIconAvailability;
 }
@@ -395,13 +411,15 @@ export interface OverlayMapLayersProps {
 export function OverlayMapLayers({
   visibleOverlayGeoJsonData,
   visibleLandmarksGeoJSON,
+  activeProjectIds,
+  collectionVisibility = {},
   mapDisplayPreferences,
   iconsLoaded,
   iconAvailability,
 }: OverlayMapLayersProps) {
   return (
     <>
-      <LandmarkMapLayers visible={mapDisplayPreferences.categories.landmarks} data={visibleLandmarksGeoJSON} />
+      <LandmarkMapLayers visible={mapDisplayPreferences.categories.landmarks} data={visibleLandmarksGeoJSON} filter={landmarkCollectionsFilter(collectionVisibility)} />
       <SurfaceStationMapLayers
         visible={mapDisplayPreferences.categories.surfaceStations}
         data={visibleOverlayGeoJsonData.surfaceStations}
@@ -409,6 +427,7 @@ export function OverlayMapLayers({
       <SubsurfaceStationMapLayers
         visible={mapDisplayPreferences.categories.surveyStations}
         stationTypes={mapDisplayPreferences.stationTypes}
+        filter={activeProjectIds && visibleIdsFilter(activeProjectIds, 'project')}
         data={visibleOverlayGeoJsonData.subsurfaceStations}
         iconsLoaded={iconsLoaded}
         iconAvailability={iconAvailability}
@@ -416,12 +435,14 @@ export function OverlayMapLayers({
       <ExplorationLeadMapLayers
         visible={mapDisplayPreferences.categories.explorationLeads}
         data={visibleOverlayGeoJsonData.explorationLeads}
+        filter={activeProjectIds && visibleIdsFilter(activeProjectIds, 'project')}
         iconsLoaded={iconsLoaded}
         iconAvailable={iconAvailability['exploration-lead-icon']}
       />
       <CylinderInstallMapLayers
         visible={mapDisplayPreferences.categories.cylinders}
         data={visibleOverlayGeoJsonData.cylinderInstalls}
+        filter={activeProjectIds && visibleIdsFilter(activeProjectIds, 'project_id')}
         iconsLoaded={iconsLoaded}
         iconAvailable={iconAvailability['cylinder-icon']}
       />

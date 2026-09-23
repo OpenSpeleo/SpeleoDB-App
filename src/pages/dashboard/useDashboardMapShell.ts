@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useState } from 'react';
 import type { RefObject } from 'react';
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
 import type { Map as MaplibreMap } from 'maplibre-gl';
@@ -12,6 +12,7 @@ import {
 } from '../../services/PreferencesService';
 import type { MapLayerId } from '../../types/mapLayer';
 import type { UserMapLocation } from '../../types/userLocation';
+import { scheduleViewerUpdate } from '../../utils/scheduleViewerUpdate';
 import {
   DEFAULT_OVERLAY_ICON_AVAILABILITY,
   OVERLAY_ICON_SOURCES,
@@ -62,15 +63,21 @@ export interface DashboardMapShellOptions {
 function useMapStyle(
   selectedMapLayerId: MapLayerId,
   dependencies: DashboardMapShellDependencies,
+  runtimeActive: boolean,
 ) {
   const [mapStyle, setMapStyle] = useState<Record<string, unknown> | null>(null);
-  useEffect(() => {
+  const [resolved, setResolved] = useState<{ layerId: MapLayerId; style: Record<string, unknown> } | null>(null);
+  useLayoutEffect(() => {
     let cancelled = false;
     void dependencies.getLayerStyle(selectedMapLayerId).then((style) => {
-      if (!cancelled) setMapStyle(style);
-    }).catch(dependencies.reportStyleError);
+      if (!cancelled) setResolved({ layerId: selectedMapLayerId, style });
+    }).catch(error => { if (!cancelled) dependencies.reportStyleError(error); });
     return () => { cancelled = true; };
   }, [dependencies, selectedMapLayerId]);
+  useLayoutEffect(() => {
+    if (!runtimeActive || resolved?.layerId !== selectedMapLayerId || resolved.style === mapStyle) return;
+    return scheduleViewerUpdate(() => setMapStyle(resolved.style));
+  }, [mapStyle, resolved, runtimeActive, selectedMapLayerId]);
   return mapStyle;
 }
 
@@ -123,7 +130,7 @@ export function useDashboardMapShell({
     zoom: MAP.DEFAULT_ZOOM,
     latitude: MAP.DEFAULT_CENTER[1],
   }));
-  const mapStyle = useMapStyle(selectedMapLayerId, dependencies);
+  const mapStyle = useMapStyle(selectedMapLayerId, dependencies, runtimeActive);
   const icons = useMapIcons(mapRef, dependencies);
   const location = useMapLocation(mapRef, runtimeActive, dependencies);
 

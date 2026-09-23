@@ -9,7 +9,7 @@ import type {
   RecordedPoint,
   RemoteGpsTrack,
 } from '../types/gpsTrack';
-import { gpsTrackGeoJsonToPoints } from '../utils/gpsTrackGeoJson';
+import { gpsTrackGeoJsonToPointsAsync } from '../utils/gpsTrackGeoJson';
 import { normalizeHexColor } from '../utils/gpsTrackColors';
 import { summarizeTrack } from '../utils/gpsTrackStats';
 import { normalizeGeoJSON } from '../utils/normalizeGeoJSON';
@@ -55,6 +55,8 @@ export class GpsTrackCoordinator {
   private remoteTracks: RemoteGpsTrack[] = [];
   private trackSnapshot: GpsTrackListItem[] = [];
   private _revision = 0;
+  private geometrySequence = 0;
+  private readonly localGeometryRevisions = new WeakMap<RecordedPoint[], string>();
   private loadGeneration = 0;
   private persistGeneration = 0;
   private persistQueue: Promise<void> | null = null;
@@ -276,20 +278,18 @@ export class GpsTrackCoordinator {
     if (local) return [...local.points];
     const geojson = await this.getGeoJSON(id, signal);
     throwIfAborted(signal);
-    return geojson ? gpsTrackGeoJsonToPoints(geojson) : [];
+    return geojson ? gpsTrackGeoJsonToPointsAsync(geojson, signal) : [];
   }
 
   async getGeoJSON(id: string, signal?: AbortSignal): Promise<GeoJSON.FeatureCollection | null> {
     throwIfAborted(signal);
     if (this.localTrack(id)) return null;
     const remote = this.remoteTracks.find((track) => track.id === id);
-    const cached = await this.dependencies.cache.getGpsTrackGeoJSON(
-      id,
-      ...signalOptions(signal),
-    );
+    if (!remote) return null;
+    const cached = await this.getCachedGeometryRecord(id, signal);
     throwIfAborted(signal);
-    if (cached) {
-      const normalizedCache = normalizeGeoJSON(cached);
+    if (cached && (!remote.sha256 || !cached.sha256 || cached.sha256 === remote.sha256)) {
+      const normalizedCache = normalizeGeoJSON(cached.geojson);
       if (normalizedCache) return normalizedCache;
     }
     if (!remote?.fileUrl || !this.dependencies.hasNetworkAccess()) return null;
@@ -301,7 +301,7 @@ export class GpsTrackCoordinator {
       throwIfAborted(signal);
       if (!isSuccessfulStatus(response.status)) return null;
       const normalized = normalizeGeoJSON(response.data);
-      if (!normalized) return null;
+      if (!normalized || !this.remoteTracks.some(track => track.id === id && track.sha256 === remote.sha256)) return null;
       await this.dependencies.cache.setGpsTrackGeoJSON(
         id,
         normalized,
@@ -455,6 +455,11 @@ export class GpsTrackCoordinator {
   private buildSnapshot(): GpsTrackListItem[] {
     const pending = this.dependencies.mutations.gpsPendingBySubject();
     const items = this.localTracks.map((track): GpsTrackListItem => {
+      let geometryRevision = this.localGeometryRevisions.get(track.points);
+      if (!geometryRevision) {
+        geometryRevision = `local:${++this.geometrySequence}`;
+        this.localGeometryRevisions.set(track.points, geometryRevision);
+      }
       const summary = summarizeTrack(track.points);
       const state = pending.get(track.id);
       return {
@@ -462,6 +467,7 @@ export class GpsTrackCoordinator {
         name: track.name,
         color: normalizeHexColor(track.color),
         origin: 'local',
+        geometryRevision,
         createdAt: track.createdAt,
         updatedAt: track.updatedAt,
         pointCount: summary.pointCount,
@@ -479,6 +485,7 @@ export class GpsTrackCoordinator {
         name: track.name,
         color: track.color,
         origin: 'remote',
+        geometryRevision: `remote:${track.sha256 || track.fileUrl}`,
         createdAt: track.createdAt,
         updatedAt: track.updatedAt,
         pending: state?.state,

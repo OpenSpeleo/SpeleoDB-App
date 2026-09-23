@@ -58,6 +58,7 @@ export function useDepthProbe(
   geoJsonData: Record<string, GeoJSON.FeatureCollection>,
   projectGeometryLayerIds: string[],
   depthLimitFeet: number | null = null,
+  preparedDomains?: Record<string, DepthDomain | null>,
 ): UseDepthProbeResult {
   // A sample belongs to the exact source revision and eligible layers that were
   // queried. Hiding/reloading a project or leaving depth mode invalidates it;
@@ -73,12 +74,13 @@ export function useDepthProbe(
   // Stage A: per-project domain cache — recomputes only when geoJsonData
   // changes (sync/reload), not on every project toggle.
   const projectDepthDomains = useMemo(() => {
+    if (preparedDomains) return preparedDomains;
     const domains: Record<string, DepthDomain | null> = {};
     for (const [projectId, fc] of Object.entries(geoJsonData)) {
       domains[projectId] = computeDepthDomain([fc]);
     }
     return domains;
-  }, [geoJsonData]);
+  }, [geoJsonData, preparedDomains]);
 
   // Stage B: merge cached domains for visible projects — O(projects) per toggle.
   const measuredDepthDomain = useMemo(() => {

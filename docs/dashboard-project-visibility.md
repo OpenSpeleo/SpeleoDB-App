@@ -68,3 +68,10 @@ collaborator defaults, haptic failure, scheduled zoom, missing bounds, and map
 unmount. The module has 100% statement, branch, function, and line coverage.
 `Dashboard.test.tsx` remains the integration characterization seam for project
 data loading, quarantine, panel wiring, overlay visibility, and bounds fitting.
+
+## Deferred viewer application
+
+Controls update intent immediately; map display applies the latest intent after
+a paint opportunity. See
+[Responsive viewer updates](viewer-update-scheduling.md) for scheduling, source
+retention, persistence and cancellation contracts.

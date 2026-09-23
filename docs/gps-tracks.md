@@ -695,3 +695,10 @@ left the recorder sitting at "Recording - 0 pts" forever with no feedback.
    `docs/coding-rules.md`).
 6. Update this document when behavior changes; run the targeted tests above plus
    `npm run build`.
+
+## Deferred viewer application
+
+Controls update intent immediately; map display applies the latest intent after
+a paint opportunity. See
+[Responsive viewer updates](viewer-update-scheduling.md) for scheduling, source
+retention, persistence and cancellation contracts.

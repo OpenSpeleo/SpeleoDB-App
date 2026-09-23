@@ -9,7 +9,9 @@ import { EMPTY_DOWNLOAD_AREAS } from '../types/downloadArea';
  * can be toggled on/off via the ProjectPanel.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAppliedViewerState } from '../hooks/useAppliedViewerState';
+import { useAppForeground } from '../hooks/useAppForeground';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import {
   IonPage,
@@ -42,7 +44,6 @@ import { useDashboardLandmarkActions } from './dashboard/useDashboardLandmarkAct
 import { useDashboardProjectVisibility } from './dashboard/useDashboardProjectVisibility';
 import {
   useDashboardMapData,
-  useVisibleDashboardOverlays,
 } from './dashboard/useDashboardMapData';
 import { DashboardMapCanvas } from './dashboard/DashboardMapCanvas';
 import {
@@ -82,6 +83,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   layerOfflineSync,
 }) => {
   const downloadAreas = useDownloadAreas();
+  const foreground = useAppForeground();
+  const runtimeActive = isActive && foreground;
   const offlineMapsOpen = isActive && activeDashboardPanel === 'offline-maps';
   const [editingArea, setEditingArea] = useState(false);
   const effectiveLayerSync = useMemo(() => ({ ...layerOfflineSync, ...Object.fromEntries(downloadAreas.availableLayerIds.map((id) => [id, true])) }), [layerOfflineSync, downloadAreas.availableLayerIds]);
@@ -128,6 +131,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     geoJsonProjects,
     geoJsonData,
     projectBounds,
+    projectDepthDomains,
     overlayGeoJsonData,
     landmarkCollectionGroups,
   } = useDashboardMapData({
@@ -152,6 +156,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     toggleCountry: handleToggleCountry,
     toggleCountryCollapsed: handleToggleCountryCollapsed,
     zoomToProject: handleZoomToProject,
+    cancelPendingZoom: cancelProjectZoom,
   } = useDashboardProjectVisibility({
     projects: sortedProjects,
     eligibleProjects: geoJsonProjects,
@@ -159,11 +164,16 @@ const Dashboard: React.FC<DashboardProps> = ({
     projectBounds,
     mapRef,
     onClosePanel: closeProjectPanel,
+    cameraActive: runtimeActive && (activeDashboardPanel === null || activeDashboardPanel === 'projects'),
   });
-  const visibleOverlayGeoJsonData = useVisibleDashboardOverlays(
-    overlayGeoJsonData,
-    effectiveActiveProjectIds,
-  );
+  const displayIntent = useMemo(() => ({
+    activeProjectIds: effectiveActiveProjectIds, mapDisplayPreferences, colorMode, measurementUnit,
+  }), [effectiveActiveProjectIds, mapDisplayPreferences, colorMode, measurementUnit]);
+  const appliedDisplay = useAppliedViewerState(displayIntent, runtimeActive);
+  // Authoritative data removal/revision gating remains immediate; only display intent lags.
+  const appliedProjectIds = useMemo(() => new Set([...appliedDisplay.activeProjectIds]
+    .filter(id => Boolean(geoJsonData[id]))), [appliedDisplay.activeProjectIds, geoJsonData]);
+  const visibleOverlayGeoJsonData = overlayGeoJsonData;
 
   // ---- Auto-fit bounds on first data load -----------------------------------
 
@@ -181,17 +191,20 @@ const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     fitInitialProjectBounds();
   }, [fitInitialProjectBounds]);
+  const fitInitialProjectBoundsRef = useRef(fitInitialProjectBounds);
+  useLayoutEffect(() => { fitInitialProjectBoundsRef.current = fitInitialProjectBounds; }, [fitInitialProjectBounds]);
+  const handleMapReady = useCallback(() => fitInitialProjectBoundsRef.current(), []);
 
   // ---- Handlers -------------------------------------------------------------
 
   const projectGeometryLayerIds = useMemo(
     () =>
-      [...effectiveActiveProjectIds].flatMap((id) => [
-        ...(mapDisplayPreferences.categories.caveEntrances ? [`project-${id}-point`] : []),
+      [...appliedProjectIds].flatMap((id) => [
+        ...(appliedDisplay.mapDisplayPreferences.categories.caveEntrances ? [`project-${id}-point`] : []),
         `project-${id}-line`,
         `project-${id}-fill`,
       ]),
-    [effectiveActiveProjectIds, mapDisplayPreferences.categories.caveEntrances],
+    [appliedProjectIds, appliedDisplay.mapDisplayPreferences.categories.caveEntrances],
   );
 
   const {
@@ -203,11 +216,12 @@ const Dashboard: React.FC<DashboardProps> = ({
     handleMapMouseLeave,
   } = useDepthProbe(
     mapRef,
-    colorMode,
-    effectiveActiveProjectIds,
+    appliedDisplay.colorMode,
+    appliedProjectIds,
     geoJsonData,
     projectGeometryLayerIds,
-    mapDisplayPreferences.depthLimitFeet,
+    appliedDisplay.mapDisplayPreferences.depthLimitFeet,
+    projectDepthDomains,
   );
 
   const {
@@ -220,7 +234,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     handleMapGestureEnd,
   } = useDashboardMapInteractions({
     mapRef,
-    activeProjectIds: effectiveActiveProjectIds,
+    activeProjectIds: appliedProjectIds,
     projects: sortedProjects,
     clearProbedDepth,
     sampleDepthAtClientPoint,
@@ -282,6 +296,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   );
   const {
     trackVisibility: gpsTrackVisibility,
+    appliedTrackVisibility,
     loadingTrackIds,
     savedTrackFeatureCollection,
     uploadTarget,
@@ -297,6 +312,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     shareTrack: handleShareTrack,
     toggleTrack: handleToggleGpsTrack,
     zoomToTrack: handleZoomToTrack,
+    cancelPendingZoom: cancelGpsZoom,
     openUpload: handleUploadTrack,
     cancelUpload: handleCancelUploadTrack,
     confirmUpload: handleConfirmUploadTrack,
@@ -309,6 +325,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   } = useDashboardGpsTrackActions({
     controller,
     tracks: gpsTracks,
+    panelActive: isActive && activeDashboardPanel === 'gps',
+    runtimeActive,
     mapRef,
     onClosePanel: closeGpsPanel,
     showToast: showLandmarkToast,
@@ -360,11 +378,46 @@ const Dashboard: React.FC<DashboardProps> = ({
     snapshot: gisGeometrySnapshot,
     mapRef,
     panelActive: isActive && activeDashboardPanel === 'gis-geometries',
+    runtimeActive,
     onClosePanel: closeGisPanel,
   });
   const refreshGisGeometries = useCallback(() => {
     void controller.refreshGisGeometries().catch(() => {});
   }, [controller]);
+
+  const appliedCollectionVisibility = useAppliedViewerState(landmarkCollectionVisibility, runtimeActive);
+  const projectLayers = useMemo(() => ({
+    projects: sortedProjects, activeProjectIds: appliedProjectIds, geoJsonData, projectColorsById,
+    colorMode: appliedDisplay.colorMode, depthDomain,
+    showCaveEntrances: appliedDisplay.mapDisplayPreferences.categories.caveEntrances,
+    runtimeActive,
+  }), [sortedProjects, appliedProjectIds, geoJsonData, projectColorsById, appliedDisplay, depthDomain, runtimeActive]);
+  const overlayLayers = useMemo(() => ({
+    visibleOverlayGeoJsonData, visibleLandmarksGeoJSON,
+    mapDisplayPreferences: appliedDisplay.mapDisplayPreferences,
+    activeProjectIds: appliedProjectIds, collectionVisibility: appliedCollectionVisibility,
+  }), [visibleOverlayGeoJsonData, visibleLandmarksGeoJSON, appliedDisplay, appliedProjectIds, appliedCollectionVisibility]);
+  const gpsTrackColors = useMemo(() => Object.fromEntries(gpsTracks.map(track => [track.id, track.color])), [gpsTracks]);
+  const appliedGpsTrackColors = useAppliedViewerState(gpsTrackColors, runtimeActive);
+  const gpsLayers = useMemo(() => ({
+    savedTrackFeatureCollection, savedTrackVisibility: appliedTrackVisibility, savedTrackColors: appliedGpsTrackColors,
+    currentTrackFeatureCollection, recordingState: gpsRecordingState,
+  }), [savedTrackFeatureCollection, appliedTrackVisibility, appliedGpsTrackColors, currentTrackFeatureCollection, gpsRecordingState]);
+  const gisLayers = useMemo(() => ({
+    featureCollection: gisActions.featureCollection, visibility: gisActions.appliedVisibility,
+  }), [gisActions.featureCollection, gisActions.appliedVisibility]);
+  const cancelGisZoom = gisActions.cancelPendingZoom;
+  const handleUserNavigation = useCallback(() => {
+    didFitRef.current = true;
+    cancelProjectZoom();
+    cancelGpsZoom();
+    cancelGisZoom();
+  }, [cancelProjectZoom, cancelGpsZoom, cancelGisZoom]);
+  const gestures = useMemo(() => ({
+    onStart: handleMapGestureStart, onMove: handleMapGestureMove, onEnd: handleMapGestureEnd,
+    onMouseMove: handleMapMouseMove, onMouseLeave: handleMapMouseLeave,
+  }), [handleMapGestureStart, handleMapGestureMove, handleMapGestureEnd, handleMapMouseMove, handleMapMouseLeave]);
+  const openOfflineMaps = useCallback(() => onDashboardPanelChange('offline-maps'), [onDashboardPanelChange]);
 
   // ---- Render ---------------------------------------------------------------
 
@@ -378,46 +431,26 @@ const Dashboard: React.FC<DashboardProps> = ({
           <DashboardMapCanvas
             mapRef={mapRef}
             isActive={isActive}
+            runtimeActive={runtimeActive}
             selectedMapLayerId={selectedMapLayerId}
             onSelectedMapLayerIdChange={onSelectedMapLayerIdChange}
             isOfflineLocked={isOfflineLocked}
             layerOfflineSync={effectiveLayerSync}
             downloadAreas={offlineMapsOpen ? downloadAreas.areas : EMPTY_DOWNLOAD_AREAS.areas}
             editingArea={editingArea}
-            onOpenOfflineMaps={() => onDashboardPanelChange('offline-maps')}
-            gisLayers={{ featureCollection: gisActions.featureCollection }}
-            projectLayers={{
-              projects: sortedProjects,
-              activeProjectIds: effectiveActiveProjectIds,
-              geoJsonData,
-              projectColorsById,
-              colorMode,
-              depthDomain,
-              showCaveEntrances: mapDisplayPreferences.categories.caveEntrances,
-            }}
-            overlayLayers={{
-              visibleOverlayGeoJsonData,
-              visibleLandmarksGeoJSON,
-              mapDisplayPreferences,
-            }}
-            gpsLayers={{
-              savedTrackFeatureCollection,
-              currentTrackFeatureCollection,
-              recordingState: gpsRecordingState,
-            }}
+            onOpenOfflineMaps={openOfflineMaps}
+            gisLayers={gisLayers}
+            projectLayers={projectLayers}
+            overlayLayers={overlayLayers}
+            gpsLayers={gpsLayers}
             recordingLocation={currentRecordingLocation}
-            gestures={{
-              onStart: handleMapGestureStart,
-              onMove: handleMapGestureMove,
-              onEnd: handleMapGestureEnd,
-              onMouseMove: handleMapMouseMove,
-              onMouseLeave: handleMapMouseLeave,
-            }}
-            colorMode={colorMode}
-            measurementUnit={measurementUnit}
+            gestures={gestures}
+            onUserNavigation={handleUserNavigation}
+            colorMode={appliedDisplay.colorMode}
+            measurementUnit={appliedDisplay.measurementUnit}
             probedDepth={probedDepth}
-            depthLimitFeet={mapDisplayPreferences.depthLimitFeet}
-            onMapReady={fitInitialProjectBounds}
+            depthLimitFeet={appliedDisplay.mapDisplayPreferences.depthLimitFeet}
+            onMapReady={handleMapReady}
           />
 
           {offlineMapsOpen && <OfflineMapsPanel controller={controller} snapshot={downloadAreas} mapRef={mapRef} offline={isOfflineLocked} onClose={() => onDashboardPanelChange(null)} onEditingChange={setEditingArea} />}

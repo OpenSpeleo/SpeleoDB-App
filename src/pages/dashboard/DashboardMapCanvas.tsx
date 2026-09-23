@@ -1,7 +1,7 @@
 import { DownloadAreaMapLayers } from './DownloadAreaMapLayers';
 import { GisGeometryMapLayers, type GisGeometryMapLayersProps } from './GisGeometryMapLayers';
 import type { DownloadArea } from '../../types/downloadArea';
-import { useCallback, useState, type PointerEventHandler, type RefObject } from 'react';
+import { memo, useCallback, useState, type PointerEventHandler, type RefObject } from 'react';
 import type { StyleSpecification } from 'maplibre-gl';
 import Map from 'react-map-gl/maplibre';
 import type { MapLayerMouseEvent, MapRef } from 'react-map-gl/maplibre';
@@ -13,7 +13,6 @@ import { UserLocationIndicator } from '../../components/map/UserLocationIndicato
 import { MapCompass } from '../../components/map/MapCompass';
 import { MapControlLayout } from '../../components/map/MapControlLayout';
 import GeolocationErrorModal from '../../components/GeolocationErrorModal';
-import { useAppForeground } from '../../hooks/useAppForeground';
 import type { MapColorMode } from '../../types/mapColorMode';
 import type { MapLayerId } from '../../types/mapLayer';
 import type { MeasurementUnit } from '../../types/measurementUnit';
@@ -50,12 +49,14 @@ interface DashboardMapCanvasProps {
   gpsLayers: GpsMapLayersProps;
   recordingLocation: UserMapLocation | null;
   isActive: boolean;
+  runtimeActive?: boolean;
   gestures: DashboardMapGestures;
   colorMode: MapColorMode;
   measurementUnit: MeasurementUnit;
   probedDepth: number | null;
   depthLimitFeet?: number | null;
   onMapReady?: () => void;
+  onUserNavigation?: () => void;
   dependencies?: DashboardMapShellDependencies;
 }
 
@@ -77,6 +78,7 @@ interface MapViewportProps {
   iconAvailability: OverlayMapLayersProps['iconAvailability'];
   gestures: DashboardMapGestures;
   onLoad: () => void;
+  onMoveStart: NonNullable<React.ComponentProps<typeof Map>['onMoveStart']>;
   onMove: (event: Parameters<NonNullable<React.ComponentProps<typeof Map>['onMove']>>[0]) => void;
 }
 
@@ -98,6 +100,7 @@ function MapViewport({
   iconAvailability,
   gestures,
   onLoad,
+  onMoveStart,
   onMove,
 }: MapViewportProps) {
   if (!mapStyle) return null;
@@ -118,6 +121,7 @@ function MapViewport({
       mapStyle={mapStyle as StyleSpecification}
       attributionControl={{ compact: true }}
       onLoad={onLoad}
+      onMoveStart={onMoveStart}
       onMove={onMove}
       onMouseMove={gestures.onMouseMove}
       onMouseLeave={gestures.onMouseLeave}
@@ -137,6 +141,8 @@ function MapViewport({
     </Map>
   );
 }
+
+const MemoMapViewport = memo(MapViewport);
 
 function MyLocationButton({
   isLocating,
@@ -228,7 +234,7 @@ function MapChrome({
   );
 }
 
-export function DashboardMapCanvas({
+export const DashboardMapCanvas = memo(function DashboardMapCanvas({
   downloadAreas,
   editingArea = false,
   onOpenOfflineMaps,
@@ -243,17 +249,17 @@ export function DashboardMapCanvas({
   gpsLayers,
   recordingLocation,
   isActive,
+  runtimeActive = isActive,
   gestures,
   colorMode,
   measurementUnit,
   probedDepth,
   depthLimitFeet = null,
   onMapReady,
+  onUserNavigation,
   dependencies,
 }: DashboardMapCanvasProps) {
   const [compassVisible, setCompassVisible] = useState(false);
-  const appForeground = useAppForeground();
-  const runtimeActive = isActive && appForeground;
   const shell = useDashboardMapShell({
     mapRef,
     selectedMapLayerId,
@@ -270,6 +276,14 @@ export function DashboardMapCanvas({
     handleShellMapLoad();
     onMapReady?.();
   }, [handleShellMapLoad, onMapReady]);
+  const handleMoveStart = useCallback<NonNullable<React.ComponentProps<typeof Map>['onMoveStart']>>((event) => {
+    if (event.originalEvent) onUserNavigation?.();
+  }, [onUserNavigation]);
+  const toggleLocationMode = shell.toggleLocationMode;
+  const handleLocate = useCallback(() => {
+    onUserNavigation?.();
+    toggleLocationMode();
+  }, [onUserNavigation, toggleLocationMode]);
   return (
     <>
       <div
@@ -279,7 +293,7 @@ export function DashboardMapCanvas({
         onPointerUpCapture={editingArea ? undefined : gestures.onEnd}
         onPointerCancelCapture={editingArea ? undefined : gestures.onEnd}
       >
-        <MapViewport
+        <MemoMapViewport
           downloadAreas={downloadAreas}
           mapRef={mapRef}
           mapStyle={shell.mapStyle}
@@ -297,6 +311,7 @@ export function DashboardMapCanvas({
           iconAvailability={shell.overlayIconAvailability}
           gestures={gestures}
           onLoad={handleMapLoad}
+          onMoveStart={handleMoveStart}
           onMove={shell.handleMapMove}
         />
         <div className="absolute bottom-2 left-2 z-10 dashboard-map-distance-scale">
@@ -327,7 +342,7 @@ export function DashboardMapCanvas({
         onSelectLayer={shell.selectMapLayer}
         isLocating={shell.isLocating}
         isLocationModeActive={shell.locationModeActive}
-        onLocate={shell.toggleLocationMode}
+        onLocate={handleLocate}
         onOpenOfflineMaps={onOpenOfflineMaps}
         compassVisible={compassVisible}
         onToggleCompass={() => setCompassVisible((visible) => !visible)}
@@ -344,4 +359,4 @@ export function DashboardMapCanvas({
       )}
     </>
   );
-}
+});

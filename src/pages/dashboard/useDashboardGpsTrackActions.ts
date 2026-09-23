@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { MapRef } from 'react-map-gl/maplibre';
 import type { SpeleoDBController } from '../../controllers/SpeleoDBController';
@@ -11,7 +11,10 @@ import type { GpsTrackListItem, RecordedPoint } from '../../types/gpsTrack';
 import { errorToLogDetails } from '../../utils/errorDiagnostics';
 import { trackPointsToLineStringFeature } from '../../utils/gpsTrackGeoJson';
 import { useMountedRef } from '../../hooks/useMountedRef';
-import { boundsFromPoints } from './dashboardMapUtils';
+import { prepareGpsTrack, type PreparedGpsTrack } from '../../utils/prepareGpsTrack';
+import { scheduleViewerUpdate } from '../../utils/scheduleViewerUpdate';
+import { yieldToMainThread } from '../../utils/yieldToMainThread';
+import { useAppliedViewerState } from '../../hooks/useAppliedViewerState';
 import { zoomToMapBounds } from '../../utils/mapCamera';
 
 type TrackController = Pick<
@@ -33,6 +36,8 @@ export interface DashboardGpsTrackActionOptions {
   controller: TrackController;
   tracks: readonly GpsTrackListItem[];
   initialVisibility?: Record<string, boolean>;
+  panelActive?: boolean;
+  runtimeActive?: boolean;
   mapRef: RefObject<MapRef | null>;
   onClosePanel: () => void;
   showToast: Toast;
@@ -43,6 +48,7 @@ export interface DashboardGpsTrackActionOptions {
 
 export interface DashboardGpsTrackActionState {
   trackVisibility: Record<string, boolean>;
+  appliedTrackVisibility: Record<string, boolean>;
   loadingTrackIds: Set<string>;
   savedTrackFeatureCollection: GeoJSON.FeatureCollection;
   uploadTarget: GpsTrackListItem | null;
@@ -58,6 +64,7 @@ export interface DashboardGpsTrackActionState {
   shareTrack: (track: GpsTrackListItem) => void;
   toggleTrack: (track: GpsTrackListItem, visible: boolean) => void;
   zoomToTrack: (track: GpsTrackListItem) => void;
+  cancelPendingZoom: () => void;
   openUpload: (track: GpsTrackListItem) => void;
   cancelUpload: () => void;
   confirmUpload: () => void;
@@ -84,9 +91,9 @@ function removeLoadingTrack(previous: Set<string>, id: string): Set<string> {
 }
 
 function removeTrackPoints(
-  previous: Record<string, RecordedPoint[]>,
+  previous: Record<string, PreparedGpsTrack>,
   id: string,
-): Record<string, RecordedPoint[]> {
+): Record<string, PreparedGpsTrack> {
   if (!(id in previous)) return previous;
   const next = { ...previous };
   delete next[id];
@@ -119,7 +126,7 @@ type ErrorReporter = (
   message: string,
   error: unknown,
 ) => void;
-type TrackPointsSetter = Dispatch<SetStateAction<Record<string, RecordedPoint[]>>>;
+type TrackPointsSetter = Dispatch<SetStateAction<Record<string, PreparedGpsTrack>>>;
 
 function useActionErrorReporter(
   mountedRef: MountedRef,
@@ -161,93 +168,169 @@ function useTrackSharing(
   }, [controller, gpxShareService, reportActionError]);
 }
 
+function geometryRevision(track: GpsTrackListItem): string {
+  return track.geometryRevision ?? `${track.origin}:${track.updatedAt}`;
+}
+
 function useTrackGeometryLoader(
   controller: TrackController,
+  tracks: readonly GpsTrackListItem[],
   mountedRef: MountedRef,
   warn: WarningLogger,
 ) {
-  const [trackPoints, setTrackPoints] = useState<Record<string, RecordedPoint[]>>({});
+  const [trackPoints, setTrackPoints] = useState<Record<string, PreparedGpsTrack>>({});
   const [loadingTrackIds, setLoadingTrackIds] = useState(() => new Set<string>());
-  const loadTrackPoints = useCallback(async (id: string): Promise<RecordedPoint[] | undefined> => {
-    setLoadingTrackIds((previous) => addLoadingTrack(previous, id));
-    try {
-      const points = await controller.getGpsTrackPoints(id);
-      if (mountedRef.current) {
-        setTrackPoints((previous) => ({ ...previous, [id]: points }));
-      }
-      return points;
-    } catch (error) {
-      warn('Failed to load GPS track geometry.', { id, error: errorToLogDetails(error) });
-      return undefined;
-    } finally {
-      if (mountedRef.current) {
-        setLoadingTrackIds((previous) => removeLoadingTrack(previous, id));
-      }
+  const current = useRef({ controller, tracks, trackPoints });
+  const inFlight = useRef(new Map<string, { revision: string; promise: Promise<PreparedGpsTrack | undefined> }>());
+  const failed = useRef(new Map<string, string>());
+  useLayoutEffect(() => {
+    if (current.current.controller !== controller) {
+      inFlight.current.clear();
+      failed.current.clear();
+      setTrackPoints({});
+      setLoadingTrackIds(new Set());
     }
+    current.current = { controller, tracks, trackPoints };
+  }, [controller, tracks, trackPoints]);
+  useEffect(() => {
+    const revisions = new Map(tracks.map(track => [track.id, geometryRevision(track)]));
+    const cancelPrune = scheduleViewerUpdate(() => setTrackPoints(previous => {
+      const entries = Object.entries(previous).filter(([id, value]) => revisions.get(id) === value.revision);
+      return entries.length === Object.keys(previous).length ? previous : Object.fromEntries(entries);
+    }));
+    for (const [id, revision] of failed.current) {
+      if (revisions.get(id) !== revision) failed.current.delete(id);
+    }
+    return cancelPrune;
+  }, [tracks]);
+
+  const loadTrackPoints = useCallback((track: GpsTrackListItem, retry = false): Promise<PreparedGpsTrack | undefined> => {
+    const revision = geometryRevision(track);
+    const isCurrent = () => mountedRef.current && current.current.controller === controller
+      && current.current.tracks.some(item => item.id === track.id && geometryRevision(item) === revision);
+    if (!isCurrent()) return Promise.resolve(undefined);
+    const cached = current.current.trackPoints[track.id];
+    if (cached?.revision === revision && (!retry || cached.feature)) return Promise.resolve(cached);
+    const pending = inFlight.current.get(track.id);
+    if (pending?.revision === revision) return pending.promise;
+    if (!retry && failed.current.get(track.id) === revision) return Promise.resolve(undefined);
+    failed.current.delete(track.id);
+    setLoadingTrackIds(previous => addLoadingTrack(previous, track.id));
+    const request = { revision, promise: Promise.resolve<PreparedGpsTrack | undefined>(undefined) };
+    const promise = (async () => {
+      // Loading feedback and visibility intent can commit before any cache work.
+      try {
+        await yieldToMainThread();
+        if (!isCurrent()) return;
+        const points = await controller.getGpsTrackPoints(track.id);
+        if (!isCurrent()) return;
+        const prepared = await prepareGpsTrack(points, revision, isCurrent);
+        if (prepared && isCurrent()) {
+          setTrackPoints(previous => ({ ...previous, [track.id]: prepared }));
+          return prepared;
+        }
+      } catch (error) {
+        if (isCurrent()) {
+          failed.current.set(track.id, revision);
+          warn('Failed to load GPS track geometry.', { id: track.id, error: errorToLogDetails(error) });
+        }
+      } finally {
+        if (inFlight.current.get(track.id) === request) {
+          inFlight.current.delete(track.id);
+          if (mountedRef.current) setLoadingTrackIds(previous => removeLoadingTrack(previous, track.id));
+        }
+      }
+    })();
+    request.promise = promise;
+    inFlight.current.set(track.id, request);
+    return promise;
   }, [controller, mountedRef, warn]);
-  return { trackPoints, setTrackPoints, loadingTrackIds, loadTrackPoints };
+  const revisionsKey = JSON.stringify(tracks.map(track => [track.id, geometryRevision(track)]));
+  const validTrackPoints = useMemo(() => {
+    const revisions = JSON.parse(revisionsKey) as [string, string][];
+    return Object.fromEntries(revisions.flatMap(([id, revision]) => {
+      const record = trackPoints[id];
+      return record?.revision === revision ? [[id, record]] : [];
+    }));
+  }, [trackPoints, revisionsKey]);
+  return { trackPoints: validTrackPoints, setTrackPoints, loadingTrackIds, loadTrackPoints };
 }
 
 function useTrackVisibilityAndMap(options: {
   tracks: readonly GpsTrackListItem[];
   initialVisibility?: Record<string, boolean>;
+  panelActive: boolean;
+  runtimeActive: boolean;
   mapRef: RefObject<MapRef | null>;
   onClosePanel: () => void;
   writeVisibility: VisibilityWriter;
   mountedRef: MountedRef;
   geometry: ReturnType<typeof useTrackGeometryLoader>;
 }) {
-  const { tracks, initialVisibility, mapRef, onClosePanel, writeVisibility, mountedRef } = options;
-  const { trackPoints, loadingTrackIds, loadTrackPoints } = options.geometry;
+  const { tracks, initialVisibility, panelActive, runtimeActive, mapRef, onClosePanel, writeVisibility, mountedRef } = options;
+  const { trackPoints, loadTrackPoints, loadingTrackIds } = options.geometry;
   const [trackVisibility, setTrackVisibility] = useState(
     () => initialVisibility ?? getGpsTrackVisibilityPreferences(),
   );
+  const appliedTrackVisibility = useAppliedViewerState(trackVisibility, runtimeActive);
+  const visibilityRef = useRef(trackVisibility);
+  const tracksRef = useRef(tracks);
+  useLayoutEffect(() => { tracksRef.current = tracks; }, [tracks]);
+  const zoomRef = useRef<symbol | null>(null);
+  const cancelPendingZoom = useCallback(() => { zoomRef.current = null; }, []);
+  const activeRef = useRef(panelActive && runtimeActive);
+  useLayoutEffect(() => {
+    activeRef.current = panelActive && runtimeActive;
+    if (!activeRef.current) zoomRef.current = null;
+  }, [panelActive, runtimeActive]);
+  const setVisible = useCallback((id: string, visible: boolean) => {
+    const next = { ...visibilityRef.current, [id]: visible };
+    visibilityRef.current = next;
+    setTrackVisibility(next);
+    writeVisibility(id, visible);
+  }, [writeVisibility]);
   const toggleTrack = useCallback((track: GpsTrackListItem, visible: boolean) => {
-    setTrackVisibility((previous) => ({ ...previous, [track.id]: visible }));
-    writeVisibility(track.id, visible);
-    if (visible && !trackPoints[track.id]) void loadTrackPoints(track.id);
-  }, [loadTrackPoints, trackPoints, writeVisibility]);
+    setVisible(track.id, visible);
+    if (!visible) zoomRef.current = null;
+    else void loadTrackPoints(track, true);
+  }, [loadTrackPoints, setVisible]);
 
   const zoomToTrack = useCallback((track: GpsTrackListItem) => {
-    if (trackVisibility[track.id] !== true) {
-      setTrackVisibility((previous) => ({ ...previous, [track.id]: true }));
-      writeVisibility(track.id, true);
-    }
+    if (visibilityRef.current[track.id] !== true) setVisible(track.id, true);
+    const token = Symbol(track.id);
+    zoomRef.current = token;
     void (async () => {
-      const points = trackPoints[track.id] ?? await loadTrackPoints(track.id);
-      if (!mountedRef.current || !points || points.length === 0) return;
-      const bounds = boundsFromPoints(points);
-      if (!bounds || !mapRef.current) return;
-      zoomToMapBounds(mapRef.current, bounds);
+      const record = await loadTrackPoints(track, true);
+      if (!mountedRef.current || !activeRef.current || zoomRef.current !== token
+        || !visibilityRef.current[track.id] || !record?.bounds || !mapRef.current
+        || !tracksRef.current.some(item => item.id === track.id && geometryRevision(item) === record.revision)) return;
+      zoomRef.current = null;
+      zoomToMapBounds(mapRef.current, record.bounds);
       onClosePanel();
     })();
-  }, [loadTrackPoints, mapRef, mountedRef, onClosePanel, trackPoints, trackVisibility, writeVisibility]);
+  }, [loadTrackPoints, mapRef, mountedRef, onClosePanel, setVisible]);
 
   useEffect(() => {
-    const pending = tracks.filter((track) => (
-      trackVisibility[track.id] === true
-      && !trackPoints[track.id]
-      && !loadingTrackIds.has(track.id)
-    )).map((track) => track.id);
-    if (pending.length === 0) return;
+    if (!runtimeActive) return;
     let cancelled = false;
     void (async () => {
-      await Promise.resolve();
-      for (const id of pending) {
+      for (const track of tracks) {
         if (cancelled) return;
-        await loadTrackPoints(id);
+        if (trackVisibility[track.id]) await loadTrackPoints(track);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [loadTrackPoints, loadingTrackIds, trackPoints, trackVisibility, tracks]);
+    return () => { cancelled = true; };
+  }, [loadTrackPoints, runtimeActive, trackVisibility, tracks]);
 
-  const savedTrackFeatureCollection = useMemo(
-    () => buildSavedTrackFeatureCollection(tracks, trackVisibility, trackPoints),
-    [trackPoints, trackVisibility, tracks],
-  );
-  return { trackVisibility, loadingTrackIds, savedTrackFeatureCollection, toggleTrack, zoomToTrack };
+  // Geometry survives display-only toggles. No coordinate conversion occurs in render.
+  const savedTrackFeatureCollection = useMemo<GeoJSON.FeatureCollection>(() => ({
+    type: 'FeatureCollection',
+    features: Object.entries(trackPoints).flatMap(([id, record]) => {
+      const feature = record.feature;
+      return feature ? [{ ...feature, properties: { ...feature.properties, id } }] : [];
+    }),
+  }), [trackPoints]);
+  return { trackVisibility, appliedTrackVisibility, loadingTrackIds, savedTrackFeatureCollection, toggleTrack, zoomToTrack, cancelPendingZoom };
 }
 
 function useTrackUploadActions(
@@ -379,6 +462,8 @@ export function useDashboardGpsTrackActions({
   controller,
   tracks,
   initialVisibility,
+  panelActive = true,
+  runtimeActive = true,
   mapRef,
   onClosePanel,
   showToast,
@@ -390,10 +475,12 @@ export function useDashboardGpsTrackActions({
   const defaultGpxShareService = useMemo(() => new GpxFileService(), []);
   const gpxShareService = injectedGpxShareService ?? defaultGpxShareService;
   const reportActionError = useActionErrorReporter(mountedRef, showToast, warn);
-  const geometry = useTrackGeometryLoader(controller, mountedRef, warn);
+  const geometry = useTrackGeometryLoader(controller, tracks, mountedRef, warn);
   const visibility = useTrackVisibilityAndMap({
     tracks,
     initialVisibility,
+    panelActive,
+    runtimeActive,
     mapRef,
     onClosePanel,
     writeVisibility,

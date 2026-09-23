@@ -3,6 +3,7 @@ import type { MapRef } from 'react-map-gl/maplibre';
 import type { GisGeometryMapRecord, GisGeometrySnapshot, GisGeometryShape } from '../../types/gisGeometry';
 import { clampWebMercatorLatitude } from '../../utils/geographicBounds';
 import { zoomToMapBounds } from '../../utils/mapCamera';
+import { useAppliedViewerState } from '../../hooks/useAppliedViewerState';
 import { useMountedRef } from '../../hooks/useMountedRef';
 
 interface GeometrySource {
@@ -15,33 +16,45 @@ interface Options {
   mapRef: RefObject<MapRef | null>;
   panelActive: boolean;
   onClosePanel(): void;
+  runtimeActive?: boolean;
 }
 interface VisibilityIntent {
   scope: string | null;
   values: Readonly<Record<string, boolean>>;
+  admitted: ReadonlySet<string>;
 }
+const NONE = new Set<string>();
 const HIDDEN: Readonly<Record<string, boolean>> = Object.freeze({});
 const EMPTY_FEATURES: GeoJSON.FeatureCollection<GisGeometryShape> = { type: 'FeatureCollection', features: [] };
 
 /** Display intent is session-only; the coordinator remains the sole geometry owner. */
 export function useDashboardGisGeometryActions({
-  source, snapshot, mapRef, panelActive, onClosePanel,
+  source, snapshot, mapRef, panelActive, onClosePanel, runtimeActive = true,
 }: Options) {
-  const [intent, setIntent] = useState<VisibilityIntent>({ scope: null, values: HIDDEN });
+  const [intent, setIntent] = useState<VisibilityIntent>({ scope: null, values: HIDDEN, admitted: NONE });
   const intentRef = useRef(intent);
   const zoomRef = useRef<{ id: string; token: symbol } | null>(null);
-  const panelActiveRef = useRef(panelActive);
+  const panelActiveRef = useRef(panelActive && runtimeActive);
   const mounted = useMountedRef();
   useLayoutEffect(() => {
-    panelActiveRef.current = panelActive;
-    if (!panelActive) zoomRef.current = null;
-  }, [panelActive]);
+    panelActiveRef.current = panelActive && runtimeActive;
+    if (!panelActiveRef.current) zoomRef.current = null;
+  }, [panelActive, runtimeActive]);
+  const cancelPendingZoom = useCallback(() => { zoomRef.current = null; }, []);
   const visibility = intent.scope === snapshot.scope ? intent.values : HIDDEN;
+  const applied = useAppliedViewerState(intent, runtimeActive);
+  const appliedVisibility = applied.scope === snapshot.scope ? applied.values : HIDDEN;
+  const admitted = applied.scope === snapshot.scope ? applied.admitted : NONE;
 
   const setVisibility = useCallback((updates: Record<string, boolean>) => {
     const scope = source.gisGeometrySnapshot.scope;
     const previous = intentRef.current;
-    const next = { scope, values: { ...(previous.scope === scope ? previous.values : HIDDEN), ...updates } };
+    const previousAdmitted = previous.scope === scope ? previous.admitted : NONE;
+    const added = Object.keys(updates).filter(id => updates[id] && !previousAdmitted.has(id));
+    const next = {
+      scope, values: { ...(previous.scope === scope ? previous.values : HIDDEN), ...updates },
+      admitted: added.length ? new Set([...previousAdmitted, ...added]) : previousAdmitted,
+    };
     intentRef.current = next;
     setIntent(next);
     const selected = zoomRef.current;
@@ -95,16 +108,17 @@ export function useDashboardGisGeometryActions({
   const featureCollection = useMemo<GeoJSON.FeatureCollection<GisGeometryShape>>(() => {
     const features = snapshot.items.flatMap(item => {
       const record = snapshot.records[item.id];
-      if (!visibility[item.id] || !record || record.detail.revision !== item.revision) return [];
-      return [{ ...record.feature, properties: { name: item.name, color: item.color } }];
+      if (!admitted.has(item.id) || !record || record.detail.revision !== item.revision) return [];
+      return [{ ...record.feature, properties: { id: item.id, name: item.name, color: item.color } }];
     });
     // Automatic preparation of hidden records must not repeatedly update the
     // map worker with new, empty GeoJSON objects.
     return features.length ? { type: 'FeatureCollection', features } : EMPTY_FEATURES;
-  }, [snapshot.items, snapshot.records, visibility]);
+  }, [snapshot.items, snapshot.records, admitted]);
   return {
-    visibility, featureCollection, toggle, showAll, hideAll, zoom,
+    visibility, appliedVisibility, featureCollection, toggle, showAll, hideAll, zoom, cancelPendingZoom,
     retry: requestDetail,
-    visibleCount: featureCollection.features.length,
+    visibleCount: snapshot.items.filter(item => visibility[item.id]
+      && snapshot.records[item.id]?.detail.revision === item.revision).length,
   };
 }

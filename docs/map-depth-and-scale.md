@@ -121,10 +121,10 @@ Project line/fill layers support three modes:
 Depth domain (`min`, `max`) is computed from active (visible) project feature
 collections only. When a project is shown or hidden via the project panel, the
 depth domain is recomputed automatically. Per-project depth domains are cached
-at GeoJSON load time and merged in O(projects) on visibility change, so toggling
-is instant regardless of feature count. The depth gauge min/max labels and all
-visible project layer color expressions update immediately to reflect the new
-domain.
+during cancellable GeoJSON preparation and merged in O(projects) when the
+applied visibility changes. Controls reflect intent immediately; after a paint
+opportunity the depth gauge min/max labels and visible project layer color
+expressions update together to reflect the new domain.
 
 ## Optional depth limit
 
@@ -265,3 +265,15 @@ E2E:
 4. Verify settings changes propagate to dashboard immediately.
 5. Run targeted tests for preferences, settings, dashboard, and map utilities.
 6. Update this doc if color ramp, depth keys, or interaction contracts change.
+
+## Deferred viewer application
+
+Controls update intent immediately; map display applies the latest intent after
+a paint opportunity. See
+[Responsive viewer updates](viewer-update-scheduling.md) for scheduling, source
+retention, persistence and cancellation contracts.
+
+The Dashboard passes revision-cached depth domains prepared alongside enriched
+GeoJSON. One large geometry yields within its coordinate traversal, and stale
+preparation cannot publish. Display changes only merge the domains of visible
+projects; they do not derive depths from survey coordinates during React render.

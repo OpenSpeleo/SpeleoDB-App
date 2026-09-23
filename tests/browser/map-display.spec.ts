@@ -327,3 +327,169 @@ test('disclosures and depth errors remain usable on narrow, landscape and tablet
   await page.screenshot({ path: testInfo.outputPath('visibility-320.png') });
   expect(app.errors).toEqual([]);
 });
+
+interface ViewerControlSample {
+  startTime: number;
+  feedbackTime: number;
+  durationMs: number;
+  control: string;
+  checked: boolean;
+  trusted: boolean;
+}
+interface ViewerWorkSample { name: string; startTime: number; durationMs: number }
+
+async function installViewerMeasurements(page: Page) {
+  await page.addInitScript(() => {
+    const samples: ViewerControlSample[] = [];
+    const longTasks: number[] = [];
+    const work: ViewerWorkSample[] = [];
+    Object.assign(window, { viewerControlSamples: samples, viewerLongTasks: longTasks, viewerWork: work });
+    if (PerformanceObserver.supportedEntryTypes.includes('longtask')) {
+      new PerformanceObserver(list => {
+        longTasks.push(...list.getEntries().map(entry => entry.duration));
+      }).observe({ type: 'longtask' });
+    }
+    new PerformanceObserver(list => {
+      work.push(...list.getEntries().filter(entry => entry.name.startsWith('viewer:')).map(entry => ({ name: entry.name, startTime: entry.startTime, durationMs: entry.duration })));
+    }).observe({ type: 'measure' });
+    document.addEventListener('click', event => {
+      const toggle = event.composedPath().find(element => element instanceof HTMLElement && element.tagName === 'ION-TOGGLE') as (HTMLElement & { checked: boolean }) | undefined;
+      if (!toggle) return;
+      const startTime = performance.now();
+      const control = toggle.getAttribute('data-testid') ?? '';
+      const trusted = event.isTrusted;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const feedbackTime = performance.now();
+        samples.push({ startTime, feedbackTime, durationMs: feedbackTime - startTime, control, checked: toggle.checked, trusted });
+      }));
+    }, { capture: true });
+  });
+}
+
+test('large cached surveys keep controls responsive through rapid project and settings changes', async ({ page }, testInfo) => {
+  const dense: GeoJSON.FeatureCollection = {
+    type: 'FeatureCollection',
+    features: Array.from({ length: 12_000 }, (_, index) => ({
+      type: 'Feature' as const, properties: { depth: index % 200 },
+      geometry: { type: 'LineString' as const, coordinates: [
+        [-87.5 + (index % 100) * 0.0001, 20.1 + Math.floor(index / 100) * 0.00001],
+        [-87.5 + (index % 100 + 1) * 0.0001, 20.1 + Math.floor(index / 100) * 0.00001],
+      ] },
+    })),
+  };
+  await installViewerMeasurements(page);
+  const app = await setupMap(page, dense);
+  await expect.poll(async () => (await mapPixels(page)).red).toBeGreaterThan(20);
+  await page.getByRole('tab', { name: 'Projects', exact: true }).tap();
+  const toggle = page.getByTestId(`project-toggle-${survey.id}`);
+  for (let index = 0; index < 6; index++) {
+    await toggle.tap();
+    await expect(toggle).toHaveJSProperty('checked', index % 2 === 1);
+  }
+  await page.getByRole('tab', { name: 'Map', exact: true }).tap();
+  await expect.poll(async () => (await mapPixels(page)).red).toBeGreaterThan(20);
+  expect(app.downloads()).toBe(1);
+  await openSettings(page);
+  await page.getByTestId('map-visibility-summary').tap();
+  const entrance = page.getByRole('switch', { name: 'Cave entrances', exact: true });
+  await entrance.tap();
+  await expect(entrance).not.toBeChecked();
+  await page.getByTestId('color-mode-selector').selectOption('depth');
+  await page.getByTestId('color-mode-selector').selectOption('shot');
+  await page.getByTestId('color-mode-selector').selectOption('project');
+  await page.getByRole('tab', { name: 'Map', exact: true }).tap();
+  await expect.poll(async () => (await mapPixels(page)).red).toBeGreaterThan(20);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { viewerControlSamples: ViewerControlSample[] }).viewerControlSamples.length)).toBe(7);
+  const measurements = await page.evaluate(() => {
+    const state = window as unknown as { viewerControlSamples: ViewerControlSample[]; viewerLongTasks: number[]; viewerWork: ViewerWorkSample[] };
+    const timings = state.viewerControlSamples.map(sample => sample.durationMs).sort((a, b) => a - b);
+    return { samples: state.viewerControlSamples, p95ControlPaintMs: timings[Math.ceil(timings.length * 0.95) - 1], longTasksMs: state.viewerLongTasks, appWork: state.viewerWork };
+  });
+  await testInfo.attach('viewer-responsiveness.json', { body: JSON.stringify({ browser: testInfo.project.name, features: 12_000, ...measurements }, null, 2), contentType: 'application/json' });
+  expect(measurements.samples).toHaveLength(7);
+  expect(measurements.p95ControlPaintMs).toBeLessThanOrEqual(100);
+  expect(measurements.appWork.some(entry => entry.name === 'viewer:project-depth')).toBe(true);
+  expect(Math.max(...measurements.appWork.map(entry => entry.durationMs))).toBeLessThanOrEqual(50);
+  expect(app.errors).toEqual([]);
+});
+
+test('controls accept newer intent while a large survey download finishes', async ({ page }, testInfo) => {
+  await fixture(page);
+  await installViewerMeasurements(page);
+  const headers = { 'access-control-allow-origin': '*' };
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  let requested = false;
+  await page.route('https://offline-maps.test/api/v2/projects/geojson/', route => route.fulfill({ headers, json: [survey] }));
+  await page.route(survey.geojson_file!, async route => {
+    requested = true;
+    await pending;
+    await route.fulfill({ headers, json: { type: 'FeatureCollection', features: [{
+      type: 'Feature', properties: {}, geometry: { type: 'LineString',
+        coordinates: Array.from({ length: 100_000 }, (_, index) => [
+          -87.5 + index / 10_000_000, 20.1 + Math.sin(index / 100) / 1000, index % 200,
+        ]),
+      },
+    }] } });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/dashboard');
+  await expect.poll(() => requested).toBe(true);
+  await openSettings(page);
+  await page.getByTestId('map-visibility-summary').tap();
+  // Project rows are intentionally withheld until validated geometry exists.
+  // Settings remain usable throughout the pending download and preparation.
+  const toggle = page.getByRole('switch', { name: 'Cave entrances', exact: true });
+  await toggle.tap();
+  await expect(toggle).toHaveJSProperty('checked', false);
+  await toggle.evaluate(element => {
+    const measure = performance.measure;
+    performance.measure = (...args) => {
+      const entry = measure.apply(performance, args);
+      if (args[0] === 'viewer:project-depth') {
+        // Trigger the actual control handler at the first production yield
+        // boundary, without pausing the scheduler or adding artificial sleeps.
+        // This is a synthetic event; trusted pointer input is covered above.
+        performance.measure = measure;
+        (element as HTMLElement).click();
+      }
+      return entry;
+    };
+  });
+  release();
+  await expect.poll(() => page.evaluate(() => {
+    const state = window as unknown as { viewerControlSamples: ViewerControlSample[] };
+    return state.viewerControlSamples.some(sample => sample.control === 'map-category-caveEntrances'
+      && !sample.trusted && sample.checked);
+  })).toBe(true);
+  await expect(toggle).toBeChecked();
+  for (let index = 0; index < 6; index++) {
+    await toggle.tap();
+    await expect(toggle).toHaveJSProperty('checked', index % 2 === 1);
+  }
+  await page.getByRole('tab', { name: 'Projects', exact: true }).tap();
+  await page.getByRole('button', { name: survey.name, exact: true }).tap();
+  await expect.poll(async () => (await mapPixels(page)).red).toBeGreaterThan(20);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { viewerControlSamples: ViewerControlSample[] }).viewerControlSamples.length)).toBe(8);
+  const measurements = await page.evaluate(() => {
+    const state = window as unknown as {
+      viewerControlSamples: ViewerControlSample[];
+      viewerWork: ViewerWorkSample[];
+      viewerLongTasks: number[];
+    };
+    const timings = state.viewerControlSamples.map(sample => sample.durationMs).sort((a, b) => a - b);
+    return { samples: state.viewerControlSamples, p95ControlPaintMs: timings[Math.ceil(timings.length * 0.95) - 1], appWork: state.viewerWork, longTasksMs: state.viewerLongTasks };
+  });
+  await testInfo.attach('viewer-load-completion.json', { body: JSON.stringify(measurements, null, 2), contentType: 'application/json' });
+  expect(measurements.p95ControlPaintMs).toBeLessThanOrEqual(100);
+  const preparation = measurements.appWork.filter(entry => entry.name === 'viewer:project-depth');
+  expect(preparation.length).toBeGreaterThan(50);
+  const interaction = measurements.samples.find(sample => sample.control === 'map-category-caveEntrances'
+    && !sample.trusted && sample.checked);
+  expect(interaction).toBeDefined();
+  expect(interaction!.startTime).toBeGreaterThanOrEqual(preparation[0].startTime);
+  expect(preparation.some(slice => slice.startTime > interaction!.startTime)).toBe(true);
+  expect(interaction!.startTime).toBeLessThan(preparation.at(-1)!.startTime + preparation.at(-1)!.durationMs);
+  expect(interaction!.durationMs).toBeLessThanOrEqual(100);
+  expect(Math.max(...measurements.appWork.map(entry => entry.durationMs))).toBeLessThanOrEqual(50);
+});

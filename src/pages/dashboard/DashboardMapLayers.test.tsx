@@ -154,7 +154,7 @@ describe('Dashboard map layers', () => {
     expect(line).toHaveAttribute('data-layer-source-id', `project-${PROJECT.id}`);
     expect(line).toHaveAttribute('data-minzoom', '0');
     expect(layoutFor(container, `project-${PROJECT.id}-line`)).toEqual({
-      'line-cap': 'round', 'line-join': 'round',
+      'line-cap': 'round', 'line-join': 'round', visibility: 'visible',
     });
     const paint = JSON.parse(line.getAttribute('data-paint')!);
     const compiled = createExpression(paint['line-width'], 'line-width', latest.paint_line['line-width'] as StylePropertySpecification);
@@ -361,7 +361,7 @@ describe('Dashboard map layers', () => {
       expect(layer).toHaveAttribute('data-layer-source-id', 'gis-geometries-source');
       expect(layer).toHaveAttribute('data-before-id', 'gis-geometry-order-anchor');
       expect(JSON.parse(layer.getAttribute('data-paint')!)).toEqual(paint);
-      expect(JSON.parse(layer.getAttribute('data-filter')!)).toEqual(['==', ['geometry-type'], type]);
+      expect(JSON.parse(layer.getAttribute('data-filter')!)).toEqual(['all', ['==', ['geometry-type'], type]]);
     }
     expect(container.querySelector('[data-layer-id="gis-geometry-order-anchor"]'))
       .toHaveAttribute('data-layer-source-id', 'gis-geometry-order-source');
@@ -565,5 +565,64 @@ describe('Dashboard map layers', () => {
       {},
     );
     expect(color.toString()).toBe('rgba(148,163,184,1)');
+  });
+});
+
+describe('viewer source identity and filter contracts', () => {
+  function accepts(container: HTMLElement, id: string, properties: Record<string, unknown>): boolean {
+    const expression = JSON.parse(container.querySelector(`[data-layer-id="${id}"]`)!.getAttribute('data-filter')!);
+    const compiled = createExpression(expression, 'filter', { type: 'boolean' } as StylePropertySpecification);
+    expect(compiled.result).toBe('success');
+    if (compiled.result !== 'success') throw new Error('Invalid viewer filter');
+    return compiled.value.evaluateWithoutErrorHandling({ zoom: 16 }, {
+      type: 'Feature', properties, geometry: { type: 'Point', coordinates: [0, 0] },
+    } as never, {});
+  }
+
+  it('retains project source/data through hide/show and composes cave-entrance visibility', () => {
+    const props = { projects: [PROJECT], geoJsonData: { [PROJECT.id]: POINT_FEATURE_COLLECTION }, projectColorsById: {}, colorMode: 'project' as const, depthDomain: null, showCaveEntrances: false };
+    const { container, rerender } = render(<ProjectMapLayers {...props} activeProjectIds={new Set([PROJECT.id])} />);
+    const source = container.querySelector(`[data-source-id="project-${PROJECT.id}"]`);
+    rerender(<ProjectMapLayers {...props} activeProjectIds={new Set()} />);
+    expect(container.querySelector(`[data-source-id="project-${PROJECT.id}"]`)).toBe(source);
+    for (const suffix of ['line', 'fill', 'point']) expect(layoutFor(container, `project-${PROJECT.id}-${suffix}`).visibility).toBe('none');
+    rerender(<ProjectMapLayers {...props} activeProjectIds={new Set([PROJECT.id])} />);
+    expect(container.querySelector(`[data-source-id="project-${PROJECT.id}"]`)).toBe(source);
+    expect(layoutFor(container, `project-${PROJECT.id}-line`).visibility).toBe('visible');
+    expect(layoutFor(container, `project-${PROJECT.id}-point`).visibility).toBe('none');
+    expect(sourceInputs.record.mock.calls.filter(([id]) => id === `project-${PROJECT.id}`).every(([, data]) => data === POINT_FEATURE_COLLECTION)).toBe(true);
+  });
+
+  it('filters project-linked markers and landmark collections without replacing their sources', () => {
+    const data = { subsurfaceStations: POINT_FEATURE_COLLECTION, explorationLeads: POINT_FEATURE_COLLECTION, cylinderInstalls: POINT_FEATURE_COLLECTION };
+    const props = { visibleOverlayGeoJsonData: data, visibleLandmarksGeoJSON: POINT_FEATURE_COLLECTION, mapDisplayPreferences: DEFAULT_DISPLAY, iconsLoaded: true, iconAvailability: ALL_ICONS };
+    const { container, rerender } = render(<OverlayMapLayers {...props} activeProjectIds={new Set(['42'])} collectionVisibility={{ __personal__: false, hidden: false }} />);
+    const sources = [...container.querySelectorAll('[data-source-id]')];
+    expect(accepts(container, 'subsurface-stations-circles', { project: 42 })).toBe(true);
+    expect(accepts(container, 'subsurface-stations-circles', { project: '42', type: 'biology' })).toBe(false);
+    expect(accepts(container, 'subsurface-stations-biology-icons', { project: '42', type: 'biology' })).toBe(true);
+    expect(accepts(container, 'cylinder-installs-labels', { project_id: '42' })).toBe(true);
+    expect(accepts(container, 'exploration-leads-icon-layer', { project: 'other' })).toBe(false);
+    for (const id of ['landmarks-layer', 'landmarks-labels']) {
+      expect(accepts(container, id, {})).toBe(false);
+      expect(accepts(container, id, { collection: null })).toBe(false);
+      expect(accepts(container, id, { collection: 'hidden' })).toBe(false);
+      expect(accepts(container, id, { collection: 42 })).toBe(true);
+    }
+    rerender(<OverlayMapLayers {...props} activeProjectIds={new Set()} collectionVisibility={{}} />);
+    expect([...container.querySelectorAll('[data-source-id]')]).toEqual(sources);
+    expect(accepts(container, 'subsurface-stations-circles', { project: 42 })).toBe(false);
+    expect(accepts(container, 'landmarks-labels', {})).toBe(true);
+  });
+
+  it('keeps saved GPS geometry while visibility changes only its filter', () => {
+    const data: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { id: 'track' }, geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] } }] };
+    const props = { savedTrackFeatureCollection: data, currentTrackFeatureCollection: EMPTY_FEATURE_COLLECTION, recordingState: 'idle' as const };
+    const { container, rerender } = render(<GpsMapLayers {...props} savedTrackVisibility={{ track: true }} />);
+    const source = container.querySelector('[data-source-id="gps-tracks-source"]');
+    expect(accepts(container, 'gps-tracks-line', { id: 'track' })).toBe(true);
+    rerender(<GpsMapLayers {...props} savedTrackVisibility={{ track: false }} />);
+    expect(container.querySelector('[data-source-id="gps-tracks-source"]')).toBe(source);
+    expect(accepts(container, 'gps-tracks-line', { id: 'track' })).toBe(false);
   });
 });

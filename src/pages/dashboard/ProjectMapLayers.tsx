@@ -1,3 +1,5 @@
+import { memo, useLayoutEffect, useState } from 'react';
+import { scheduleViewerUpdate } from '../../utils/scheduleViewerUpdate';
 import { Layer, Source } from 'react-map-gl/maplibre';
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { PROJECT_LAYERS } from '../../constants';
@@ -20,15 +22,17 @@ interface ProjectMapSourceProps {
   depthDomain: DepthDomain | null;
   projectColorsById: Record<string, string>;
   showCaveEntrances: boolean;
+  visible: boolean;
 }
 
-function ProjectMapSource({
+const ProjectMapSource = memo(function ProjectMapSource({
   project,
   data,
   colorMode,
   depthDomain,
   projectColorsById,
   showCaveEntrances,
+  visible,
 }: ProjectMapSourceProps) {
   const sourceId = `project-${project.id}`;
   const fallbackColor = getProjectColor(project.id, projectColorsById);
@@ -51,6 +55,7 @@ function ProjectMapSource({
           true,
           false,
         ]}
+        layout={{ visibility: visible ? 'visible' : 'none' }}
         paint={{ 'fill-color': lineAndFillColor, 'fill-opacity': 0.25 }}
       />
       <Layer
@@ -65,7 +70,7 @@ function ProjectMapSource({
           true,
           false,
         ]}
-        layout={GEOJSON_LINE_LAYOUT}
+        layout={{ ...GEOJSON_LINE_LAYOUT, visibility: visible ? 'visible' : 'none' }}
         paint={{ 'line-color': lineAndFillColor, 'line-width': PROJECT_LAYERS.lineWidth }}
       />
       <Layer
@@ -81,7 +86,7 @@ function ProjectMapSource({
         ]}
         minzoom={PROJECT_LAYERS.entrySymbolMinZoom}
         layout={{
-          visibility: showCaveEntrances ? 'visible' : 'none',
+          visibility: visible && showCaveEntrances ? 'visible' : 'none',
           'text-field': '★',
           'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
           'text-size': PROJECT_LAYERS.entrySymbolTextSize,
@@ -96,7 +101,7 @@ function ProjectMapSource({
       />
     </Source>
   );
-}
+});
 
 export interface ProjectMapLayersProps {
   projects: readonly Project[];
@@ -106,6 +111,7 @@ export interface ProjectMapLayersProps {
   colorMode: MapColorMode;
   depthDomain: DepthDomain | null;
   showCaveEntrances: boolean;
+  runtimeActive?: boolean;
 }
 
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -121,7 +127,21 @@ export function ProjectMapLayers({
   colorMode,
   depthDomain,
   showCaveEntrances,
+  runtimeActive = true,
 }: ProjectMapLayersProps) {
+  // Keep previously displayed sources mounted, but never eagerly admit hidden data.
+  // Four first-time sources per painted turn bounds Show all and startup work.
+  const [admitted, setAdmitted] = useState(() => new Set(projects
+    .filter(project => activeProjectIds.has(project.id) && geoJsonData[project.id])
+    .slice(0, 4).map(project => project.id)));
+  useLayoutEffect(() => {
+    if (!runtimeActive) return;
+    const retained = [...admitted].filter(id => geoJsonData[id]);
+    const next = projects.filter(project => activeProjectIds.has(project.id)
+      && geoJsonData[project.id] && !admitted.has(project.id)).slice(0, 4);
+    if (!next.length && retained.length === admitted.size) return;
+    return scheduleViewerUpdate(() => setAdmitted(new Set([...retained, ...next.map(project => project.id)])));
+  }, [activeProjectIds, admitted, geoJsonData, projects, runtimeActive]);
   return (
     <>
       <Source
@@ -137,11 +157,12 @@ export function ProjectMapLayers({
       </Source>
       {projects.map((project) => {
         const data = geoJsonData[project.id];
-        if (!activeProjectIds.has(project.id) || !data) return null;
+        if (!admitted.has(project.id) || !data) return null;
         return (
           <ProjectMapSource
             key={project.id}
             project={project}
+            visible={activeProjectIds.has(project.id)}
             data={data}
             colorMode={colorMode}
             depthDomain={depthDomain}

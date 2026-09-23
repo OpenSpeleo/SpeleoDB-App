@@ -88,3 +88,13 @@ remains the integration seam for actual layer composition, pointer forwarding,
 chrome, depth/scale, offline selection, location modal behavior,
 recording/manual indicator policy, native listener suspension, and orientation
 locking.
+
+## Deferred viewer application
+
+Controls update intent immediately; map display applies the latest intent after
+a paint opportunity. Cached basemap results use the same boundary, with
+supersession, suspension and unmount cancellation. User-origin map movement and
+My Location cancel pending row locate actions; programmatic movement does not
+invalidate its own completion. See
+[Responsive viewer updates](viewer-update-scheduling.md) for scheduling, source
+retention, persistence and cancellation contracts.

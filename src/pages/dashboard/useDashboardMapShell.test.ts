@@ -7,6 +7,7 @@ import type { LocationWatcher } from '../../services/GeolocationWatcher';
 import type { RecordedPoint } from '../../types/gpsTrack';
 import type { MapLayerId } from '../../types/mapLayer';
 import { PERMISSION_DENIED_SENTINEL } from '../../utils/geolocationError';
+import * as viewerUpdates from '../../utils/scheduleViewerUpdate';
 import type { OverlayIconAvailability, OverlayImageMap } from './dashboardMapUtils';
 import {
   useDashboardMapShell,
@@ -132,6 +133,58 @@ afterEach(() => {
 });
 
 describe('useDashboardMapShell', () => {
+  it('keeps selection feedback urgent and applies only the latest resolved style after paint', async () => {
+    const pending = new Set<() => void>();
+    vi.spyOn(viewerUpdates, 'scheduleViewerUpdate').mockImplementation(work => {
+      pending.add(work);
+      return () => { pending.delete(work); };
+    });
+    const dependencies = createDependencies();
+    const onChange = vi.fn();
+    const { result, rerender, unmount } = renderHook(({ layerId, active }) => useDashboardMapShell({
+      mapRef: createMapRef(), selectedMapLayerId: layerId, onSelectedMapLayerIdChange: onChange,
+      runtimeActive: active, dependencies,
+    }), { initialProps: { layerId: 'esri-satellite' as MapLayerId, active: true } });
+    await waitFor(() => expect(pending.size).toBe(1));
+    expect(result.current.mapStyle).toBeNull();
+    act(() => result.current.selectMapLayer('esri-world-hillshade'));
+    expect(onChange).toHaveBeenCalledWith('esri-world-hillshade');
+    expect(result.current.mapStyle).toBeNull();
+    rerender({ layerId: 'esri-world-hillshade', active: true });
+    expect(pending.size).toBe(0);
+    await waitFor(() => expect(pending.size).toBe(1));
+    rerender({ layerId: 'esri-world-hillshade', active: false });
+    expect(pending.size).toBe(0);
+    expect(result.current.mapStyle).toBeNull();
+    rerender({ layerId: 'esri-world-hillshade', active: true });
+    act(() => {
+      const callbacks = [...pending]; pending.clear(); callbacks.forEach(work => work());
+    });
+    expect(result.current.mapStyle).toEqual({ version: 8, layerId: 'esri-world-hillshade' });
+    expect(dependencies.getLayerStyle).toHaveBeenCalledTimes(2);
+    rerender({ layerId: 'esri-world-hillshade', active: false });
+    rerender({ layerId: 'esri-world-hillshade', active: true });
+    expect(pending.size).toBe(0);
+    rerender({ layerId: 'esri-satellite', active: true });
+    await waitFor(() => expect(pending.size).toBe(1));
+    unmount();
+    expect(pending.size).toBe(0);
+  });
+
+  it('ignores an obsolete style error after a newer layer was selected', async () => {
+    const stale = deferred<Record<string, unknown>>();
+    const dependencies = createDependencies({ getLayerStyle: vi.fn()
+      .mockReturnValueOnce(stale.promise).mockResolvedValue({ version: 8, current: true }) });
+    const { result, rerender } = renderHook(({ layerId }) => useDashboardMapShell({
+      mapRef: createMapRef(), selectedMapLayerId: layerId,
+      onSelectedMapLayerIdChange: vi.fn(), dependencies,
+    }), { initialProps: { layerId: 'esri-satellite' as MapLayerId } });
+    rerender({ layerId: 'esri-world-hillshade' });
+    await act(async () => stale.reject(new Error('obsolete style')));
+    await waitFor(() => expect(result.current.mapStyle).toEqual({ version: 8, current: true }));
+    expect(dependencies.reportStyleError).not.toHaveBeenCalled();
+  });
+
   it('loads style and icons, locks orientation, and ignores map loads without a map', async () => {
     const map = { flyTo: vi.fn() } as unknown as OverlayImageMap & {
       flyTo: ReturnType<typeof vi.fn>;

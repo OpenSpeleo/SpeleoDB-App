@@ -1,6 +1,8 @@
 import { featureCollection, lineString, point } from '@turf/helpers';
 import type { Feature, FeatureCollection, LineString, Point } from 'geojson';
 import type { GpsTrackOrigin, RecordedPoint } from '../types/gpsTrack';
+import { throwIfAborted } from './abort';
+import { yieldToMainThread } from './yieldToMainThread';
 import { isValidLatLng } from './coordinates';
 
 export interface GpsTrackLineProperties {
@@ -65,20 +67,21 @@ export function trackPointsToFeatureCollection(
   return featureCollection(feature ? [feature] : []);
 }
 
+function appendTrackPosition(position: unknown, out: RecordedPoint[]): void {
+  if (!Array.isArray(position) || position.length < 2) return;
+  const [lon, lat, ele] = position;
+  if (typeof lon !== 'number' || typeof lat !== 'number' || !isValidLatLng(lat, lon)) return;
+  out.push({
+    latitude: lat,
+    longitude: lon,
+    altitude: typeof ele === 'number' && Number.isFinite(ele) ? ele : null,
+    timestamp: 0,
+  });
+}
+
 function pushLineStringPoints(coordinates: unknown, out: RecordedPoint[]): void {
   if (!Array.isArray(coordinates)) return;
-  for (const position of coordinates) {
-    if (!Array.isArray(position) || position.length < 2) continue;
-    const [lon, lat, ele] = position;
-    if (typeof lon !== 'number' || typeof lat !== 'number') continue;
-    if (!isValidLatLng(lat, lon)) continue;
-    out.push({
-      latitude: lat,
-      longitude: lon,
-      altitude: typeof ele === 'number' && Number.isFinite(ele) ? ele : null,
-      timestamp: 0,
-    });
-  }
+  for (const position of coordinates) appendTrackPosition(position, out);
 }
 
 /**
@@ -107,5 +110,48 @@ export function gpsTrackGeoJsonToPoints(geojson: unknown): RecordedPoint[] {
       }
     }
   }
+  return points;
+}
+
+function* trackPositionSteps(geojson: unknown): Generator<unknown> {
+  if (!geojson || typeof geojson !== 'object') return;
+  const collection = geojson as { features?: unknown; geometry?: unknown };
+  const features = Array.isArray(collection.features) && collection.features.length
+    ? collection.features : [{ geometry: collection.geometry }];
+  for (const feature of features) {
+    // Count traversal even when a feature or segment contains no usable positions.
+    yield undefined;
+    if (!feature || typeof feature !== 'object') continue;
+    const geometry = (feature as { geometry?: unknown }).geometry;
+    if (!geometry || typeof geometry !== 'object') continue;
+    const geom = geometry as { type?: unknown; coordinates?: unknown };
+    if (geom.type === 'LineString' && Array.isArray(geom.coordinates)) {
+      yield* geom.coordinates;
+    } else if (geom.type === 'MultiLineString' && Array.isArray(geom.coordinates)) {
+      for (const segment of geom.coordinates) {
+        yield undefined;
+        if (Array.isArray(segment)) yield* segment;
+      }
+    }
+  }
+}
+
+/** Bounded variant retaining the permissive legacy-cache conversion contract. */
+export async function gpsTrackGeoJsonToPointsAsync(
+  geojson: unknown,
+  signal?: AbortSignal,
+): Promise<RecordedPoint[]> {
+  const points: RecordedPoint[] = [];
+  let workSinceYield = 0;
+  throwIfAborted(signal);
+  for (const position of trackPositionSteps(geojson)) {
+    if (workSinceYield === 0) {
+      await yieldToMainThread();
+      throwIfAborted(signal);
+    }
+    appendTrackPosition(position, points);
+    workSinceYield = (workSinceYield + 1) % 1000;
+  }
+  throwIfAborted(signal);
   return points;
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import type { MapRef } from 'react-map-gl/maplibre';
@@ -32,6 +32,7 @@ export interface DashboardProjectVisibilityOptions {
   projectBounds: ProjectBoundsRecord;
   mapRef: RefObject<MapRef | null>;
   onClosePanel: () => void;
+  cameraActive?: boolean;
   initialCountryVisibility?: VisibilityRecord;
   initialCountryCollapsed?: VisibilityRecord;
   readProjectVisibility?: PreferenceReader;
@@ -56,6 +57,7 @@ export interface DashboardProjectVisibilityState {
   toggleCountry: (country: string, visible: boolean) => void;
   toggleCountryCollapsed: (country: string, collapsed: boolean) => void;
   zoomToProject: (projectId: string) => void;
+  cancelPendingZoom: () => void;
 }
 
 const defaultHaptic: Haptic = () => {
@@ -202,6 +204,8 @@ function useCountryActions(options: CountryActionOptions) {
 }
 
 interface ZoomActionOptions {
+  cameraActive?: boolean;
+  generationRef: { current: number };
   projects: readonly Project[];
   projectBounds: ProjectBoundsRecord;
   mapRef: RefObject<MapRef | null>;
@@ -226,8 +230,18 @@ function useProjectZoomAction(options: ZoomActionOptions) {
     writeCountryVisibility,
     onClosePanel,
     schedule,
+    cameraActive = true,
+    generationRef,
   } = options;
+  const boundsRef = useRef(projectBounds);
+  useLayoutEffect(() => { boundsRef.current = projectBounds; }, [projectBounds]);
+  const cancelZoom = useCallback(() => { generationRef.current++; }, [generationRef]);
+  useLayoutEffect(() => {
+    if (!cameraActive) cancelZoom();
+    return cancelZoom;
+  }, [cameraActive, cancelZoom]);
   return useCallback((projectId: string) => {
+    const request = ++generationRef.current;
     updateActiveProjectIds((previous) => {
       if (previous.has(projectId)) return previous;
       const next = new Set(previous);
@@ -245,12 +259,13 @@ function useProjectZoomAction(options: ZoomActionOptions) {
     }
     onClosePanel();
     schedule(() => {
+      if (generationRef.current !== request || !cameraActive) return;
       const map = mapRef.current;
       if (!map) return;
-      const bounds = computeBounds(projectBounds, new Set([projectId]));
+      const bounds = computeBounds(boundsRef.current, new Set([projectId]));
       if (bounds) zoomToMapBounds(map, bounds);
     });
-  }, [countryVisibility, mapRef, onClosePanel, projectBounds, projects, schedule,
+  }, [cameraActive, generationRef, countryVisibility, mapRef, onClosePanel, projects, schedule,
     setCountryVisibility, updateActiveProjectIds, writeCountryVisibility,
     writeProjectVisibility]);
 }
@@ -266,6 +281,7 @@ export function useDashboardProjectVisibility({
   schedule = defaultSchedule,
   ...options
 }: DashboardProjectVisibilityOptions): DashboardProjectVisibilityState {
+  const zoomGeneration = useRef(0);
   const { activeProjectIds, updateActiveProjectIds } = useProjectVisibilityState(
     options.eligibleProjects,
     readProjectVisibility,
@@ -300,6 +316,7 @@ export function useDashboardProjectVisibility({
   });
   const zoomToProject = useProjectZoomAction({
     ...options,
+    generationRef: zoomGeneration,
     countryVisibility,
     updateActiveProjectIds,
     setCountryVisibility,
@@ -307,12 +324,25 @@ export function useDashboardProjectVisibility({
     writeCountryVisibility,
     schedule,
   });
+  const { toggleProject, showAll, hideAll } = projectActions;
+  const { toggleCountry } = countryActions;
   return {
     ...derived,
     ...projectActions,
     ...countryActions,
+    toggleProject: useCallback((id: string) => {
+      zoomGeneration.current++;
+      toggleProject(id);
+    }, [toggleProject]),
+    showAll: useCallback(() => { zoomGeneration.current++; showAll(); }, [showAll]),
+    hideAll: useCallback(() => { zoomGeneration.current++; hideAll(); }, [hideAll]),
+    toggleCountry: useCallback((country: string, visible: boolean) => {
+      zoomGeneration.current++;
+      toggleCountry(country, visible);
+    }, [toggleCountry]),
     countryVisibility,
     countryCollapsed,
     zoomToProject,
+    cancelPendingZoom: useCallback(() => { zoomGeneration.current++; }, []),
   };
 }
