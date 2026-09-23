@@ -1,5 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { fixture } from './fixtures/app';
+import { gisMetadata } from '../../src/test/gisGeometryFixtures';
 import type { Project } from '../../src/types/project';
 
 const survey: Project = {
@@ -21,7 +22,7 @@ const geometry: GeoJSON.FeatureCollection = {
   ],
 };
 
-async function setupMap(page: Page) {
+async function setupMap(page: Page, projectGeometry = geometry, beforeNavigation?: () => Promise<void>) {
   const app = await fixture(page);
   let online = true;
   let projectDownloads = 0;
@@ -33,9 +34,10 @@ async function setupMap(page: Page) {
   }));
   await page.route(survey.geojson_file!, route => {
     projectDownloads++;
-    return route.fulfill({ status: online ? 200 : 503, json: online ? geometry : {}, headers });
+    return route.fulfill({ status: online ? 200 : 503, json: online ? projectGeometry : {}, headers });
   });
   await page.setViewportSize({ width: 390, height: 844 });
+  await beforeNavigation?.();
   await page.goto('/dashboard');
   await page.getByRole('tab', { name: 'Projects', exact: true }).tap();
   await page.getByRole('button', { name: survey.name, exact: true }).tap();
@@ -67,6 +69,130 @@ async function mapPixels(page: Page) {
 async function openSettings(page: Page) {
   await page.getByRole('tab', { name: 'Settings', exact: true }).tap();
   await expect(page.getByTestId('map-visibility-summary')).toBeVisible();
+}
+
+async function overviewPixels(page: Page) {
+  const screenshot = await page.locator('.maplibregl-canvas').screenshot({ scale: 'css' });
+  return page.evaluate(async dataUrl => {
+    const image = new Image(); image.src = dataUrl; await image.decode();
+    const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext('2d')!; context.drawImage(image, 0, 0);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const ink: { x: number; y: number }[] = [];
+    for (let index = 0; index < pixels.length; index += 4) {
+      const [r, g, b] = pixels.subarray(index, index + 3);
+      if (r > 60 && r > g + 40 && r > b + 40) {
+        ink.push({ x: (index / 4) % canvas.width, y: Math.floor(index / 4 / canvas.width) });
+      }
+    }
+    if (ink.length === 0) return { lines: 0, width: 0, maxColumnPixels: 0 };
+    const minX = Math.min(...ink.map(p => p.x)); const maxX = Math.max(...ink.map(p => p.x));
+    const minY = Math.min(...ink.map(p => p.y)); const maxY = Math.max(...ink.map(p => p.y));
+    const lines = new Set(ink.map(p => {
+      const column = Math.min(2, Math.floor(3 * (p.x - minX) / (maxX - minX + 1)));
+      const row = Math.min(2, Math.floor(3 * (p.y - minY) / (maxY - minY + 1)));
+      return `${row}:${column}`;
+    }));
+    const columnPixels = new Map<number, number>();
+    for (const point of ink) columnPixels.set(point.x, (columnPixels.get(point.x) ?? 0) + 1);
+    return { lines: lines.size, width: maxX - minX + 1, maxColumnPixels: Math.max(...columnPixels.values()) };
+  }, `data:image/png;base64,${screenshot.toString('base64')}`);
+}
+
+async function expectOverviewLines(page: Page, testInfo: TestInfo) {
+  await expect.poll(async () => (await overviewPixels(page)).lines).toBe(9);
+  // Three rows of thin lines need at most two antialiased pixels per row.
+  await expect.poll(async () => (await overviewPixels(page)).maxColumnPixels).toBeLessThanOrEqual(6);
+  await page.screenshot({ path: testInfo.outputPath('regional-lines.png') });
+  for (let zoomOut = 1; zoomOut <= 3; zoomOut++) {
+    const previous = await overviewPixels(page);
+    const canvas = await page.locator('.maplibregl-canvas').boundingBox();
+    // Mobile WebKit's automation bridge cannot send mouse-wheel input. Deliver
+    // the same DOM event to the real map handler in both browser engines.
+    await page.locator('.maplibregl-canvas').dispatchEvent('wheel', {
+      deltaY: 900, deltaMode: 0,
+      clientX: canvas!.x + canvas!.width / 2, clientY: canvas!.y + canvas!.height / 2,
+    });
+    // Prove the camera actually zoomed out as well as all nine lines surviving.
+    await expect.poll(async () => (await overviewPixels(page)).width).toBeLessThan(previous.width * 0.75);
+    await expect.poll(async () => (await overviewPixels(page)).lines).toBe(9);
+    await page.screenshot({ path: testInfo.outputPath(`overview-zoom-out-${zoomOut}.png`) });
+  }
+}
+
+test('short survey shots remain visible from regional to country overview', async ({ page }, testInfo) => {
+  // Nine 3 km surveys across roughly 70 km, each built from ~10 m shots.
+  // Individual shots are below the default simplification threshold at the
+  // fitted overview zoom, although each whole cave spans several pixels.
+  const features: GeoJSON.Feature[] = [];
+  for (const latitude of [20.1, 20.2, 20.3]) {
+    for (const longitude of [-87.5, -87.2, -86.9]) {
+      for (let shot = 0; shot < 300; shot++) {
+        features.push({
+          type: 'Feature', properties: { depth: shot },
+          geometry: { type: 'LineString', coordinates: [
+            [longitude + shot * 0.0001, latitude],
+            [longitude + (shot + 1) * 0.0001, latitude],
+          ] },
+        });
+      }
+    }
+  }
+  const app = await setupMap(page, { type: 'FeatureCollection', features });
+  await expectOverviewLines(page, testInfo);
+  expect(app.errors).toEqual([]);
+});
+
+for (const kind of ['GIS', 'GPS'] as const) {
+  test(`${kind} lines remain visible from regional to country overview`, async ({ page }, testInfo) => {
+    const vertexCount = kind === 'GIS' ? 91 : 301;
+    const lines = [20.1, 20.2, 20.3].flatMap(latitude => [-87.5, -87.2, -86.9].map(longitude => ({
+      type: 'LineString' as const,
+      coordinates: Array.from({ length: vertexCount }, (_, vertex) => [longitude + vertex * 0.03 / (vertexCount - 1), latitude]),
+    })));
+    const metadata = lines.map((_, index) => gisMetadata({
+      id: `${index + 1}2345678-1234-4234-8234-123456789abc`, name: `Overview line ${index}`, color: '#ff0000',
+    }));
+    // Only points establish the shared camera bounds; the red linework must
+    // come from the GIS/GPS renderer being tested, not from a survey layer.
+    const cameraBounds: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [
+      { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [-87.5, 20.1] } },
+      { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [-86.87, 20.3] } },
+    ] };
+    const app = await setupMap(page, cameraBounds, async () => {
+      const headers = { 'access-control-allow-origin': '*' };
+      if (kind === 'GIS') {
+        await page.route('https://offline-maps.test/api/v2/gis-geometries/**', route => {
+          const id = new URL(route.request().url()).pathname.split('/')[4];
+          const index = metadata.findIndex(item => item.id === id);
+          return route.fulfill({ headers, json: id ? {
+            ...metadata[index], geojson: lines[index], bbox_area_m2: 0, vertex_count: vertexCount,
+          } : metadata });
+        });
+      } else {
+        await page.route('https://offline-maps.test/api/v2/gps_tracks/', route => route.fulfill({ headers,
+          json: metadata.map(item => ({ ...item, file: `https://offline-maps.test/track-${item.id}.json`, sha256_hash: item.id })),
+        }));
+        for (const [index, item] of metadata.entries()) {
+          await page.route(`https://offline-maps.test/track-${item.id}.json`, route => route.fulfill({ headers,
+            json: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: lines[index] }] },
+          }));
+        }
+      }
+    });
+    // Camera-bound entrance stars would cover two small lines as we zoom out.
+    await openSettings(page);
+    await page.getByTestId('map-visibility-summary').tap();
+    await page.getByRole('switch', { name: 'Cave entrances', exact: true }).tap();
+    await page.getByRole('tab', { name: kind === 'GIS' ? 'Geometries' : 'GPS', exact: true }).tap();
+    for (const item of metadata) {
+      await page.getByTestId(kind === 'GIS' ? `gis-geometry-toggle-${item.id}` : `gps-track-visibility-${item.id}`).tap();
+    }
+    if (kind === 'GIS') await expect(page.getByTestId('gis-geometry-panel').getByText('9 of 9 visible')).toBeVisible();
+    await page.getByRole('tab', { name: 'Map', exact: true }).tap();
+    await expectOverviewLines(page, testInfo);
+    expect(app.errors).toEqual([]);
+  });
 }
 
 test('entrance visibility changes real map output, preserves linework, and restores offline', async ({ page }, testInfo) => {

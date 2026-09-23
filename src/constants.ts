@@ -5,6 +5,7 @@
 
 import type { MapOverlayDefinition, ProjectLayerConfig } from './types/mapOverlay';
 import type { MapLayerDefinition } from './types/mapLayer';
+import { createGeoJSONLineWidth } from './utils/geojsonLineRendering';
 
 // ==================== API ENDPOINTS ====================
 const BASE_PATH = '/api/v2';
@@ -351,6 +352,7 @@ export const COLORS = {
 
 export const PROJECT_LAYERS: ProjectLayerConfig = {
   lineMinZoom: 0,
+  lineWidth: createGeoJSONLineWidth(2.5),
   entrySymbolMinZoom: 5,
   entrySymbolTextSize: ['interpolate', ['linear'], ['zoom'], 8, 18, 14, 24],
 } as const;

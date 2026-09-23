@@ -1,5 +1,9 @@
 import { Layer, Source } from 'react-map-gl/maplibre';
 import { GIS_GEOMETRY_RENDER } from '../../gisGeometry/constants';
+import { createGeoJSONLineWidth, GEOJSON_LINE_LAYOUT, GEOJSON_LINE_SOURCE_OPTIONS } from '../../utils/geojsonLineRendering';
+
+const OUTLINE_WIDTH = createGeoJSONLineWidth(GIS_GEOMETRY_RENDER.OUTLINE_WIDTH);
+const LINE_WIDTH = createGeoJSONLineWidth(GIS_GEOMETRY_RENDER.LINE_WIDTH);
 
 export interface GisGeometryMapLayersProps {
   featureCollection: GeoJSON.FeatureCollection;
@@ -12,7 +16,7 @@ export function GisGeometryMapLayers({ featureCollection = EMPTY }: Partial<GisG
       <Source id="gis-geometry-order-source" type="geojson" data={EMPTY}>
         <Layer id="gis-geometry-order-anchor" type="circle" paint={{ 'circle-opacity': 0, 'circle-radius': 0 }} />
       </Source>
-      <Source id="gis-geometries-source" type="geojson" data={featureCollection}>
+      <Source id="gis-geometries-source" type="geojson" data={featureCollection} {...GEOJSON_LINE_SOURCE_OPTIONS}>
         <Layer
           id="gis-geometries-fill" type="fill" beforeId="gis-geometry-order-anchor"
           filter={['==', ['geometry-type'], 'Polygon']}
@@ -21,14 +25,14 @@ export function GisGeometryMapLayers({ featureCollection = EMPTY }: Partial<GisG
         <Layer
           id="gis-geometries-outline" type="line" beforeId="gis-geometry-order-anchor"
           filter={['==', ['geometry-type'], 'Polygon']}
-          layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-          paint={{ 'line-color': ['get', 'color'], 'line-width': GIS_GEOMETRY_RENDER.OUTLINE_WIDTH, 'line-opacity': GIS_GEOMETRY_RENDER.LINE_OPACITY }}
+          layout={GEOJSON_LINE_LAYOUT}
+          paint={{ 'line-color': ['get', 'color'], 'line-width': OUTLINE_WIDTH, 'line-opacity': GIS_GEOMETRY_RENDER.LINE_OPACITY }}
         />
         <Layer
           id="gis-geometries-line" type="line" beforeId="gis-geometry-order-anchor"
           filter={['==', ['geometry-type'], 'LineString']}
-          layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-          paint={{ 'line-color': ['get', 'color'], 'line-width': GIS_GEOMETRY_RENDER.LINE_WIDTH, 'line-opacity': GIS_GEOMETRY_RENDER.LINE_OPACITY }}
+          layout={GEOJSON_LINE_LAYOUT}
+          paint={{ 'line-color': ['get', 'color'], 'line-width': LINE_WIDTH, 'line-opacity': GIS_GEOMETRY_RENDER.LINE_OPACITY }}
         />
       </Source>
     </>

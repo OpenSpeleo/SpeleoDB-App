@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { fixture } from './fixtures/app';
 import { gisMetadata } from '../../src/test/gisGeometryFixtures';
 import type { DownloadAreaCatalog } from '../../src/types/downloadArea';
@@ -49,6 +49,19 @@ async function geometryFixture(page: Page, holdDetails = false) {
 async function openGis(page: Page) {
   await page.getByRole('tab', { name: 'Geometries' }).click();
   return page.getByTestId('gis-geometry-panel');
+}
+
+async function waitForClosedPanel(panel: Locator) {
+  await expect(panel).toHaveAttribute('aria-hidden', 'true');
+  // aria-hidden changes before the panel and its dark backdrop finish their
+  // transitions. Canvas screenshots include those overlays, skewing pixel math.
+  await panel.evaluate(async element => {
+    const animations = [
+      ...element.getAnimations(),
+      ...(element.previousElementSibling?.getAnimations() ?? []),
+    ];
+    await Promise.all(animations.map(animation => animation.finished));
+  });
 }
 
 async function automaticLandmark(page: Page) {
@@ -175,7 +188,7 @@ test('renders both shapes with full bounds and saved-fill transparency, then wor
   await expect.poll(() => offlineGeometryReady(page)).toBe(true);
   await panel.getByRole('button', { name: 'Show all geometries' }).click();
   await panel.getByRole('button', { name: 'Zoom to Reference polygon' }).click();
-  await expect(panel).toHaveAttribute('aria-hidden', 'true');
+  await waitForClosedPanel(panel);
   const canvas = page.locator('.maplibregl-canvas');
   await expect.poll(async () => {
     const pixels = await colorPixels(page, await canvas.screenshot({ scale: 'css' }));
@@ -188,6 +201,7 @@ test('renders both shapes with full bounds and saved-fill transparency, then wor
   panel = await openGis(page);
   await panel.getByRole('button', { name: 'Hide all geometries' }).click();
   await page.getByRole('tab', { name: 'Map', exact: true }).click();
+  await waitForClosedPanel(panel);
   await expect.poll(async () => (await colorPixels(page, await canvas.screenshot({ scale: 'css' }))).cyan.count).toBe(0);
   const hidden = await canvas.screenshot({ scale: 'css' });
   expect(await page.getByTestId('distance-scale').textContent()).toBe(scale);

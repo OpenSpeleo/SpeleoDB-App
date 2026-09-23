@@ -44,6 +44,7 @@ export interface MapOverlayDefinition {
 
 export interface ProjectLayerConfig {
   lineMinZoom: number;
+  lineWidth: ExpressionSpecification;
   entrySymbolMinZoom: number;
   entrySymbolTextSize: MarkerSizeExpression;
 }

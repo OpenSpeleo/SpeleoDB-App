@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState, type RefObject } from 'react';
 import { Layer, Source, type MapRef } from 'react-map-gl/maplibre';
 import type { DownloadArea } from '../../types/downloadArea';
 import { areaFeatureCollection } from '../../services/downloadAreaGeometry';
+import { createGeoJSONLineWidth, GEOJSON_LINE_LAYOUT, GEOJSON_LINE_SOURCE_OPTIONS } from '../../utils/geojsonLineRendering';
+
+const OUTLINE_WIDTH = createGeoJSONLineWidth(1.5);
 
 /** Small procedural pattern, generated once per style, with no network asset. */
 function registerDownloadAreaPattern(map: ReturnType<MapRef['getMap']>): void {
@@ -52,7 +55,7 @@ export function DownloadAreaMapLayers({
     };
   }, [mapRef, data]);
   return (
-    <Source id="download-areas" type="geojson" data={data}>
+    <Source id="download-areas" type="geojson" data={data} {...GEOJSON_LINE_SOURCE_OPTIONS}>
       <Layer
         id="download-areas-fill"
         type="fill"
@@ -70,9 +73,10 @@ export function DownloadAreaMapLayers({
       <Layer
         id="download-areas-outline"
         type="line"
+        layout={GEOJSON_LINE_LAYOUT}
         paint={{
           'line-color': ['get', 'color'],
-          'line-width': 1.5,
+          'line-width': OUTLINE_WIDTH,
           'line-opacity': 0.8,
         }}
       />

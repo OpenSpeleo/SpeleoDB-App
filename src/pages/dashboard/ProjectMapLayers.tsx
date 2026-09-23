@@ -9,6 +9,7 @@ import {
   type DepthDomain,
 } from '../../utils/depthColoring';
 import { getProjectColor } from '../../utils/projectColors';
+import { GEOJSON_LINE_LAYOUT, GEOJSON_LINE_SOURCE_OPTIONS } from '../../utils/geojsonLineRendering';
 
 export type ProjectGeoJsonRecord = Record<string, GeoJSON.FeatureCollection>;
 
@@ -38,7 +39,7 @@ function ProjectMapSource({
       : fallbackColor;
 
   return (
-    <Source id={sourceId} type="geojson" data={data}>
+    <Source id={sourceId} type="geojson" data={data} {...GEOJSON_LINE_SOURCE_OPTIONS}>
       <Layer
         id={`${sourceId}-fill`}
         type="fill"
@@ -64,7 +65,8 @@ function ProjectMapSource({
           true,
           false,
         ]}
-        paint={{ 'line-color': lineAndFillColor, 'line-width': 2.5 }}
+        layout={GEOJSON_LINE_LAYOUT}
+        paint={{ 'line-color': lineAndFillColor, 'line-width': PROJECT_LAYERS.lineWidth }}
       />
       <Layer
         id={`${sourceId}-point`}

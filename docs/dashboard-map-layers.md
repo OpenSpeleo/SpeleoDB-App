@@ -64,6 +64,44 @@ heading provider only while its explicit `headingActive` input is true.
   active/paused recording supplies a valid point. A paused recording alone is
   dot-only; a live manual mode or active recording may own the cone.
 
+## GeoJSON line rendering across zoom levels
+
+Every line-bearing GeoJSON source uses `GEOJSON_LINE_SOURCE_OPTIONS` from
+`utils/geojsonLineRendering.ts`. Its `tolerance: 0` prevents the default
+simplifier from discarding short features. The same module owns round caps/joins
+and `createGeoJSONLineWidth`, the continuous width policy used by every line
+layer, including polygon outlines. No line layer has a low-zoom visibility
+cutoff.
+
+Overview strokes are 1 px through zoom 8, 1.5 px at zoom 12, and 2 px at zoom
+14, clamped to a layer's close-up width so thin outlines never grow thicker when
+zooming out. The web viewers follow the same overview policy. From zoom 16, each
+layer retains its established close-up emphasis:
+
+| Line layer                         | Width at zoom 16 | Width at zoom 18 and above |
+| ---------------------------------- | ---------------- | -------------------------- |
+| Project survey and polygon outline | 2.5 px           | 2.5 px                     |
+| GIS line                           | 2.5 px           | 2.5 px                     |
+| GIS polygon outline                | 1.5 px           | 1.5 px                     |
+| Saved GPS track                    | 6 px             | 7 px                       |
+| Live/paused GPS recording          | 4 px             | 4 px                       |
+| Offline download-area boundary     | 1.5 px           | 1.5 px                     |
+
+Colors, fills, opacity, GPS dashes, visibility gates and source data retain
+their existing semantics. This includes project/depth/shot modes and
+cached/offline geometry. The policy changes presentation only, without replacing
+lines with markers or changing exported geometry.
+
+Keeping vertices costs additional tile processing and memory, particularly for
+large GIS imports and GPS tracks. Expressions are built once when modules load;
+zooming adds no listeners, network requests, geometry scans or layers. Keep
+point-only marker sources and invisible ordering anchors outside this policy.
+
+Tile-coordinate quantization and screen resolution still limit extreme zoom-out:
+a subpixel cave cannot retain a recognizable shape. Increasing source maxzoom
+does not increase low-zoom tile precision. Do not compensate with thick strokes
+that obscure the neighboring passages.
+
 ## Verification and performance
 
 `DashboardMapLayers.test.tsx` models `react-map-gl` source injection with
@@ -75,7 +113,14 @@ project line/fill shot expressions are evaluated for valid opaque/alpha colors
 and missing/malformed values. Category tests retain source/data identity while
 checking every symbol, label and fallback; subtype tests evaluate the production
 label expression, including legacy null/missing Sensor types. Depth expressions
-are evaluated below, at and above a configured maximum.
+are evaluated below, at and above a configured maximum. Overview tests evaluate
+the production width expression, source tolerance, and source ownership in all
+three color modes, plus every GIS, GPS and download-area line declaration.
+`tests/browser/map-display.spec.ts` renders nine surveys built from roughly 10 m
+shots across 70 km, plus separate GIS and GPS fixtures, and checks their canvas
+pixels through three further zoom-outs in Chromium and WebKit. These browser
+checks exercise the real renderer; physical-device performance with large
+real-world survey collections remains a separate validation step.
 `UserLocationIndicator.test.tsx` proves the same direct source-injection
 contract for the dot plus its fixed SVG geometry and dot-only fallback. The
 Dashboard characterization suite verifies surrounding source selection,

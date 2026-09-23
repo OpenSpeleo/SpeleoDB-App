@@ -11,6 +11,7 @@ import { GpsMapLayers } from './GpsMapLayers';
 import { OverlayMapLayers } from './OverlayMapLayers';
 import { ProjectMapLayers } from './ProjectMapLayers';
 import { GisGeometryMapLayers } from './GisGeometryMapLayers';
+import { DownloadAreaMapLayers } from './DownloadAreaMapLayers';
 
 const sourceInputs = vi.hoisted(() => ({ record: vi.fn() }));
 
@@ -18,15 +19,17 @@ vi.mock('react-map-gl/maplibre', () => ({
   Source: ({
     id,
     data,
+    tolerance,
     children,
   }: {
     id: string;
     data: unknown;
+    tolerance?: number;
     children?: React.ReactNode;
   }) => {
     sourceInputs.record(id, data);
     return (
-    <div data-source-id={id}>
+    <div data-source-id={id} data-tolerance={tolerance}>
       {React.Children.map(children, (child) => (
         React.isValidElement(child)
           ? React.cloneElement(child as React.ReactElement<{ source?: string }>, { source: id })
@@ -35,21 +38,25 @@ vi.mock('react-map-gl/maplibre', () => ({
     </div>
     );
   },
-  Layer: ({ id, source, paint, filter, layout, beforeId }: {
+  Layer: ({ id, source, type, paint, filter, layout, beforeId, minzoom }: {
     id: string;
     source?: string;
+    type?: string;
     paint?: Record<string, unknown>;
     filter?: unknown;
     layout?: unknown;
     beforeId?: string;
+    minzoom?: number;
   }) => (
     <div
       data-layer-id={id}
       data-layer-source-id={source}
+      data-layer-type={type}
       data-paint={JSON.stringify(paint)}
       data-filter={JSON.stringify(filter)}
       data-layout={JSON.stringify(layout)}
       data-before-id={beforeId}
+      data-minzoom={minzoom}
       data-text-color-expression={JSON.stringify(paint?.['text-color'])}
     />
   ),
@@ -134,6 +141,35 @@ function allOverlays(preferences: MapDisplayPreferences, icons = ALL_ICONS) {
 }
 
 describe('Dashboard map layers', () => {
+  it.each(['project', 'depth', 'shot'] as const)('keeps %s survey lines thin and available at overview zooms', (colorMode) => {
+    const { container } = render(<ProjectMapLayers
+      projects={[PROJECT]} activeProjectIds={new Set([PROJECT.id])}
+      geoJsonData={{ [PROJECT.id]: POINT_FEATURE_COLLECTION }}
+      projectColorsById={{ [PROJECT.id]: PROJECT.color }} colorMode={colorMode}
+      depthDomain={{ min: 0, max: 50 }} showCaveEntrances={false}
+    />);
+    const source = container.querySelector(`[data-source-id="project-${PROJECT.id}"]`);
+    expect(source).toHaveAttribute('data-tolerance', '0');
+    const line = container.querySelector(`[data-layer-id="project-${PROJECT.id}-line"]`)!;
+    expect(line).toHaveAttribute('data-layer-source-id', `project-${PROJECT.id}`);
+    expect(line).toHaveAttribute('data-minzoom', '0');
+    expect(layoutFor(container, `project-${PROJECT.id}-line`)).toEqual({
+      'line-cap': 'round', 'line-join': 'round',
+    });
+    const paint = JSON.parse(line.getAttribute('data-paint')!);
+    const compiled = createExpression(paint['line-width'], 'line-width', latest.paint_line['line-width'] as StylePropertySpecification);
+    expect(compiled.result).toBe('success');
+    if (compiled.result !== 'success') throw new Error('Invalid survey width expression');
+    const widthAt = (zoom: number) => compiled.value.evaluateWithoutErrorHandling({ zoom });
+    for (const zoom of [0, 4, 6, 8, 9, 10, 11, 12]) {
+      expect(widthAt(zoom)).toBeGreaterThanOrEqual(1);
+      expect(widthAt(zoom)).toBeLessThanOrEqual(1.5);
+    }
+    expect(widthAt(10.5)).toBeCloseTo(1.3125);
+    expect(widthAt(14)).toBe(2);
+    for (const zoom of [16, 18, 22]) expect(widthAt(zoom)).toBe(2.5);
+  });
+
   it('hides entrance stars without replacing the source, linework or fill', () => {
     const props = {
       projects: [PROJECT], activeProjectIds: new Set([PROJECT.id]),
@@ -317,8 +353,8 @@ describe('Dashboard map layers', () => {
     const { container } = render(<GisGeometryMapLayers featureCollection={EMPTY_FEATURE_COLLECTION} />);
     const styles = [
       ['fill', 'Polygon', { 'fill-color': ['get', 'color'], 'fill-opacity': 0.175 }],
-      ['outline', 'Polygon', { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-opacity': 0.95 }],
-      ['line', 'LineString', { 'line-color': ['get', 'color'], 'line-width': 2.5, 'line-opacity': 0.95 }],
+      ['outline', 'Polygon', { 'line-color': ['get', 'color'], 'line-width': expect.any(Array), 'line-opacity': 0.95 }],
+      ['line', 'LineString', { 'line-color': ['get', 'color'], 'line-width': expect.any(Array), 'line-opacity': 0.95 }],
     ] as const;
     for (const [suffix, type, paint] of styles) {
       const layer = container.querySelector(`[data-layer-id="gis-geometries-${suffix}"]`)!;
@@ -329,6 +365,53 @@ describe('Dashboard map layers', () => {
     }
     expect(container.querySelector('[data-layer-id="gis-geometry-order-anchor"]'))
       .toHaveAttribute('data-layer-source-id', 'gis-geometry-order-source');
+  });
+
+  it('preserves short geometry and thin overview strokes for every GeoJSON line layer', () => {
+    const { container } = render(<>
+      <ProjectMapLayers projects={[PROJECT]} activeProjectIds={new Set([PROJECT.id])}
+        geoJsonData={{ [PROJECT.id]: POINT_FEATURE_COLLECTION }}
+        projectColorsById={{ [PROJECT.id]: PROJECT.color }} colorMode="project"
+        depthDomain={null} showCaveEntrances />
+      <GisGeometryMapLayers featureCollection={POINT_FEATURE_COLLECTION} />
+      <GpsMapLayers savedTrackFeatureCollection={POINT_FEATURE_COLLECTION}
+        currentTrackFeatureCollection={POINT_FEATURE_COLLECTION} recordingState="recording" />
+      <DownloadAreaMapLayers areas={[]} mapRef={{ current: null }} />
+    </>);
+    const expectedDetailWidths: Record<string, [number, number]> = {
+      [`project-${PROJECT.id}-line`]: [2.5, 2.5],
+      'gis-geometries-line': [2.5, 2.5],
+      'gis-geometries-outline': [1.5, 1.5],
+      'gps-tracks-line': [6, 7],
+      'gps-recording-track-line': [4, 4],
+      'download-areas-outline': [1.5, 1.5],
+    };
+    const lines = [...container.querySelectorAll('[data-layer-type="line"]')];
+    expect(lines).toHaveLength(Object.keys(expectedDetailWidths).length);
+    for (const line of lines) {
+      const id = line.getAttribute('data-layer-id')!;
+      const sourceId = line.getAttribute('data-layer-source-id');
+      expect(sourceId).toBeTruthy();
+      expect(container.querySelector(`[data-source-id="${sourceId}"]`)).toHaveAttribute('data-tolerance', '0');
+      expect(Number(line.getAttribute('data-minzoom') ?? 0)).toBe(0);
+      expect(layoutFor(container, id)).toMatchObject({ 'line-cap': 'round', 'line-join': 'round' });
+      const paint = JSON.parse(line.getAttribute('data-paint')!);
+      const expression = createExpression(paint['line-width'], 'line-width', latest.paint_line['line-width'] as StylePropertySpecification);
+      expect(expression.result).toBe('success');
+      if (expression.result !== 'success') throw new Error(`Invalid width for ${id}`);
+      const widthAt = (zoom: number) => expression.value.evaluateWithoutErrorHandling({ zoom });
+      for (const zoom of [0, 4, 8]) expect(widthAt(zoom)).toBe(1);
+      expect(widthAt(10.5)).toBeCloseTo(1.3125);
+      const [at16, at18] = expectedDetailWidths[id];
+      expect(widthAt(12)).toBe(1.5);
+      expect(widthAt(14)).toBe(Math.min(2, at16));
+      expect(widthAt(16)).toBe(at16);
+      expect(widthAt(18)).toBe(at18);
+      expect(widthAt(22)).toBe(at18);
+    }
+    const savedPaint = JSON.parse(container.querySelector('[data-layer-id="gps-tracks-line"]')!.getAttribute('data-paint')!);
+    expect(savedPaint['line-dasharray']).toEqual([2, 2]);
+    expect(savedPaint['line-color']).toEqual(['coalesce', ['get', 'color'], '#38bdf8']);
   });
 
   it('binds every active project layer to its GeoJSON source', () => {
