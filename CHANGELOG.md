@@ -15,6 +15,8 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ### Performance
 
+- Keep map controls responsive while layers and large surveys update. `688ed13`
+
 ## v1.7.0 - 2026-09-22
 
 ### Features
