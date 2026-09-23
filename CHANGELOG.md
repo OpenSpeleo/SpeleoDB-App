@@ -10,6 +10,9 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ### Fixes
 
+- Keep survey lines, GIS layers, and GPS tracks clear when zooming out.
+  `c621183`
+
 ### Performance
 
 ## v1.7.0 - 2026-09-22
