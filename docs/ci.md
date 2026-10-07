@@ -105,7 +105,9 @@ They are compile evidence only and are never attached to a GitHub release.
 its concurrency exception must change together: pushes to the default branch run
 CI, and an in-progress default-branch run is preserved while superseded
 feature-branch runs may be cancelled. Pull-request targeting remains independent
-and accepts every branch.
+and accepts every branch. Hosted default-branch settings, protection rules, open
+pull-request targets, and remote symbolic HEAD are separate administration
+settings; changing workflow YAML alone does not migrate them.
 
 ## Release Integrity
 
@@ -137,6 +139,10 @@ it. This avoids the Node 22 failure mode:
 ```text
 node: bad option: --no-webstorage
 ```
+
+Probe optional runtime flags with `node <flag> -e ""` after sanitizing injected
+`NODE_OPTIONS`; pass the first supported candidate or no optional flag when none
+are supported. Never infer support solely from the developer machine.
 
 Do not call bare `npx vitest` from CI unless the wrapper behavior is also
 preserved.
@@ -264,10 +270,15 @@ above. The update policy adds no application runtime work.
 Before changing CI-sensitive code, run the same core commands locally:
 
 ```bash
-node --version # must be Node 22
+node --version # use Node 26, matching .node-version
 make ci
 PREK_HOME=/private/tmp/prek npx prek run -a --show-diff-on-failure
 ```
+
+The checked-in mobile workflow currently still selects Node 22, while
+`.node-version` and the root workspace select Node 26. Record the runtime with
+verification results; local success alone does not establish compatibility with
+that different CI runtime.
 
 `make ci` verifies the tracked-file quality inventory, lint, type checking, the
 full one-shot Vitest suite with coverage and serialized test files, and the
@@ -278,3 +289,74 @@ shipped in native/web bundles. Run Android Gradle and iOS `xcodebuild` locally
 when changing native configuration or platform-facing behavior. `make sync`
 updates both native projects; inspect every tracked Android/iOS diff after it
 runs.
+
+## Browser preview build ownership
+
+Finish every command that may rebuild `dist/` before running Playwright against
+Vite preview, including prek build hooks and Gradle/Xcode web-asset phases. Vite
+clears its output during a build, so concurrent writers can cause a real
+navigation 404 before `index.html` is replaced. Preserve the trace and compare
+request/build timestamps, remove the concurrent writer, then rerun the affected
+verification. Retries, longer timeouts, or weaker assertions do not repair this
+orchestration error.
+
+## Generated test prerequisites
+
+A test job may read tracked inputs, installed dependency output, or artifacts
+created earlier in that job. Checks of ignored native output belong in the
+sync/build job that generates it and can inspect warning or path drift. Fast
+unit gates should check committed source, compatibility transformations, or the
+attribution ledger rather than absent downstream output. Reproduce suspected
+clean-checkout failures with generated output absent; stale local files are not
+evidence that CI owns its prerequisites.
+
+## GitHub Actions version references
+
+Preserve human-readable action version tags selected by the user or dependency
+updater; never replace them with commit hashes. If a test or document requires
+SHA pinning for such an action, update that stale contract. Leave pre-existing
+hash-pinned actions unchanged unless the user explicitly includes them in scope.
+
+## iOS package cache recovery
+
+After Swift Package Manager replaces headers or binary artifacts, a cached
+explicit module may report that a header changed after its `.pcm` was built.
+Repair only the affected project's named DerivedData directory, then run
+`xcodebuild -resolvePackageDependencies` before rebuilding. If a clean build
+reports a missing artifact zip while products are reconstructed, finish package
+resolution before rerunning. Verify the normal IDE DerivedData location and
+signed destination; a separate temporary build does not establish IDE recovery.
+Do not disable explicit modules, edit dependency headers, change versions, or
+clear global Xcode caches to conceal this mismatch.
+
+Native Xcode invocations for this checkout must also run sequentially: simulator
+and device builds write the same `ios/App/App/public` web assets even when their
+DerivedData paths differ. Separate build directories do not isolate that shared
+output. Finish native writers before browser-preview verification as well.
+
+## Standalone and monorepo installs
+
+Mobile retains its own manifest and lockfile for standalone clones. The
+enclosing monorepo also owns a root workspace lock; neither substitutes for
+validating the other installation context. Use `npm ci --workspaces=false` in
+this repository for the standalone lock and `npm ci` at the monorepo root for
+integration. The mobile lockfile hook likewise keeps `--workspaces=false`.
+
+The package name is npm-valid (`speleodb-mobile`). Declare directly imported
+build/test packages directly rather than borrowing transitive dependencies. The
+root's nested install strategy must preserve mobile-local Capacitor packages;
+verify lint/build in both contexts and inspect `cap sync` output for native path
+drift when dependency topology changes. Root workspace configuration belongs to
+the parent repository; standalone product configuration stays here.
+
+## Native test report interpretation
+
+Confirm boot completion and inspect device-specific XML/xcresult counts,
+failures, and skips alongside the process exit code. An interrupted emulator
+renderer can leave a failed or incomplete instrumentation report even when
+Gradle exits zero. Preserve logs, screenshots, and resource diagnostics, repair
+the demonstrated emulator/environment problem, and rerun unchanged assertions.
+Do not count the interrupted run as passing or infer hardware, minimum-OS, or
+Huawei-provider coverage from a different emulator. Disable optional diagnostic
+collection only when that collector is the diagnosed stall; never disable tests
+to hide it.

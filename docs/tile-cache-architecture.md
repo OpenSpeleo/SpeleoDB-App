@@ -43,12 +43,15 @@ runtime.
   `application/octet-stream`. HTTP errors and invalid/empty payloads are
   failures, never no-data answers.
 - A verified provider no-data raster becomes a zero-byte, freshness-aware
-  tombstone. Hashes live on `MapLayerDefinition`; the known fingerprint applies
-  only to satellite. Both hillshade lists are empty pending independent proof.
-  If a configured hash cannot be computed, validation fails closed.
+  tombstone (`isNoData: true`, `sizeBytes: 0`). Older metadata defaults
+  `isNoData` to false; this additive field required no database-version bump.
+  Hashes live on `MapLayerDefinition`; the known fingerprint applies only to
+  satellite. Both hillshade lists are empty pending independent proof. If a
+  configured hash cannot be computed, validation fails closed.
 
-Warm-tile and cached-viewport p95 values are release-device targets, not claims
-established by jsdom, fake IndexedDB, simulator builds, or fake timers.
+Warm-tile ≤50 ms and fully cached viewport ≤300 ms p95 values are release-device
+targets, not claims established by jsdom, fake IndexedDB, simulator builds, or
+fake timers.
 
 ## Source authority and retained coverage
 
@@ -220,3 +223,38 @@ Physical Android/iOS p95 timings plus slow-network, airplane-mode, restart,
 interruption, storage, layer-switching, and zero-network viewport checks remain
 release blockers until recorded on attached devices. Builds/simulators do not
 satisfy those gates.
+
+Cache-hit regressions exercise the production protocol/loader with network held
+pending: a fresh hit resolves with zero HTTP calls, and a stale hit resolves
+before its background refresh. Failed replacement must preserve the previous
+bytes. Online state must not make a usable local tile wait for the network.
+
+## Planner and progress verification boundaries
+
+Streaming partial batches are not final denominators. Publish totals only from
+the settled unique coordinate count and layer scope; aggregate completion uses
+the same bounded per-layer values rendered in the UI, with persisted counters
+clamped to their declared totals. Preserve retained coverage independently of
+replacement progress; resetting work counters must not discard usable tiles.
+
+Keep worker handoff batches and ready/delayed queues bounded independently of
+active concurrency. Do not launch a storage-writing consumer inside a storage
+audit loop: real IndexedDB can starve both sides despite passing mocks. Measure
+queue high-water marks and notification latency without per-item job writes.
+Exercise the actual Worker branch, request/response discriminants, and durable
+chunk acknowledgements; main-thread fallback tests cannot catch a silently
+ignored message that leaves a caller pending. The rectangle-union sweep
+described above supersedes the older full-union packed-set approach; the legacy
+point/path compatibility planner still needs its explicit coordinate and memory
+bound.
+
+Facade tests using an engine double that never persists active generations
+cannot infer replanning from schedule-call counts. Await public offline-map
+idleness and compare canonical coverage keys, rectangles, and durable area
+identities; real engine/repository tests own the unchanged-plan reuse claim.
+
+Device release evidence also includes SHA-256 availability, low-coverage
+hillshade appearance, and upgrade of a real legacy v6/v7 tile database under
+storage pressure. An older binary cannot reopen a newer IndexedDB schema merely
+because payload bytes were retained; use the downgrade policy in
+[indexedDB migrations](indexeddb-migrations.md).

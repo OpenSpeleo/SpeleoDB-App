@@ -23,8 +23,8 @@ shake as a system undo/redo input:
 Capacitor hosts SpeleoDB in one `WKWebView`. Web inputs can register a typing
 undo action independently of whether the software keyboard remains visible. The
 supplied no-keyboard screenshot proves that an undo action can surface over the
-map, but its exact originating touch sequence has not yet been reproduced; that
-deeper root-cause investigation is tracked separately.
+map, but its exact originating touch sequence has not yet been reproduced. The
+investigation requirements below preserve this open evidence gap.
 
 The dashboard pointer state machine does not register or invoke undo. Map taps,
 pans, pinches, depth probing, and long presses are therefore not the owning seam
@@ -98,3 +98,20 @@ form editing, selection, context-menu copy/paste, Cancel, and Save.
 The implementation writes one Boolean during application launch. It adds no
 listener, sensor subscription, bridge call, render, storage, network, or
 background cost.
+
+## Open trigger investigation boundary
+
+The original no-keyboard alert remains unreproduced; the shake policy is a
+verified configuration guardrail, not proof of that report's exact cause. A
+physical-device investigation records model, OS, app build, Shake to Undo and
+accessibility settings, plus external-keyboard presence. Cover login, landmark,
+and track text entry followed by save/cancel/dismiss, map return timing,
+background/foreground, rotation, shake, and distinct three-finger gestures.
+Capture the shortest reproduction with screen recording and allowlisted
+responder/focus/undo diagnostics, excluding field contents and coordinates.
+
+A follow-up fix needs before/after evidence at the actual native responder or
+WebView boundary and a supported public API. Any competing recognizer evaluation
+must establish partially delivered MapLibre cancellation behavior and preserve
+VoiceOver, Accessibility Zoom, one-/two-finger map gestures, and normal form
+editing. Simulator or DOM-only characterization cannot close that device gate.

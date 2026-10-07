@@ -151,3 +151,15 @@ foreground sensors.
   rotation checks remain mandatory for cardinal accuracy, north wraparound,
   portrait/landscape orientation, and unavailable-sensor fallback; compilation
   cannot prove physical sensor alignment.
+
+Physical verification also covers toggle/recording pause and resume, route/app
+suspension, and cone activation with iOS Main Thread Checker enabled. The
+earlier signed builds did not close these runtime gates; retain them as release
+requirements until actual Android and iOS observations are recorded.
+
+Native listener regressions retain old callbacks and hold bridge promises across
+teardown, restart, and failed startup. Assert both the resumed consumer's
+initial state and its next current reading; preserve a valid shared listener
+when consumers leave and return before reconciliation. A layout-effect probe
+records every committed hook value across suspend/resume so a stale first-render
+flash cannot hide behind assertions made only after passive effects settle.

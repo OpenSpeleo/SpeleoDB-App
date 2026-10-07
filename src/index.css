@@ -360,8 +360,7 @@ body {
  *  2. Opacity-modified utilities (`bg-slate-800/70`) compile to
  *     `color-mix(in oklab, …)`, which renders invisibly / not at all on older
  *     Android WebViews — the button then looks like plain text with NO
- *     background. This has bitten us repeatedly. See docs/coding-rules.md and
- *     tasks/lessons/button-backgrounds.md.
+ *     background. This has bitten us repeatedly. See docs/coding-rules.md.
  *
  * These variants use SOLID Tailwind theme tokens (`var(--color-*)`) in
  * UNLAYERED CSS, so the fill always renders. Add layout-only utilities

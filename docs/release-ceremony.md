@@ -8,10 +8,10 @@ signatures are compilation evidence only; they do not establish publisher
 identity, entitlement validity, installation compatibility, or store acceptance.
 
 This repository plan does not authorize publishing. No tag, GitHub release,
-store upload, or rollout may occur while executing the July 2026 remediation
-work. The steps below become executable only when a release owner receives
-separate authorization to use protected signing systems and the independent
-release approver accepts the complete evidence record.
+store upload, or rollout is authorized by documentation or audit work alone. The
+steps below become executable only when a release owner receives separate
+authorization to use protected signing systems and the independent release
+approver accepts the complete evidence record.
 
 ## Roles and protected inputs
 
@@ -47,10 +47,11 @@ commit so these values must match across Android and iOS:
 | Android  | `android/app/build.gradle`              | `versionName`       | `versionCode`             |
 | iOS      | `ios/App/App.xcodeproj/project.pbxproj` | `MARKETING_VERSION` | `CURRENT_PROJECT_VERSION` |
 
-The current baseline is `1.3.0 (130)`. The human version follows the approved
-release number; both integer build values increase beyond every build previously
-submitted to either store. Never reuse an Android `versionCode` or iOS
-`CURRENT_PROJECT_VERSION`, including after a rejected upload or rollback.
+Read the candidate’s versions from these native files rather than a historical
+audit baseline. The human version follows the approved release number; both
+integer build values increase beyond every build previously submitted to either
+store. Never reuse an Android `versionCode` or iOS `CURRENT_PROJECT_VERSION`,
+including after a rejected upload or rollback.
 
 Before signing, run the complete web suite, production build, dependency audits,
 Android/iOS unit and native configuration tests, physical-device protocols, and

@@ -232,11 +232,8 @@ current app target so these checks can run reproducibly.
 
 Physical-device verification remains distinct: actual Android/iOS WebView
 rendering, touch/safe areas, airplane-mode tiles, force-quit recovery and
-background transitions require device evidence. Exact executed commands, results
-and limitations are recorded in the
-[task review](../tasks/todos/gis-geometry.md). The
-[deep failure-mode review](../tasks/todos/gis-geometry-deep-review.md) records
-additional interrupted-write, regrant, stalled-source and native-body evidence.
-
-The [latest independent review](../tasks/todos/gis-geometry-review-round-3.md)
-adds cache-restoration ordering and discarded web response-body regressions.
+background transitions require device evidence. Regression coverage also
+exercises interrupted writes, access regrant, stalled sources, native response
+bodies, cache-restoration ordering, and discarded web response bodies. Record
+exact commands, results, and device limitations outside the checkout following
+the [verification strategy](verification-strategy.md).

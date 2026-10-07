@@ -30,9 +30,13 @@ surfaces, not by application JavaScript.
 parses the emitted HTML and manifest, resolves every local `link[href]` and
 `script[src]`, validates SpeleoDB titles/colors, checks PNG signatures, and
 compares encoded icon dimensions with declared sizes. The in-process build
-disables only bundle-budget enforcement because Vitest instrumentation inflates
-its chunks; the normal standalone `npm run build` remains the authoritative
-bundle-budget gate.
+disables bundle-budget enforcement because Vitest instrumentation inflates its
+chunks; the normal standalone `npm run build` remains the authoritative
+bundle-budget gate. The metadata-only build also sets
+`build.rolldownOptions.checks.pluginTimings: false`: machine-load-sensitive
+`PLUGIN_TIMINGS` advisories are unrelated to artifact correctness and bypass
+Vite’s silent log level. Normal production builds retain the advisory, and the
+repository console guard remains active.
 
 For manual response verification, serve `dist/` and confirm `/manifest.json`,
 `/icons/icon-192.png`, `/icons/icon-512.png`, and

@@ -137,8 +137,7 @@ progress record; catalog normalization lives in `DownloadAreaRepository`.
    ownership.
 4. Repair already-upgraded installations explicitly. Editing an old upgrade
    branch does not rerun it for users already on that database version. Add a
-   new upgrade/repair path; see the
-   [freshness migration lesson](../tasks/lessons/cache-migration-freshness.md).
+   new upgrade/repair path; see the freshness policy below.
 5. Test old fixtures through the production open/read/migration APIs and
    document the supported versions, performance cost, failure behavior and
    downgrade limits.
@@ -166,3 +165,12 @@ already tested. Run focused tests plus the repository's full validation. Startup
 performance, native process termination and platform storage-pressure behavior
 need appropriate device evidence; successful compilation or fake IndexedDB tests
 cannot prove them.
+
+## Freshness repair policy
+
+When adding fetch timestamps, preserved payloads without metadata use migration
+time as the conservative freshness baseline unless the product explicitly
+requires revalidation. Missing metadata alone must not turn usable offline data
+into an immediate network dependency. Correct an already exercised migration
+with a subsequent schema version that repairs records in place; cover both the
+old schema and the faulty intermediate schema through production migration APIs.

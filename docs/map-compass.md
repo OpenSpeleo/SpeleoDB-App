@@ -122,5 +122,11 @@ The browser fixture proves presentation and integration, not physical sensor
 accuracy. Release checks on physical iOS and Android must cover cardinal
 headings, 359° ↔ 0° movement, portrait/landscape rotation, available/denied
 authorization, compass plus My Location/recording, and background/foreground
-transitions. Commands, results and device limitations are recorded in
-[the task review](../tasks/todos/map-compass.md).
+transitions. Record commands, results, and device limitations outside the
+checkout following the [verification strategy](verification-strategy.md).
+
+Browser drag checks pace synthetic pointer moves through animation frames so
+MapLibre's render queue can process them before release. An instantaneous burst
+in WebKit is not equivalent to physical input timing. Keep the actual movement
+and pass-through assertions; frame synchronization is test setup, not evidence
+of a production sensor fix or permission to hide failures with sleeps/retries.

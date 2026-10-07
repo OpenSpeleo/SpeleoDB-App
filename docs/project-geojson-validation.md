@@ -329,3 +329,9 @@ Before release, verify on both an Android device and an iOS device:
    and becomes eligible for tile prefetch without restarting the app.
 9. Seed a historical 500 ms timeout marker and reconnect: the same commit is
    downloaded, validated, and atomically restored when its content is valid.
+
+Vitest's `onConsoleLog` reporting hook filters only rendered records beginning
+with `[project-geojson:bbox]`. It does not disable production logging or the
+unexpected-console guard; tests must still explicitly expect quarantine
+warnings. This keeps routine test output readable without weakening diagnostic
+assertions.

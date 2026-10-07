@@ -324,8 +324,7 @@ Regression evidence includes real engine + IndexedDB tests that count worker
 calls and unique network URLs, hold transport/source reads across rapid
 switches, verify unchanged generation IDs and completion counts, restore plans
 after restart, and prove all-layer replacement safety. Browser checks exercise
-actual workers, Settings toggles and persisted plans in Chromium and WebKit. See
-[the layer stability review](../tasks/todos/offline-layer-stability.md).
+actual workers, Settings toggles and persisted plans in Chromium and WebKit.
 
 Automated evidence lives at the owning seams:
 
@@ -351,10 +350,15 @@ Automated evidence lives at the owning seams:
   small-screen touch targets, fixture transport and a narrowly emulated native
   vault bridge.
 
-See [the implementation review](../tasks/todos/offline-download-areas.md) for
-exact executed commands and limitations. Browser fixtures do not establish
-physical iOS/Android WebView behavior. Release verification must still cover
-real touch pan/pinch/handles, airplane-mode rendering of each layer, app kill /
-relaunch during replacement, storage pressure/consent, and background/foreground
-transitions on both devices. Native builds establish compatibility, not those
-runtime guarantees.
+Record exact executed commands and limitations outside the checkout following
+the [verification strategy](verification-strategy.md). Browser fixtures do not
+establish physical iOS/Android WebView behavior. Release verification must still
+cover real touch pan/pinch/handles, airplane-mode rendering of each layer, app
+kill / relaunch during replacement, storage pressure/consent, and
+background/foreground transitions on both devices. Native builds establish
+compatibility, not those runtime guarantees.
+
+Mobile browser layer-toggle tests use taps and assert each emitted switch intent
+before checking the unchanged plan and durable preferences. An unchecked DOM
+switch without an observed `ionChange` does not establish a persistence failure;
+verify the actual input boundary before diagnosing storage or adding retries.

@@ -29,8 +29,8 @@ correct changes without re-discovering architecture every session.
 Keep agent plans, task lists, TODO tracking, progress notes, review notes, and
 scratch lessons outside the repository tree, including all submodules. Use a
 unique task directory under `/tmp/` (for example, create one with
-`mktemp -d /tmp/speleodb-task.XXXXXX`) or another OS temporary directory whose
-resolved path is outside every checkout.
+`mktemp -d /tmp/sdb-mobile-app-task.XXXXXX`) or another OS temporary directory
+whose resolved path is outside every checkout.
 
 Never create or update these working files inside the checkout, even in ignored
 directories such as `tasks/`, `todos/`, or `plans/`. Never stage or commit them.
@@ -134,8 +134,7 @@ files.
   Preserve the tag selected by the user or dependency updater. If a test or
   document requires converting that tag to a hash, the contract is stale and
   must be updated instead. Leave pre-existing hash-pinned actions unchanged
-  unless the user explicitly asks to change them. See
-  `tasks/lessons/github-actions-version-tags.md`.
+  unless the user explicitly asks to change them. See `docs/ci.md`.
 - Treat Capacitor-generated native files as reviewable output. After `cap sync`,
   inspect every tracked native diff and keep only changes owned by the task.
 - Do not hide flaky tests with retries, sleeps, skipped tests, or relaxed
@@ -201,19 +200,43 @@ Do not only document "what changed"; include "why this architecture exists".
 See `docs/coding-rules.md`. These are **hard rules** — violations must be fixed
 before merging.
 
-**Buttons (hard rule):** every `.app-btn` MUST carry a solid color variant
-(`app-btn--primary | secondary | danger | info | success`, defined unlayered in
-`src/index.css`). NEVER use an opacity-modified background utility
-(`bg-<color>/<NN>`, e.g. `bg-slate-800/70`) as a button fill — it renders as
-invisible "bare text" on Android WebViews. A button with no visible background
-is a bug. Self-check: `app-btn[^"]*bg-` must return zero matches in
-`src/**/*.tsx`. See `.cursor/rules/ui-buttons.mdc` and
-`tasks/lessons/button-backgrounds.md`.
+**Buttons (hard rule):** a button that renders as bare text without a visible
+background is a bug, not a style choice.
+
+- Every `.app-btn` MUST carry exactly one solid color variant:
+  `app-btn--primary`, `app-btn--secondary`, `app-btn--danger`, `app-btn--info`,
+  or `app-btn--success`. These are defined unlayered in `src/index.css` and set
+  `background-color` using Tailwind theme tokens (`var(--color-*)`).
+- NEVER use an opacity-modified background utility (`bg-<color>-<n>/<NN>`, e.g.
+  `bg-slate-800/70` or `bg-purple-600/90`) as a button fill. Tailwind v4
+  compiles these to `color-mix(in oklab, …)`, which can render invisibly on
+  older Android WebViews. Layered background utilities can also lose the cascade
+  to unlayered author rules and preflight. Use solid variants; opacity-modified
+  colors are only for decorative layers such as blurs and subtle card tints.
+- Text color alone must never provide a button's visibility. A readable label
+  without a visible button shape/fill is broken.
+- Layout utilities (`w-full`, `gap-2`, `mb-3`, `ml-auto`, `touch-manipulation`,
+  `shadow-sm`) may accompany the variant. Disabled styling belongs to
+  `.app-btn:disabled`; do not re-add `disabled:opacity-50`.
+- Ionic `IonButton` is exempt because it provides a solid theme background.
+
+```tsx
+// GOOD
+<button className="app-btn app-btn--secondary">Cancel</button>
+<button className="app-btn app-btn--primary w-full gap-2">Save</button>
+
+// BAD: no variant; relies on a Tailwind utility for the fill
+<button className="app-btn bg-slate-800/70 text-slate-200">Cancel</button>
+```
+
+Before finishing any UI change that adds or edits a button, confirm each
+`.app-btn` carries a variant. Self-check: `app-btn[^"]*bg-` must return zero
+matches in `src/**/*.tsx`. See `docs/coding-rules.md`.
 
 **MapLibre sources (hard rule):** every `react-map-gl` `<Layer>` MUST be a
 direct child of its owning `<Source>`. A wrapper must explicitly forward the
 injected `source` prop and be covered by a source-injection contract test. See
-`docs/coding-rules.md` and `tasks/lessons/maplibre-source-children.md`.
+`docs/coding-rules.md`.
 
 ## Working rules
 
@@ -221,6 +244,21 @@ injected `source` prop and be covered by a source-injection contract test. See
 2. Keep code aligned with documented behavior.
 3. If behavior changes, update docs in the same change.
 4. If docs and code conflict, report it and align one with the other.
+
+### Docs-first context for authentication and offline changes
+
+Before implementing or reviewing authentication, offline mode, cache behavior,
+startup validation, or retry logic, read these documents in order:
+
+1. `docs/README.md`
+2. `docs/offline-mode.md`
+3. `docs/networking.md`
+4. `docs/implementation-guidelines.md`
+
+Treat `docs/` as the guidance source for expected behavior. Keep implementation
+aligned with documented offline/auth rules and update affected docs in the same
+change. Call out code/documentation conflicts and align them. At minimum, run
+targeted tests for affected controller, provider, and Dashboard paths.
 
 # Changelog Maintenance
 

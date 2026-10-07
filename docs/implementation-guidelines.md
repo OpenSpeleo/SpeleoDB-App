@@ -98,6 +98,23 @@ for feature work in this repository.
 - Avoid hidden global coupling; pass dependencies where practical.
 - Add small comments only for non-obvious behavior or invariants.
 
+## Persisted input boundaries
+
+New-input validation does not repair older stored values. Revalidate identifiers
+that control security, routing, ownership, or storage selection before restored
+state is published or used for I/O. Canonically migrate recoverable values;
+reject and purge unsafe values through the owning lifecycle boundary. Tests must
+prove no request or stale publication precedes validation. Keep post-migration
+transport failures separate from malformed state so offline continuity is not
+destroyed.
+
+## Diagnostic scope
+
+For logging or investigation work, collect phase-specific evidence and the
+concrete runtime failure before proposing a dependency replacement. Suspicion
+alone does not justify architectural changes. Keep fixes proportional to the
+authorized scope; seek expanded authorization when a replacement goes beyond it.
+
 ## Error handling
 
 - Fail safely for user-facing flows: preserve usable local state when remote
@@ -109,6 +126,40 @@ for feature work in this repository.
   offline-map plans or generation state.
 - Recheck cancellation after persistence and cleanup awaits, immediately before
   logging, counters, warnings, revisions, or other observable publication.
+
+## Authoritative publication and observers
+
+Commit durable state and its owning transition before notifying observers.
+Subscriber or runtime-adapter exceptions cannot turn that success into a command
+failure: storage, snapshot, and returned result must agree. Test throwing
+observers at the owning seam. Startup adapters and follow-up work after the
+authoritative result are best-effort effects.
+
+Safety prerequisites are different: cancellation/invalidation preventing old
+account work from crossing into a new session must succeed before credentials
+are committed. A failed prerequisite rejects setup without writing credentials.
+
+Cancellation requests are not proof of settlement. Backpressured producers must
+join all admitted workers on failure as well as success before reporting idle or
+permitting destructive cleanup. Draining workers still count toward the
+replacement scheduler’s concurrency limit.
+
+## Async UI completion
+
+Blocking state follows the authoritative commit, not subsequent background
+housekeeping. Derive it from pending IDs still present in authoritative state;
+do not fake persistence success or use timers to unblock controls. When actions
+overlap, a completion may clear only its own pending state and confirmation.
+Verify this with held promises: publish one commit, begin another action, then
+settle the old action while the new one is confirming or saving. Exercise shared
+storage cleanup at its owning seam as well.
+
+A disabled button only closes admission after React renders. Async form and
+destructive actions need a ref-backed gate set before their first state update.
+The initiating component owns completion and timer cleanup: ignore unmounted
+results, cancel delayed callbacks, and retain admission through success-to-
+navigation windows. Test duplicate same-turn events and unmount through the real
+handler; button appearance alone is not concurrency evidence.
 
 ## Testing expectations
 
@@ -124,14 +175,31 @@ for feature work in this repository.
   dependencies at the actual awaited cache/fetch/sleep/write boundary; UI reload
   invariants require the revision and controller accessor used by Dashboard.
   Mocking an obsolete helper or making a mock return the desired answer is not
-  proof. See `tasks/lessons/authoritative-seam-tests.md`.
+  proof. Trace the production call path before choosing the test boundary.
+  Assert ordering and final durable/runtime state, not just callback counts.
+- Shared ownership tests include unique and shared resources in queued and
+  active states: prove sole-owner cancellation and remaining-owner continuity.
+- Keep adversarial fixtures independent of the helper under test; expected
+  geometry, metadata, and counters must not come from the implementation itself.
+- Monitoring tests assert the emitted envelope through the real SDK parser,
+  integrations, and final filter using an in-memory transport. Mocking
+  `captureException` cannot establish stack preservation or redaction.
+- Inspect native test reports for expected device counts and failures. A Gradle
+  success exit alone can conceal interrupted or incomplete instrumentation.
 - When production deliberately starts a background IndexedDB write, tests must
   await the final durable record or accounting update, not an earlier object-
   store write from the same transaction. Ending a test on an intermediate write
   leaks work into later tests and makes coverage depend on execution order.
   Serialized files must also receive separate fake IndexedDB factories so open
-  connections and catalogs cannot cross file boundaries. See
-  `tasks/lessons/indexeddb-background-writes.md`.
+  connections and catalogs cannot cross file boundaries. Preserve database
+  lifetime within a file when restart behavior is under test. A generic
+  microtask flush is not transaction completion; use multiple deterministic
+  shuffled seeds when diagnosing order-dependent persistence failures.
+- Attach cancellation to the live `IDBTransaction`, not merely pre/post helper
+  checks. Recheck generation before final metadata/accounting writes. Refreshes
+  capture a cache/session epoch and abort on clear/logout; ignored transport
+  aborts cannot commit late payloads or tombstones. Test real transaction
+  aborts, not just pre-aborted mocks.
 - Separate compilation evidence from device evidence. Web/native builds cannot
   establish WebView responsiveness, native modal dismissal, device-console
   output, real network cancellation, or persistence across force-quit.
@@ -161,3 +229,55 @@ surface.
 - `docs/networking.md`
 - `docs/offline-mode.md`
 - `docs/logout-behavior.md`
+
+## Native plugin thread ownership
+
+Capacitor bridge invocation does not imply the main thread. Marshal UIKit reads
+and mutations (`UIApplication`, scenes, windows, and device orientation) to the
+main queue. Keep native start/stop idempotent across bridge, lifecycle, and
+cancellation calls. Cache orientation from main-queue notifications instead of
+polling UIKit in high-frequency sensor callbacks. A build establishes linkage
+and type correctness; exercise the plugin action on a physical device with Main
+Thread Checker enabled to establish thread correctness.
+
+## Dashboard async test setup
+
+Before fake-timer gesture assertions, settle Dashboard mount effects for project
+sync, map style, overlay GeoJSON, and icons. Wait for the map touch surface and
+a loaded layer/overlay that proves data publication, then flush an asynchronous
+`act` tick before advancing timers. Otherwise late state commits produce React
+`act` warnings after the gesture assertion and can leak into later tests.
+
+## Native plugin registration
+
+First-party Capacitor plugins also need explicit Android class registration in
+`MainActivity` and iOS instance registration in `AppBridgeViewController`.
+Compiling a class or type-only registration does not prove package discovery
+exposes it. A bridge integration test must load the production host and resolve
+the exact JavaScript plugin name. Keep this separate from native formatter or
+storage unit tests, which prove a different invariant.
+
+## Native UI evidence and completion
+
+Recognizing system UI identifies its owner, not the exact trigger. Preserve
+contradictory observations (for example, no keyboard or apparent touch rather
+than motion). Treat policies blocking candidate triggers as guardrails until
+there is a before/after reproduction at the owning responder/WebView seam.
+Ancestor property assertions and compilation cannot prove gesture behavior; see
+[iOS editing](ios-webview-editing.md).
+
+Native presentation promises can reject even with valid inputs. UI handlers must
+consume that rejection and provide fixed, non-sensitive feedback while mounted.
+Test a rejected plugin call and successful subsequent retry, not only
+invocation.
+
+## High-frequency resource work
+
+Let IndexedDB order durable transactions and use bounded independent network
+workers; a single application promise chain per downloaded resource serializes
+otherwise independent work. Publish live in-memory progress separately from
+crash checkpoints. Verify concurrency limits, head-of-line avoidance, resource
+transitions, and notification isolation. A dedicated observer still fans out if
+its snapshot enters shared React context: consume frequent progress through a
+narrow `useSyncExternalStore` hook or separate context, and prove unrelated
+consumers remain untouched with render-count tests.

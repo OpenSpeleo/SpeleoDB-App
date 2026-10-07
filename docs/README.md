@@ -139,8 +139,12 @@ behaviors.
 ## Maintainer note
 
 When behavior changes, update the related document in this folder in the same
-pull request so implementation and docs stay aligned. When a regression exposed
-a weak test seam, also capture the reusable rule under `tasks/lessons/`; see
-`tasks/lessons/authoritative-seam-tests.md` for persistence, concurrency, and
-revision-driven UI tests. First-party native plugins also require a live bridge
-resolution test; see `tasks/lessons/native-plugin-registration.md`.
+pull request so implementation and docs stay aligned. Durable engineering rules,
+including authoritative persistence/concurrency tests and live native bridge
+registration, belong in
+[implementation guidelines](implementation-guidelines.md).
+[Verification strategy](verification-strategy.md) distinguishes automated gates,
+engineering goals, and physical-device evidence. Keep agent plans, task
+tracking, review notes, and scratch lessons in a unique OS temporary directory
+outside all checkouts; do not add task checklists or temporary-file links to
+these docs.

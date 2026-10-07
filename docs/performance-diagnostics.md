@@ -48,11 +48,12 @@ The foreground `total` ends after durable project, overlay, and GPS publication.
 Offline-map `coverage_source_collection` and `plan_schedule` are separate
 background timings and do not keep the Syncing action active.
 
-`plan_schedule` includes worker-side coordinate enumeration, packed in-memory
-deduplication and sorting, and durable writes of the final compact plan chunks.
-It does not include tile-provider downloads. For a typical 12,000-coordinate
-plan, only six final chunk transactions are required. A large value therefore
-points to planner computation or final plan persistence rather than temporary
+`plan_schedule` includes worker-side coordinate enumeration and deduplication
+(the sorted rectangle-union sweep for current areas, bounded packed-key planning
+for legacy inputs), plus durable writes of the final compact plan chunks. It
+does not include tile-provider downloads. For a typical 12,000-coordinate plan,
+only six final chunk transactions are required. A large value therefore points
+to planner computation or final plan persistence rather than temporary
 per-coordinate staging, which is not part of the current planner path.
 
 The `project-geojson` scope splits the local work hidden inside `geojson_sync`:
@@ -92,3 +93,50 @@ Logging is best effort and performs no storage or network work. Timing uses
 constant-memory numeric accumulators; no project identifier or payload is
 retained for diagnostics. One short line is emitted per measured phase, so log
 volume does not grow with projects, landmarks, tracks, sources, or tiles.
+
+## Preserve async ordering while measuring
+
+An async timing wrapper adds a promise-settlement boundary and can change
+admission, cancellation, or supersession ordering. In sensitive orchestration,
+record the monotonic start synchronously before the existing `await` and
+completion synchronously after it. Keep the active phase in the caller so its
+existing catch path reports abort/failure without an extra promise. Verify the
+owning cancellation and overlap tests as well as emitted diagnostic fields.
+
+## Evidence for performance claims
+
+Define user-visible start and terminal boundaries and compare the same
+representative workload before and after the change. Record raw wall-clock
+samples, median, worst result, time to first useful publication, long tasks, and
+retained large-payload ownership. Operation counts, complexity, and concurrency
+are supporting evidence; storage contention, cloning, garbage collection,
+rendering, worker startup, and WebView scheduling can reverse their apparent
+benefit. Revert or redesign changes that regress elapsed time or responsiveness.
+Use sanitized production phase timings for device confirmation where desktop
+benchmarks cannot model the platform.
+
+Load-sensitive build-speed advisories do not belong in tests whose contract is
+artifact correctness. Disable only that advisory through the build tool's scoped
+test configuration; keep normal production advisories and the repository console
+guard enabled. Do not mute `console.warn` globally.
+
+## Project-sync measurement limits
+
+The project-cache optimization shares validated records through a 64-entry LRU,
+weakly memoizes derived depth data, batches ready map publication, and overlaps
+independent metadata phases. The owning architecture is documented in
+[project sync](project-sync-coordination.md) and
+[Dashboard data](dashboard-map-data.md).
+
+The recorded desktop comparison used 60 projects with 2,000 3D point features
+each (18.1 MiB total), five samples, fake IndexedDB, React publication, and
+explicit garbage collection. It did not reproduce the reported phone slowdown.
+That historical comparison is not a current-build device speed claim: real
+WebKit storage, worker startup/structured cloning, and MapLibre commit-to-paint
+must be measured on the affected workload using the granular timings above. The
+physical regression remains unverified by that desktop evidence.
+
+Combining project MapLibre sources is a separate architectural decision. It
+changes visibility, color, depth, hit-testing, and source ownership; undertake
+it only if post-fix measurements identify reconciliation, rather than storage,
+as the remaining cost. Operation-count reductions alone do not justify it.

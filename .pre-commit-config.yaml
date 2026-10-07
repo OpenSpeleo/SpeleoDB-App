@@ -23,7 +23,7 @@ repos:
   # Markdown formatting
   # -------------------------
   - repo: https://github.com/rbubley/mirrors-prettier
-    rev: v3.9.5
+    rev: v3.9.9
     hooks:
       - id: prettier
         name: prettier markdown

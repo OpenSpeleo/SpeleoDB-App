@@ -148,6 +148,8 @@ account replacement use the same secure-first ordering and rollback contract.
 - Signed iOS Keychain tests exercise empty reads, replacement, clearing, byte
   limits, and malformed stored data on a simulator Keychain. Do not disable code
   signing for these tests; an unsigned test host cannot prove Keychain behavior.
+  `CODE_SIGNING_ALLOWED=NO` is compile-only evidence. If all Keychain tests fail
+  together, inspect host signing before changing store code or entitlements.
 - An iOS bridge integration test loads the production `AppBridgeViewController`
   and requires its live bridge to resolve `CredentialStore` to
   `CredentialStorePlugin`. This guards the native registration seam separately
@@ -156,3 +158,15 @@ account replacement use the same secure-first ordering and rollback contract.
   duplicate directories; Android lint validates both backup rule schemas.
 - Every native change requires Android unit/release compilation and an iOS
   simulator test/release build in addition to the complete web CI gate.
+
+## Untrusted error prose
+
+Server, proxy, native, and storage error text can contain submitted credentials;
+React escaping does not make it safe to disclose. Where product behavior does
+not need that prose, select fixed local messages from trusted status/error
+classes and log a fixed operation label without the raw error object.
+Exact-value replacement cannot establish secret absence across encodings, case
+changes, normalization, or overlap with the replacement marker. If a feature
+requires untrusted text, use a schema-specific allowlist and verify its full
+transformation boundary rather than claiming safety from a finite replacement
+list.

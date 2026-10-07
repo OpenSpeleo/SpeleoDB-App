@@ -9,10 +9,17 @@ removal condition. This is an attribution ledger, not permission for a blanket
 Gradle or dependency upgrade. Do not perform a blanket upgrade to clear these
 warnings.
 
+## Checked-in build configuration
+
+The current wrapper selects Gradle 9.6.0 and `android/build.gradle` selects AGP
+9.4.1. These files own the build versions; the dated audit below explains the
+original Java-toolchain and warning policy, not the current version pin.
+Revalidate the complete native matrix when either pin changes.
+
 ## August 2026 Gradle 10 readiness
 
-Gradle 10 has not been released as of August 26, 2026. The supported migration
-baseline is therefore Android Gradle Plugin (AGP) 9.3.2 with Gradle 9.5.0: AGP
+Gradle 10 has not been released as of August 26, 2026. The audited migration
+baseline was therefore Android Gradle Plugin (AGP) 9.3.2 with Gradle 9.5.0: AGP
 9.3 declares Gradle 9.5.0 as both its minimum and default version. Gradle 9.5's
 `--warning-mode all` output is the forward-compatibility gate until a Gradle 10
 distribution and a supporting AGP release are available. Do not put an
