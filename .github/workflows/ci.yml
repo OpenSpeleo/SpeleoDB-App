@@ -14,7 +14,26 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
+  shared-package-ci:
+    name: Shared Package CI
+    runs-on: ubuntu-latest
+    # Share a 30-minute verification deadline; allow extra time for setup.
+    timeout-minutes: 32
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Verify published map package commits and CI
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/check-shared-package-ci.ts
+
   prek:
+    needs: [shared-package-ci]
     name: Prek Hooks
     runs-on: ubuntu-latest
     timeout-minutes: 20

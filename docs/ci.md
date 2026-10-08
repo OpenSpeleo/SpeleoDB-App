@@ -1,31 +1,34 @@
 # GitHub CI
 
 This repository's GitHub Actions workflow is intentionally close to the local
-developer contract: hooks first, then the complete test suite, then web/native
-builds. The workflow lives in `.github/workflows/ci.yml`.
+developer contract: shared package verification first, then hooks, the complete
+test suite, and web/native builds. The workflow lives in
+`.github/workflows/ci.yml`.
 
 ## Stages
 
-1. **Prek Hooks** runs
+1. **Shared Package CI** verifies the published map package pins and waits for
+   their exact-commit verification to pass, with a shared 30-minute deadline.
+2. **Prek Hooks** runs
    `PREK_HOME="$RUNNER_TEMP/prek" bunx --bun prek run -a --show-diff-on-failure`,
    then `git diff --exit-code`. The diff check makes hook auto-fixes fail CI
    instead of silently changing the runner checkout.
-2. **Full Vitest Suite** runs
+3. **Full Vitest Suite** runs
    `bun run test.unit --run --reporter=verbose --coverage --no-file-parallelism`.
    The `--run` flag is required in CI so Vitest exits instead of entering watch
    mode. File-level serialization keeps real SpeleoDB integration tests from
    issuing concurrent password-login requests with the same account from a
    GitHub-hosted runner.
-3. **Production Web Build** runs `bun run build` and uploads `dist/` for native
+4. **Production Web Build** runs `bun run build` and uploads `dist/` for native
    jobs. Before uploading, it installs Playwright Chromium and WebKit and runs
    `bun run test:browser` against those built assets. The browser suite verifies
    login scrolling and reachable actions at reduced viewport sizes and enlarged
    text; it allows no retries or focused-only tests. Browser tests are separate
    from Vitest because jsdom cannot prove layout or hit testing.
-4. **Android Release Compile Smoke** downloads `dist/`, runs
+5. **Android Release Compile Smoke** downloads `dist/`, runs
    `bun run cap sync android`, and builds release-configuration APK/AAB files
    with a disposable CI keystore.
-5. **iOS Release Compile Smoke** is currently commented out while its signing
+6. **iOS Release Compile Smoke** is currently commented out while its signing
    workflow is being repaired. Its intended flow downloads `dist/`, runs
    `bun run cap sync ios`, archives the Xcode project, and verifies an IPA
    signed by a disposable CI identity. It is not an active verification gate.
@@ -95,9 +98,43 @@ There is no dependency upgrade, compatibility shim, request, or additional
 background work. Supported engines retain the existing startup and rendering
 behavior.
 
-Pull requests and pushes to `master` run the four enabled stages. Version tags
+Pull requests and pushes to `master` run the five enabled stages. Version tags
 retain the explicitly named `*-ci-smoke-*` workflow artifacts for seven days.
 They are compile evidence only and are never attached to a GitHub release.
+
+## Shared package CI gate
+
+Before any app checks or dependency installation, `Shared Package CI` runs
+`bun scripts/check-shared-package-ci.ts`. It verifies the full SHA pins for
+`@speleodb/map-core` and `@speleodb/map-viewer` against their public OpenSpeleo
+repositories and checks each repository's `.github/workflows/ci.yml` (`Verify`)
+using the GitHub Actions API. Only a `push` run on that exact SHA counts; PR
+merge runs and unrelated workflows cannot satisfy the gate.
+
+Both commits must exist. A missing commit, API error, or completed run with any
+conclusion other than `success` fails immediately. The newest workflow run is
+selected by run ID, including its current rerun attempt. Queued/in-progress runs
+and an absent run are polled every 30 seconds, with one shared 30-minute
+deadline for both packages, including API time. Each request has at most 30
+seconds to finish. Both packages are rechecked every round, so a rerun of a
+previously green package is observed while the other is pending. No verification
+result is cached between app runs. The job timeout is 32 minutes to allow
+checkout/Bun setup; the verification script itself stops at 30 minutes.
+
+All downstream CI jobs depend directly or transitively on this gate and are
+skipped when it fails. The job uses the read-only `GITHUB_TOKEN` supplied by
+Actions, including fork/Dependabot runs; no extra secret is required for these
+public repositories. API/authentication/rate-limit errors fail closed. For local
+verification, provide `GITHUB_TOKEN` with public-repository Actions read access;
+unauthenticated polling can exhaust GitHub's lower rate limit before 30 minutes.
+
+The small script uses only Bun built-ins and is kept in each standalone app:
+loading a shared dependency to decide whether that dependency is safe to install
+would make this bootstrap check circular. Keep both copies and their policy
+aligned. Vitest exercises the actual checker with simulated GitHub responses and
+a virtual clock, covering failure propagation, exact-SHA selection, reruns,
+pagination and the shared deadline. Workflow contract tests verify downstream
+dependencies. There is no application runtime or browser impact.
 
 ## Default Branch Contract
 
