@@ -1,3 +1,4 @@
+---
 repos:
   # -------------------------
   # Generic sanity checks
@@ -31,6 +32,39 @@ repos:
         args: [--prose-wrap=always]
         # args: [--prose-wrap=always, --embedded-language-formatting=off]
 
+  # -------------------------
+  # CI formatting
+  # -------------------------
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        # Accept GitHub Actions `on` and capitalized YAML booleans.
+        args:
+          - --config-data
+          - |
+            extends: default
+            rules:
+              truthy:
+                allowed-values: ['true', 'false', 'True', 'False', 'on']
+
+  - repo: https://github.com/shenxianpeng/hadolint-pre-commit
+    # This wrapper bundles Hadolint 2.15.1 in prek's isolated environment.
+    rev: v2.15.1.2
+    hooks:
+      - id: hadolint
+        # Allow latest image tags and distro-managed APT package versions.
+        args:
+          - --ignore
+          - DL3007  # Allow `latest` Docker image tags.
+          - --ignore
+          - DL3008  # Allow APT packages without explicit version pins.
+
   # ---------------------------
   # Application Linting & Check
   # ---------------------------
@@ -48,7 +82,9 @@ repos:
         # package-lock.json are out of sync, without touching node_modules.
         # Only runs when a manifest actually changed in the commit.
         name: package-lock.json matches package.json
-        entry: npm ci --dry-run --no-audit --no-fund --ignore-scripts --workspaces=false
+        entry: >-
+          npm ci --dry-run --no-audit --no-fund --ignore-scripts
+          --workspaces=false
         language: system
         files: ^(package\.json|package-lock\.json)$
         pass_filenames: false
