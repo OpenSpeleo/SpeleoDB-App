@@ -55,7 +55,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.2",
-    "@eslint/js": "^9.39.5",
+    "@eslint/js": "^10.0.1",
     "@j178/prek": "^0.5.3",
     "@maplibre/maplibre-gl-style-spec": "^26.4.4",
     "@playwright/test": "1.63.0",
