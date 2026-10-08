@@ -1,4 +1,5 @@
-import { useCallback, useLayoutEffect, useState } from 'react';
+import { attachGlobeAtmosphere } from '@speleodb/map-viewer';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
 import type { Map as MaplibreMap } from 'maplibre-gl';
@@ -25,6 +26,7 @@ import {
 
 export interface DashboardMapShellDependencies {
   getLayerStyle: (layerId: MapLayerId) => Promise<Record<string, unknown>>;
+  attachAtmosphere: (map: MaplibreMap) => () => void;
   persistLayerId: (layerId: MapLayerId) => void;
   locationWatcher: LocationWatcher;
   impact: () => Promise<void>;
@@ -44,6 +46,7 @@ async function loadOverlayIcons(map: OverlayImageMap): Promise<OverlayIconAvaila
 
 const DEFAULT_DEPENDENCIES: DashboardMapShellDependencies = {
   getLayerStyle: getCachedLayerStyle,
+  attachAtmosphere: map => attachGlobeAtmosphere(map, { beforeId: MAP.GLOBE_FOREGROUND_ANCHOR }),
   persistLayerId: persistSelectedMapLayerId,
   locationWatcher: new GeolocationWatcher(),
   impact: () => Haptics.impact({ style: ImpactStyle.Light }),
@@ -70,7 +73,14 @@ function useMapStyle(
   useLayoutEffect(() => {
     let cancelled = false;
     void dependencies.getLayerStyle(selectedMapLayerId).then((style) => {
-      if (!cancelled) setResolved({ layerId: selectedMapLayerId, style });
+      if (cancelled) return;
+      // Provider metadata must never reset the application's camera on a switch.
+      // Copy only the style root; retain cache URLs, source and layer identity.
+      const presentationStyle = { ...style, projection: { type: 'globe' } };
+      for (const key of ['center', 'zoom', 'bearing', 'pitch', 'roll']) {
+        delete (presentationStyle as Record<string, unknown>)[key];
+      }
+      setResolved({ layerId: selectedMapLayerId, style: presentationStyle });
     }).catch(error => { if (!cancelled) dependencies.reportStyleError(error); });
     return () => { cancelled = true; };
   }, [dependencies, selectedMapLayerId]);
@@ -133,6 +143,22 @@ export function useDashboardMapShell({
   const mapStyle = useMapStyle(selectedMapLayerId, dependencies, runtimeActive);
   const icons = useMapIcons(mapRef, dependencies);
   const location = useMapLocation(mapRef, runtimeActive, dependencies);
+  const appearance = useRef<{ map: MaplibreMap; dispose: () => void } | null>(null);
+  useLayoutEffect(() => () => {
+    appearance.current?.dispose();
+    appearance.current = null;
+  }, []);
+  const handleMapLoad = useCallback(() => {
+    const map = mapRef.current?.getMap();
+    if (map && appearance.current?.map !== map) {
+      appearance.current?.dispose();
+      appearance.current = { map, dispose: dependencies.attachAtmosphere(map) };
+      // Globe projection is now installed: undo the temporary Mercator clamp
+      // once, before the caller applies project bounds or a navigation target.
+      map.jumpTo({ center: MAP.DEFAULT_CENTER, zoom: MAP.DEFAULT_ZOOM, ...MAP.NORTH_UP_ORIENTATION });
+    }
+    icons.handleMapLoad();
+  }, [dependencies, icons.handleMapLoad, mapRef]);
 
   const selectMapLayer = useCallback((layerId: string) => {
     const nextLayerId = (MAP_LAYERS.find((layer) => layer.id === layerId)?.id
@@ -161,7 +187,7 @@ export function useDashboardMapShell({
     userLocation: location.location,
     geoError: location.error,
     selectMapLayer,
-    handleMapLoad: icons.handleMapLoad,
+    handleMapLoad,
     handleMapMove,
     toggleLocationMode: location.toggleLocationMode,
     dismissGeoError: location.dismissError,

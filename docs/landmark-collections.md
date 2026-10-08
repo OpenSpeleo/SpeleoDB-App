@@ -156,7 +156,7 @@ does not open the modal).
 
 ## Tests
 
-- `src/utils/landmarkCollections.test.ts`
+- the shared `@speleodb/map-core` landmark-grouping suite
 - `src/services/PreferencesService.test.ts`
 - `src/utils/overlayMarkerDetails.test.ts`
 - `src/components/OverlayMarkerDetailsModal.test.tsx`

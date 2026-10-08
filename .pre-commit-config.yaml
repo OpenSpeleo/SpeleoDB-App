@@ -28,6 +28,9 @@ repos:
     hooks:
       - id: prettier
         name: prettier markdown
+        entry: bun run --bun prettier --write --ignore-unknown
+        language: bun
+        language_version: system
         types_or: [markdown]
         args: [--prose-wrap=always]
         # args: [--prose-wrap=always, --embedded-language-formatting=off]
@@ -72,36 +75,33 @@ repos:
     hooks:
       - id: eslint
         name: eslint --fix on staged TS/TSX
-        entry: npx eslint --fix
+        entry: bunx --bun eslint --fix
         language: system
         files: \.(ts|tsx)$
         pass_filenames: true
 
       - id: lockfile-sync
-        # `npm ci --dry-run` exits non-zero when package.json and
-        # package-lock.json are out of sync, without touching node_modules.
-        # Only runs when a manifest actually changed in the commit.
-        name: package-lock.json matches package.json
-        entry: >-
-          npm ci --dry-run --no-audit --no-fund --ignore-scripts
-          --workspaces=false
+        # Isolate the standalone graph so a parent workspace cannot mask drift.
+        name: bun.lock matches standalone package.json
+        entry: bun scripts/check-lockfile.mjs
         language: system
-        files: ^(package\.json|package-lock\.json)$
+        files: ^(package\.json|bun\.lock|bunfig\.toml)$
         pass_filenames: false
 
       - id: typecheck
         name: TypeScript --noEmit
-        entry: npx tsc --noEmit
+        entry: bun run typecheck
         language: system
         pass_filenames: false
         always_run: true
 
       - id: build
-        # `npm run build` runs `tsc && vite build`, so it re-typechecks. The
-        # extra ~2s is intentional: it catches the case where someone bypasses
-        # the typecheck hook with --no-verify and then pushes.
+        # `bun run build` runs the typecheck wrapper and Vite, so it
+        # re-typechecks. The extra ~2s is intentional: it catches the case
+        # where someone bypasses the typecheck hook with --no-verify and
+        # then pushes.
         name: vite build (tsc + bundle)
-        entry: npm run build
+        entry: bun run build
         language: system
         pass_filenames: false
         always_run: true

@@ -1,3 +1,4 @@
+import { calculateDistanceInMeters } from '@speleodb/map-core/geo';
 import { PROJECT_GEOJSON_VALIDATION } from '../constants';
 import type {
   ProjectGeoJSONAnalysis,
@@ -42,23 +43,15 @@ function invalid(message: string): never {
   throw new ProjectGeoJSONComputationError('invalid_geojson', message);
 }
 
-function radians(degrees: number): number {
-  return degrees * Math.PI / 180;
-}
-
 function haversineKm(
   firstLongitude: number,
   firstLatitude: number,
   secondLongitude: number,
   secondLatitude: number,
 ): number {
-  const lat1 = radians(firstLatitude);
-  const lat2 = radians(secondLatitude);
-  const deltaLat = lat2 - lat1;
-  const deltaLng = radians(secondLongitude - firstLongitude);
-  const a = Math.sin(deltaLat / 2) ** 2
-    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
-  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(a)));
+  return calculateDistanceInMeters(
+    [firstLongitude, firstLatitude], [secondLongitude, secondLatitude], EARTH_RADIUS_KM,
+  );
 }
 
 function visitPosition(value: unknown, sink: (longitude: number, latitude: number) => void): void {

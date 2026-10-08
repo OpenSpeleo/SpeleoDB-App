@@ -49,8 +49,8 @@ repository's persistent hook configuration.
 
 ## 1. Update both native versions
 
-The native version is authoritative. The root npm package version is tooling
-metadata and must not be changed as part of this workflow.
+The native version is authoritative. The root JavaScript package version is
+tooling metadata and must not be changed as part of this workflow.
 
 | File                                    | Human-readable version       | Integer build number           |
 | --------------------------------------- | ---------------------------- | ------------------------------ |

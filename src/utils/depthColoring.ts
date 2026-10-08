@@ -1,3 +1,7 @@
+import { createDepthColorExpression as buildDepthColorExpression } from '@speleodb/map-viewer';
+import { annotateFeatureDepths, computeCollectionDepthDomain, firstPropertyDepth, meanGeometryDepth, mergeDepthDomains, type DepthDomain } from '@speleodb/map-core/depth';
+export { mergeDepthDomains };
+export type { DepthDomain };
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 
 export const DEPTH_PROPERTY_KEY = '_speleoDepth';
@@ -24,11 +28,6 @@ const DEPTH_PROPERTY_CANDIDATES = [
   'min_depth',
   'max_depth',
 ] as const;
-
-export interface DepthDomain {
-  min: number;
-  max: number;
-}
 
 export interface DepthColorStop {
   ratio: number;
@@ -63,66 +62,14 @@ function toFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-function visitGeometryDepths(geometry: GeoJSON.Geometry, visit: (depth: number) => void): void {
-  const visitCoord = (coord: number[]): void => {
-    if (coord.length < 3) return;
-    const depth = toFiniteNumber(coord[2]);
-    if (depth === null) return;
-    visit(depth);
-  };
-
-  switch (geometry.type) {
-    case 'Point':
-      visitCoord(geometry.coordinates);
-      break;
-    case 'MultiPoint':
-    case 'LineString':
-      for (const coord of geometry.coordinates) visitCoord(coord);
-      break;
-    case 'MultiLineString':
-    case 'Polygon':
-      for (const ring of geometry.coordinates) {
-        for (const coord of ring) visitCoord(coord);
-      }
-      break;
-    case 'MultiPolygon':
-      for (const polygon of geometry.coordinates) {
-        for (const ring of polygon) {
-          for (const coord of ring) visitCoord(coord);
-        }
-      }
-      break;
-    case 'GeometryCollection':
-      for (const child of geometry.geometries) {
-        visitGeometryDepths(child, visit);
-      }
-      break;
-  }
-}
-
 export function getDepthFromProperties(
   properties: Record<string, unknown> | null | undefined,
 ): number | null {
-  if (!properties) return null;
-  for (const key of DEPTH_PROPERTY_CANDIDATES) {
-    const depth = toFiniteNumber(properties[key]);
-    if (depth !== null) {
-      return depth;
-    }
-  }
-  return null;
+  return firstPropertyDepth(properties, DEPTH_PROPERTY_CANDIDATES, toFiniteNumber);
 }
 
 export function getDepthFromGeometry(geometry: GeoJSON.Geometry | null | undefined): number | null {
-  if (!geometry) return null;
-  let sum = 0;
-  let count = 0;
-  visitGeometryDepths(geometry, (depth) => {
-    sum += depth;
-    count += 1;
-  });
-  if (count === 0) return null;
-  return sum / count;
+  return meanGeometryDepth(geometry, toFiniteNumber);
 }
 
 export function getFeatureDepth(feature: GeoJSON.Feature): number | null {
@@ -138,65 +85,13 @@ export function attachDepthToFeatureCollection(
   featureCollection: GeoJSON.FeatureCollection,
   depthPropertyKey = DEPTH_PROPERTY_KEY,
 ): GeoJSON.FeatureCollection {
-  let changed = false;
-  const nextFeatures = featureCollection.features.map((feature) => {
-    const depth = getFeatureDepth(feature);
-    if (depth === null) {
-      return feature;
-    }
-
-    const properties = (feature.properties ?? {}) as Record<string, unknown>;
-    if (toFiniteNumber(properties[depthPropertyKey]) === depth) {
-      return feature;
-    }
-
-    changed = true;
-    return {
-      ...feature,
-      properties: {
-        ...properties,
-        [depthPropertyKey]: depth,
-      },
-    };
+  return annotateFeatureDepths(featureCollection, {
+    resolveDepth: getFeatureDepth, property: depthPropertyKey, parseStoredDepth: toFiniteNumber,
   });
-
-  if (!changed) {
-    return featureCollection;
-  }
-
-  return {
-    ...featureCollection,
-    features: nextFeatures,
-  };
 }
 
-function clampDepthForColorScale(depth: number): number {
-  if (!Number.isFinite(depth)) {
-    return 0;
-  }
-  return Math.max(0, depth);
-}
-
-export function computeDepthDomain(
-  featureCollections: GeoJSON.FeatureCollection[],
-): DepthDomain | null {
-  let max = 0;
-  let hasDepth = false;
-
-  for (const featureCollection of featureCollections) {
-    for (const feature of featureCollection.features) {
-      const depth = getFeatureDepth(feature);
-      if (depth === null) continue;
-      hasDepth = true;
-      const clampedDepth = clampDepthForColorScale(depth);
-      if (clampedDepth > max) max = clampedDepth;
-    }
-  }
-
-  if (!hasDepth) {
-    return null;
-  }
-  return { min: 0, max };
+export function computeDepthDomain(featureCollections: GeoJSON.FeatureCollection[]): DepthDomain | null {
+  return computeCollectionDepthDomain(featureCollections, getFeatureDepth);
 }
 
 export function createDepthColorExpression(
@@ -204,57 +99,10 @@ export function createDepthColorExpression(
   fallbackColor: string,
   depthPropertyKey = DEPTH_PROPERTY_KEY,
 ): ExpressionSpecification | string {
-  if (!domain) {
-    return fallbackColor;
-  }
-
-  const maxDepth = Math.max(0, domain.max);
-  if (maxDepth <= 0) {
-    return [
-      'case',
-      ['has', depthPropertyKey],
-      DEPTH_COLOR_STOPS[0].color,
-      fallbackColor,
-    ];
-  }
-  const clampedDepthExpression = [
-    'min',
-    maxDepth,
-    ['max', 0, ['to-number', ['get', depthPropertyKey]]],
-  ];
-  const emphasizedDepthExpression = [
-    'sqrt',
-    ['/', clampedDepthExpression, maxDepth],
-  ];
-  const interpolateExpression = [
-    'interpolate',
-    ['linear'],
-    emphasizedDepthExpression,
-    ...DEPTH_COLOR_STOPS.flatMap((stop) => [stop.ratio, stop.color]),
-  ] as unknown as ExpressionSpecification;
-
-  return [
-    'case',
-    ['has', depthPropertyKey],
-    interpolateExpression,
-    fallbackColor,
-  ];
-}
-
-export function mergeDepthDomains(
-  domains: (DepthDomain | null)[],
-): DepthDomain | null {
-  let max = 0;
-  let hasDepth = false;
-
-  for (const domain of domains) {
-    if (!domain) continue;
-    hasDepth = true;
-    if (domain.max > max) max = domain.max;
-  }
-
-  if (!hasDepth) return null;
-  return { min: 0, max };
+  return buildDepthColorExpression({
+    domain, fallbackColor, property: depthPropertyKey,
+    stops: DEPTH_COLOR_STOPS, transform: 'sqrt',
+  });
 }
 
 export function getDepthRatio(depth: number, domain: DepthDomain): number {

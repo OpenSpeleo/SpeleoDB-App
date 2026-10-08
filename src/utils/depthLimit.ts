@@ -1,18 +1,9 @@
 import type { MeasurementUnit } from '../types/measurementUnit';
-import type { DepthDomain } from './depthColoring';
+import { isValidDepthLimit } from '@speleodb/map-core/depth';
 import { FEET_TO_METERS, formatDepthValue } from './measurementUnits';
 
-export function isValidDepthLimit(value: unknown): value is number | null {
-  return value === null || (typeof value === 'number' && Number.isFinite(value) && value > 0);
-}
-
 /** A configured maximum fixes the color scale without changing measured depths. */
-export function applyDepthLimit(domain: DepthDomain | null, limitFeet: number | null): DepthDomain | null {
-  if (!domain) return null;
-  return limitFeet !== null && isValidDepthLimit(limitFeet)
-    ? { min: 0, max: limitFeet }
-    : domain;
-}
+export { isValidDepthLimit, applyDepthLimit } from '@speleodb/map-core/depth';
 
 function depthInUnit(feet: number, unit: MeasurementUnit): number {
   return unit === 'meters' ? feet * FEET_TO_METERS : feet;

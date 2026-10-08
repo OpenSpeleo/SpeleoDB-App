@@ -275,5 +275,5 @@ devices before shipping:
    path.
 4. Route all tile requests through `cached-https` (offline + missing-tile
    check).
-5. Run targeted vitest for touched paths + `npm run build`.
+5. Run targeted vitest for touched paths + `bun run build`.
 6. Update this document if layer behavior changes.

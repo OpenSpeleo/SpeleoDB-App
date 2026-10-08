@@ -6,7 +6,7 @@ updates:
     schedule:
       interval: monthly
 
-  - package-ecosystem: npm
+  - package-ecosystem: bun
     directory: /
     schedule:
       interval: weekly

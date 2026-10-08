@@ -34,13 +34,13 @@ from the artifact being verified.
 ## 1. Freeze and version the candidate
 
 Start from a clean checkout of the approved source commit with no ignored build
-output reused. Record `git rev-parse HEAD`, `git status --porcelain`, Node, npm,
-Java, Gradle, Xcode, Cocoa/Swift package resolution, Capacitor, Android SDK, and
-iOS SDK versions.
+output reused. Record `git rev-parse HEAD`, `git status --porcelain`, Bun, Java,
+Gradle, Xcode, Cocoa/Swift package resolution, Capacitor, Android SDK, and iOS
+SDK versions.
 
-The native store version is authoritative; the npm package version is tooling
-metadata and is not silently substituted for it. Update one dedicated release
-commit so these values must match across Android and iOS:
+The native store version is authoritative; the JavaScript package version is
+tooling metadata and is not silently substituted for it. Update one dedicated
+release commit so these values must match across Android and iOS:
 
 | Platform | File                                    | Human version       | Monotonic build           |
 | -------- | --------------------------------------- | ------------------- | ------------------------- |
@@ -55,8 +55,8 @@ including after a rejected upload or rollback.
 
 Before signing, run the complete web suite, production build, dependency audits,
 Android/iOS unit and native configuration tests, physical-device protocols, and
-`npx cap sync android && npx cap sync ios`. Inspect every tracked native diff
-after sync. The candidate is frozen only when these gates are green, the
+`bun run cap sync android && bun run cap sync ios`. Inspect every tracked native
+diff after sync. The candidate is frozen only when these gates are green, the
 worktree is clean, and the exact commit is approved for signing.
 
 ## 2. Build with trusted identities
@@ -73,13 +73,13 @@ for direct installation evidence. The current project accepts signing arguments
 through Capacitor; an approved secret-injection wrapper supplies the values:
 
 ```bash
-npx cap build android --androidreleasetype=AAB \
+bun run cap build android --androidreleasetype=AAB \
   --keystorepath="$ANDROID_RELEASE_KEYSTORE" \
   --keystorepass="$ANDROID_RELEASE_KEYSTORE_PASSWORD" \
   --keystorealias="$ANDROID_RELEASE_KEY_ALIAS" \
   --keystorealiaspass="$ANDROID_RELEASE_KEY_PASSWORD"
 
-npx cap build android --androidreleasetype=APK \
+bun run cap build android --androidreleasetype=APK \
   --keystorepath="$ANDROID_RELEASE_KEYSTORE" \
   --keystorepass="$ANDROID_RELEASE_KEYSTORE_PASSWORD" \
   --keystorealias="$ANDROID_RELEASE_KEY_ALIAS" \

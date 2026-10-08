@@ -1,9 +1,9 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { writePackagePatch } from './write-package-patch.mjs';
 
-const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(scriptDir, '..');
+// Lifecycle cwd selects the installed workspace, including local source projections.
+const repoRoot = process.cwd();
 const sentryPackagePath = path.join(repoRoot, 'node_modules', '@sentry', 'capacitor', 'Package.swift');
 const sentryCapacitorAndroidGradlePath = path.join(
   repoRoot,
@@ -60,7 +60,7 @@ function patchSentrySwiftPackage() {
   }
 
   const patched = current.replace(sourceDependency, dynamicDependency);
-  writeFileSync(sentryPackagePath, patched, 'utf8');
+  writePackagePatch(sentryPackagePath, patched);
   console.log('[sentry] Patched @sentry/capacitor to use Sentry-Dynamic for iOS dSYM compatibility.');
 }
 
@@ -73,7 +73,7 @@ function patchCapacitorAndroidProguardDefaults() {
   const patchedPackages = [];
 
   const packageDirs = readdirSync(capacitorPackagesDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() || (entry.isSymbolicLink() && statSync(path.join(capacitorPackagesDir, entry.name)).isDirectory()))
     .map((entry) => entry.name);
 
   for (const packageName of packageDirs) {
@@ -88,7 +88,7 @@ function patchCapacitorAndroidProguardDefaults() {
     }
 
     const patchedGradle = currentGradle.split(legacyProguardConfig).join(optimizedProguardConfig);
-    writeFileSync(gradleFilePath, patchedGradle, 'utf8');
+    writePackagePatch(gradleFilePath, patchedGradle);
     patchedPackages.push(`@capacitor/${packageName}`);
   }
 
@@ -113,7 +113,7 @@ function patchSentryCapacitorAndroidProguardDefault() {
   }
 
   const patchedGradle = currentGradle.split(legacyProguardConfig).join(optimizedProguardConfig);
-  writeFileSync(sentryCapacitorAndroidGradlePath, patchedGradle, 'utf8');
+  writePackagePatch(sentryCapacitorAndroidGradlePath, patchedGradle);
   console.log('[gradle] Updated default ProGuard file for: @sentry/capacitor');
 }
 
@@ -130,7 +130,7 @@ function patchBackgroundGeolocationAndroidProguardDefault() {
   }
 
   const patchedGradle = currentGradle.split(legacyProguardConfig).join(optimizedProguardConfig);
-  writeFileSync(backgroundGeolocationAndroidGradlePath, patchedGradle, 'utf8');
+  writePackagePatch(backgroundGeolocationAndroidGradlePath, patchedGradle);
   console.log('[gradle] Updated default ProGuard file for: @capacitor-community/background-geolocation');
 }
 
@@ -173,7 +173,7 @@ function patchAndroidGradlePropertyAssignments(gradleFilePath, packageName) {
     return;
   }
 
-  writeFileSync(gradleFilePath, patchedGradle, 'utf8');
+  writePackagePatch(gradleFilePath, patchedGradle);
   console.log(`[gradle] Updated Android property assignment syntax for: ${packageName}`);
 }
 
@@ -189,7 +189,7 @@ function patchCapacitorKotlinPluginForAgp9() {
   const patchedPackages = [];
 
   const packageDirs = readdirSync(capacitorPackagesDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() || (entry.isSymbolicLink() && statSync(path.join(capacitorPackagesDir, entry.name)).isDirectory()))
     .map((entry) => entry.name);
 
   for (const packageName of packageDirs) {
@@ -233,7 +233,7 @@ function patchCapacitorKotlinPluginForAgp9() {
     }
 
     const patched = patchedLines.join('\n');
-    writeFileSync(gradleFilePath, patched, 'utf8');
+    writePackagePatch(gradleFilePath, patched);
     patchedPackages.push(`@capacitor/${packageName}`);
   }
 
@@ -281,7 +281,7 @@ function patchBackgroundGeolocationSwiftPackage() {
   }
 
   const patched = current.replace(pinnedConstraint, widenedConstraint);
-  writeFileSync(backgroundGeolocationPackagePath, patched, 'utf8');
+  writePackagePatch(backgroundGeolocationPackagePath, patched);
   console.log('[bg-geo] Widened background-geolocation capacitor-swift-pm constraint to include Capacitor 8.');
 }
 

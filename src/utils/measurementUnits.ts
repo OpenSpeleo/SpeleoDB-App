@@ -1,6 +1,8 @@
 import type { MeasurementUnit } from '../types/measurementUnit';
+import { FEET_TO_METERS, convertFeetToMeters } from '@speleodb/map-core/depth';
 
-export const FEET_TO_METERS = 0.3048;
+export { FEET_TO_METERS, convertFeetToMeters } from '@speleodb/map-core/depth';
+
 const FEET_PER_MILE = 5280;
 const METERS_PER_KILOMETER = 1000;
 
@@ -11,10 +13,6 @@ function roundToTenths(value: number): number {
     return Math.round(value * 10) / 10;
   }
   return -Math.round(Math.abs(value) * 10) / 10;
-}
-
-export function convertFeetToMeters(valueFeet: number): number {
-  return valueFeet * FEET_TO_METERS;
 }
 
 export function formatDepthValue(valueFeet: number | null, unit: MeasurementUnit): string {

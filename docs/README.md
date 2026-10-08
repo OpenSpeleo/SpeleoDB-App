@@ -5,6 +5,9 @@ behaviors.
 
 ## Available docs
 
+- `shared-map-packages.md`: shared TypeScript geography and renderer ownership,
+  app-specific policy boundaries, source/artifact builds and verification.
+
 - `gis-geometry.md`: read-only private line/polygon browsing, session
   visibility, token-only HTTP, scoped cache/revocation, and automatic offline
   rectangles.

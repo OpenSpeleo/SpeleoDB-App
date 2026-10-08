@@ -17,7 +17,7 @@ function runUpdate(failingCommand?: string) {
   directories.push(directory);
   const log = path.join(directory, 'commands.log');
   writeFileSync(log, '');
-  for (const command of ['npx', 'npm']) {
+  for (const command of ['bunx', 'bun']) {
     writeFileSync(path.join(directory, command), `#!/bin/sh
 printf '%s\\n' "${command} $*" >> "$UPDATE_TEST_LOG"
 if [ "${command} $*" = "$UPDATE_TEST_FAILURE" ]; then exit 17; fi
@@ -45,13 +45,13 @@ exit 0
 }
 
 describe('make update', () => {
-  const checkUpdates = 'npx --yes npm-check-updates -u --peer --target minor --reject react,react-dom';
-  const checkReactUpdates = 'npx --yes npm-check-updates -u --peer --target patch --filter react,react-dom';
+  const checkUpdates = 'bunx --bun npm-check-updates -u --peer --target minor --reject react,react-dom';
+  const checkReactUpdates = 'bunx --bun npm-check-updates -u --peer --target patch --filter react,react-dom';
 
   it('checks peers within current majors before installing, even with an update file', () => {
     expect(runUpdate()).toEqual({
       status: 0,
-      commands: [checkUpdates, checkReactUpdates, 'npm install'],
+      commands: [checkUpdates, checkReactUpdates, 'bun install'],
     });
   });
 
@@ -68,8 +68,8 @@ describe('make update', () => {
   });
 
   it('reports install failures without bypassing peer resolution', () => {
-    const result = runUpdate('npm install');
+    const result = runUpdate('bun install');
     expect(result.status).not.toBe(0);
-    expect(result.commands).toEqual([checkUpdates, checkReactUpdates, 'npm install']);
+    expect(result.commands).toEqual([checkUpdates, checkReactUpdates, 'bun install']);
   });
 });

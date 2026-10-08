@@ -1,3 +1,4 @@
+import { isHexColor } from '@speleodb/map-core/colors';
 import { COLORS } from '../constants';
 import type { Project } from '../types/project';
 
@@ -23,7 +24,7 @@ export function createProjectColorState(projects: Project[]): ProjectColorState 
   const projectColorsById: Record<string, string> = Object.fromEntries(
     sortedProjects.map((project) => [
       project.id,
-      isValidHex(project.color) ? project.color : COLORS.FALLBACK,
+      isHexColor(project.color) ? project.color : COLORS.FALLBACK,
     ]),
   );
   return { sortedProjects, projectColorsById };
@@ -34,8 +35,4 @@ export function getProjectColor(
   projectColorsById: Record<string, string>,
 ): string {
   return projectColorsById[projectId] ?? COLORS.FALLBACK;
-}
-
-function isValidHex(value: unknown): value is string {
-  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
 }

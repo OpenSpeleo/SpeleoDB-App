@@ -322,7 +322,7 @@ checkpoints continue without a hidden page timer.
 - Browser coverage: `tests/browser/map-display.spec.ts` exercises the real
   Settings route and retained map, offline restoration, and responsive depth
   validation in Chromium and WebKit. Run after the production build with
-  `npx playwright test tests/browser/map-display.spec.ts` from this app.
+  `bunx --bun playwright test tests/browser/map-display.spec.ts` from this app.
 
 ## Change checklist
 
@@ -344,7 +344,7 @@ checkpoints continue without a hidden page timer.
 9. Verify the Go Online button appears only while offline-locked and routes
    `ok`/`network_error`/`unauthorized` correctly (sync + auto-hide / failure
    modal / redirect to login).
-10. Run `npx vitest run src/pages/Settings.test.tsx`.
+10. Run `bunx --bun vitest run src/pages/Settings.test.tsx`.
 11. Update this document if sections, state ownership, or offline behavior
     changes.
 

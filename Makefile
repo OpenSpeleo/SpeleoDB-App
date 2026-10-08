@@ -14,7 +14,7 @@ BUNDLE_ID       := org.speleodb.app
 SIMULATOR       ?=
 
 # Derived
-DEVICE_UDID     = $(shell node scripts/resolve-ios-simulator.mjs "$(SIMULATOR)" 2>/dev/null)
+DEVICE_UDID     = $(shell bun scripts/resolve-ios-simulator.mjs "$(SIMULATOR)" 2>/dev/null)
 SIMULATOR_LABEL = $(if $(SIMULATOR),$(SIMULATOR),auto-selected iPhone)
 BUILD_DIR       := build
 
@@ -34,53 +34,53 @@ help: ## Show this help
 	@echo ""
 
 # ── Dependencies ──────────────────────────────────────────────
-install: ## Install npm dependencies
-	npm ci
+install: ## Install locked Bun dependencies
+	test -s bun.lock && bun install --frozen-lockfile
 
 # ── Web ───────────────────────────────────────────────────────
 dev: ## Start Vite dev server with live reload
-	npm run dev
+	bun run dev
 
 build: ## Build the web app for production
-	npm run build
+	bun run build
 
 clean: ## Remove build artifacts
 	rm -rf dist $(BUILD_DIR) node_modules/.vite
 	@echo "Cleaned dist/, $(BUILD_DIR)/, and Vite cache."
 
 lint: ## Run ESLint
-	npm run lint
+	bun run lint
 
 quality: ## Verify every tracked file has a quality classification
-	npm run quality:inventory
+	bun run quality:inventory
 
 typecheck: ## Run TypeScript type checking
-	npm run typecheck
+	bun run typecheck
 
 # ── Tests ─────────────────────────────────────────────────────
 test: ## Run unit tests (Vitest)
-	npm run test.unit
+	bun run test.unit
 
 test-ci: ## Run unit tests (Vitest, one-shot)
-	npm run test:ci
+	bun run test:ci
 
 # ── CI ────────────────────────────────────────────────────────
 ci: quality lint typecheck test-ci build ## Run the full web CI pipeline locally
 
 # ── Git hooks (prek) ──────────────────────────────────────────
 pre-commit: ## Run all pre-commit hooks against the entire repo
-	npx prek run --all-files
+	bunx --bun prek run --all-files
 
 # ── Capacitor ─────────────────────────────────────────────────
 sync: build ## Build web + sync to both native platforms
-	npx cap sync
+	bun run cap sync
 
 cap-doctor: ## Run Capacitor doctor diagnostics
-	npx cap doctor
+	bun run cap doctor
 
 # ── iOS (no Xcode GUI needed) ────────────────────────────────
 ios-open: ## Open the project in Xcode
-	npx cap open ios
+	bun run cap open ios
 
 ios-build: sync ## Build iOS app via xcodebuild (Debug)
 	xcodebuild \
@@ -174,11 +174,11 @@ ios-device: sync ## Build + run on a connected physical device
 		-allowProvisioningUpdates \
 		build
 
-ios-live: ## Live-reload on iOS simulator (Ionic + Capacitor)
+ios-live: ## Live-reload on iOS simulator (Vite + Capacitor)
 	@set -a; \
 	if [ -f .env ]; then . ./.env; fi; \
 	set +a; \
-	VITE_SENTRY_DSN="$${VITE_SENTRY_DSN:-$${SENTRY_DSN_IOS}}" npx ionic cap run ios --livereload --external
+	VITE_SENTRY_DSN="$${VITE_SENTRY_DSN:-$${SENTRY_DSN_IOS}}" bun run dev:ios
 
 ios-log: ## Stream logs from the booted simulator
 	@if [ -z "$(DEVICE_UDID)" ]; then \
@@ -188,10 +188,10 @@ ios-log: ## Stream logs from the booted simulator
 	xcrun simctl spawn $(DEVICE_UDID) log stream --level debug --predicate 'processImagePath CONTAINS "$(SCHEME)"'
 
 dependencies: ## Report dependency drift without modifying manifests or the lockfile
-	npm outdated
+	bun outdated
 
 update: ## Update dependencies within current majors, checking peer compatibility
 	# React minor upgrades need a bundle-budget review (19.3 exceeds the entry limit).
-	npx --yes npm-check-updates -u --peer --target minor --reject react,react-dom
-	npx --yes npm-check-updates -u --peer --target patch --filter react,react-dom
-	npm install
+	bunx --bun npm-check-updates -u --peer --target minor --reject react,react-dom
+	bunx --bun npm-check-updates -u --peer --target patch --filter react,react-dom
+	bun install

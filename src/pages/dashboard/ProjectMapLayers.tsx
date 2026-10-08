@@ -1,3 +1,4 @@
+import { createShotColorExpression } from '@speleodb/map-viewer';
 import { memo, useLayoutEffect, useState } from 'react';
 import { scheduleViewerUpdate } from '../../utils/scheduleViewerUpdate';
 import { Layer, Source } from 'react-map-gl/maplibre';
@@ -39,7 +40,7 @@ const ProjectMapSource = memo(function ProjectMapSource({
   const lineAndFillColor: ExpressionSpecification | string = colorMode === 'depth'
     ? createDepthColorExpression(depthDomain, fallbackColor, DEPTH_PROPERTY_KEY)
     : colorMode === 'shot'
-      ? ['to-color', ['get', 'color'], fallbackColor]
+      ? createShotColorExpression(fallbackColor)
       : fallbackColor;
 
   return (

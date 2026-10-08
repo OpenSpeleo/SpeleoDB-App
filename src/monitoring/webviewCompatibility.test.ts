@@ -3,6 +3,12 @@ import { readFileSync } from 'node:fs';
 import { loadConfigFromFile } from 'vite';
 import capacitor from '../../capacitor.config';
 
+// Bun can load TypeScript directly. Repeated bundled loads through a symlinked
+// node_modules tree retain stale temporary-module resolutions after Vite cleanup.
+const loadProductionConfig = () => loadConfigFromFile(
+  { command: 'build', mode: 'production' }, undefined, undefined, undefined, undefined, 'native',
+);
+
 describe('native browser support contract', () => {
   it('rejects engines below the CSS framework floor before application startup', () => {
     expect(capacitor.android?.minWebViewVersion).toBe(111);
@@ -10,7 +16,7 @@ describe('native browser support contract', () => {
   });
 
   it('uses the same Chromium floor in the actual production build configuration', async () => {
-    const loaded = await loadConfigFromFile({ command: 'build', mode: 'production' });
+    const loaded = await loadProductionConfig();
     expect(loaded?.config.build?.target).toContain(`chrome${capacitor.android?.minWebViewVersion}`);
   });
 
@@ -21,7 +27,7 @@ describe('native browser support contract', () => {
     expect(deploymentTargets.length).toBeGreaterThan(0);
     expect(new Set(deploymentTargets)).toEqual(new Set(['16.4']));
 
-    const loaded = await loadConfigFromFile({ command: 'build', mode: 'production' });
+    const loaded = await loadProductionConfig();
     expect(loaded?.config.build?.target).toEqual(expect.arrayContaining(['safari16.4', 'ios16.4']));
   });
 });

@@ -69,8 +69,8 @@ Sign In, and the logo's reachability after scrolling back to the top. Unexpected
 browser warnings/errors fail the tests. No credentials or login requests are
 required.
 
-Run `npx playwright install chromium webkit`, `npm run build`, then
-`npm run test:browser`. CI installs the browsers and runs this suite against the
+Run `bunx --bun playwright install chromium webkit`, `bun run build`, then
+`bun run test:browser`. CI installs the browsers and runs this suite against the
 production build with no retries. Existing Login component tests continue to own
 authentication submission and state behavior. Storage/network/concurrency
 integration behavior is unchanged.

@@ -9,7 +9,7 @@ own transitions. Their boundaries are documented in the topic index; broad suite
 counts do not prove any particular failure mode.
 
 `quality/file-classification.json` maps tracked files to owners and applicable
-verification. `npm run quality:inventory` checks classification completeness;
+verification. `bun run quality:inventory` checks classification completeness;
 its labels name required evidence categories, not proof those tests exist or
 ran. Every behavior change needs a failing-before/passing-after regression at
 its production seam. See

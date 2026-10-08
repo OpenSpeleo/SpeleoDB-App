@@ -1,9 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import fixtures from './geometry_cases.json';
+import fixtures from '@speleodb/map-core/geometry-cases.json';
+import { GIS_GEOMETRY_CONTRACT } from './constants';
 import { inspectGisGeometry, parseGisGeometryDetail, parseGisGeometryList } from './validation';
 import { geometryDetail, geometryMetadata } from './testFixtures';
 
 describe('GIS Geometry API validation', () => {
+  it.each(['LineString', 'Polygon'] as const)('rejects oversized %s input before reading positions', type => {
+    let coordinateReads = 0;
+    const positions = new Array(GIS_GEOMETRY_CONTRACT.max_vertices + (type === 'Polygon' ? 2 : 1));
+    Object.defineProperty(positions, 0, { get() { coordinateReads++; return [-87.5, 20.1]; } });
+    expect(() => inspectGisGeometry({ type, coordinates: type === 'Polygon' ? [positions] : positions }))
+      .toThrow('Invalid GIS Geometry response.');
+    expect(coordinateReads).toBe(0);
+  });
+  it('isolates validated geometry coordinates from later transport-object mutation', () => {
+    const detail = geometryDetail();
+    const parsed = parseGisGeometryDetail(detail);
+    if (detail.geojson.type !== 'LineString' || parsed.detail.geojson.type !== 'LineString') throw new Error('Expected a line fixture');
+    detail.geojson.coordinates[0][0] = 0;
+    expect(parsed.detail.geojson.coordinates[0][0]).toBe(-87.5);
+  });
+  it('rejects foreign geometry fields without reading their values', () => {
+    let foreignReads = 0;
+    const geometry = { type: 'LineString', coordinates: [[-87.5, 20.1], [-87.499, 20.1]] };
+    Object.defineProperty(geometry, 'foreign', { enumerable: true, get() { foreignReads++; return new Array(100_000); } });
+    expect(() => inspectGisGeometry(geometry)).toThrow('Invalid GIS Geometry response.');
+    expect(foreignReads).toBe(0);
+  });
   for (const fixture of fixtures) {
     it(`matches the canonical Python/JavaScript contract: ${fixture.id}`, () => {
       if (!fixture.valid) { expect(() => inspectGisGeometry(fixture.geojson)).toThrow(); return; }

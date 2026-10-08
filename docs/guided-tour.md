@@ -180,6 +180,6 @@ When modifying the guided tour:
 5. Verify the Settings "Show Tutorial" button re-triggers the tour.
 6. Verify manual close on steps 1-5 marks tour as completed and suppresses
    future auto-start.
-7. Run `npx vitest run src/onboarding/` for tour-specific tests.
+7. Run `bunx --bun vitest run src/onboarding/` for tour-specific tests.
 8. Update this document if step flow, architecture, or persistence behavior
    changes.

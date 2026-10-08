@@ -138,6 +138,7 @@ const {
     queryRenderedFeatures: mockQueryRenderedFeatures,
     unproject: mockMapUnproject,
     flyTo: mockMapFlyTo,
+    jumpTo: vi.fn(),
   }));
 
   return {
@@ -262,6 +263,11 @@ vi.mock('@capacitor/haptics', () => ({
   },
   ImpactStyle: { Light: 'LIGHT', Medium: 'MEDIUM', Heavy: 'HEAVY' },
   NotificationType: { Success: 'SUCCESS', Warning: 'WARNING', Error: 'ERROR' },
+}));
+
+vi.mock('@speleodb/map-viewer', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@speleodb/map-viewer')>(),
+  attachGlobeAtmosphere: vi.fn(() => vi.fn()),
 }));
 
 // Mock maplibre-gl (used by TileCacheService)
@@ -1110,6 +1116,9 @@ describe('Dashboard', () => {
     expect(mapProps.maxPitch).toBe(0);
 
     const initialViewState = mapProps.initialViewState as Record<string, unknown>;
+    expect(initialViewState.longitude).toBe(2.35);
+    expect(initialViewState.latitude).toBe(46.6);
+    expect(initialViewState.zoom).toBe(0);
     expect(initialViewState.bearing).toBe(0);
     expect(initialViewState.pitch).toBe(0);
 

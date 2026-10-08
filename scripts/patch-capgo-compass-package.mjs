@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { writePackagePatch } from './write-package-patch.mjs';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+// Lifecycle cwd selects the installed workspace, including local source projections.
+const repoRoot = process.cwd()
 const swiftRoot = path.join(
   repoRoot,
   'node_modules/@capgo/capacitor-compass/ios/Sources/CapgoCompassPlugin',
@@ -34,7 +35,7 @@ function patchFile(fileName, patches) {
       ? replaceAtMostOnce(source, expected, replacement, label)
       : replaceExactlyOnce(source, expected, replacement, label)
   }
-  writeFileSync(filePath, source)
+  writePackagePatch(filePath, source)
 }
 
 patchFile('CapgoCompass.swift', [

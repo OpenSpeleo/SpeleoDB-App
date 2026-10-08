@@ -4,14 +4,11 @@
  * Shared by the GPS panel and any consumer that needs track summaries.
  */
 
+import { calculateDistanceInMeters } from '@speleodb/map-core/geo';
 import type { RecordedPoint } from '../types/gpsTrack';
 import { isValidLatLng } from './coordinates';
 
 const EARTH_RADIUS_METERS = 6_371_008.8;
-
-function toRadians(degrees: number): number {
-  return (degrees * Math.PI) / 180;
-}
 
 /** Great-circle distance between two lat/lng points in meters. */
 export function haversineMeters(
@@ -21,13 +18,7 @@ export function haversineMeters(
   bLng: number,
 ): number {
   if (![aLat, aLng, bLat, bLng].every((v) => Number.isFinite(v))) return 0;
-  const dLat = toRadians(bLat - aLat);
-  const dLng = toRadians(bLng - aLng);
-  const lat1 = toRadians(aLat);
-  const lat2 = toRadians(bLat);
-  const h =
-    Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
-  return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(h)));
+  return calculateDistanceInMeters([aLng, aLat], [bLng, bLat], EARTH_RADIUS_METERS);
 }
 
 /**

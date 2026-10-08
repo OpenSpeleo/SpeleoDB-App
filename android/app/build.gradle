@@ -110,65 +110,53 @@ def resolveCommandFromLoginShell(commandName) {
     return null
 }
 
-def resolveNodeBinary() {
-    def explicitNodeBinary = System.getenv("NODE_BINARY")?.trim()
-    if (explicitNodeBinary) {
-        def explicitNodeFile = new File(explicitNodeBinary)
-        if (explicitNodeFile.exists() && explicitNodeFile.canExecute()) {
-            return explicitNodeFile.absolutePath
+def resolveBunBinary() {
+    def explicitBunBinary = System.getenv("BUN_BINARY")?.trim()
+    if (explicitBunBinary) {
+        def explicitBunFile = new File(explicitBunBinary)
+        if (explicitBunFile.exists() && explicitBunFile.canExecute()) {
+            return explicitBunFile.absolutePath
         }
 
-        // If NODE_BINARY is a command name (e.g. "node"), resolve it to a concrete path.
-        if (!explicitNodeBinary.contains(File.separator) && !explicitNodeBinary.contains("\\")) {
-            def explicitFromCurrentPath = resolveCommandFromCurrentPath(explicitNodeBinary)
+        // If BUN_BINARY is a command name (e.g. "bun"), resolve it to a concrete path.
+        if (!explicitBunBinary.contains(File.separator) && !explicitBunBinary.contains("\\")) {
+            def explicitFromCurrentPath = resolveCommandFromCurrentPath(explicitBunBinary)
             if (explicitFromCurrentPath) {
                 return explicitFromCurrentPath
             }
 
-            def explicitFromLoginShell = resolveCommandFromLoginShell(explicitNodeBinary)
+            def explicitFromLoginShell = resolveCommandFromLoginShell(explicitBunBinary)
             if (explicitFromLoginShell) {
                 return explicitFromLoginShell
             }
         }
     }
 
-    def nodeFromCurrentPath = resolveCommandFromCurrentPath("node")
-    if (nodeFromCurrentPath) {
-        return nodeFromCurrentPath
+    def bunFromCurrentPath = resolveCommandFromCurrentPath("bun")
+    if (bunFromCurrentPath) {
+        return bunFromCurrentPath
     }
 
     // Android Studio often launches Gradle with a reduced PATH.
-    // Use a login shell so NVM/Homebrew-managed Node installs are discoverable.
-    def nodeFromLoginShell = resolveCommandFromLoginShell("node")
-    if (nodeFromLoginShell) {
-        return nodeFromLoginShell
+    // Use a login shell so Bun/Homebrew-managed installs are discoverable.
+    def bunFromLoginShell = resolveCommandFromLoginShell("bun")
+    if (bunFromLoginShell) {
+        return bunFromLoginShell
     }
 
-    def candidateNodePaths = [
-        "/opt/homebrew/bin/node",
-        "/usr/local/bin/node",
-        "/usr/bin/node",
+    def candidateBunPaths = [
+        "/opt/homebrew/bin/bun",
+        "/usr/local/bin/bun",
+        "/usr/bin/bun",
     ]
 
-    def nvmBin = System.getenv("NVM_BIN")?.trim()
-    if (nvmBin) {
-        candidateNodePaths.add("${nvmBin}${File.separator}node")
+    def userHome = System.getProperty("user.home")
+    if (userHome) {
+        candidateBunPaths.add("${userHome}${File.separator}.bun${File.separator}bin${File.separator}bun")
+        candidateBunPaths.add("${userHome}${File.separator}.bun${File.separator}bin${File.separator}bun.exe")
     }
 
-    def programFiles = System.getenv("ProgramFiles")
-    def programFilesX86 = System.getenv("ProgramFiles(x86)")
-    def localAppData = System.getenv("LOCALAPPDATA")
-    if (programFiles) {
-        candidateNodePaths.add("${programFiles}\\nodejs\\node.exe")
-    }
-    if (programFilesX86) {
-        candidateNodePaths.add("${programFilesX86}\\nodejs\\node.exe")
-    }
-    if (localAppData) {
-        candidateNodePaths.add("${localAppData}\\Programs\\nodejs\\node.exe")
-    }
-
-    for (def candidatePath : candidateNodePaths) {
+    for (def candidatePath : candidateBunPaths) {
         def candidateFile = new File(candidatePath)
         if (candidateFile.exists() && candidateFile.canExecute()) {
             return candidatePath
@@ -176,18 +164,18 @@ def resolveNodeBinary() {
     }
 
     throw new RuntimeException(
-        "[sentry] Node.js not found for Android build. " +
-        "Set NODE_BINARY to your Node executable path (for example /opt/homebrew/bin/node), " +
-        "or launch Android Studio from a shell where node is available."
+        "[sentry] Bun not found for Android build. " +
+        "Set BUN_BINARY to your Bun executable path (for example /opt/homebrew/bin/bun), " +
+        "or launch Android Studio from a shell where Bun is available."
     )
 }
 
 tasks.register("buildWebAssetsWithAndroidSentry", Exec) {
     workingDir repoRootDir
     doFirst {
-        def nodeBinary = resolveNodeBinary()
-        logger.lifecycle("[sentry] Using Node binary: ${nodeBinary}")
-        commandLine nodeBinary, "scripts/build-native-assets.mjs", "android"
+        def bunBinary = resolveBunBinary()
+        logger.lifecycle("[sentry] Using Bun binary: ${bunBinary}")
+        commandLine bunBinary, "scripts/build-native-assets.mjs", "android"
     }
 }
 

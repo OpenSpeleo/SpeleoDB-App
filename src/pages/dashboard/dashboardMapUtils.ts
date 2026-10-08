@@ -18,12 +18,8 @@ import type {
   MarkerParseContext,
   OverlayMarkerDetails,
 } from '../../utils/overlayMarkerDetails';
-import artifactIcon from '../../assets/media/map-icons/artifact-icon.png';
-import boneIcon from '../../assets/media/map-icons/bones-icon.png';
-import biologyIcon from '../../assets/media/map-icons/fish-icon.png';
-import geologyIcon from '../../assets/media/map-icons/rock-icon.png';
-import explorationLeadIcon from '../../assets/media/map-icons/exploration-lead-icon.png';
-import cylinderIcon from '../../assets/media/map-icons/cylinder-orange-icon.png';
+import { MAP_ICON_URLS } from '@speleodb/map-viewer/icons';
+import { hitQueryBounds } from '@speleodb/map-viewer';
 
 export type ProjectBoundsRecord = Record<string, ProjectGeoJSONBounds>;
 export type OverlayIconId =
@@ -75,12 +71,12 @@ export const MAP_TOUCH_TAP_MAX_MOVEMENT_PX = 12;
 export const MAP_TOUCH_TAP_MAX_DURATION_MS = 550;
 
 export const OVERLAY_ICON_SOURCES: Record<OverlayIconId, string> = {
-  'biology-station-icon': biologyIcon,
-  'bone-station-icon': boneIcon,
-  'artifact-station-icon': artifactIcon,
-  'geology-station-icon': geologyIcon,
-  'exploration-lead-icon': explorationLeadIcon,
-  'cylinder-icon': cylinderIcon,
+  'biology-station-icon': MAP_ICON_URLS.biology,
+  'bone-station-icon': MAP_ICON_URLS.bones,
+  'artifact-station-icon': MAP_ICON_URLS.artifact,
+  'geology-station-icon': MAP_ICON_URLS.geology,
+  'exploration-lead-icon': MAP_ICON_URLS.explorationLead,
+  'cylinder-icon': MAP_ICON_URLS.cylinder,
 };
 
 export const DEFAULT_OVERLAY_ICON_AVAILABILITY: OverlayIconAvailability = {
@@ -155,10 +151,7 @@ export function getMarkerHitQueryBounds(
   point: { x: number; y: number },
   radiusPx: number,
 ): [[number, number], [number, number]] {
-  return [
-    [point.x - radiusPx, point.y - radiusPx],
-    [point.x + radiusPx, point.y + radiusPx],
-  ];
+  return hitQueryBounds(point, radiusPx);
 }
 
 function getProjectLinkFromFeature(

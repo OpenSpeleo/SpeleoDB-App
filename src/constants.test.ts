@@ -67,8 +67,9 @@ describe('constants', () => {
       expect(MAP.DEFAULT_CENTER[1]).toBeLessThanOrEqual(90);
     });
 
-    it('has DEFAULT_ZOOM as a positive number', () => {
-      expect(MAP.DEFAULT_ZOOM).toBeGreaterThan(0);
+    it('starts with the complete globe over France', () => {
+      expect(MAP.DEFAULT_ZOOM).toBe(0);
+      expect(MAP.DEFAULT_CENTER).toEqual([2.35, 46.6]);
     });
 
     it('has MAX_ZOOM greater than or equal to DEFAULT_ZOOM', () => {

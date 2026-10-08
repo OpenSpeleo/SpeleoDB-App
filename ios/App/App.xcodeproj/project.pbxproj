@@ -286,7 +286,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\ncd \"${SRCROOT}/../..\"\n\nNODE_BIN=\"${NODE_BINARY:-}\"\nif [ -z \"$NODE_BIN\" ]; then\n  NODE_BIN=\"$(command -v node || true)\"\nfi\nif [ -z \"$NODE_BIN\" ]; then\n  for CANDIDATE in /opt/homebrew/bin/node /usr/local/bin/node; do\n    if [ -x \"$CANDIDATE\" ]; then\n      NODE_BIN=\"$CANDIDATE\"\n      break\n    fi\n  done\nfi\nif [ -z \"$NODE_BIN\" ]; then\n  echo \"[sentry] Node.js not found. Set NODE_BINARY in Xcode Build Settings.\"\n  exit 1\nfi\n\"$NODE_BIN\" scripts/build-native-assets.mjs ios\n";
+			shellScript = "set -e\ncd \"${SRCROOT}/../..\"\n\nBUN_BIN=\"${BUN_BINARY:-}\"\nif [ -z \"$BUN_BIN\" ]; then\n  BUN_BIN=\"$(command -v bun || true)\"\nfi\nif [ -z \"$BUN_BIN\" ]; then\n  for CANDIDATE in \"${HOME}/.bun/bin/bun\" /opt/homebrew/bin/bun /usr/local/bin/bun; do\n    if [ -x \"$CANDIDATE\" ]; then\n      BUN_BIN=\"$CANDIDATE\"\n      break\n    fi\n  done\nfi\nif [ -z \"$BUN_BIN\" ]; then\n  echo \"[sentry] Bun not found. Set BUN_BINARY in Xcode Build Settings.\"\n  exit 1\nfi\n\"$BUN_BIN\" scripts/build-native-assets.mjs ios\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

@@ -7,28 +7,28 @@ builds. The workflow lives in `.github/workflows/ci.yml`.
 ## Stages
 
 1. **Prek Hooks** runs
-   `PREK_HOME="$RUNNER_TEMP/prek" npx prek run -a --show-diff-on-failure`, then
-   `git diff --exit-code`. The diff check makes hook auto-fixes fail CI instead
-   of silently changing the runner checkout.
+   `PREK_HOME="$RUNNER_TEMP/prek" bunx --bun prek run -a --show-diff-on-failure`,
+   then `git diff --exit-code`. The diff check makes hook auto-fixes fail CI
+   instead of silently changing the runner checkout.
 2. **Full Vitest Suite** runs
-   `npm run test.unit -- --run --reporter=verbose --coverage --no-file-parallelism`.
+   `bun run test.unit --run --reporter=verbose --coverage --no-file-parallelism`.
    The `--run` flag is required in CI so Vitest exits instead of entering watch
    mode. File-level serialization keeps real SpeleoDB integration tests from
    issuing concurrent password-login requests with the same account from a
    GitHub-hosted runner.
-3. **Production Web Build** runs `npm run build` and uploads `dist/` for native
+3. **Production Web Build** runs `bun run build` and uploads `dist/` for native
    jobs. Before uploading, it installs Playwright Chromium and WebKit and runs
-   `npm run test:browser` against those built assets. The browser suite verifies
+   `bun run test:browser` against those built assets. The browser suite verifies
    login scrolling and reachable actions at reduced viewport sizes and enlarged
    text; it allows no retries or focused-only tests. Browser tests are separate
    from Vitest because jsdom cannot prove layout or hit testing.
 4. **Android Release Compile Smoke** downloads `dist/`, runs
-   `npx cap sync android`, and builds release-configuration APK/AAB files with a
-   disposable CI keystore.
+   `bun run cap sync android`, and builds release-configuration APK/AAB files
+   with a disposable CI keystore.
 5. **iOS Release Compile Smoke** is currently commented out while its signing
    workflow is being repaired. Its intended flow downloads `dist/`, runs
-   `npx cap sync ios`, archives the Xcode project, and verifies an IPA signed by
-   a disposable CI identity. It is not an active verification gate.
+   `bun run cap sync ios`, archives the Xcode project, and verifies an IPA
+   signed by a disposable CI identity. It is not an active verification gate.
 
 ### iOS compatibility
 
@@ -130,29 +130,34 @@ a manual authorization boundary; this CI workflow does not implement publishing.
 
 ## Vitest Wrapper
 
-All CI Vitest invocations must go through `npm run test.unit`, which calls
-`scripts/run-vitest.sh`. The wrapper sanitizes locally injected Node web-storage
-flags, forces the threaded Vitest pool unless the caller chooses another pool,
-and only passes a web-storage disable flag when the current Node binary supports
-it. This avoids the Node 22 failure mode:
+All CI Vitest invocations go through `bun run test.unit`, which calls
+`scripts/run-vitest.sh`. The wrapper removes inherited Node web-storage options
+and runs the Vitest executable with Bun. The process pool is the default because
+Bun worker threads do not load the required JSDOM preload. Vitest continues to
+own jsdom setup, console guards, isolation and mocks; `bun test` is a different
+runner.
 
-```text
-node: bad option: --no-webstorage
-```
+The worker preload `scripts/jsdom-runtime.mjs` applies the same Bun/JSDOM
+compatibility bridge as the web app. It registers the VM Window proxy with its
+existing WebIDL implementation and resolves JSDOM's installed Undici dispatcher.
+It preserves event dispatch, brand checks and real networking; tests cover
+window and iframe listeners plus rejected forged event targets. Remove the
+bridge once upstream Bun/JSDOM passes these regressions without it. The setup
+also removes Bun’s server Worker when the actual JSDOM window has no browser
+Worker. Analyzer tests retain injected worker ports, and Playwright verifies the
+emitted browser worker.
 
-Probe optional runtime flags with `node <flag> -e ""` after sanitizing injected
-`NODE_OPTIONS`; pass the first supported candidate or no optional flag when none
-are supported. Never infer support solely from the developer machine.
+Vitest and `@vitest/coverage-istanbul` are upgraded together. Istanbul
+instruments sources and works on Bun's JavaScriptCore runtime; V8 inspector
+coverage does not. Keep the existing global and owning-seam thresholds: a
+runtime migration does not authorize lowering coverage floors. See the
+[Vitest coverage guide](https://vitest.dev/guide/coverage.html).
 
-Do not call bare `npx vitest` from CI unless the wrapper behavior is also
-preserved.
-
-Vitest and `@vitest/coverage-v8` are upgraded together. Vitest 5 clears mock
-call history before each test. Fixtures that capture a module's one-time
-registration (such as the cached tile protocol) retain the registered callback
-in `beforeAll` and invoke it directly, rather than reading earlier tests' mock
-history. This preserves production lifecycle semantics and Vitest's default mock
-isolation.
+Vitest 5 clears mock call history before each test. Fixtures that capture a
+module's one-time registration (such as the cached tile protocol) retain the
+registered callback in `beforeAll` and invoke it directly, rather than reading
+earlier tests' mock history. This preserves production lifecycle semantics and
+Vitest's default mock isolation.
 
 ## Coverage Enforcement
 
@@ -184,7 +189,7 @@ tests, raise each critical floor as evidence improves, and enable repository
 `perFile` enforcement only when the remaining historical modules meet it.
 
 `quality/coverage-thresholds.test.ts` protects the configuration contract. The
-authoritative proof is still the full `npm run test:ci` command: Vitest exits
+authoritative proof is still the full `bun run test:ci` command: Vitest exits
 non-zero when either a global or file-specific floor is missed.
 
 ## Release Behavior Documentation
@@ -221,7 +226,7 @@ when the same credentials work locally. When that happens, integration tests
 accept the runner-side password-auth block only after validating
 `SPELEODB_OAUTH_TOKEN` against the same instance. Local runs remain strict for
 password login. The live tests use the production `HttpClient` transport, whose
-Node-backed API requests identify as `SpeleoDB-Web`; do not substitute a
+Bun-backed API requests identify as `SpeleoDB-Web`; do not substitute a
 test-only user agent because production edge security may challenge it before
 the request reaches SpeleoDB.
 
@@ -236,7 +241,7 @@ trusted releases, regardless of whether real DSNs are present.
 
 `make dependencies` reports drift without changing files. `make update` runs
 `npm-check-updates -u --peer --target minor --reject react,react-dom`, then a
-patch-only pass for `react,react-dom`, followed by `npm install` to update the
+patch-only pass for `react,react-dom`, followed by `bun install` to update the
 root manifest and lockfile together. Routine updates stay within each declared
 major version; peer checks alone do not establish application API compatibility.
 For version-zero dependencies, minor updates can still be breaking and require
@@ -260,35 +265,37 @@ with those runtime APIs. Do not bypass resolution with `--force` or
 
 `quality/dependency-update.test.ts` executes the actual Make target with local
 package-manager doubles to verify the update policy, install ordering, and
-failure propagation without registry traffic. Real `npm install`, `npm ci`,
-`npm ls`, and `make ci` provide resolution and application verification after an
-update. Native dependency changes additionally require the native/device gates
-above. The update policy adds no application runtime work.
+failure propagation without registry traffic. Real `bun install`,
+`test -s bun.lock && bun install --frozen-lockfile`, `bun pm ls`, and `make ci`
+provide resolution and application verification after an update. Native
+dependency changes additionally require the native/device gates above. The
+update policy adds no application runtime work.
 
 ### Application checks
 
 Before changing CI-sensitive code, run the same core commands locally:
 
 ```bash
-node --version # use Node 26, matching .node-version
+bun --version # exact version from .bun-version
 make ci
-PREK_HOME=/private/tmp/prek npx prek run -a --show-diff-on-failure
+PREK_HOME=/private/tmp/prek bunx --bun prek run -a --show-diff-on-failure
 ```
 
-The checked-in mobile workflow currently still selects Node 22, while
-`.node-version` and the root workspace select Node 26. Record the runtime with
-verification results; local success alone does not establish compatibility with
-that different CI runtime.
+CI, local scripts and native asset wrappers use the exact `.bun-version`
+runtime. `bunfig.toml` forces Bun for script executables and uses the isolated
+dependency linker. Gradle and Xcode discover `BUN_BINARY`, PATH or standard Bun
+install locations; they do not require a separate Node runtime for the web-asset
+phase.
 
 `make ci` verifies the tracked-file quality inventory, lint, type checking, the
 full one-shot Vitest suite with coverage and serialized test files, and the
 production web build. For the browser layout gate, additionally run
-`npx playwright install chromium webkit` once, then `npm run test:browser` after
-the build. Playwright is a development-only dependency and its browsers are not
-shipped in native/web bundles. Run Android Gradle and iOS `xcodebuild` locally
-when changing native configuration or platform-facing behavior. `make sync`
-updates both native projects; inspect every tracked Android/iOS diff after it
-runs.
+`bunx --bun playwright install chromium webkit` once, then
+`bun run test:browser` after the build. Playwright is a development-only
+dependency and its browsers are not shipped in native/web bundles. Run Android
+Gradle and iOS `xcodebuild` locally when changing native configuration or
+platform-facing behavior. `make sync` updates both native projects; inspect
+every tracked Android/iOS diff after it runs.
 
 ## Browser preview build ownership
 
@@ -336,27 +343,57 @@ output. Finish native writers before browser-preview verification as well.
 
 ## Standalone and monorepo installs
 
-Mobile retains its own manifest and lockfile for standalone clones. The
-enclosing monorepo also owns a root workspace lock; neither substitutes for
-validating the other installation context. Use `npm ci --workspaces=false` in
-this repository for the standalone lock and `npm ci` at the monorepo root for
-integration. The mobile lockfile hook likewise keeps `--workspaces=false`.
+Mobile retains `package.json` and `bun.lock` for standalone clones. The
+enclosing monorepo owns its separate Bun workspace lock. Standalone clones use
+`test -s bun.lock && bun install --frozen-lockfile`; the monorepo uses
+`bun run install:local`, which installs an isolated projection of live checkouts
+before publishing dependency links. The lockfile hook checks a temporary
+standalone copy so parent workspace resolution cannot hide drift. Shared map
+packages use public GitHub dependencies pinned to full commit SHAs. The direct
+core dependency and its override must match so the viewer resolves the same
+revision; the pin guard and standalone lock hook enforce this contract. The
+monorepo overlay continues to use live local sources.
 
-The package name is npm-valid (`speleodb-mobile`). Declare directly imported
-build/test packages directly rather than borrowing transitive dependencies. The
-root's nested install strategy must preserve mobile-local Capacitor packages;
-verify lint/build in both contexts and inspect `cap sync` output for native path
-drift when dependency topology changes. Root workspace configuration belongs to
-the parent repository; standalone product configuration stays here.
+Declare directly imported build/test packages directly. Bun's isolated linker
+keeps app-local Capacitor package links; native postinstall patches follow those
+links and atomically replace files so Bun cache hardlinks remain unchanged. Use
+`bun run cap` for native CLI operations: it enables Bun’s `--preserve-symlinks`
+so generated Android/Swift package paths remain relative to the app’s
+`node_modules`, even when dependencies live in a projected cache. A real CLI
+sync regression verifies every Android plugin path resolves through that local
+directory. Inspect `cap sync` output for native path drift when dependency
+topology changes. Root integration stays in the parent repository.
 
-## Native test report interpretation
+## Bun development runtime
 
-Confirm boot completion and inspect device-specific XML/xcresult counts,
-failures, and skips alongside the process exit code. An interrupted emulator
-renderer can leave a failed or incomplete instrumentation report even when
-Gradle exits zero. Preserve logs, screenshots, and resource diagnostics, repair
-the demonstrated emulator/environment problem, and rerun unchanged assertions.
-Do not count the interrupted run as passing or infer hardware, minimum-OS, or
-Huawei-provider coverage from a different emulator. Disable optional diagnostic
-collection only when that collector is the diagnosed stall; never disable tests
-to hide it.
+Vite dev, build and preview use its supported native config loader. Bun can
+execute TypeScript directly; repeated bundled config loads through the local
+dependency projection can otherwise resolve a deleted temporary module. Changes
+to modules imported only by the Vite config require restarting the dev server;
+normal application and shared package source changes retain Vite's usual reload
+behavior. Browser-support tests load the same production configuration with this
+loader.
+
+`make ios-live` runs `bun run dev:ios`: it builds missing web assets on a clean
+checkout, then Vite serves the app and Capacitor syncs and deploys iOS with live
+reload using the same Bun flags as the canonical `cap` script. `IOS_LIVE_HOST`
+selects the device-reachable advertised address (default: the first external
+IPv4 address, then loopback), and `IOS_LIVE_PORT` defaults to 5173. The server
+binds to all interfaces, matching the previous external live-reload workflow.
+This uses the installed Vite and Capacitor versions; Ionic CLI has no supported
+Bun package-manager option.
+
+The live runner forwards interruption to the native process group, waits for it
+to settle, restores the generated post-sync Capacitor configuration, and closes
+Vite. The explicit snapshot also covers interruption before Capacitor installs
+its own handler during deployment. Subprocess tests verify termination ordering
+and restoration after deployment failure; a device build still requires the
+local Apple toolchain. The authored Capacitor configuration is not modified.
+
+The October 2026 Bun migration passed all 55 Chromium browser cases. Its final
+focused WebKit run passed offline GIS rendering and large-survey responsiveness,
+but three pixel assertions still failed: clearing a revoked GIS shape and GIS
+and GPS overview line counts. Those three failures were also reproduced against
+the original application code in the same container; their assertions remain
+unchanged. This is a recorded browser-validation limitation, not a passing
+WebKit release gate.

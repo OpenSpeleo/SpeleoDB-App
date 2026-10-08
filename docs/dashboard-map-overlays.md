@@ -137,7 +137,7 @@ per-item selections, or the camera. See [Settings](settings.md).
 
 Django assets are copied into:
 
-- `src/assets/media/map-icons/`
+- `@speleodb/map-viewer/icons` and the package's `assets/` directory
 
 Files:
 

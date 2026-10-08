@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { isEffectivelyVisible } from '@speleodb/map-core/visibility';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import type { MapRef } from 'react-map-gl/maplibre';
@@ -114,8 +115,11 @@ function useProjectVisibilityDerivations(
   const effectiveActiveProjectIds = useMemo(() => {
     const next = new Set<string>();
     for (const project of projects) {
-      if (!activeProjectIds.has(project.id) || !geoJsonData[project.id]) continue;
-      if (countryVisibility[project.country || 'Unknown'] === false) continue;
+      if (!isEffectivelyVisible({
+        individual: activeProjectIds.has(project.id),
+        country: countryVisibility[project.country || 'Unknown'] !== false,
+        eligible: Boolean(geoJsonData[project.id]),
+      })) continue;
       next.add(project.id);
     }
     return next;

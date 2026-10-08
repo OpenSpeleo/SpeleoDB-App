@@ -8,6 +8,15 @@ import {
   resetConsoleGuardState,
 } from './test/consoleGuard';
 
+// Bun exposes its server Worker on the host global, but JSDOM has no browser
+// Worker. Keep the environment faithful to JSDOM so Vite browser-worker URLs
+// cannot accidentally execute as server files. Worker tests inject their port;
+// Playwright owns the actual bundled browser-worker integration.
+const jsdomWindow = (globalThis as unknown as { jsdom: { window: Window & { Worker?: typeof Worker } } }).jsdom.window;
+if (process.versions.bun && jsdomWindow.Worker === undefined) {
+  Object.defineProperty(globalThis, 'Worker', { value: undefined, configurable: true, writable: true });
+}
+
 // Vitest reuses a worker across serialized test files. fake-indexeddb's auto
 // entry point exports a module singleton, so without a fresh factory one file's
 // databases and open connections can leak into the next file. Give every test

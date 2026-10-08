@@ -142,11 +142,17 @@ files.
 
 ## JavaScript Workspace Contract
 
-The repository now uses a single Node workspace at the repo root.
+The repository now uses a single Bun workspace at the repo root.
 
-- Canonical Node manifests are:
+- Canonical JavaScript manifests are:
   - `package.json`
-  - `package-lock.json`
+  - `bun.lock`
+  - `.bun-version` (exact runtime pin)
+
+Use the pinned Bun runtime for application scripts and Vitest. Keep
+`[run] bun = true` and the isolated dependency linker in `bunfig.toml`.
+Production commands use `bun run`; `bun test` is not this repository's test
+runner.
 
 ## Testing Requirements
 

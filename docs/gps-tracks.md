@@ -694,7 +694,7 @@ left the recorder sitting at "Recording - 0 pts" forever with no feedback.
 5. Every `.app-btn` must carry a solid `app-btn--*` variant (see
    `docs/coding-rules.md`).
 6. Update this document when behavior changes; run the targeted tests above plus
-   `npm run build`.
+   `bun run build`.
 
 ## Deferred viewer application
 

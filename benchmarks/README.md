@@ -3,7 +3,7 @@
 Run the cache-to-Dashboard benchmark with explicit garbage collection:
 
 ```sh
-node --expose-gc node_modules/vitest/vitest.mjs run \
+bun --expose-gc node_modules/vitest/vitest.mjs run \
   --config benchmarks/vitest.config.ts
 ```
 

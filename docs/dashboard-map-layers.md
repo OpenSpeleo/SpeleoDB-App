@@ -32,6 +32,12 @@ see [Responsive viewer updates](viewer-update-scheduling.md).
 `UserLocationIndicator` it subscribes to the shared heading provider only while
 its explicit `headingActive` input is true.
 
+Common landmark/station and GIS vector specifications, filters, line widths and
+shot/depth expression construction come from `@speleodb/map-viewer`. React
+components retain source lifetime and direct `Source`/`Layer` composition;
+mobile sizes, depth ramps and offline presentation remain explicit inputs. See
+[Shared map packages](shared-map-packages.md).
+
 ## Invariants
 
 - Every MapLibre `Layer` is a direct child of its owning `Source`. The

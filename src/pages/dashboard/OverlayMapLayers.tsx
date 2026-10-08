@@ -1,3 +1,4 @@
+import { createLandmarkLayers, createStationLayers, createSurfaceStationLayers } from '@speleodb/map-viewer';
 import { Layer, Source } from 'react-map-gl/maplibre';
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { landmarkCollectionsFilter, visibleIdsFilter } from '../../utils/viewerFilters';
@@ -51,49 +52,16 @@ interface VisibleOverlayMapLayersProps {
 function LandmarkMapLayers({ visible, data, filter }: VisibleOverlayMapLayersProps) {
   if (!data) return null;
   const sizes = overlaySizes('landmarks');
+  const layers = createLandmarkLayers({
+    sourceId: 'landmarks-source', markerId: 'landmarks-layer', labelId: 'landmarks-labels',
+    markerMinZoom: markerMinZoom('landmarks'), labelMinZoom: labelMinZoom('landmarks'),
+    markerSize: sizes.markerTextSize!, labelSize: sizes.labelTextSize!,
+    color: LANDMARK_COLLECTION_COLOR_EXPRESSION, haloColor: LANDMARK_COLLECTION_HALO_EXPRESSION,
+    visible, filter,
+  });
   return (
     <Source id="landmarks-source" type="geojson" data={data}>
-      <Layer
-        id="landmarks-layer"
-        filter={filter}
-        type="symbol"
-        minzoom={markerMinZoom('landmarks')}
-        layout={{
-          visibility: visible ? 'visible' : 'none',
-          'text-field': '▼',
-          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-          'text-size': sizes.markerTextSize,
-          'text-allow-overlap': true,
-          'text-ignore-placement': true,
-        }}
-        paint={{
-          'text-color': LANDMARK_COLLECTION_COLOR_EXPRESSION,
-          'text-halo-color': LANDMARK_COLLECTION_HALO_EXPRESSION,
-          'text-halo-width': 2,
-          'text-halo-blur': 0.5,
-        }}
-      />
-      <Layer
-        id="landmarks-labels"
-        filter={filter}
-        type="symbol"
-        minzoom={labelMinZoom('landmarks')}
-        layout={{
-          visibility: visible ? 'visible' : 'none',
-          'text-field': ['get', 'name'],
-          'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
-          'text-offset': [0, 1.5],
-          'text-size': sizes.labelTextSize,
-          'text-anchor': 'top',
-          'text-allow-overlap': false,
-          'text-ignore-placement': false,
-        }}
-        paint={{
-          'text-color': LANDMARK_COLLECTION_COLOR_EXPRESSION,
-          'text-halo-color': LANDMARK_COLLECTION_HALO_EXPRESSION,
-          'text-halo-width': 1.5,
-        }}
-      />
+      {layers.map(layer => <Layer key={layer.id} {...layer} />)}
     </Source>
   );
 }
@@ -101,47 +69,15 @@ function LandmarkMapLayers({ visible, data, filter }: VisibleOverlayMapLayersPro
 function SurfaceStationMapLayers({ visible, data }: VisibleOverlayMapLayersProps) {
   if (!data) return null;
   const sizes = overlaySizes('surfaceStations');
+  const layers = createSurfaceStationLayers({
+    sourceId: 'surface-stations-source', markerId: 'surface-stations-layer', labelId: 'surface-stations-labels',
+    markerMinZoom: markerMinZoom('surfaceStations'), labelMinZoom: labelMinZoom('surfaceStations'),
+    markerSize: sizes.markerTextSize!, labelSize: sizes.labelTextSize!,
+    color: ['coalesce', ['get', 'color'], '#fb923c'], visible,
+  });
   return (
     <Source id="surface-stations-source" type="geojson" data={data}>
-      <Layer
-        id="surface-stations-layer"
-        type="symbol"
-        minzoom={markerMinZoom('surfaceStations')}
-        layout={{
-          visibility: visible ? 'visible' : 'none',
-          'text-field': '◆',
-          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-          'text-size': sizes.markerTextSize,
-          'text-allow-overlap': true,
-          'text-ignore-placement': true,
-        }}
-        paint={{
-          'text-color': ['coalesce', ['get', 'color'], '#fb923c'],
-          'text-halo-color': '#ffffff',
-          'text-halo-width': 2,
-          'text-halo-blur': 0.5,
-        }}
-      />
-      <Layer
-        id="surface-stations-labels"
-        type="symbol"
-        minzoom={labelMinZoom('surfaceStations')}
-        layout={{
-          visibility: visible ? 'visible' : 'none',
-          'text-field': ['get', 'name'],
-          'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
-          'text-offset': [0, 1.2],
-          'text-size': sizes.labelTextSize,
-          'text-anchor': 'top',
-          'text-allow-overlap': false,
-          'text-ignore-placement': false,
-        }}
-        paint={{
-          'text-color': '#222',
-          'text-halo-color': '#ffffff',
-          'text-halo-width': 2,
-        }}
-      />
+      {layers.map(layer => <Layer key={layer.id} {...layer} />)}
     </Source>
   );
 }
@@ -192,73 +128,19 @@ function SubsurfaceStationMapLayers({
 }: SubsurfaceStationMapLayersProps) {
   if (!data) return null;
   const sizes = overlaySizes('subsurfaceStations');
+  const layers = createStationLayers({
+    sourceId: 'subsurface-stations-source', circleId: 'subsurface-stations-circles',
+    labelId: 'subsurface-stations-labels', color: ['coalesce', ['get', 'color'], '#fb923c'],
+    markerSize: sizes.markerCircleRadius!, iconSize: sizes.markerIconSize!, labelSize: sizes.labelTextSize!,
+    markerMinZoom: markerMinZoom('subsurfaceStations'), labelMinZoom: labelMinZoom('subsurfaceStations'),
+    visible, filter, stationTypes,
+    icons: SUBSURFACE_ICON_LAYERS.map(icon => ({
+      ...icon, available: iconsLoaded && iconAvailability[icon.iconId],
+    })),
+  });
   return (
     <Source id="subsurface-stations-source" type="geojson" data={data}>
-      <Layer
-        id="subsurface-stations-circles"
-        type="circle"
-        filter={['all', ...(filter ? [filter] : []), [
-          'any',
-          ['!', ['has', 'type']],
-          ['==', ['get', 'type'], null],
-          ['==', ['get', 'type'], 'sensor'],
-        ]]}
-        minzoom={markerMinZoom('subsurfaceStations')}
-        layout={{ visibility: visible && stationTypes.sensor ? 'visible' : 'none' }}
-        paint={{
-          'circle-radius': sizes.markerCircleRadius,
-          'circle-color': ['coalesce', ['get', 'color'], '#fb923c'],
-          'circle-stroke-width': 2,
-          'circle-stroke-color': '#ffffff',
-          'circle-opacity': 1,
-        }}
-      />
-      {iconsLoaded && SUBSURFACE_ICON_LAYERS.map(({ layerId, stationType, iconId }) => (
-        iconAvailability[iconId] ? (
-          <Layer
-            key={layerId}
-            id={layerId}
-            type="symbol"
-            filter={['all', ...(filter ? [filter] : []), ['==', ['get', 'type'], stationType]]}
-            minzoom={markerMinZoom('subsurfaceStations')}
-            layout={{
-              visibility: visible && stationTypes[stationType] ? 'visible' : 'none',
-              'icon-image': iconId,
-              'icon-size': sizes.markerIconSize,
-              'icon-allow-overlap': true,
-              'icon-ignore-placement': true,
-            }}
-            paint={{ 'icon-opacity': 1 }}
-          />
-        ) : null
-      ))}
-      <Layer
-        id="subsurface-stations-labels"
-        type="symbol"
-        minzoom={labelMinZoom('subsurfaceStations')}
-        filter={['all', ...(filter ? [filter] : []), [
-          'in',
-          ['coalesce', ['get', 'type'], 'sensor'],
-          ['literal', Object.keys(stationTypes).filter(
-            (type) => stationTypes[type as keyof typeof stationTypes],
-          )],
-        ]]}
-        layout={{
-          visibility: visible ? 'visible' : 'none',
-          'text-field': ['get', 'name'],
-          'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
-          'text-offset': [0, 1.2],
-          'text-size': sizes.labelTextSize,
-          'text-anchor': 'top',
-          'text-allow-overlap': false,
-          'text-ignore-placement': false,
-        }}
-        paint={{
-          'text-color': '#222',
-          'text-halo-color': '#ffffff',
-          'text-halo-width': 2,
-        }}
-      />
+      {layers.map(layer => <Layer key={layer.id} {...layer} />)}
     </Source>
   );
 }

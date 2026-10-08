@@ -15,7 +15,9 @@ expanding the page component.
 
 The shell owns:
 
-- cached map-style loading for the selected layer;
+- cached map-style loading for the selected layer and application-owned globe
+  camera;
+- shared globe-atmosphere attachment, foreground ordering and cleanup;
 - validation, persistence, and publication of map-layer selection;
 - north-up orientation locking when MapLibre reports ready;
 - one-pass overlay icon registration and availability publication;

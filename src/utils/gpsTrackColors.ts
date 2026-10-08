@@ -8,15 +8,14 @@
  * of React/storage so it is trivially testable.
  */
 
+import { isHexColor } from '@speleodb/map-core/colors';
 import { GPS } from '../constants';
 
 export const TRACK_COLOR_PALETTE: readonly string[] = GPS.TRACK_COLOR_PALETTE;
 
-const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
-
 /** True for a valid `#rrggbb` hex color. */
 export function isValidHexColor(value: unknown): value is string {
-  return typeof value === 'string' && HEX_COLOR_RE.test(value.trim());
+  return typeof value === 'string' && isHexColor(value.trim());
 }
 
 /** Lowercase a valid hex color, or return `fallback` when invalid. */

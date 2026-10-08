@@ -1,3 +1,4 @@
+import { hitQueryBounds } from '@speleodb/map-viewer';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { MapRef, MapLayerMouseEvent } from 'react-map-gl/maplibre';
 import type { MapColorMode } from '../types/mapColorMode';
@@ -23,15 +24,6 @@ type DepthProbeQueryMap = {
   getLayer: (id: string) => unknown;
 };
 
-function hitQueryBounds(
-  point: { x: number; y: number },
-  radiusPx: number,
-): [[number, number], [number, number]] {
-  return [
-    [point.x - radiusPx, point.y - radiusPx],
-    [point.x + radiusPx, point.y + radiusPx],
-  ];
-}
 
 function getFirstDepth(features: InteractiveOverlayFeature[], layerIds: ReadonlySet<string>): number | null {
   for (const feature of features) {

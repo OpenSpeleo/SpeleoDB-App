@@ -29,10 +29,11 @@ Test on at least:
 
 ## Native Build Prep
 
-1. Run `npm ci` with lifecycle scripts enabled.
+1. Run `test -s bun.lock && bun install --frozen-lockfile` with lifecycle
+   scripts enabled.
 2. Confirm the postinstall patch logs that the background-geolocation SwiftPM
    constraint either already allows Capacitor 8 or was widened for Capacitor 8.
-3. Run `npx cap sync android && npx cap sync ios`.
+3. Run `bun run cap sync android && bun run cap sync ios`.
 4. Re-open native projects only after the sync completes; opening Xcode before
    the node_modules SwiftPM patch runs can show misleading "Missing package
    product" errors for every Capacitor product.

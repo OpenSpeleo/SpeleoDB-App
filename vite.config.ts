@@ -6,14 +6,18 @@ import {
   createLogger,
   defineConfig,
   loadEnv,
+  searchForWorkspaceRoot,
   type LogErrorOptions,
   type LogOptions,
   type PluginOption,
 } from 'vite'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import { useLocalSharedMapPackages } from './scripts/shared-map-packages.mjs'
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url))
+const maplibrePackageRoot = path.dirname(createRequire(import.meta.url).resolve('maplibre-gl/package.json'))
 
 // Custom logger that drops a single class of third-party noise while leaving
 // every other build message intact: lightningcss (Vite 8's CSS minifier) does
@@ -149,7 +153,12 @@ export default defineConfig(({ mode }) => {
   const enableLegacyPlugin = env.VITE_ENABLE_LEGACY_PLUGIN === 'true'
   const enforceBundleBudget = env.VITE_ENFORCE_BUNDLE_BUDGET !== 'false'
 
+  useLocalSharedMapPackages();
+
   return {
+    // Local dependency projections keep registry packages outside the checkout.
+    // Allow only MapLibre's installed worker assets alongside the normal workspace.
+    server: { fs: { allow: [searchForWorkspaceRoot(repoRoot), maplibrePackageRoot] } },
     plugins: [
       react(),
       enableLegacyPlugin && legacy(),
@@ -160,6 +169,8 @@ export default defineConfig(({ mode }) => {
     ],
     customLogger: baseLogger,
     resolve: {
+      // Compatibility with older Git pins whose default exports still reference dist.
+      conditions: ['speleodb-source', 'module', 'browser', 'development|production'],
       alias: {
         events: path.resolve(repoRoot, 'src/polyfills/node-events.ts'),
         url: path.resolve(repoRoot, 'src/polyfills/node-url.ts'),
@@ -180,10 +191,12 @@ export default defineConfig(({ mode }) => {
     test: {
       globals: true,
       environment: 'jsdom',
+      pool: 'forks',
+      execArgv: ['--preload', path.join(repoRoot, 'scripts/jsdom-runtime.mjs')],
       setupFiles: './src/setupTests.ts',
       env,
       coverage: {
-        provider: 'v8',
+        provider: 'istanbul',
         thresholds: {
           // Audited July 2026 repository floors. Keep a small deterministic
           // margin below the measured baseline while preventing regression.

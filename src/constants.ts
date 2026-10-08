@@ -90,8 +90,9 @@ export const MAP = {
   MISSING_TILE_SHA256_HASHES: [
     '9eafd300d61393184a4abc1d458564cfd1cd9b6f9c4e9c74687045c0a0e5b858',
   ] as readonly string[],
-  DEFAULT_CENTER: [2.3, 46.6] as [number, number], // France center
-  DEFAULT_ZOOM: 5,
+  DEFAULT_CENTER: [2.35, 46.6] as [number, number], // France center
+  DEFAULT_ZOOM: 0,
+  GLOBE_FOREGROUND_ANCHOR: 'dashboard-globe-foreground-anchor',
   NORTH_UP_ORIENTATION: {
     bearing: 0,
     pitch: 0,

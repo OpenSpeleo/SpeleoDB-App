@@ -12,6 +12,7 @@
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "customConditions": ["speleodb-source"],
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,

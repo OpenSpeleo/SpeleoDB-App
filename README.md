@@ -18,9 +18,7 @@ Requires **iOS/iPadOS 16.4 or later** on Apple mobile devices.
 
 ## Prerequisites
 
-- **Node.js** 22.12 or newer within the Node 22 release line (see
-  `.node-version`)
-- **npm**
+- **Bun** 1.4.2 (see `.bun-version`)
 - **Xcode** with Command Line Tools installed for iOS builds
 - **Android SDK** and **Java 21** for Android builds
 - _(optional)_ [xcbeautify](https://github.com/cpisciotta/xcbeautify) for
@@ -55,9 +53,8 @@ Native pre-build hooks regenerate web assets before compile and inject the
 platform-specific DSN into `VITE_SENTRY_DSN`, so iOS and Android builds do not
 share the same DSN in their bundled web assets.
 
-If Node is not available in your IDE build environment, set `NODE_BINARY` to
-your Node executable path (or launch the IDE from a shell where Node is on
-`PATH`).
+If Bun is not available in your IDE build environment, set `BUN_BINARY` to your
+Bun executable path (or launch the IDE from a shell where Bun is on `PATH`).
 
 ## Make Targets
 
@@ -67,7 +64,7 @@ Run `make help` to see all targets. Here is the full reference:
 
 | Command        | Description                                  |
 | -------------- | -------------------------------------------- |
-| `make install` | Reproducibly install locked npm dependencies |
+| `make install` | Reproducibly install locked Bun dependencies |
 | `make dev`     | Start Vite dev server (live reload)          |
 | `make build`   | Build the web app for production             |
 | `make clean`   | Remove `dist/`, `build/`, Vite cache         |
@@ -143,7 +140,7 @@ Cursor/VSCode** without opening Xcode.
 | `make ios-sim-boot`     | Boot the iOS simulator                                                            |
 | `make ios-sim-shutdown` | Shutdown all running simulators                                                   |
 | `make ios-device`       | Build + target a connected physical device                                        |
-| `make ios-live`         | Live-reload on iOS simulator (Ionic + Capacitor)                                  |
+| `make ios-live`         | Live-reload on iOS simulator (Vite + Capacitor)                                   |
 | `make ios-log`          | Stream app logs from the booted simulator                                         |
 | `make ios-open`         | Open the project in Xcode                                                         |
 

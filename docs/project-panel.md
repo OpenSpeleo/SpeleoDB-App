@@ -305,5 +305,5 @@ for free.
 2. If adding new panel actions, wire them as `onXxx` callback props.
 3. Verify auto-close still works after any changes to zoom or panel logic.
 4. Run
-   `npx vitest run src/components/ProjectPanel.test.tsx src/pages/Dashboard.test.tsx`.
+   `bunx --bun vitest run src/components/ProjectPanel.test.tsx src/pages/Dashboard.test.tsx`.
 5. Update this document if layout, behavior, or persistence rules change.

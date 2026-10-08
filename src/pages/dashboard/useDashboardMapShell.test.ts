@@ -1,3 +1,4 @@
+import { attachGlobeAtmosphere } from '@speleodb/map-viewer';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RefObject } from 'react';
@@ -13,6 +14,11 @@ import {
   useDashboardMapShell,
   type DashboardMapShellDependencies,
 } from './useDashboardMapShell';
+
+vi.mock('@speleodb/map-viewer', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@speleodb/map-viewer')>(),
+  attachGlobeAtmosphere: vi.fn(() => vi.fn()),
+}));
 
 const {
   mockGetCachedLayerStyle,
@@ -91,6 +97,7 @@ function createDependencies(
 ): DashboardMapShellDependencies {
   return {
     getLayerStyle: vi.fn(async (layerId) => ({ version: 8, layerId })),
+    attachAtmosphere: vi.fn(() => vi.fn()),
     persistLayerId: vi.fn(),
     locationWatcher: {
       requestPermissions: vi.fn(async () => 'granted'),
@@ -160,7 +167,7 @@ describe('useDashboardMapShell', () => {
     act(() => {
       const callbacks = [...pending]; pending.clear(); callbacks.forEach(work => work());
     });
-    expect(result.current.mapStyle).toEqual({ version: 8, layerId: 'esri-world-hillshade' });
+    expect(result.current.mapStyle).toEqual({ version: 8, layerId: 'esri-world-hillshade', projection: { type: 'globe' } });
     expect(dependencies.getLayerStyle).toHaveBeenCalledTimes(2);
     rerender({ layerId: 'esri-world-hillshade', active: false });
     rerender({ layerId: 'esri-world-hillshade', active: true });
@@ -181,12 +188,12 @@ describe('useDashboardMapShell', () => {
     }), { initialProps: { layerId: 'esri-satellite' as MapLayerId } });
     rerender({ layerId: 'esri-world-hillshade' });
     await act(async () => stale.reject(new Error('obsolete style')));
-    await waitFor(() => expect(result.current.mapStyle).toEqual({ version: 8, current: true }));
+    await waitFor(() => expect(result.current.mapStyle).toEqual({ version: 8, current: true, projection: { type: 'globe' } }));
     expect(dependencies.reportStyleError).not.toHaveBeenCalled();
   });
 
   it('loads style and icons, locks orientation, and ignores map loads without a map', async () => {
-    const map = { flyTo: vi.fn() } as unknown as OverlayImageMap & {
+    const map = { flyTo: vi.fn(), jumpTo: vi.fn() } as unknown as OverlayImageMap & {
       flyTo: ReturnType<typeof vi.fn>;
     };
     const mapRef = createMapRef(map);
@@ -201,6 +208,7 @@ describe('useDashboardMapShell', () => {
     await waitFor(() => expect(result.current.mapStyle).toEqual({
       version: 8,
       layerId: 'esri-satellite',
+      projection: { type: 'globe' },
     }));
     act(() => result.current.handleMapLoad());
     await waitFor(() => expect(result.current.overlayIconsLoaded).toBe(true));
@@ -259,7 +267,7 @@ describe('useDashboardMapShell', () => {
   });
 
   it('toggles live location, flies on the first fix, and contains rejected haptics', async () => {
-    const map = { flyTo: vi.fn() } as unknown as OverlayImageMap & {
+    const map = { flyTo: vi.fn(), jumpTo: vi.fn() } as unknown as OverlayImageMap & {
       flyTo: ReturnType<typeof vi.fn>;
     };
     const location = createLocationWatcher();
@@ -348,7 +356,7 @@ describe('useDashboardMapShell', () => {
     mockClearWatch.mockResolvedValue(undefined);
     mockImpact.mockRejectedValue(new Error('no haptics'));
     mockLoadMapImage.mockResolvedValue(true);
-    const map = { flyTo: vi.fn() } as unknown as OverlayImageMap & {
+    const map = { flyTo: vi.fn(), jumpTo: vi.fn() } as unknown as OverlayImageMap & {
       flyTo: ReturnType<typeof vi.fn>;
     };
     const mapRef = createMapRef(map);
@@ -359,7 +367,7 @@ describe('useDashboardMapShell', () => {
       onSelectedMapLayerIdChange: onChange,
     }));
 
-    await waitFor(() => expect(result.current.mapStyle).toEqual({ version: 8 }));
+    await waitFor(() => expect(result.current.mapStyle).toEqual({ version: 8, projection: { type: 'globe' } }));
     act(() => {
       result.current.selectMapLayer('esri-world-hillshade');
       result.current.handleMapLoad();
@@ -383,6 +391,7 @@ describe('useDashboardMapShell', () => {
     expect(mockImpact).toHaveBeenCalledWith({ style: 'LIGHT' });
     expect(mockLoadMapImage).toHaveBeenCalledTimes(6);
     expect(mockLockMapOrientation).toHaveBeenCalledWith(mapRef.current);
+    expect(attachGlobeAtmosphere).toHaveBeenCalledWith(map, { beforeId: MAP.GLOBE_FOREGROUND_ANCHOR });
 
     const styleError = new Error('cache failed');
     mockGetCachedLayerStyle.mockRejectedValueOnce(styleError);
@@ -396,5 +405,47 @@ describe('useDashboardMapShell', () => {
       'Failed to load map style:',
       styleError,
     ));
+  });
+});
+
+
+describe('globe presentation ownership', () => {
+  it('attaches once per map, preserves later navigation and disposes on replacement and unmount', () => {
+    const first = { jumpTo: vi.fn() };
+    const second = { jumpTo: vi.fn() };
+    const mapRef = createMapRef(first as unknown as Parameters<typeof createMapRef>[0]);
+    const disposeFirst = vi.fn();
+    const disposeSecond = vi.fn();
+    const attachAtmosphere = vi.fn().mockReturnValueOnce(disposeFirst).mockReturnValueOnce(disposeSecond);
+    const dependencies = createDependencies({ attachAtmosphere });
+    const { result, unmount } = renderHook(() => useDashboardMapShell({
+      mapRef, selectedMapLayerId: 'esri-satellite', onSelectedMapLayerIdChange: vi.fn(), dependencies,
+    }));
+    act(() => result.current.handleMapLoad());
+    act(() => result.current.handleMapLoad());
+    expect(attachAtmosphere).toHaveBeenCalledExactlyOnceWith(first);
+    expect(first.jumpTo).toHaveBeenCalledExactlyOnceWith({ center: [2.35, 46.6], zoom: 0, bearing: 0, pitch: 0 });
+    mapRef.current = { getMap: () => second } as unknown as MapRef;
+    act(() => result.current.handleMapLoad());
+    expect(disposeFirst).toHaveBeenCalledOnce();
+    expect(attachAtmosphere).toHaveBeenLastCalledWith(second);
+    unmount();
+    expect(disposeSecond).toHaveBeenCalledOnce();
+  });
+
+  it('discards provider camera metadata without changing cached sources, layers or URLs', async () => {
+    const sources = { satellite: { type: 'raster', tiles: ['cached-https://tiles.test/{z}/{x}/{y}'] } };
+    const layers = [{ id: 'satellite', source: 'satellite', type: 'raster' }];
+    const provider = { version: 8, sources, layers, center: [55, 25], zoom: 12, bearing: 30, pitch: 40, roll: 5 };
+    const dependencies = createDependencies({ getLayerStyle: vi.fn(async () => provider) });
+    const { result } = renderHook(() => useDashboardMapShell({
+      mapRef: createMapRef(), selectedMapLayerId: 'esri-satellite', onSelectedMapLayerIdChange: vi.fn(), dependencies,
+    }));
+    await waitFor(() => expect(result.current.mapStyle).not.toBeNull());
+    expect(result.current.mapStyle).toEqual({ version: 8, sources, layers, projection: { type: 'globe' } });
+    expect(result.current.mapStyle?.sources).toBe(sources);
+    expect(result.current.mapStyle?.layers).toBe(layers);
+    expect(provider.center).toEqual([55, 25]);
+    expect(provider.zoom).toBe(12);
   });
 });

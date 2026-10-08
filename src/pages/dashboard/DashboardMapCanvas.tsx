@@ -3,7 +3,7 @@ import { GisGeometryMapLayers, type GisGeometryMapLayersProps } from './GisGeome
 import type { DownloadArea } from '../../types/downloadArea';
 import { memo, useCallback, useState, type PointerEventHandler, type RefObject } from 'react';
 import type { StyleSpecification } from 'maplibre-gl';
-import Map from 'react-map-gl/maplibre';
+import Map, { Layer } from 'react-map-gl/maplibre';
 import type { MapLayerMouseEvent, MapRef } from 'react-map-gl/maplibre';
 import { MAP, MAP_LAYERS } from '../../constants';
 import MapLayerControl from '../../components/map/MapLayerControl';
@@ -126,6 +126,8 @@ function MapViewport({
       onMouseMove={gestures.onMouseMove}
       onMouseLeave={gestures.onMouseLeave}
     >
+      {/* Source-free background marks the boundary below every application overlay. */}
+      <Layer id={MAP.GLOBE_FOREGROUND_ANCHOR} type="background" paint={{ 'background-opacity': 0 }} />
       <DownloadAreaMapLayers areas={downloadAreas} mapRef={mapRef} />
       <GisGeometryMapLayers {...gisLayers} />
       <ProjectMapLayers {...projectLayers} />

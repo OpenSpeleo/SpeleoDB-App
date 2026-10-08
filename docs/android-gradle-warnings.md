@@ -62,7 +62,7 @@ and the VS Code Gradle extension's
 The audited clean-build commands are:
 
 ```bash
-npm ci
+test -s bun.lock && bun install --frozen-lockfile
 cd android
 ./gradlew testDebugUnitTest lint assembleDebug assembleRelease bundleRelease \
   assembleDebugAndroidTest --warning-mode all --console=plain
@@ -105,8 +105,8 @@ The postinstall patch is intentionally fail-closed. If either plugin stops
 containing the known deprecated form and does not contain the compatible form,
 installation fails with a version-change diagnostic instead of silently applying
 an unreviewed transformation. The owning quality test reads the installed plugin
-scripts, so a clean `npm ci` proves the patch actually ran at the production
-dependency seam.
+scripts, so a clean `test -s bun.lock && bun install --frozen-lockfile` proves
+the patch actually ran at the production dependency seam.
 
 ## Remaining third-party/generated warnings
 
@@ -201,13 +201,14 @@ The `uses or overrides a deprecated API` summaries are expanded by the committed
   intentionally does not read ignored Capacitor-generated output: a clean
   unit-test checkout has not run `cap sync` yet.
 - The Android unit, lint, Debug/Release APK, Release AAB, and instrumentation
-  compilation tasks run after `npx cap sync android` with all warnings shown;
-  that native gate owns verification of the generated Cordova `flatDir` warning.
+  compilation tasks run after `bun run cap sync android` with all warnings
+  shown; that native gate owns verification of the generated Cordova `flatDir`
+  warning.
 - `quality/gradle-deprecation.init.gradle` expands Java deprecation summaries
   into exact source/API diagnostics without changing normal production builds.
 - A clean dependency install/non-cached build is required when refreshing this
   ledger because Gradle does not re-emit compiler warnings for up-to-date tasks.
-- `npx cap sync android` must leave no unexplained tracked native diff.
+- `bun run cap sync android` must leave no unexplained tracked native diff.
 - Dependency upgrades require their own compatibility review and full native
   matrix.
 

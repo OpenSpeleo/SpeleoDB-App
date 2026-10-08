@@ -48,22 +48,23 @@ of creator provenance. A same-revision sharing change still refreshes access
 metadata. Geometry-level denials do not independently destroy the app session;
 SessionCoordinator retains authority over authentication/logout.
 
-`src/gisGeometry/geometry_contract.json` is copied byte-for-byte from the
-SpeleoDB backend at commit `67c67592e1a1017c7aab40a28ddde1e532fea2f7`. Its
-SHA-256 is `9ad38c83e2f30dfe2fa3603637f937c965c76dd2e55a1b10a2cd8d3baf41ef36`.
-The shared backend fixture corpus is vendored alongside it. The app imports
-policy values from this document; builds need no adjacent backend checkout.
-Updating the contract requires updating provenance and checking shared fixtures.
+The contract exported by `@speleodb/map-core/geometry` is copied byte-for-byte
+from the SpeleoDB backend. Its SHA-256 is
+`9ad38c83e2f30dfe2fa3603637f937c965c76dd2e55a1b10a2cd8d3baf41ef36`. The shared
+backend fixture corpus ships in the same package. The app imports policy values
+and geometry validation from that package; builds need no adjacent backend
+checkout. Updating the contract requires checking package/backend fixture
+parity. See [Shared map packages](shared-map-packages.md).
 
-The bounded validator ports upstream read/measurement logic. It accepts only
-bare LineString or single-exterior-ring Polygon objects, validates topology,
-finite two-dimensional positions, closure, vertex count, 30 km² bounding-box
-limit, safe positive integer revisions, UUIDs, color and offset-bearing dates.
-Name length counts Unicode code points like the backend, rather than UTF-16
-units. Coordinates retain received numeric precision. A malformed list cannot
-become an authoritative empty list. Cached records cross the same validation
-boundary on restoration; validated online reads can repair corrupt detail
-entries.
+The shared bounded validator owns upstream read/measurement logic. It accepts
+only bare LineString or single-exterior-ring Polygon objects, validates
+topology, finite two-dimensional positions, closure, vertex count, 30 km²
+bounding-box limit, safe positive integer revisions, UUIDs, color and
+offset-bearing dates. Name length counts Unicode code points like the backend,
+rather than UTF-16 units. Coordinates retain received numeric precision. A
+malformed list cannot become an authoritative empty list. Cached records cross
+the same validation boundary on restoration; validated online reads can repair
+corrupt detail entries.
 
 **GIS uses ordinary min/max longitude bounds.** This is a deliberate exception
 to project/GPS shortest-wrapped-interval behavior: a wide line's bounding box

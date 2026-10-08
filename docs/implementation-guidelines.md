@@ -210,7 +210,7 @@ handler; button appearance alone is not concurrency evidence.
 2. Verify controller remains the source of truth for auth/offline decisions.
 3. Verify reconnect behavior stays explicit and user-driven.
 4. Run targeted unit tests for touched paths.
-5. Run `npm run build` for type and dead-path validation.
+5. Run `bun run build` for type and dead-path validation.
 6. Record physical Android/iOS checks separately when behavior crosses worker,
    WebView, native modal, network, or persistence boundaries.
 

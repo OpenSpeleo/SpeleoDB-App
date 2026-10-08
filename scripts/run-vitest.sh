@@ -64,26 +64,8 @@ unset npm_package_config_sessionstorage_file
 unset npm_package_config_experimental_webstorage
 unset npm_package_config_webstorage
 
-detect_webstorage_disable_flag() {
-  local flag
-  for flag in --no-webstorage --no-experimental-webstorage; do
-    if node "$flag" -e "" >/dev/null 2>&1; then
-      printf '%s\n' "$flag"
-      return 0
-    fi
-  done
-}
-
-NODE_WEBSTORAGE_ARGS=()
-if WEBSTORAGE_DISABLE_FLAG="$(detect_webstorage_disable_flag)"; then
-  NODE_WEBSTORAGE_ARGS=("$WEBSTORAGE_DISABLE_FLAG")
-fi
-
 run_vitest() {
-  exec node \
-    "${NODE_WEBSTORAGE_ARGS[@]}" \
-    ./node_modules/vitest/vitest.mjs \
-    "$@"
+  exec bun ./node_modules/vitest/vitest.mjs "$@"
 }
 
 HAS_POOL_FLAG=0
@@ -105,7 +87,7 @@ if [[ "$HAS_POOL_FLAG" -eq 1 ]]; then
 fi
 
 if (($# > 0)); then
-  run_vitest --pool=threads "$@"
+  run_vitest --pool=forks "$@"
 fi
 
-run_vitest --pool=threads
+run_vitest --pool=forks
