@@ -5,9 +5,6 @@ on:
   push:
     branches: [master]
     tags: ['v*']
-  pull_request:
-    types: [opened, synchronize]
-    branches: ['**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
