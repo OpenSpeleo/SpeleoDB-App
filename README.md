@@ -39,6 +39,14 @@ make dev
 
 Open [http://localhost:8100](http://localhost:8100) in your browser.
 
+Before opening a native project or building directly with Gradle or Xcode, run
+`bun run build`, then `bun run cap sync android` or `bun run cap sync ios` for
+the platform you need. Repeat the sync after dependency changes or switching
+between standalone and monorepo installations. The generated native dependency
+manifests are ignored because their paths depend on the local installation.
+`make sync` prepares both platforms; `make ios-open` prepares iOS before opening
+Xcode, and the iOS build targets already sync before compiling.
+
 ## Sentry Configuration
 
 This app uses `@sentry/capacitor` with strict per-platform DSN bundling.

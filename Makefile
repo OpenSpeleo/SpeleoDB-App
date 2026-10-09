@@ -79,7 +79,8 @@ cap-doctor: ## Run Capacitor doctor diagnostics
 	bun run cap doctor
 
 # ── iOS (no Xcode GUI needed) ────────────────────────────────
-ios-open: ## Open the project in Xcode
+ios-open: build ## Build web assets, sync iOS, and open the project in Xcode
+	bun run cap sync ios
 	bun run cap open ios
 
 ios-build: sync ## Build iOS app via xcodebuild (Debug)

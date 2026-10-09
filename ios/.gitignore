@@ -9,5 +9,6 @@ xcuserdata
 capacitor-cordova-ios-plugins
 
 # Generated Config files
+/App/CapApp-SPM/Package.swift
 App/App/capacitor.config.json
 App/App/config.xml

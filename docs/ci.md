@@ -30,6 +30,21 @@ builds. The workflow lives in `.github/workflows/ci.yml`.
    `bun run cap sync ios`, archives the Xcode project, and verifies an IPA
    signed by a disposable CI identity. It is not an active verification gate.
 
+### Generated native dependency manifests
+
+`android/capacitor.settings.gradle` and `ios/App/CapApp-SPM/Package.swift` are
+ignored Capacitor output. Their plugin paths depend on the local dependency
+installation, which can differ between standalone clones and the monorepo. Keep
+the surrounding native projects tracked.
+
+After installing dependencies, build the web assets with `bun run build` and run
+`bun run cap sync android` or `bun run cap sync ios` before opening the
+corresponding IDE or invoking Gradle or Xcode directly. Repeat sync when
+dependencies or installation layout change. Native CI already syncs before
+compiling; the iOS Make build targets do too, and `make ios-open` builds the web
+assets and syncs iOS before opening Xcode. Web and unit-test jobs must not
+depend on these ignored manifests being present.
+
 ### iOS compatibility
 
 The app requires **iOS/iPadOS 16.4 or later**. Xcode's project, app, and test
