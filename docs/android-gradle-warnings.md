@@ -16,6 +16,17 @@ The current wrapper selects Gradle 9.6.0 and `android/build.gradle` selects AGP
 original Java-toolchain and warning policy, not the current version pin.
 Revalidate the complete native matrix when either pin changes.
 
+The Gradle daemon requires Java 21, matching the JDK provisioned by Android CI.
+`android/gradle/gradle-daemon-jvm.properties` deliberately leaves the vendor
+unspecified and contains no provisioning URLs. Install a local JDK 21 for
+command-line and Android Studio builds; CI already installs Zulu 21 through
+`actions/setup-java`. This avoids a second daemon-JDK download through stale
+vendor-specific Foojay URLs. Gradle's
+[daemon JVM criteria](https://docs.gradle.org/current/userguide/gradle_daemon.html#sec:daemon_jvm_criteria)
+take precedence over `JAVA_HOME`, so changing only CI's environment cannot fix a
+conflicting committed daemon requirement. The quality audit checks that the
+daemon version and CI's installed Java version stay aligned.
+
 ## August 2026 Gradle 10 readiness
 
 Gradle 10 has not been released as of August 26, 2026. The audited migration

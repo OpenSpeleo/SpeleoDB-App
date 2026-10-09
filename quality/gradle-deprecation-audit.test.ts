@@ -27,6 +27,20 @@ describe("Android Gradle deprecation audit", () => {
     );
   });
 
+  it("uses the Java version installed by Android CI without vendor-specific daemon downloads", async () => {
+    const [daemon, workflow] = await Promise.all([
+      readFile("android/gradle/gradle-daemon-jvm.properties", "utf8"),
+      readFile(".github/workflows/ci.yml", "utf8"),
+    ]);
+    const androidJob = workflow
+      .split(/^ {2}(?=[\w-]+:)/m)
+      .find((job) => job.startsWith("build-android:"));
+    const ciJavaVersion = androidJob?.match(/^\s+java-version:\s*["']?(\d+)/m)?.[1];
+    expect(ciJavaVersion).toBe("21");
+    expect(daemon.match(/^toolchainVersion=(\d+)\s*$/m)?.[1]).toBe(ciJavaVersion);
+    expect(daemon).not.toMatch(/^\s*toolchain(?:Vendor|Url\.[^=]+)\s*=/m);
+  });
+
   it("limits VS Code Gradle discovery to the authoritative Android build", () => {
     expect(vscodeSettings["gradle.nestedProjects"]).toEqual(["android"]);
     expect(vscodeSettings["java.import.exclusions"]).toEqual(
