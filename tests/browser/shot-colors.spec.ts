@@ -72,6 +72,9 @@ test('By Shot renders source colors and fallback, persists, and works after offl
   await expect(page.getByTestId('depth-gauge')).toBeVisible();
   await page.getByRole('tab', { name: 'Settings', exact: true }).tap();
   await selector.selectOption('shot');
+  // Finish automatic offline preparation before disconnecting and reloading;
+  // otherwise navigation aborts tile requests still owned by the online page.
+  await expect(page.getByTestId('sync-pct')).toHaveText('100%');
   await page.getByRole('tab', { name: 'Map', exact: true }).tap();
   await expect(page.getByTestId('depth-gauge')).toHaveCount(0);
 

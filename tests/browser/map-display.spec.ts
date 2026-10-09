@@ -120,6 +120,29 @@ async function expectOverviewLines(page: Page, testInfo: TestInfo) {
   }
 }
 
+test('project navigation survives the initial basemap finishing later', async ({ page }) => {
+  let releaseTiles!: () => void;
+  const tilesReady = new Promise<void>(resolve => { releaseTiles = resolve; });
+  let app: Awaited<ReturnType<typeof setupMap>>;
+  try {
+    app = await setupMap(page, geometry, async () => {
+      await page.route(/https:\/\/.*(arcgisonline|arcgis)\.com\/.*\/tile\//, async route => {
+        await tilesReady;
+        await route.fallback();
+      });
+    });
+    // Navigate while the initial map load is held at the tile transport seam.
+    await expect.poll(async () => (await mapPixels(page)).red).toBeGreaterThan(20);
+  } finally {
+    releaseTiles();
+  }
+  // Entrance icons are registered by the map load handler. Both the entrance
+  // and survey must still be in view after that handler has run.
+  await expect.poll(async () => (await mapPixels(page)).yellow).toBeGreaterThan(15);
+  await expect.poll(async () => (await mapPixels(page)).red).toBeGreaterThan(20);
+  expect(app.errors).toEqual([]);
+});
+
 test('short survey shots remain visible from regional to country overview', async ({ page }, testInfo) => {
   // Nine 3 km surveys across roughly 70 km, each built from ~10 m shots.
   // Individual shots are below the default simplification threshold at the

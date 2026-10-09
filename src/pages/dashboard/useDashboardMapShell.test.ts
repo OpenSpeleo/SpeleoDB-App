@@ -410,7 +410,7 @@ describe('useDashboardMapShell', () => {
 
 
 describe('globe presentation ownership', () => {
-  it('attaches once per map, preserves later navigation and disposes on replacement and unmount', () => {
+  it('attaches once per map without resetting navigation before load, and disposes on replacement and unmount', () => {
     const first = { jumpTo: vi.fn() };
     const second = { jumpTo: vi.fn() };
     const mapRef = createMapRef(first as unknown as Parameters<typeof createMapRef>[0]);
@@ -424,11 +424,12 @@ describe('globe presentation ownership', () => {
     act(() => result.current.handleMapLoad());
     act(() => result.current.handleMapLoad());
     expect(attachAtmosphere).toHaveBeenCalledExactlyOnceWith(first);
-    expect(first.jumpTo).toHaveBeenCalledExactlyOnceWith({ center: [2.35, 46.6], zoom: 0, bearing: 0, pitch: 0 });
+    expect(first.jumpTo).not.toHaveBeenCalled();
     mapRef.current = { getMap: () => second } as unknown as MapRef;
     act(() => result.current.handleMapLoad());
     expect(disposeFirst).toHaveBeenCalledOnce();
     expect(attachAtmosphere).toHaveBeenLastCalledWith(second);
+    expect(second.jumpTo).not.toHaveBeenCalled();
     unmount();
     expect(disposeSecond).toHaveBeenCalledOnce();
   });

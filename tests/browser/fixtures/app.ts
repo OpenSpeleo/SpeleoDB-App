@@ -1,5 +1,5 @@
-// The shipped app has a native-only credential vault. Emulate only its bridge
-// for this fixture; application routing, map, IndexedDB, and downloads stay real.
+// The shipped app has a native-only credential vault. Emulate its bridge;
+// application routing, map rendering, IndexedDB, and downloads stay real.
 export async function fixture(
   page: import('@playwright/test').Page,
   connected = true,
@@ -8,6 +8,21 @@ export async function fixture(
 ) {
   let online = connected;
   await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.addInitScript(() => {
+    // Screenshots run outside MapLibre's render callback. Retain the actual
+    // WebGL output so WebKit cannot capture an older, discarded drawing buffer.
+    // This affects only the test page, not the shipped map's rendering options.
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (
+      this: HTMLCanvasElement,
+      contextId: string,
+      options?: Record<string, unknown>,
+    ) {
+      return getContext.call(this, contextId, contextId.startsWith('webgl')
+        ? { ...options, preserveDrawingBuffer: true }
+        : options);
+    } as typeof getContext;
+  });
   await page.addInitScript(({ withCompass, withDepth }: { withCompass: boolean; withDepth: boolean }) => {
     if (!localStorage.getItem('speleo_user_preferences'))
       localStorage.setItem(

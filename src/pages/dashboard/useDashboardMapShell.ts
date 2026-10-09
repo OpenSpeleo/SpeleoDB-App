@@ -142,6 +142,7 @@ export function useDashboardMapShell({
   }));
   const mapStyle = useMapStyle(selectedMapLayerId, dependencies, runtimeActive);
   const icons = useMapIcons(mapRef, dependencies);
+  const loadMapIcons = icons.handleMapLoad;
   const location = useMapLocation(mapRef, runtimeActive, dependencies);
   const appearance = useRef<{ map: MaplibreMap; dispose: () => void } | null>(null);
   useLayoutEffect(() => () => {
@@ -153,12 +154,11 @@ export function useDashboardMapShell({
     if (map && appearance.current?.map !== map) {
       appearance.current?.dispose();
       appearance.current = { map, dispose: dependencies.attachAtmosphere(map) };
-      // Globe projection is now installed: undo the temporary Mercator clamp
-      // once, before the caller applies project bounds or a navigation target.
-      map.jumpTo({ center: MAP.DEFAULT_CENTER, zoom: MAP.DEFAULT_ZOOM, ...MAP.NORTH_UP_ORIENTATION });
+      // MapLibre initializes the globe camera from initialViewState. Loading
+      // tiles can finish after navigation; never replace that newer camera.
     }
-    icons.handleMapLoad();
-  }, [dependencies, icons.handleMapLoad, mapRef]);
+    loadMapIcons();
+  }, [dependencies, loadMapIcons, mapRef]);
 
   const selectMapLayer = useCallback((layerId: string) => {
     const nextLayerId = (MAP_LAYERS.find((layer) => layer.id === layerId)?.id

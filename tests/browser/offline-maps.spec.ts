@@ -2,16 +2,16 @@ import { expect, test } from '@playwright/test';
 
 import { fixture } from './fixtures/app';
 
-async function zoomToLocalArea(page: import('@playwright/test').Page) {
+async function zoomToMapScale(page: import('@playwright/test').Page, scalePattern = /^\d{1,2} m$/) {
   const canvas = page.locator('.maplibregl-canvas');
   const scale = page.getByTestId('distance-scale');
   // Feed a continuous wheel gesture through MapLibre's real input handler.
   // Keyboard map navigation is intentionally disabled by the north-up contract.
-  await canvas.evaluate(async (element) => {
+  await canvas.evaluate(async (element, pattern) => {
     const rect = element.getBoundingClientRect();
     for (let frame = 0; frame < 300; frame++) {
       if (
-        /^\d{1,2} m$/.test(
+        new RegExp(pattern).test(
           document
             .querySelector('[data-testid="distance-scale"]')!
             .textContent!.trim(),
@@ -24,13 +24,14 @@ async function zoomToLocalArea(page: import('@playwright/test').Page) {
           cancelable: true,
           deltaY: -100,
           clientX: rect.x + rect.width / 2,
-          clientY: rect.y + rect.height / 3,
+          // Start on the globe, not in the space above its horizon.
+          clientY: rect.y + rect.height / 2,
         }),
       );
       await new Promise(requestAnimationFrame);
     }
-  });
-  await expect(scale).toHaveText(/^\d{1,2} m$/);
+  }, scalePattern.source);
+  await expect(scale).toHaveText(scalePattern);
   await expect(page.getByRole('spinbutton')).toHaveCount(0);
   await expect(page.getByRole('textbox')).toHaveCount(0);
 }
@@ -55,7 +56,7 @@ test('multiple unnamed areas keep their colors through reload, menu reopening, e
   await page.goto('/dashboard');
   await page.getByRole('button', { name: 'Offline Maps', exact: true }).click();
   await page.getByRole('button', { name: 'Add new offline area' }).click();
-  await zoomToLocalArea(page);
+  await zoomToMapScale(page);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   const first = page.getByRole('group', { name: 'Area 1', exact: true });
   const second = page.getByRole('group', { name: 'Area 2', exact: true });
@@ -193,7 +194,7 @@ test('long offline area lists scroll below fixed controls in a smaller sheet', a
   await page.goto('/dashboard');
   await page.getByRole('button', { name: 'Offline Maps', exact: true }).click();
   await page.getByRole('button', { name: 'Add new offline area' }).click();
-  await zoomToLocalArea(page);
+  await zoomToMapScale(page);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Downloaded', { exact: true })).toBeVisible();
   // Expand a real saved catalog, keeping identical coverage to avoid unrelated
@@ -345,7 +346,7 @@ for (const layout of [
       await expect(handle).toBeInViewport({ ratio: 1 });
       await handle.tap();
     }
-    await zoomToLocalArea(page);
+    await zoomToMapScale(page);
     const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
     const dialog = page.getByRole('dialog', { name: 'Select offline area' });
     await expect(
@@ -378,7 +379,7 @@ test('offline intent survives restart and downloads after explicit reconnect', a
   await page.getByRole('button', { name: 'Go Offline', exact: true }).click();
   await page.getByRole('button', { name: 'Offline Maps', exact: true }).click();
   await page.getByRole('button', { name: 'Add new offline area' }).click();
-  await zoomToLocalArea(page);
+  await zoomToMapScale(page);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(
     page.getByText('Waiting for connection', { exact: true }),
@@ -647,13 +648,26 @@ test('a real drag beginning on the compass pans the underlying map without chang
   await fixture(page, true, true);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/dashboard');
+  // At the initial globe view the compass sits over space, where MapLibre
+  // cannot anchor a surface drag. Exercise pass-through over the globe surface.
+  await zoomToMapScale(page, /^\d{1,3} km$/);
   await page.getByRole('button', { name: 'Show compass', exact: true }).tap();
   await emitCompassHeading(page, 260);
   await mapSizeSettled(page);
-  // The production distance scale derives its rendered width from MapLibre's
-  // latitude, so its change proves that the gesture moved the actual map.
-  const scale = page.getByTestId('distance-scale').locator('[style]');
-  const originalWidth = await scale.evaluate((element) => element.getBoundingClientRect().width);
+  // Globe panning adjusts zoom with latitude to preserve scale. Compare a
+  // basemap-only patch instead, after the wheel gesture has visually settled.
+  const canvas = (await page.locator('.maplibregl-canvas').boundingBox())!;
+  const mapPatch = () => page.screenshot({ clip: {
+    x: canvas.x + canvas.width / 2 - 40, y: canvas.y + canvas.height / 2 - 40,
+    width: 80, height: 80,
+  } });
+  let original: Buffer | undefined;
+  await expect.poll(async () => {
+    const current = await mapPatch();
+    const settled = original?.equals(current) ?? false;
+    original = current;
+    return settled;
+  }).toBe(true);
   const box = (await page.getByTestId('map-compass').boundingBox())!;
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
@@ -667,7 +681,7 @@ test('a real drag beginning on the compass pans the underlying map without chang
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
   }
   await page.mouse.up();
-  await expect.poll(async () => Math.abs(await scale.evaluate((element) => element.getBoundingClientRect().width) - originalWidth)).toBeGreaterThan(1);
+  await expect.poll(async () => (await mapPatch()).equals(original!)).toBe(false);
   await expect(page.getByRole('img', { name: 'Compass heading 260 degrees, W', exact: true })).toBeVisible();
 });
 
@@ -922,7 +936,7 @@ test('editing and resizing the viewport never change saved bounds without a gest
   });
   await page.getByRole('button', { name: 'Offline Maps', exact: true }).click();
   await page.getByRole('button', { name: 'Add new offline area' }).click();
-  await zoomToLocalArea(page);
+  await zoomToMapScale(page);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Downloaded', { exact: true })).toBeVisible();
   const [original] = await savedAreas(page);
@@ -992,7 +1006,7 @@ test('layer switches reuse the union worker plan and preserve satellite coverage
   await page.goto('/dashboard');
   await page.getByRole('button', { name: 'Offline Maps', exact: true }).click();
   await page.getByRole('button', { name: 'Add new offline area' }).click();
-  await zoomToLocalArea(page);
+  await zoomToMapScale(page);
   await expect(page.getByText('1 map layer', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Downloaded', { exact: true })).toBeVisible();

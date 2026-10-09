@@ -4,7 +4,9 @@ export default defineConfig({
   testDir: './tests/browser',
   forbidOnly: true,
   retries: 0,
-  workers: 2,
+  // Real WebGL rendering and control-paint budgets share the runner's GPU/CPU.
+  // Competing maps would measure cross-test contention instead of app latency.
+  workers: 1,
   use: {
     baseURL: 'http://127.0.0.1:4173',
     hasTouch: true,

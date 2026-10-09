@@ -427,10 +427,29 @@ its own handler during deployment. Subprocess tests verify termination ordering
 and restoration after deployment failure; a device build still requires the
 local Apple toolchain. The authored Capacitor configuration is not modified.
 
-The October 2026 Bun migration passed all 55 Chromium browser cases. Its final
-focused WebKit run passed offline GIS rendering and large-survey responsiveness,
-but three pixel assertions still failed: clearing a revoked GIS shape and GIS
-and GPS overview line counts. Those three failures were also reproduced against
-the original application code in the same container; their assertions remain
-unchanged. This is a recorded browser-validation limitation, not a passing
-WebKit release gate.
+Browser map fixtures exercise the shipped globe projection. Wheel gestures start
+at the canvas center, on the globe surface; aiming above the horizon can drive
+the camera to the Mercator latitude limit and flatten an offline selection. The
+compass drag fixture first establishes a regional view and compares a settled
+basemap patch before and after dragging. Globe panning adjusts zoom with
+latitude to preserve scale, so an unchanged distance-scale width cannot prove
+that the map stayed still.
+
+The browser fixture requests `preserveDrawingBuffer` for real WebGL contexts
+because pixel assertions capture screenshots outside the map's render callback.
+Without retained output, Linux WebKit can capture an earlier frame after a
+source has changed, falsely showing revoked geometry or omitting newly visible
+lines. This capture setting stays in the test fixture; production keeps its
+default drawing-buffer behavior and performance.
+
+Browser tests use one worker so real WebGL maps do not compete for the CI
+runner's rendering resources while control-paint latency is measured. The 100 ms
+control-paint and 50 ms application-work budgets remain unchanged. Offline
+reload fixtures wait for automatic tile preparation to finish before
+disconnecting, so navigation does not abort the preparation they depend on.
+
+The delayed-basemap regression holds tile responses until a selected survey is
+rendered, then verifies both survey lines and load-time entrance icons. It
+protects against resetting navigation when the initial map load finishes. The
+geometry-revocation, overview-line and responsiveness assertions remain blocking
+in both browser engines.

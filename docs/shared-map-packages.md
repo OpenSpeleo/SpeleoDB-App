@@ -93,10 +93,11 @@ WebView performance claims.
 The Dashboard starts over France at `[2.35, 46.6]`, zoom `0`. The map shell
 shallow-copies the selected cached style, installs its globe projection and
 removes provider camera metadata. Tile URLs, sources and layer arrays retain
-their existing identities and cached protocol handling. After the first map
-load, the shell restores the initial camera once to undo MapLibre's temporary
-Mercator viewport constraint; project navigation runs afterward. Later style
-changes retain the current camera.
+their existing identities and cached protocol handling. MapLibre initializes the
+globe camera from `initialViewState`; its object-style initialization defers
+Mercator constraints until the globe transform is available. The map load
+handler never resets the camera: tile loading can finish after project fitting
+or a user's navigation. Later style changes also retain the current camera.
 
 The shell attaches the shared `attachGlobeAtmosphere` renderer once per map and
 releases it when that map is replaced or the shell unmounts. The package
@@ -113,8 +114,10 @@ local and deterministic; one draw runs only with MapLibre's own frame rendering.
 There are no new requests, timers, feature scans or offline cache entries.
 Native location and orientation-lock policies remain mobile-owned.
 
-Shell unit tests cover provider-camera removal, source identity, one-time camera
-application, map replacement and unmount cleanup. Browser tests inspect the real
+Shell unit tests cover provider-camera removal, source identity, camera
+preservation, map replacement and unmount cleanup. A browser regression holds
+initial basemap tiles until after project navigation, then verifies the survey
+and load-time entrance icons remain visible. Browser tests inspect the real
 canvas for stars, dark space and a white halo before and after all three basemap
 choices, tab navigation and portrait/landscape resizing. Run browser checks
 against a manual production build; browser evidence does not establish physical
