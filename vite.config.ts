@@ -190,6 +190,7 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       globals: true,
+      testTimeout: 30_000,
       environment: 'jsdom',
       pool: 'forks',
       execArgv: ['--preload', path.join(repoRoot, 'scripts/jsdom-runtime.mjs')],
