@@ -1,5 +1,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { fixture } from './fixtures/app';
+import { captureMapCanvas } from './fixtures/mapCanvas';
 import { gisMetadata } from '../../src/test/gisGeometryFixtures';
 import type { Project } from '../../src/types/project';
 
@@ -72,7 +73,7 @@ async function openSettings(page: Page) {
 }
 
 async function overviewPixels(page: Page) {
-  const screenshot = await page.locator('.maplibregl-canvas').screenshot({ scale: 'css' });
+  const screenshot = await captureMapCanvas(page);
   return page.evaluate(async dataUrl => {
     const image = new Image(); image.src = dataUrl; await image.decode();
     const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;

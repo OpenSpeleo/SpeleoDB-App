@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { fixture } from './fixtures/app';
+import { captureMapCanvas } from './fixtures/mapCanvas';
 import { gisMetadata } from '../../src/test/gisGeometryFixtures';
 import type { DownloadAreaCatalog } from '../../src/types/downloadArea';
 import type { OfflineMapGenerationRecord } from '../../src/types/offlineMapSync';
@@ -53,8 +54,8 @@ async function openGis(page: Page) {
 
 async function waitForClosedPanel(panel: Locator) {
   await expect(panel).toHaveAttribute('aria-hidden', 'true');
-  // aria-hidden changes before the panel and its dark backdrop finish their
-  // transitions. Canvas screenshots include those overlays, skewing pixel math.
+  // aria-hidden changes before the panel and its backdrop finish transitioning.
+  // Wait until the map is unobstructed before continuing interactions.
   await panel.evaluate(async element => {
     const animations = [
       ...element.getAnimations(),
@@ -189,21 +190,20 @@ test('renders both shapes with full bounds and saved-fill transparency, then wor
   await panel.getByRole('button', { name: 'Show all geometries' }).click();
   await panel.getByRole('button', { name: 'Zoom to Reference polygon' }).click();
   await waitForClosedPanel(panel);
-  const canvas = page.locator('.maplibregl-canvas');
   await expect.poll(async () => {
-    const pixels = await colorPixels(page, await canvas.screenshot({ scale: 'css' }));
+    const pixels = await colorPixels(page, await captureMapCanvas(page));
     return pixels.cyan.count > 20 && pixels.magenta > 20 && pixels.cyan.left >= 50
       && pixels.cyan.right <= pixels.width - 50 && pixels.cyan.top >= 50 && pixels.cyan.bottom <= pixels.height - 50;
   }).toBe(true);
-  const visible = await canvas.screenshot({ scale: 'css', path: testInfo.outputPath('geometries-map.png') });
+  const visible = await captureMapCanvas(page);
   const colors = await colorPixels(page, visible);
   const scale = await page.getByTestId('distance-scale').textContent();
   panel = await openGis(page);
   await panel.getByRole('button', { name: 'Hide all geometries' }).click();
   await page.getByRole('tab', { name: 'Map', exact: true }).click();
   await waitForClosedPanel(panel);
-  await expect.poll(async () => (await colorPixels(page, await canvas.screenshot({ scale: 'css' }))).cyan.count).toBe(0);
-  const hidden = await canvas.screenshot({ scale: 'css' });
+  await expect.poll(async () => (await colorPixels(page, await captureMapCanvas(page))).cyan.count).toBe(0);
+  const hidden = await captureMapCanvas(page);
   expect(await page.getByTestId('distance-scale').textContent()).toBe(scale);
   const sample = {
     x: Math.round((colors.cyan.left + 2 * colors.cyan.right) / 3),
@@ -228,7 +228,7 @@ test('renders both shapes with full bounds and saved-fill transparency, then wor
   await expect(panel.getByText('0 of 2 visible')).toBeVisible();
   await panel.getByRole('button', { name: 'Zoom to Reference polygon' }).click();
   await expect(panel).toHaveAttribute('aria-hidden', 'true');
-  await expect.poll(async () => (await colorPixels(page, await canvas.screenshot({ scale: 'css' }))).cyan.count).toBeGreaterThan(20);
+  await expect.poll(async () => (await colorPixels(page, await captureMapCanvas(page))).cyan.count).toBeGreaterThan(20);
   expect(app.requests).toHaveLength(requestCount);
   expect(app.errors).toEqual(['Failed to load resource: the server responded with a status of 503 (Service Unavailable)']);
 });
@@ -275,15 +275,14 @@ test('a refreshed access loss removes an already visible geometry', async ({ pag
   await expect.poll(() => offlineGeometryReady(page)).toBe(true);
   await panel.getByRole('button', { name: 'Zoom to Reference polygon' }).click();
   await expect(panel).toHaveAttribute('aria-hidden', 'true');
-  const canvas = page.locator('.maplibregl-canvas');
-  await expect.poll(async () => (await colorPixels(page, await canvas.screenshot({ scale: 'css' }))).cyan.count).toBeGreaterThan(20);
+  await expect.poll(async () => (await colorPixels(page, await captureMapCanvas(page))).cyan.count).toBeGreaterThan(20);
   app.revoke();
   await page.getByRole('tab', { name: 'Settings', exact: true }).click();
   await page.getByTestId('sync-button').click();
   panel = await openGis(page);
   await expect(panel.getByText('No geometries available.')).toBeVisible();
   await page.getByRole('tab', { name: 'Map', exact: true }).click();
-  await expect.poll(async () => (await colorPixels(page, await canvas.screenshot({ scale: 'css' }))).cyan.count).toBe(0);
+  await expect.poll(async () => (await colorPixels(page, await captureMapCanvas(page))).cyan.count).toBe(0);
   expect(app.errors).toEqual([]);
 });
 

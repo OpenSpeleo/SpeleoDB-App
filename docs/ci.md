@@ -405,6 +405,13 @@ source has changed, falsely showing revoked geometry or omitting newly visible
 lines. This capture setting stays in the test fixture; production keeps its
 default drawing-buffer behavior and performance.
 
+Geometry color and overview-line assertions read that retained canvas directly
+at CSS-pixel dimensions. A locator screenshot also includes DOM controls,
+attribution and text antialiasing, so its colored pixels cannot be treated as
+map features. Full-page screenshots remain useful for layout diagnostics. A
+failed browser job uploads `test-results/`, including Playwright traces, as
+`browser-test-failures` for seven days.
+
 Browser tests use one worker so real WebGL maps do not compete for the CI
 runner's rendering resources while control-paint latency is measured. The 100 ms
 control-paint and 50 ms application-work budgets remain unchanged. Offline
