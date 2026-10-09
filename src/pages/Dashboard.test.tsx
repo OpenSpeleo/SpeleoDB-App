@@ -3621,6 +3621,7 @@ describe('Dashboard -- Landmark CRUD', () => {
     mockLandmarksRevision = 0;
     mockMapDataRevision = 1;
     mockProjects = [makeProject({ id: 'p1', name: 'CRUD Project' })];
+    mockGetCachedLayerStyle.mockResolvedValue({ version: 8, sources: {}, layers: [] });
     mockGetProjectVisibilityPreferences.mockReturnValue({});
     mockGetCountryVisibilityPreferences.mockReturnValue({});
     mockGetCountryCollapsedPreferences.mockReturnValue({});
@@ -3948,13 +3949,17 @@ describe('Dashboard -- Landmark CRUD', () => {
 
   it('does not delete when the confirmation is cancelled', async () => {
     renderDashboard();
+    await settleAsyncEffects();
     await waitFor(() => {
       expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
     });
 
-    tapLandmark();
-    fireEvent.click(screen.getByTestId('delete-landmark-button'));
-    fireEvent.click(screen.getByTestId('delete-landmark-confirm-cancel'));
+    // Pattern registration queues a state update even when no mutation occurs.
+    // Flush effects from each interaction before checking the cancelled flow.
+    await act(async () => { tapLandmark(); });
+    await userEvent.click(screen.getByTestId('delete-landmark-button'));
+    expect(screen.getByTestId('delete-landmark-confirm')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('delete-landmark-confirm-cancel'));
 
     expect(mockDeleteLandmark).not.toHaveBeenCalled();
     expect(screen.queryByTestId('delete-landmark-confirm')).not.toBeInTheDocument();

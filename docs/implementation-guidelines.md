@@ -248,6 +248,12 @@ a loaded layer/overlay that proves data publication, then flush an asynchronous
 `act` tick before advancing timers. Otherwise late state commits produce React
 `act` warnings after the gesture assertion and can leak into later tests.
 
+Cancellation flows also need settled mount effects and awaited interactions.
+Download-area pattern registration queues a React state update even when a
+landmark action makes no network request. Wrap synthetic map gestures in async
+`act` and await `userEvent` clicks before asserting that cancellation caused no
+mutation; keep the console guard enabled.
+
 ## Native plugin registration
 
 First-party Capacitor plugins also need explicit Android class registration in
