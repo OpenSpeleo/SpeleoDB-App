@@ -4,6 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "lock": "bun scripts/lock.mjs",
     "dev": "vite --configLoader native",
     "build": "bun scripts/typecheck.mjs && vite build --configLoader native",
     "bundle:report": "bun run build && bun ./scripts/report-bundle-stats.mjs",
@@ -55,8 +56,8 @@
     "react-router": "^5.3.4",
     "react-router-dom": "^5.3.4",
     "tslib": "2.8.1",
-    "@speleodb/map-core": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapCore.git#cb1cb131ae10dc57727ddf671f54df3c57bbd019",
-    "@speleodb/map-viewer": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapViewer.git#a1fcbc080a8da87fe86baeb7b16e27957e433916"
+    "@speleodb/map-core": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapCore.git#4b846912ccc25319ac200c2587f98ebce88d3188",
+    "@speleodb/map-viewer": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapViewer.git#6e2e7eea22da6d39874647256bea8a13da3fd922"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",
@@ -111,6 +112,6 @@
     "fsevents"
   ],
   "overrides": {
-    "@speleodb/map-core": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapCore.git#cb1cb131ae10dc57727ddf671f54df3c57bbd019"
+    "@speleodb/map-core": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapCore.git#4b846912ccc25319ac200c2587f98ebce88d3188"
   }
 }
