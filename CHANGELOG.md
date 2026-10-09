@@ -10,6 +10,8 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ### Fixes
 
+- Keep the map on your selected survey while background maps finish loading.
+  `340ecae`
 - Keep survey lines, GIS layers, and GPS tracks clear when zooming out.
   `c621183`
 
