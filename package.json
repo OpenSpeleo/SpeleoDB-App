@@ -4,6 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "lock": "bun scripts/lock.mjs",
     "dev": "vite --configLoader native",
     "build": "bun scripts/typecheck.mjs && vite build --configLoader native",
     "bundle:report": "bun run build && bun ./scripts/report-bundle-stats.mjs",

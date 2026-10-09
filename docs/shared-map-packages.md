@@ -119,3 +119,19 @@ canvas for stars, dark space and a white halo before and after all three basemap
 choices, tab navigation and portrait/landscape resizing. Run browser checks
 against a manual production build; browser evidence does not establish physical
 Android/iOS WebView performance.
+
+## Standalone lock resolution inside the monorepo
+
+Run `bun run lock` from this app after editing its dependency manifest. Use
+`bun run lock --upgrade` to refresh all direct and transitive versions within
+the existing constraints. Both commands delegate to the parent-owned
+`utilities/bun-lock/lock.mjs`, shared with web and the map packages. The utility
+requires the pinned Bun version, resolves outside the workspace and installed
+tree, and publishes only this app's `bun.lock` after success. It neither changes
+`package.json` nor runs lifecycle scripts. Refresh the root integration lock
+separately when necessary.
+
+This command requires the monorepo. Standalone clones retain native
+`bun install --lockfile-only --ignore-scripts` and the existing independent
+lockfile check. Shared utility validation uses isolated resolver fixtures;
+application and native runtime behavior is unaffected.
