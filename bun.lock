@@ -25,8 +25,8 @@
         "@ionic/react-router": "^8.8.19",
         "@sentry/capacitor": "^4.4.0",
         "@sentry/react": "10.69.0",
-        "@speleodb/map-core": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapCore.git#4b846912ccc25319ac200c2587f98ebce88d3188",
-        "@speleodb/map-viewer": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapViewer.git#6e2e7eea22da6d39874647256bea8a13da3fd922",
+        "@speleodb/map-core": "0.1.0",
+        "@speleodb/map-viewer": "0.1.0",
         "@turf/helpers": "^7.4.0",
         "@types/react-router": "^5.1.20",
         "@types/react-router-dom": "^5.3.3",
@@ -87,7 +87,7 @@
     "@sentry/capacitor",
   ],
   "overrides": {
-    "@speleodb/map-core": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapCore.git#4b846912ccc25319ac200c2587f98ebce88d3188",
+    "@speleodb/map-core": "0.1.0",
   },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
@@ -516,9 +516,9 @@
 
     "@sentry/types": ["@sentry/types@10.69.0", "", { "dependencies": { "@sentry/core": "10.69.0" } }, "sha512-sWOH1SrpGecTWVygZy3tI3D4WmJQd1/CEcR+1GJr0MltNHK6u8GbTF/Zl+aOR7EfYxPR9vZWUYTjNpdpFt7HeA=="],
 
-    "@speleodb/map-core": ["@speleodb/map-core@github:OpenSpeleo/SpeleoDB-TS-MapCore#4b84691", { "dependencies": { "@types/geojson": "7946.0.16" } }, "OpenSpeleo-SpeleoDB-TS-MapCore-4b84691", "sha512-deogYEreku7w//HZdn8LJX4Dz7zyLGCmjMaJoDdERfiTEYQqjwL8pQl2KLAUwJWU8d6qMNCDIi+PSc7b1j5sqw=="],
+    "@speleodb/map-core": ["@speleodb/map-core@0.1.0", "", { "dependencies": { "@types/geojson": "7946.0.16" } }, "sha512-j8eBHscldlXVj+AeNnz562QIsaQKf0xjOuNxHqy7cZ6aIwxXCaPySePsnrtMMsRU7xDspM6hp5qxUxLQ1fME7A=="],
 
-    "@speleodb/map-viewer": ["@speleodb/map-viewer@github:OpenSpeleo/SpeleoDB-TS-MapViewer#6e2e7ee", { "dependencies": { "@speleodb/map-core": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapCore.git#4b846912ccc25319ac200c2587f98ebce88d3188" }, "peerDependencies": { "maplibre-gl": "6.10.0" } }, "OpenSpeleo-SpeleoDB-TS-MapViewer-6e2e7ee", "sha512-NRRzIuIffaVi4BTuxuJej4KfsMtFQeUNzVOL06nR/oXrH1G8yceA5lYNnO1xzRrstHbfeqbZlM1ZKea5sYj6/A=="],
+    "@speleodb/map-viewer": ["@speleodb/map-viewer@0.1.0", "", { "dependencies": { "@speleodb/map-core": ">=0.1.0 <1.0.0" }, "peerDependencies": { "maplibre-gl": "6.10.0" } }, "sha512-xqKw0zNdoRVgA5b9jE0fsQnYQhgFJnlhDzDWbMM0Ou7Eso4SJpnX545ZEzYcQ9xJB6AwE+YPjPuAEqJY/LW7cA=="],
 
     "@stencil/core": ["@stencil/core@4.45.2", "", { "optionalDependencies": { "@rollup/rollup-darwin-arm64": "4.44.0", "@rollup/rollup-darwin-x64": "4.44.0", "@rollup/rollup-linux-arm64-gnu": "4.44.0", "@rollup/rollup-linux-arm64-musl": "4.44.0", "@rollup/rollup-linux-x64-gnu": "4.44.0", "@rollup/rollup-linux-x64-musl": "4.44.0", "@rollup/rollup-win32-arm64-msvc": "4.44.0", "@rollup/rollup-win32-x64-msvc": "4.44.0" }, "bin": { "stencil": "bin/stencil" } }, "sha512-CNkPVZsqyNMjFMX9bEkMJsvBbQxjLw480OaoamoqiLPdQCFjJQReeOjnWX1A5ivSn3UYEIJ6MoN5VXDkaHGt8Q=="],
 
@@ -1521,8 +1521,6 @@
     "@ionic/core/@stencil/core": ["@stencil/core@4.43.5", "", { "optionalDependencies": { "@rollup/rollup-darwin-arm64": "4.44.0", "@rollup/rollup-darwin-x64": "4.44.0", "@rollup/rollup-linux-arm64-gnu": "4.44.0", "@rollup/rollup-linux-arm64-musl": "4.44.0", "@rollup/rollup-linux-x64-gnu": "4.44.0", "@rollup/rollup-linux-x64-musl": "4.44.0", "@rollup/rollup-win32-arm64-msvc": "4.44.0", "@rollup/rollup-win32-x64-msvc": "4.44.0" }, "bin": { "stencil": "bin/stencil" } }, "sha512-cgWD+GeuvJpTe1WQn40p02+BJ2j0j1YJ17GdkF2qKIQ23s2e3Zivq5yISXS3dcuV6oUJFN93jprdk+nk/sq99Q=="],
 
     "@ionic/utils-fs/fs-extra": ["fs-extra@9.1.0", "", { "dependencies": { "at-least-node": "^1.0.0", "graceful-fs": "^4.2.0", "jsonfile": "^6.0.1", "universalify": "^2.0.0" } }, "sha512-hcg3ZmepS30/7BSFqRvoo3DOMQu7IjqxO5nCDt+zM9XWjb33Wg7ziNT+Qvqbuc3+gWpzO02JubVyk2G4Zvo1OQ=="],
-
-    "@speleodb/map-viewer/@speleodb/map-core": ["@speleodb/map-core@github:OpenSpeleo/SpeleoDB-TS-MapCore#4b84691", { "dependencies": { "@types/geojson": "7946.0.16" } }, "OpenSpeleo-SpeleoDB-TS-MapCore-4b84691", "sha512-deogYEreku7w//HZdn8LJX4Dz7zyLGCmjMaJoDdERfiTEYQqjwL8pQl2KLAUwJWU8d6qMNCDIi+PSc7b1j5sqw=="],
 
     "@tailwindcss/node/lightningcss": ["lightningcss@1.32.0", "", { "dependencies": { "detect-libc": "^2.0.3" }, "optionalDependencies": { "lightningcss-android-arm64": "1.32.0", "lightningcss-darwin-arm64": "1.32.0", "lightningcss-darwin-x64": "1.32.0", "lightningcss-freebsd-x64": "1.32.0", "lightningcss-linux-arm-gnueabihf": "1.32.0", "lightningcss-linux-arm64-gnu": "1.32.0", "lightningcss-linux-arm64-musl": "1.32.0", "lightningcss-linux-x64-gnu": "1.32.0", "lightningcss-linux-x64-musl": "1.32.0", "lightningcss-win32-arm64-msvc": "1.32.0", "lightningcss-win32-x64-msvc": "1.32.0" } }, "sha512-NXYBzinNrblfraPGyrbPoD19C1h9lfI/1mzgWYvXUTe414Gz/X1FD2XBZSZM7rRTrMA8JL3OtAaGifrIKhQ5yQ=="],
 

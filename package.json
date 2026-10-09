@@ -56,8 +56,8 @@
     "react-router": "^5.3.4",
     "react-router-dom": "^5.3.4",
     "tslib": "2.8.1",
-    "@speleodb/map-core": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapCore.git#4b846912ccc25319ac200c2587f98ebce88d3188",
-    "@speleodb/map-viewer": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapViewer.git#6e2e7eea22da6d39874647256bea8a13da3fd922"
+    "@speleodb/map-core": "0.1.0",
+    "@speleodb/map-viewer": "0.1.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",
@@ -112,6 +112,6 @@
     "fsevents"
   ],
   "overrides": {
-    "@speleodb/map-core": "git+https://github.com/OpenSpeleo/SpeleoDB-TS-MapCore.git#4b846912ccc25319ac200c2587f98ebce88d3188"
+    "@speleodb/map-core": "0.1.0"
   }
 }

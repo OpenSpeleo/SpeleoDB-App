@@ -5,5 +5,5 @@
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true
   },
-  "include": ["vite.config.ts", "quality/**/*.test.ts", "scripts/check-shared-package-ci.ts"]
+  "include": ["vite.config.ts", "quality/**/*.test.ts"]
 }
