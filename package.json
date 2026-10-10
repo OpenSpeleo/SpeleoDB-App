@@ -65,7 +65,7 @@
     "@j178/prek": "^0.5.5",
     "@maplibre/maplibre-gl-style-spec": "^26.4.4",
     "@playwright/test": "1.63.0",
-    "@sentry/browser": "10.69.0",
+    "@sentry/browser": "11.5.0",
     "@sentry/core": "10.69.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/dom": "^10.4.2",
