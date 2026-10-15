@@ -360,24 +360,29 @@ output. Finish native writers before browser-preview verification as well.
 
 Mobile retains `package.json` and `bun.lock` for standalone clones. The
 enclosing monorepo owns its separate Bun workspace lock. Standalone clones use
-`test -s bun.lock && bun install --frozen-lockfile`; the monorepo uses
-`bun run install:local`, which installs an isolated projection of live checkouts
-before publishing dependency links. The lockfile hook checks a temporary
-standalone copy so parent workspace resolution cannot hide drift. Shared map
-packages use exact npm versions (`0.1.0` for both core and viewer). The direct
-core dependency and its override must match so the viewer resolves the same
-version; the pin guard and standalone lock hook enforce this contract. The
-monorepo overlay continues to use live local sources.
+`test -s bun.lock && bun install --frozen-lockfile`; the monorepo uses `bun ci`,
+which installs every declared workspace using native dependency links. Existing
+monorepo checkouts with external dependency-cache links migrate once with
+`bun run install:local`. The lockfile hook checks a temporary standalone copy so
+parent workspace resolution cannot hide drift. Shared map packages use exact npm
+versions (`0.1.0` for both core and viewer). The direct core dependency and its
+override must match so the viewer resolves the same version; the pin guard and
+standalone lock hook enforce this contract. The monorepo overlay continues to
+use live local sources.
 
 Declare directly imported build/test packages directly. Bun's isolated linker
 keeps app-local Capacitor package links; native postinstall patches follow those
-links and atomically replace files so Bun cache hardlinks remain unchanged. Use
-`bun run cap` for native CLI operations: it enables Bun’s `--preserve-symlinks`
-so generated Android/Swift package paths remain relative to the app’s
-`node_modules`, even when dependencies live in a projected cache. A real CLI
-sync regression verifies every Android plugin path resolves through that local
-directory. Inspect `cap sync` output for native path drift when dependency
-topology changes. Root integration stays in the parent repository.
+links and atomically replace files so Bun cache hardlinks remain unchanged. The
+Android patch scans skip entries without an accessible `android/build.gradle`,
+including dangling package links, so an unrelated missing CLI target cannot
+abort patching installed plugins. The package-patch regression exercises real
+directories, valid and dangling symlinks, and repeated execution to verify
+idempotence. Use `bun run cap` for native CLI operations: it enables Bun’s
+`--preserve-symlinks` so generated Android/Swift package paths remain relative
+to the app’s `node_modules`, even when dependencies live in a projected cache. A
+real CLI sync regression verifies every Android plugin path resolves through
+that local directory. Inspect `cap sync` output for native path drift when
+dependency topology changes. Root integration stays in the parent repository.
 
 ## Bun development runtime
 

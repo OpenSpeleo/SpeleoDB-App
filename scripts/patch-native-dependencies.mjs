@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { writePackagePatch } from './write-package-patch.mjs';
 
@@ -36,8 +36,7 @@ const legacyProguardConfig = "getDefaultProguardFile('proguard-android.txt')";
 const optimizedProguardConfig = "getDefaultProguardFile('proguard-android-optimize.txt')";
 const gradle10PropertyAssignments = ['namespace', 'abortOnError'];
 
-// Historical filename aside, this postinstall owns all node_modules patches
-// required by the native Capacitor build: Sentry iOS product selection,
+// This postinstall applies native dependency compatibility patches: Sentry iOS product selection,
 // background-geolocation's SwiftPM Capacitor range, Android ProGuard defaults,
 // and AGP 9 Kotlin plugin guards.
 
@@ -73,7 +72,8 @@ function patchCapacitorAndroidProguardDefaults() {
   const patchedPackages = [];
 
   const packageDirs = readdirSync(capacitorPackagesDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() || (entry.isSymbolicLink() && statSync(path.join(capacitorPackagesDir, entry.name)).isDirectory()))
+    // The build.gradle existence check below also skips dangling package links.
+    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
     .map((entry) => entry.name);
 
   for (const packageName of packageDirs) {
@@ -189,7 +189,8 @@ function patchCapacitorKotlinPluginForAgp9() {
   const patchedPackages = [];
 
   const packageDirs = readdirSync(capacitorPackagesDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() || (entry.isSymbolicLink() && statSync(path.join(capacitorPackagesDir, entry.name)).isDirectory()))
+    // The build.gradle existence check below also skips dangling package links.
+    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
     .map((entry) => entry.name);
 
   for (const packageName of packageDirs) {
@@ -276,7 +277,7 @@ function patchBackgroundGeolocationSwiftPackage() {
       '[bg-geo] @capacitor-community/background-geolocation Package.swift no longer contains ' +
         `the expected '${pinnedConstraint}' capacitor-swift-pm constraint (and is not already ` +
         `widened to '${widenedConstraint}'). The plugin version likely changed; update ` +
-        'scripts/patch-sentry-capacitor-package.mjs to match before building iOS.',
+        'scripts/patch-native-dependencies.mjs to match before building iOS.',
     );
   }
 
