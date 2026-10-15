@@ -111,6 +111,12 @@ transport together; mocking the SDK would miss frame loss at this boundary. Null
 or undefined thrown values do not have stacks and must not prevent the React
 recovery UI from remaining visible or reporting the original failure.
 
+The Capacitor bridge shares one JavaScript client with the React SDK. Its exact
+React peer version and bundled browser/core versions must match the app's direct
+Sentry dependencies; a newer React SDK can compile with a type assertion while
+silently dropping errors captured through the native bridge. The integration
+test exercises the real client and transport to guard this seam.
+
 The only retained event contexts are sanitized React component code locations
 and the browser engine name/version parsed from the local user agent. The full
 user agent, device description, and arbitrary context fields are not forwarded.

@@ -17,7 +17,7 @@
     "test:browser": "playwright test",
     "test.unit": "bash ./scripts/run-vitest.sh",
     "lint": "eslint",
-    "postinstall": "bun scripts/patch-sentry-capacitor-package.mjs && bun scripts/patch-capgo-compass-package.mjs",
+    "postinstall": "bun scripts/patch-native-dependencies.mjs && bun scripts/patch-capgo-compass-package.mjs",
     "check:shared-packages": "bun scripts/check-shared-package-pins.mjs",
     "cap": "bun --preserve-symlinks ./node_modules/@capacitor/cli/bin/capacitor",
     "dev:ios": "bun scripts/ios-live.mjs"
@@ -93,9 +93,9 @@
     "tailwindcss": "^4.3.3",
     "terser": "^5.51.2",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.71.1",
-    "vite": "^8.3.4",
-    "vitest": "5.0.1",
+    "typescript-eslint": "8.71.1",
+    "vite": "8.3.4",
+    "vitest": "5.0.4",
     "@vitest/coverage-istanbul": "5.0.1"
   },
   "lint-staged": {
