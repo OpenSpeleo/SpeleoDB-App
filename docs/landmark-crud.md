@@ -255,3 +255,9 @@ as other landmark fields. GPS-averaged-point creation uses this form too.
 Read-only collection permissions still gate editing. No new endpoint, native
 plugin, reconnect trigger or separate queue is introduced. Tests cover edit
 prefilling, selection, durable replay and collection-based rendering.
+
+The browser icon check measures collection-colored pixels in the centered marker
+row, independently of the names below it. Counting the whole canvas can merge
+adjacent labels into one shape on WebKit. The test still requires all five icons
+and distinct shapes after basemap changes and an offline reload; form
+interaction tests separately wait for the landmark label to paint.

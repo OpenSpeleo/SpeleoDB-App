@@ -4,15 +4,20 @@ import { captureMapCanvas } from './fixtures/mapCanvas';
 
 const ICONS = ['DEFAULT', 'CAVE', 'UNKNOWN', 'ATTENTION', 'NOGO'] as const;
 
-async function iconShapes(page: Page) {
+async function magentaShapes(page: Page, region: 'icons' | 'canvas' = 'icons') {
   const screenshot = await captureMapCanvas(page);
-  return page.evaluate(async url => {
+  return page.evaluate(async ({ url, region }) => {
     const image = new Image(); image.src = url; await image.decode();
     const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
     const ctx = canvas.getContext('2d')!; ctx.drawImage(image, 0, 0);
     const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
     const columns = new Map<number, number>();
-    for (let y = 0; y < canvas.height; y++) for (let x = 0; x < canvas.width; x++) {
+    // locateCenter aligns all five markers on the canvas center row. Keep their
+    // full artwork in a 32px band, excluding names below it: neighboring labels
+    // can join across columns depending on the browser's font rasterization.
+    const top = region === 'icons' ? Math.floor(canvas.height / 2) - 16 : 0;
+    const bottom = region === 'icons' ? Math.ceil(canvas.height / 2) + 16 : canvas.height;
+    for (let y = top; y < bottom; y++) for (let x = 0; x < canvas.width; x++) {
       const i = (y * canvas.width + x) * 4;
       if (pixels[i] > 150 && pixels[i + 2] > 150 && pixels[i + 1] < 100) columns.set(x, (columns.get(x) ?? 0) + 1);
     }
@@ -23,7 +28,7 @@ async function iconShapes(page: Page) {
       else { previous.end = x; previous.pixels += columns.get(x)!; }
     }
     return shapes.map(shape => ({ width: shape.end - shape.start + 1, pixels: shape.pixels }));
-  }, `data:image/png;base64,${screenshot.toString('base64')}`);
+  }, { url: `data:image/png;base64,${screenshot.toString('base64')}`, region });
 }
 
 async function locateCenter(page: Page) {
@@ -49,21 +54,21 @@ test('renders distinct collection-colored landmark icons after style changes and
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/dashboard');
   await locateCenter(page);
-  await expect.poll(async () => (await iconShapes(page)).length).toBe(5);
-  await expect.poll(async () => new Set((await iconShapes(page)).map(shape => `${shape.width}:${shape.pixels}`)).size).toBeGreaterThanOrEqual(4);
+  await expect.poll(async () => (await magentaShapes(page)).length).toBe(5);
+  await expect.poll(async () => new Set((await magentaShapes(page)).map(shape => `${shape.width}:${shape.pixels}`)).size).toBeGreaterThanOrEqual(4);
   await testInfo.attach('landmark-icons.png', { body: await captureMapCanvas(page), contentType: 'image/png' });
   await page.getByTestId('map-layer-button').click();
   await page.getByTestId('map-layer-option-esri-world-hillshade').click();
-  await expect.poll(async () => (await iconShapes(page)).length).toBe(5);
+  await expect.poll(async () => (await magentaShapes(page)).length).toBe(5);
   await page.getByTestId('map-layer-button').click();
   await page.getByTestId('map-layer-option-esri-satellite').click();
-  await expect.poll(async () => new Set((await iconShapes(page)).map(shape => `${shape.width}:${shape.pixels}`)).size).toBeGreaterThanOrEqual(4);
+  await expect.poll(async () => new Set((await magentaShapes(page)).map(shape => `${shape.width}:${shape.pixels}`)).size).toBeGreaterThanOrEqual(4);
   offline = true; app.disconnect();
   await page.reload();
   await page.getByRole('button', { name: 'Go Offline', exact: true }).click();
   await locateCenter(page);
-  await expect.poll(async () => (await iconShapes(page)).length).toBe(5);
-  await expect.poll(async () => new Set((await iconShapes(page)).map(shape => `${shape.width}:${shape.pixels}`)).size).toBeGreaterThanOrEqual(4);
+  await expect.poll(async () => (await magentaShapes(page)).length).toBe(5);
+  await expect.poll(async () => new Set((await magentaShapes(page)).map(shape => `${shape.width}:${shape.pixels}`)).size).toBeGreaterThanOrEqual(4);
   expect(errors).toEqual([]);
 });
 
@@ -94,7 +99,7 @@ for (const mode of ['create', 'edit'] as const) {
     await page.getByRole('tab', { name: 'Map', exact: true }).click();
     // The first SVG frame can precede MapLibre's symbol hit index. Wait for
     // the wider landmark name to paint, and for the drawer to clear the map.
-    await expect.poll(async () => (await iconShapes(page))[0]?.width ?? 0).toBeGreaterThan(32);
+    await expect.poll(async () => (await magentaShapes(page, 'canvas'))[0]?.width ?? 0).toBeGreaterThan(32);
     await expect.poll(() => page.getByTestId('landmark-panel')
       .evaluate(element => element.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
     const canvas = page.locator('.maplibregl-canvas');
