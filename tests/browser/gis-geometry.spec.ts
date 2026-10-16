@@ -415,12 +415,12 @@ test('shows alias labels by default, persists their switch and reads description
     }
   };
   const line = { ...LINE, alias: 'LINE MIDPOINT' };
-  const polygon = { ...POLYGON, alias: 'POLYGON CENTER' };
+  const polygon = { ...POLYGON, name: 'W'.repeat(100), alias: 'W'.repeat(32) };
   await page.route('https://offline-maps.test/api/v2/gis-geometries/**', route => {
     const id = new URL(route.request().url()).pathname.split('/')[4];
     if (offline) return route.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' }, json: {} });
     return route.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: id
-      ? { ...DETAILS[id], alias: id === LINE.id ? line.alias : polygon.alias }
+      ? { ...DETAILS[id], ...(id === LINE.id ? line : polygon) }
       : [line, polygon] });
   });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -428,7 +428,7 @@ test('shows alias labels by default, persists their switch and reads description
   let panel = await openGis(page);
   await expect.poll(() => offlineGeometryReady(page)).toBe(true);
   await panel.getByRole('button', { name: 'Show all geometries' }).click();
-  await panel.getByRole('button', { name: 'Zoom to Reference polygon' }).click();
+  await panel.getByRole('button', { name: `Zoom to ${polygon.name}`, exact: true }).click();
   await waitForClosedPanel(panel);
   await openLabelSettings();
   await expect(page.getByTestId('geometry-label-toggle')).toHaveAttribute('aria-checked', 'true');
@@ -449,8 +449,26 @@ test('shows alias labels by default, persists their switch and reads description
   await openLabelSettings();
   await expect(page.getByTestId('geometry-label-toggle')).toHaveAttribute('aria-checked', 'false');
   panel = await openGis(page);
-  await panel.getByRole('button', { name: 'Details for Reference polygon' }).click();
-  await expect(page.getByText('POLYGON CENTER', { exact: true })).toBeVisible();
-  await expect(page.getByText('Reference polygon notes', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await panel.getByRole('button', { name: `Details for ${polygon.name}`, exact: true }).click();
+  const details = page.getByTestId('gis-geometry-details');
+  await expect(details.getByRole('heading', { name: polygon.name, exact: true })).toBeVisible();
+  await expect(details.getByText(polygon.alias, { exact: true })).toBeVisible();
+  await expect(details.getByText('Reference polygon notes', { exact: true })).toBeVisible();
+  const scrollOwner = await details.evaluateHandle(async element => {
+    const content = element.closest('ion-content') as HTMLElement & { getScrollElement(): Promise<HTMLElement> };
+    return content.getScrollElement();
+  });
+  await page.setViewportSize({ width: 320, height: 568 });
+  for (const fontSize of ['16px', '20px']) {
+    await page.locator('html').evaluate((element, size) => { element.style.fontSize = size; }, fontSize);
+    expect(await scrollOwner.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await details.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await details.getByRole('heading', { name: polygon.name, exact: true })
+      .evaluate(element => element.scrollIntoView({ block: 'center', inline: 'nearest' }));
+    await expect(details.getByRole('heading', { name: polygon.name, exact: true })).toBeInViewport({ ratio: 1 });
+    await details.getByText(polygon.alias, { exact: true })
+      .evaluate(element => element.scrollIntoView({ block: 'center', inline: 'nearest' }));
+    await expect(details.getByText(polygon.alias, { exact: true })).toBeInViewport({ ratio: 1 });
+  }
+  await details.getByRole('button', { name: 'Close', exact: true }).click();
 });

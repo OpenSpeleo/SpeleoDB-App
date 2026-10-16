@@ -28,7 +28,9 @@ Info opens the optional alias and description without changing visibility or
 moving the camera. Description is plain multiline text, loaded through the same
 coordinator and available offline once saved. Descriptions remain detail-only
 payloads so the unpaginated metadata list stays small. Aliases are optional and
-limited to 32 Unicode code points by the shared backend contract.
+limited to 32 Unicode code points by the shared backend contract. The Info
+title, alias and description wrap on narrow screens, including long unbroken
+text, so the full values remain readable with enlarged text.
 
 When a visible geometry has an alias, the shared renderer draws one horizontal
 label: inside a polygon or just above the line's half-length point. Concave

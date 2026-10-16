@@ -127,13 +127,24 @@ The controls appear in this order:
   category and station type is on, otherwise **Custom**. These summaries
   describe preferences, not feature availability at the current zoom.
 
-Map visibility contains **Cave entrances**, **Survey stations**, **Surface
-stations**, **Landmarks**, **Exploration leads**, and **Safety cylinders**. Each
-defaults on. Cave entrances controls the star symbols from project GeoJSONs. The
-inline **Station types** disclosure under Survey stations contains **Sensor**,
-**Biology**, **Bones**, **Artifact**, and **Geology**. Its summary reports **N
-of 5 selected** or **Survey stations off**. Turning the parent off disables
-subtype switches without changing their selections.
+Map visibility lists its switches alphabetically: **Cave entrances**,
+**Exploration leads**, **Geometry labels**, **Landmarks**, **Safety cylinders**,
+**Surface stations**, and **Survey stations**. Each defaults on. Cave entrances
+controls the star symbols from project GeoJSONs. The inline **Station types**
+disclosure stays directly under Survey stations, with its switches also sorted:
+**Artifact**, **Biology**, **Bones**, **Geology**, and **Sensor**. Its summary
+reports **N of 5 selected** or **Survey stations off**. Turning the parent off
+disables subtype switches without changing their selections. Alphabetical order
+makes settings easier to locate; sorted presentation copies are created once
+when the component module loads, preserving the shared preference metadata.
+
+Station types is an inset group with an indigo left border and a contrasting
+header so it reads as a disclosure belonging to Survey stations. Its small
+uppercase heading, leading chevron, and selected-count badge distinguish it from
+the visibility switches. The summary retains its 52px minimum touch target,
+existing keyboard/focus behavior, and text wrapping on narrow screens. The
+header and expanded body use solid theme colors for WebView compatibility; the
+shared chevron icon is reused without adding icon markup.
 
 Switches apply immediately, including offline, without a Save button, network
 request, loading overlay, or camera change. Individual project, network, and
@@ -141,10 +152,11 @@ item selections are preserved. Labels follow their marker gates, and all
 existing zoom thresholds still apply. A single light haptic acknowledges a
 visibility change; opening groups and editing text are silent.
 
-**Reset visibility** restores only the six category and five subtype flags. It
-preserves color mode, map unit, depth limit, camera, cache, and individual
-selections. **Reset to full range** clears only the depth cap. Reset actions
-require no confirmation and are disabled when already at their default.
+**Reset visibility** remains last and restores only the six category flags,
+geometry labels, and five subtype flags. It preserves color mode, map unit,
+depth limit, camera, cache, and individual selections. **Reset to full range**
+clears only the depth cap. Reset actions require no confirmation and are
+disabled when already at their default.
 
 #### Depth editing
 
@@ -176,12 +188,14 @@ paths. Legacy `showLandmarks` values migrate into the new landmark category; new
 fields receive defaults. Map filtering composes display preferences with
 existing selection gates rather than changing cached feature collections.
 
-Settings tests exercise every category, subtype preservation, offline changes,
-local reset scope, decimal entry, validation, unit changes, and the guided-tour
-target. Browser tests verify real Ionic controls and map rendering. Visual QA
-covers 320/390px portrait, short landscape, tablet, larger text, keyboard-open
-input, and reduced motion; native checks must include iOS and Android WebViews,
-particularly keyboard dismissal and solid button backgrounds.
+Settings tests exercise rendered alphabetical order and the station disclosure's
+position, every category, geometry labels, subtype preservation, offline
+changes, local reset scope, decimal entry, validation, unit changes, and the
+guided-tour target. Browser tests verify real Ionic controls, the station
+group's 320px layout with enlarged text, keyboard expansion, and map rendering.
+Visual QA covers 320/390px portrait, short landscape, tablet, larger text,
+keyboard-open input, and reduced motion; native checks must include iOS and
+Android WebViews, particularly keyboard dismissal and solid button backgrounds.
 
 ### Map layers
 

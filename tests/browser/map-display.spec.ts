@@ -349,6 +349,40 @@ test('disclosures and depth errors remain usable on narrow, landscape and tablet
   expect(lastSwitch!.x + lastSwitch!.width).toBeLessThanOrEqual(320);
   await page.getByTestId('map-visibility-summary').scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('visibility-320.png') });
+
+  const stationTypes = page.locator('.map-settings-station-types');
+  const stationSummary = stationTypes.locator('summary');
+  for (const fontSize of ['16px', '20px']) {
+    await page.locator('html').evaluate((element, size) => { element.style.fontSize = size; }, fontSize);
+    await stationSummary.scrollIntoViewIfNeeded();
+    const bounds = await stationTypes.evaluate(element => {
+      const summary = element.querySelector('summary')!;
+      const label = summary.querySelector('span')!;
+      const chevron = summary.querySelector('ion-icon')!;
+      const cardBox = element.getBoundingClientRect();
+      const summaryBox = summary.getBoundingClientRect();
+      return {
+        left: cardBox.left,
+        right: cardBox.right,
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        summaryHeight: summaryBox.height,
+        labelLeft: label.getBoundingClientRect().left,
+        chevronRight: chevron.getBoundingClientRect().right,
+      };
+    });
+    expect(bounds.left).toBeGreaterThan(16);
+    expect(bounds.right).toBeLessThanOrEqual(320);
+    expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.clientWidth);
+    expect(bounds.summaryHeight).toBeGreaterThanOrEqual(52);
+    expect(bounds.chevronRight).toBeLessThan(bounds.labelLeft);
+    await page.screenshot({ path: testInfo.outputPath(`station-types-320-${fontSize}.png`) });
+  }
+  await stationSummary.tap();
+  await expect(stationTypes).not.toHaveAttribute('open', '');
+  await stationSummary.press('Enter');
+  await expect(stationTypes).toHaveAttribute('open', '');
+  await expect(page.getByRole('switch', { name: 'Artifact', exact: true })).toBeVisible();
   expect(app.errors).toEqual([]);
 });
 

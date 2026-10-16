@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
@@ -641,13 +641,39 @@ describe('Settings page', () => {
     expect(mockMapDisplayChange).toHaveBeenCalledWith({ categories: { landmarks: false } });
   });
 
-  it('keeps marker controls in a collapsed disclosure with a visible tour target', () => {
+  it('keeps alphabetized visibility controls in a collapsed disclosure with a visible tour target', async () => {
+    const user = userEvent.setup();
     renderSettings();
-    expect(screen.getByTestId('map-visibility-disclosure')).not.toHaveAttribute('open');
+    const disclosure = screen.getByTestId('map-visibility-disclosure');
+    expect(disclosure).not.toHaveAttribute('open');
     expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('All shown');
     expect(screen.getByTestId('map-visibility-summary')).toHaveAttribute('data-tour', 'settings-map-visibility');
     expect(screen.getByTestId('landmark-toggle')).not.toBeVisible();
     expect(screen.queryByTestId('depth-limit-summary')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('map-visibility-summary'));
+    const controls = within(disclosure).getAllByRole('checkbox')
+      .filter((control) => control.closest('details') === disclosure);
+    const labels = [
+      'Cave entrances', 'Exploration leads', 'Geometry labels', 'Landmarks',
+      'Safety cylinders', 'Surface stations', 'Survey stations',
+    ];
+    expect(controls).toHaveLength(labels.length);
+    labels.forEach((label, index) => expect(controls[index]).toHaveAccessibleName(label));
+
+    const stationTypes = screen.getByText('Station types').closest('details')!;
+    expect(stationTypes.previousElementSibling).toHaveTextContent('Survey stations');
+    expect(stationTypes.nextElementSibling).toContainElement(screen.getByRole('button', { name: 'Reset visibility' }));
+    await user.click(screen.getByText('Station types'));
+    const subtypeControls = within(stationTypes).getAllByRole('checkbox');
+    const subtypeLabels = ['Artifact', 'Biology', 'Bones', 'Geology', 'Sensor'];
+    expect(subtypeControls).toHaveLength(subtypeLabels.length);
+    subtypeLabels.forEach((label, index) => expect(subtypeControls[index]).toHaveAccessibleName(label));
+
+    await user.click(screen.getByRole('checkbox', { name: 'Geometry labels' }));
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ showGeometryLabels: false });
+    expect(screen.getByRole('checkbox', { name: 'Geometry labels' })).not.toBeChecked();
+    expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('Custom');
   });
 
   it.each([

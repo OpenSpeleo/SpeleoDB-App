@@ -17,7 +17,7 @@ export function GisGeometryDetailsModal({ item, snapshot, onClose, onRetry }: Pr
   return (
     <IonModal isOpen={!!item} onDidDismiss={onClose}>
       <IonContent>
-        <div className="p-5" data-testid="gis-geometry-details">
+        <div className="p-5 break-words" data-testid="gis-geometry-details">
           <h2 className="text-xl font-semibold mb-4">{item?.name}</h2>
           <dl className="space-y-3">
             <div><dt className="text-sm text-slate-400">Alias</dt><dd>{item?.alias || 'No alias'}</dd></div>

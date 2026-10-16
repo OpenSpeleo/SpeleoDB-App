@@ -27,6 +27,12 @@ interface MapDisplaySettingsProps {
 }
 
 const DEPTH_ERROR = 'Enter a number greater than zero, or leave blank for the full range.';
+const MAP_VISIBILITY_SETTINGS = [
+  ...MAP_DISPLAY_CATEGORIES,
+  { id: 'showGeometryLabels', label: 'Geometry labels' } as const,
+].sort((left, right) => left.label.localeCompare(right.label));
+const SORTED_STATION_TYPES = [...MAP_STATION_TYPES]
+  .sort((left, right) => left.label.localeCompare(right.label));
 
 function DisclosureChevron() {
   return <IonIcon icon={chevronDownOutline} className="map-settings-disclosure-chevron" aria-hidden="true" />;
@@ -248,22 +254,17 @@ const MapDisplaySettings: React.FC<MapDisplaySettingsProps> = ({
           <p className="map-settings-description map-settings-visibility-help">
             Individual selections are preserved. Markers appear at the appropriate zoom.
           </p>
-          <IonItem>
-            <IonToggle
-              checked={preferences.showGeometryLabels}
-              justify="space-between"
-              onIonChange={(event) => changeVisibility({ showGeometryLabels: event.detail.checked })}
-              data-testid="geometry-label-toggle"
-            >Geometry labels</IonToggle>
-          </IonItem>
-          {MAP_DISPLAY_CATEGORIES.map(({ id, label }) => (
+          {MAP_VISIBILITY_SETTINGS.map(({ id, label }) => (
             <React.Fragment key={id}>
               <IonItem>
                 <IonToggle
-                  checked={preferences.categories[id]}
+                  checked={id === 'showGeometryLabels' ? preferences.showGeometryLabels : preferences.categories[id]}
                   justify="space-between"
-                  onIonChange={(event) => changeVisibility({ categories: { [id]: event.detail.checked } })}
-                  data-testid={id === 'landmarks' ? 'landmark-toggle' : `map-category-${id}`}
+                  onIonChange={(event) => changeVisibility(id === 'showGeometryLabels'
+                    ? { showGeometryLabels: event.detail.checked }
+                    : { categories: { [id]: event.detail.checked } })}
+                  data-testid={id === 'showGeometryLabels'
+                    ? 'geometry-label-toggle' : id === 'landmarks' ? 'landmark-toggle' : `map-category-${id}`}
                 >{label}</IonToggle>
               </IonItem>
               {id === 'surveyStations' && (
@@ -281,7 +282,7 @@ const MapDisplaySettings: React.FC<MapDisplaySettingsProps> = ({
                   </summary>
                   <fieldset disabled={!preferences.categories.surveyStations}>
                     <legend className="sr-only">Survey station types</legend>
-                    {MAP_STATION_TYPES.map(({ id: type, label: typeLabel }) => (
+                    {SORTED_STATION_TYPES.map(({ id: type, label: typeLabel }) => (
                       <IonItem key={type}>
                         <IonToggle
                           checked={preferences.stationTypes[type]}
