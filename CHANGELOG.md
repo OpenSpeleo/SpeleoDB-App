@@ -8,6 +8,9 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ### UI/UX
 
+- Find map visibility options alphabetically, with clearly grouped station types
+  and readable geometry details on small screens. `f2f5147`
+
 ### Fixes
 
 - Keep the map on your selected survey while background maps finish loading.
