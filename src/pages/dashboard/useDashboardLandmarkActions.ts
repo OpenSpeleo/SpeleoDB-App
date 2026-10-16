@@ -262,6 +262,8 @@ function useLandmarkFormOpenActions(
       mode: 'edit',
       editId: detail.id,
       initialValues: {
+        icon: detail.icon,
+        collectionColor: detail.collectionColor,
         name: detail.name === 'N/A' ? '' : detail.name,
         description: detail.description === 'N/A' ? '' : detail.description,
         latitude: detail.latitude,
@@ -365,6 +367,7 @@ async function submitLandmarkMutation(
   value: NormalizedLandmarkInput,
 ): Promise<void> {
   const input = {
+    icon: value.icon,
     name: value.name,
     description: value.description,
     latitude: value.latitude,

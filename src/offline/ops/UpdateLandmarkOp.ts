@@ -7,6 +7,7 @@
  * the existing feature while overriding the editable fields.
  */
 
+import { normalizeLandmarkIcon } from '@speleodb/map-core';
 import type { LandmarkApiObject } from '../../types/landmark';
 import type { LandmarkSnapshot, SerializedOfflineOp } from '../../types/offlineOp';
 import { upsertLandmarkFeature } from '../../utils/landmarkMutations';
@@ -22,18 +23,21 @@ export class UpdateLandmarkOp extends OfflineOp {
    */
   baseline: LandmarkSnapshot | null;
   next: LandmarkSnapshot;
+  readonly requiresConflictReview: boolean;
 
   constructor(
     init: OfflineOpInit & {
       targetId: string;
       baseline: LandmarkSnapshot | null;
       next: LandmarkSnapshot;
+      requiresConflictReview?: boolean;
     },
   ) {
     super(init);
     this.targetId = init.targetId;
     this.baseline = init.baseline;
     this.next = init.next;
+    this.requiresConflictReview = init.requiresConflictReview === true;
   }
 
   subjectId(): string {
@@ -48,6 +52,7 @@ export class UpdateLandmarkOp extends OfflineOp {
         : {};
     const merged: LandmarkApiObject = {
       id: this.targetId,
+      icon: this.next.icon ?? normalizeLandmarkIcon(props.icon),
       name: this.next.name,
       description: this.next.description,
       latitude: this.next.latitude,
@@ -87,6 +92,7 @@ export class UpdateLandmarkOp extends OfflineOp {
       targetId: this.targetId,
       baseline: this.baseline,
       next: this.next,
+      ...(this.requiresConflictReview ? { requiresConflictReview: true } : {}),
     };
   }
 }

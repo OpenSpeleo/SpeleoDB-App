@@ -11,17 +11,31 @@ The **Geometries** bottom tab opens a panel matching Survey Projects in the same
 mutually exclusive slot as Projects, Landmarks and GPS. The menu uses the same
 triangle-with-vertices icon as the
 [SpeleoDB web app](https://github.com/OpenSpeleo/SpeleoDB/commit/ed9de067890543a3a3531da0e920f8285e133631).
-Rows show name, record color and a visibility switch, with no zoom hint, side
-icon or offline-preparation message. Show all and Hide all change display intent
-without moving the camera. A name tap enables the geometry and frames its full
-bounds after coordinates load, then closes the panel. Failed loads keep the
-panel available for retry. The most recent selection owns camera movement;
-hiding a pending geometry cancels its pending zoom.
+Rows show name, record color, a read-only Info action and a visibility switch,
+with no zoom hint, side icon or offline-preparation message. Show all and Hide
+all change display intent without moving the camera. A name tap enables the
+geometry and frames its full bounds after coordinates load, then closes the
+panel. Failed loads keep the panel available for retry. The most recent
+selection owns camera movement; hiding a pending geometry cancels its pending
+zoom.
 
 Every cold launch starts hidden. Choices remain during panel/route changes and
 background/resume within that session. Loading details for offline preparation
 never enables a switch. The switch remains operable during requests, and late
 responses cannot reverse a user's newer choice.
+
+Info opens the optional alias and description without changing visibility or
+moving the camera. Description is plain multiline text, loaded through the same
+coordinator and available offline once saved. Descriptions remain detail-only
+payloads so the unpaginated metadata list stays small. Aliases are optional and
+limited to 32 Unicode code points by the shared backend contract.
+
+When a visible geometry has an alias, the shared renderer draws one horizontal
+label: inside a polygon or just above the line's half-length point. Concave
+polygon anchors are selected inside the polygon by the shared map-core helper.
+**Settings → Map visibility → Geometry labels** defaults on and persists per
+device. It changes label visibility only, preserving geometry selection,
+coordinates, camera and tile downloads.
 
 The list uses the server's modified-date ordering. It distinguishes an empty
 successful list from errors, and cached data from a fresh verified collection.
@@ -50,7 +64,7 @@ SessionCoordinator retains authority over authentication/logout.
 
 The contract exported by `@speleodb/map-core/geometry` is copied byte-for-byte
 from the SpeleoDB backend. Its SHA-256 is
-`9ad38c83e2f30dfe2fa3603637f937c965c76dd2e55a1b10a2cd8d3baf41ef36`. The shared
+`dfd6c43a53ab11f4f497d0a8db1709e53515aa10fb71e701b48035e2531569bf`. The shared
 backend fixture corpus ships in the same package. The app imports policy values
 and geometry validation from that package; builds need no adjacent backend
 checkout. Updating the contract requires checking package/backend fixture
@@ -127,10 +141,17 @@ The GIS catalog stores authoritative membership and revoked IDs. This is the
 durable authority across the separate geometry and tile databases: detail/map
 reads require membership, while startup replays interrupted
 detail/automatic-area cleanup. A crash between databases must not restore
-revoked access. Geometry records have their own schema version; CacheStore
-remains database version 3. When a restored account has no geometry catalog,
-startup removes orphan GIS areas instead of treating the previous account's
-download intent as its own.
+revoked access. Geometry records have their own schema version. Version 2
+includes alias and detail-only description. Version-1 durable records normalize
+missing fields to empty strings for offline continuity and retain a refresh
+marker; the next online read fetches detail even when the content revision is
+unchanged. The marker clears only after a successful version-2 detail write.
+Until then, Info explains that the description is not yet available, rather than
+claiming it is empty. Current live responses must include these fields; cache
+adaptation does not weaken live validation. Catalog projection never copies
+description. CacheStore remains database version 3. When a restored account has
+no geometry catalog, startup removes orphan GIS areas instead of treating the
+previous account's download intent as its own.
 
 ## Native and web HTTP isolation
 
@@ -161,8 +182,8 @@ indefinitely when JavaScript is paused.
 
 ## Rendering and offline coverage
 
-Visible validated records become a memoized local FeatureCollection. Three
-Layers are direct children of their owning Source: polygon fill at 0.175
+Visible validated records become a memoized local FeatureCollection. Shape and
+label Layers are direct children of their owning Source: polygon fill at 0.175
 opacity, polygon outline at 1.5 px/0.95, and line at 2.5 px/0.95. Record color
 is validated before CSS/map use. GIS remains below survey geometry and markers,
 independent of project visibility and depth styling. The map camera reuses the
@@ -238,3 +259,9 @@ exercises interrupted writes, access regrant, stalled sources, native response
 bodies, cache-restoration ordering, and discarded web response bodies. Record
 exact commands, results, and device limitations outside the checkout following
 the [verification strategy](verification-strategy.md).
+
+Regression coverage includes same-revision cache upgrades,
+stale-list/newer-detail alias preservation, plain-text offline descriptions,
+label-source ownership, preference persistence and actual Chromium/WebKit
+rendering. Label anchors are cached per geometry ID and content revision, so
+display-only toggles do not scan coordinates again.

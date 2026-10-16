@@ -31,6 +31,7 @@ const EMPTY_FEATURES: GeoJSON.FeatureCollection<GisGeometryShape> = { type: 'Fea
 export function useDashboardGisGeometryActions({
   source, snapshot, mapRef, panelActive, onClosePanel, runtimeActive = true,
 }: Options) {
+  const [inspection, setInspection] = useState<{ scope: string | null; id: string } | null>(null);
   const [intent, setIntent] = useState<VisibilityIntent>({ scope: null, values: HIDDEN, admitted: NONE });
   const intentRef = useRef(intent);
   const zoomRef = useRef<{ id: string; token: symbol } | null>(null);
@@ -109,13 +110,21 @@ export function useDashboardGisGeometryActions({
     const features = snapshot.items.flatMap(item => {
       const record = snapshot.records[item.id];
       if (!admitted.has(item.id) || !record || record.detail.revision !== item.revision) return [];
-      return [{ ...record.feature, properties: { id: item.id, name: item.name, color: item.color } }];
+      return [{ ...record.feature, properties: { id: item.id, name: item.name, alias: item.alias, color: item.color, revision: item.revision } }];
     });
     // Automatic preparation of hidden records must not repeatedly update the
     // map worker with new, empty GeoJSON objects.
     return features.length ? { type: 'FeatureCollection', features } : EMPTY_FEATURES;
   }, [snapshot.items, snapshot.records, admitted]);
+  const inspect = useCallback((id: string) => {
+    setInspection({ scope: source.gisGeometrySnapshot.scope, id });
+    requestDetail(id);
+  }, [requestDetail, source]);
+  const closeInspection = useCallback(() => setInspection(null), []);
+  const inspectedItem = inspection?.scope === snapshot.scope
+    ? snapshot.items.find(item => item.id === inspection.id) : undefined;
   return {
+    inspect, closeInspection, inspectedItem,
     visibility, appliedVisibility, featureCollection, toggle, showAll, hideAll, zoom, cancelPendingZoom,
     retry: requestDetail,
     visibleCount: snapshot.items.filter(item => visibility[item.id]

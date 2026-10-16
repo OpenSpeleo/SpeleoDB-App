@@ -959,4 +959,13 @@ describe('deferred viewer preference persistence', () => {
     setPreferences({ lastSyncedAt: 100 });
     expect(getPreferences()).toMatchObject({ lastSyncedAt: 100, projectVisibility: { a: false } });
   });
+  it('defaults geometry labels on and persists their switch without replacing sibling preferences', async () => {
+    expect(getMapDisplayPreferences().showGeometryLabels).toBe(true);
+    setMapDisplayPreferences({ showGeometryLabels: false });
+    setMapDisplayPreferences({ categories: { landmarks: false } });
+    await vi.waitFor(() => expect(JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY)!).mapDisplayPreferences)
+      .toMatchObject({ showGeometryLabels: false, categories: { landmarks: false } }));
+    expect(getMapDisplayPreferences().showGeometryLabels).toBe(false);
+  });
+
 });

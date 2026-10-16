@@ -235,3 +235,23 @@ different collection than the one displayed.
 - `src/components/OverlayMarkerDetailsModal.test.tsx`
 - `src/pages/dashboard/useDashboardLandmarkActions.test.ts`
 - `src/pages/Dashboard.test.tsx`
+
+## Landmark symbols
+
+The create/edit form offers Default, Cave, Unknown, Attention and No go. Wire
+values are `DEFAULT`, `CAVE`, `UNKNOWN`, `ATTENTION`, `NOGO` from map-core;
+map-viewer supplies the same artwork for form previews and map rendering.
+Symbols always follow their collection color, including the white-collection
+contrast treatment. Default keeps its triangle shape and uses the same sizing
+and halo pipeline as the other symbols. Collection changes update previews
+without resetting the selected symbol.
+
+The form grows with its contents inside Ionic's scroll owner. Short, landscape,
+keyboard-sized and enlarged-text viewports keep the first field reachable at the
+scroll origin and allow scrolling to every icon and both actions.
+
+Icon travels through the existing mutation/cache seam and the same offline queue
+as other landmark fields. GPS-averaged-point creation uses this form too.
+Read-only collection permissions still gate editing. No new endpoint, native
+plugin, reconnect trigger or separate queue is introduced. Tests cover edit
+prefilling, selection, durable replay and collection-based rendering.

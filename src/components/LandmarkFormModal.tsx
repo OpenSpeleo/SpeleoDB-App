@@ -1,3 +1,5 @@
+import { LANDMARK_ICON_OPTIONS, normalizeLandmarkIcon, type LandmarkIcon } from '@speleodb/map-core';
+import { LandmarkIconPreview } from './LandmarkIconPreview';
 import React, { useEffect, useRef, useState } from 'react';
 import { IonContent, IonModal } from '@ionic/react';
 import type { LandmarkCollection } from '../types/landmark';
@@ -9,6 +11,8 @@ import {
 export type LandmarkFormMode = 'create' | 'edit';
 
 export interface LandmarkFormInitialValues {
+  icon?: LandmarkIcon;
+  collectionColor?: string;
   name?: string;
   description?: string;
   latitude: number | null;
@@ -94,6 +98,7 @@ const LandmarkFormModal: React.FC<LandmarkFormModalProps> = ({
   onSubmit,
   onCancel,
 }) => {
+  const [icon, setIcon] = useState<LandmarkIcon>('DEFAULT');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [latitude, setLatitude] = useState('');
@@ -109,6 +114,7 @@ const LandmarkFormModal: React.FC<LandmarkFormModalProps> = ({
   // Seed fields from initialValues each time the modal opens.
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
+      setIcon(normalizeLandmarkIcon(initialValues.icon));
       setName(initialValues.name ?? '');
       setDescription(initialValues.description ?? '');
       setLatitude(formatCoordinate(initialValues.latitude));
@@ -134,9 +140,12 @@ const LandmarkFormModal: React.FC<LandmarkFormModalProps> = ({
   }, [isOpen, collections, initialValues]);
 
   const options = buildCollectionOptions(collections, initialValues);
+  const iconColor = collections.find(value => value.id === collection)?.color
+    ?? (collection === initialValues.collectionId ? initialValues.collectionColor : undefined);
 
   const handleSubmit = () => {
     const result = validateLandmarkInput({
+      icon,
       name,
       description,
       latitude,
@@ -166,7 +175,7 @@ const LandmarkFormModal: React.FC<LandmarkFormModalProps> = ({
       <IonContent className="ion-padding">
         <div
           data-testid="landmark-form-modal"
-          className="flex flex-col h-full justify-center max-w-sm mx-auto"
+          className="flex flex-col min-h-full justify-center max-w-sm mx-auto"
         >
           <h2 className="text-xl font-semibold text-slate-100 mb-5 text-center">{title}</h2>
 
@@ -192,6 +201,21 @@ const LandmarkFormModal: React.FC<LandmarkFormModalProps> = ({
             </div>
 
             <div>
+              <fieldset className="mb-4" disabled={busy}>
+                <legend className="block text-xs uppercase tracking-wide text-slate-400 mb-2">Icon</legend>
+                <div className="flex flex-wrap gap-2">
+                  {LANDMARK_ICON_OPTIONS.map(option => (
+                    <button key={option.value} type="button"
+                      className={`app-btn ${icon === option.value ? 'app-btn--primary' : 'app-btn--secondary'} flex flex-col items-center gap-1`}
+                      aria-pressed={icon === option.value} aria-label={`Icon: ${option.label}`}
+                      onClick={() => setIcon(option.value)}>
+                      <LandmarkIconPreview icon={option.value} color={iconColor} />
+                      <span>{option.label}</span>
+                    </button>
+                  ))}
+                </div>
+                {fieldErrors.icon && <p role="alert" className="text-red-400 text-xs mt-1">{fieldErrors.icon}</p>}
+              </fieldset>
               <label htmlFor="landmark-description" className="block text-xs uppercase tracking-wide text-slate-400 mb-1">
                 Description
               </label>

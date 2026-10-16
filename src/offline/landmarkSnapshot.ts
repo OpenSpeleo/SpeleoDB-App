@@ -11,6 +11,7 @@
  * See docs/offline-op-queue.md.
  */
 
+import { normalizeLandmarkIcon, LANDMARK_ICON_OPTIONS } from '@speleodb/map-core';
 import type { LandmarkApiObject } from '../types/landmark';
 import type {
   LandmarkSnapshot,
@@ -82,6 +83,7 @@ function pointCoordinates(feature: GeoJSON.Feature): [number, number] {
 
 export function snapshotFromApi(landmark: LandmarkApiObject): LandmarkSnapshot {
   return {
+    icon: normalizeLandmarkIcon(landmark.icon),
     name: asString(landmark.name),
     description: asString(landmark.description),
     latitude: roundCoordinate(asNumber(landmark.latitude)),
@@ -103,6 +105,7 @@ export function landmarkApiObjectFromFeature(feature: GeoJSON.Feature): Landmark
   const [lon, lat] = pointCoordinates(feature);
   return {
     id: featureLandmarkId(feature),
+    icon: normalizeLandmarkIcon(props.icon),
     name: asString(props.name),
     description: asString(props.description),
     latitude: roundCoordinate(lat),
@@ -123,6 +126,7 @@ export function snapshotFromFeature(feature: GeoJSON.Feature): LandmarkSnapshot 
       : {};
   const [lon, lat] = pointCoordinates(feature);
   return {
+    icon: normalizeLandmarkIcon(props.icon),
     name: asString(props.name),
     description: asString(props.description),
     latitude: roundCoordinate(lat),
@@ -139,7 +143,7 @@ export function snapshotFromFeature(feature: GeoJSON.Feature): LandmarkSnapshot 
  * personal collection's UUID; the `/landmarks/geojson/` endpoint empties it),
  * and there is no reliable client-side way to map between them, so including it
  * produced a false "changed on the server" conflict on every edit/delete. Name,
- * description, and 6-dp coordinates reliably detect a real server-side change; a
+ * description, icon, and 6-dp coordinates detect a real server-side change; a
  * collection move on its own is treated as last-writer-wins (consistent with the
  * online eventual-consistency model in docs/landmark-crud.md).
  */
@@ -147,6 +151,7 @@ export function canonicalizeSnapshot(snapshot: LandmarkSnapshot): string {
   return JSON.stringify([
     snapshot.name,
     snapshot.description,
+    snapshot.icon,
     roundCoordinate(snapshot.latitude),
     roundCoordinate(snapshot.longitude),
   ]);
@@ -154,7 +159,10 @@ export function canonicalizeSnapshot(snapshot: LandmarkSnapshot): string {
 
 /** Exact equality of two snapshots (canonical comparison, collision-free). */
 export function snapshotsEqual(a: LandmarkSnapshot, b: LandmarkSnapshot): boolean {
-  return canonicalizeSnapshot(a) === canonicalizeSnapshot(b);
+  // Legacy queued edits did not observe or modify icon. Unknown is not DEFAULT.
+  const knownIcon = a.icon !== undefined && b.icon !== undefined;
+  return canonicalizeSnapshot(knownIcon ? a : { ...a, icon: undefined })
+    === canonicalizeSnapshot(knownIcon ? b : { ...b, icon: undefined });
 }
 
 /** Find a landmark feature by id within a FeatureCollection. */
@@ -195,6 +203,7 @@ export function findLandmarkFeatureByIdentity(
 }
 
 const FIELD_LABELS: Record<keyof LandmarkSnapshot, string> = {
+  icon: 'Icon',
   name: 'Name',
   description: 'Description',
   latitude: 'Latitude',
@@ -203,9 +212,10 @@ const FIELD_LABELS: Record<keyof LandmarkSnapshot, string> = {
 };
 
 function displayValue(field: keyof LandmarkSnapshot, snapshot: LandmarkSnapshot): string {
-  // Only ever called with FOOTPRINT_FIELDS (name/description/latitude/longitude);
+  // Only ever called with FOOTPRINT_FIELDS (icon/name/description/latitude/longitude);
   // `collection` is excluded from the footprint and the diff/conflict views.
   const value = snapshot[field];
+  if (field === 'icon') return LANDMARK_ICON_OPTIONS.find(option => option.value === value)?.label ?? '\u2014';
   if (value === '' || value === null || value === undefined) return '\u2014';
   return String(value);
 }
@@ -213,6 +223,7 @@ function displayValue(field: keyof LandmarkSnapshot, snapshot: LandmarkSnapshot)
 /** Human-readable field changes between two snapshots (only those that differ). */
 /** Fields that make up the footprint (and the diff/conflict views). */
 const FOOTPRINT_FIELDS: (keyof LandmarkSnapshot)[] = [
+  'icon',
   'name',
   'description',
   'latitude',
@@ -226,6 +237,7 @@ export function diffSnapshots(
   const fields = FOOTPRINT_FIELDS;
   const changes: OfflineOpFieldChange[] = [];
   for (const field of fields) {
+    if (field === 'icon' && (from.icon === undefined || to.icon === undefined)) continue;
     const before = displayValue(field, from);
     const after = displayValue(field, to);
     if (before !== after) {
@@ -243,6 +255,7 @@ export function conflictRows(
   const fields = FOOTPRINT_FIELDS;
   const rows: OfflineOpConflictRow[] = [];
   for (const field of fields) {
+    if (field === 'icon' && local && local.icon === undefined) continue;
     const localValue = local ? displayValue(field, local) : '\u2014';
     const serverValue = server ? displayValue(field, server) : '\u2014';
     if (localValue !== serverValue) {

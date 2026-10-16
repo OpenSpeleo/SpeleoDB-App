@@ -63,4 +63,29 @@ describe('GIS Geometry IndexedDB authority', () => {
     await store.set('geojson', `gis-geometry:a:${GEOMETRY_ID}`, { data: { schemaVersion: 1, scope: 'wrong', detail: geometryDetail() }, cachedAt: 1 });
     await expect(cache.getDetail('a', GEOMETRY_ID)).rejects.toThrow();
   });
+  it('adapts v1 cached metadata only and preserves an explicit online-refresh requirement', async () => {
+    const legacy = { ...geometryDetail() } as Record<string, unknown>;
+    delete legacy.alias; delete legacy.description;
+    const item = { ...geometryMetadata() } as Record<string, unknown>;
+    delete item.alias;
+    await store.set('projects', 'gis-geometry:a:catalog', {
+      data: { schemaVersion: 1, scope: 'a', items: [item], revokedIds: [] }, cachedAt: 1,
+    });
+    await store.set('geojson', `gis-geometry:a:${GEOMETRY_ID}`, {
+      data: { schemaVersion: 1, scope: 'a', detail: legacy }, cachedAt: 1,
+    });
+    const cache = new GisGeometryCacheService(store);
+    expect((await cache.getCatalog('a'))?.items[0].alias).toBe('');
+    expect(await cache.getDetail('a', GEOMETRY_ID)).toMatchObject({
+      needsMetadataRefresh: true, detail: { alias: '', description: '' },
+    });
+    await cache.putDetail('a', parseGisGeometryDetail(geometryDetail({ alias: 'Cave', description: 'Notes' })));
+    expect(await new GisGeometryCacheService().getDetail('a', GEOMETRY_ID)).toMatchObject({ detail: { alias: 'Cave', description: 'Notes' } });
+    expect((await cache.getDetail('a', GEOMETRY_ID))?.needsMetadataRefresh).toBeUndefined();
+    await store.set('geojson', `gis-geometry:a:${GEOMETRY_ID}`, {
+      data: { schemaVersion: 2, scope: 'a', detail: legacy }, cachedAt: 1,
+    });
+    await expect(cache.getDetail('a', GEOMETRY_ID)).rejects.toThrow();
+  });
+
 });

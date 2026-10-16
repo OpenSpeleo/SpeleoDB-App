@@ -3952,7 +3952,7 @@ describe('SpeleoDBController landmark CRUD', () => {
       const createLandmark = vi.fn();
       const { controller, cache } = await offlineController({ createLandmark } as never);
 
-      const result = await controller.createLandmark({ name: 'Camp', latitude: 1, longitude: 2 });
+      const result = await controller.createLandmark({ icon: 'CAVE', name: 'Camp', latitude: 1, longitude: 2 });
 
       // Optimistic landmark carries a local temp id; nothing was sent or written.
       expect(result.id.startsWith('local:')).toBe(true);
@@ -3965,7 +3965,7 @@ describe('SpeleoDBController landmark CRUD', () => {
       expect(folded.features).toContainEqual(expect.objectContaining({
         geometry: { type: 'Point', coordinates: [2, 1] },
         properties: expect.objectContaining({
-          name: 'Camp',
+          icon: 'CAVE', name: 'Camp',
           collection: '',
           collection_color: '',
           is_personal_collection: true,
@@ -4103,8 +4103,9 @@ describe('SpeleoDBController landmark CRUD', () => {
 
     it('enqueues an offline edit when offline-locked', async () => {
       const { controller, cache } = await offlineController();
-      const result = await controller.updateLandmark('lm-1', { name: 'x', latitude: 1, longitude: 2 });
+      const result = await controller.updateLandmark('lm-1', { icon: 'NOGO', name: 'x', latitude: 1, longitude: 2 });
       expect(result.name).toBe('x');
+      expect(result.icon).toBe('NOGO');
       expect(controller.pendingOpsCount).toBe(1);
       expect(cache.setOverlayGeoJSON).not.toHaveBeenCalled();
     });

@@ -3,7 +3,6 @@ import { render } from '@testing-library/react';
 import { createExpression, latest } from '@maplibre/maplibre-gl-style-spec';
 import type { StylePropertySpecification } from '@maplibre/maplibre-gl-style-spec';
 import { describe, expect, it, vi } from 'vitest';
-import { COLORS } from '../../constants';
 import { createDefaultMapDisplayPreferences, type MapDisplayPreferences } from '../../types/mapDisplayPreferences';
 import type { Project } from '../../types/project';
 import type { OverlayIconAvailability } from './dashboardMapUtils';
@@ -546,11 +545,6 @@ describe('Dashboard map layers', () => {
     const expression = JSON.parse(
       layer?.getAttribute('data-text-color-expression') ?? 'null',
     );
-    expect(expression).toEqual([
-      'to-color',
-      ['get', 'collection_color'],
-      COLORS.FALLBACK,
-    ]);
     const compiled = createExpression(
       expression,
       'text-color',
@@ -625,4 +619,22 @@ describe('viewer source identity and filter contracts', () => {
     expect(container.querySelector('[data-source-id="gps-tracks-source"]')).toBe(source);
     expect(accepts(container, 'gps-tracks-line', { id: 'track' })).toBe(false);
   });
+  it('keeps geometry label anchors stable across display-only switches and injects their source', () => {
+    const featureCollection: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [{
+      type: 'Feature', properties: { id: 'line', alias: 'Midpoint', color: '#ff0000' },
+      geometry: { type: 'LineString', coordinates: [[0, 0], [1, 0], [3, 0]] },
+    }] };
+    const { container, rerender } = render(<GisGeometryMapLayers featureCollection={featureCollection} visibility={{ line: true }} />);
+    const labels = sourceInputs.record.mock.calls.filter(call => call[0] === 'gis-geometry-labels-source').at(-1)![1];
+    expect(labels.features).toHaveLength(1);
+    expect(labels.features[0].geometry.coordinates).toEqual([1.5, 0]);
+    const layer = container.querySelector('[data-layer-id="gis-geometry-labels"]')!;
+    expect(layer).toHaveAttribute('data-layer-source-id', 'gis-geometry-labels-source');
+    expect(JSON.parse(layer.getAttribute('data-layout')!).visibility).toBe('visible');
+    rerender(<GisGeometryMapLayers featureCollection={featureCollection} visibility={{ line: false }} showLabels={false} />);
+    expect(sourceInputs.record.mock.calls.filter(call => call[0] === 'gis-geometry-labels-source').at(-1)![1]).toBe(labels);
+    expect(JSON.parse(layer.getAttribute('data-layout')!).visibility).toBe('none');
+    expect(layer.getAttribute('data-filter')).toContain('["literal",[]]');
+  });
+
 });

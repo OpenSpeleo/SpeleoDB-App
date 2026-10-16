@@ -142,6 +142,7 @@ describe('LandmarkFormModal', () => {
     await user.type(screen.getByTestId('landmark-name-input'), '  Camp  ');
     await user.click(screen.getByTestId('landmark-form-submit'));
     expect(onSubmit).toHaveBeenCalledWith({
+      icon: 'DEFAULT',
       name: 'Camp',
       description: '',
       latitude: 45.5,
@@ -232,4 +233,15 @@ describe('LandmarkFormModal', () => {
     expect(screen.getByTestId('landmark-latitude-input')).toHaveValue('33');
     expect(screen.getByTestId('landmark-longitude-input')).toHaveValue('44');
   });
+  it('selects the stored icon and submits a changed icon with the existing collection', async () => {
+    const user = userEvent.setup();
+    const { props } = renderForm({ mode: 'edit', initialValues: {
+      name: 'Cave', latitude: 1, longitude: 2, collectionId: 'col-survey', icon: 'CAVE',
+    } });
+    expect(screen.getByRole('button', { name: 'Icon: Cave' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Icon: Attention' }));
+    await user.click(screen.getByTestId('landmark-form-submit'));
+    expect(props.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ icon: 'ATTENTION', collection: 'col-survey' }));
+  });
+
 });

@@ -46,7 +46,7 @@ describe('GIS Geometry display intent and zoom', () => {
     expect(state.result.current.visibility[record.detail.id]).toBe(true);
     expect(state.result.current.featureCollection.features).toEqual([]);
     await waitFor(() => expect(state.result.current.featureCollection.features).toEqual([
-      { ...record.feature, properties: { id: record.detail.id, name: record.detail.name, color: record.detail.color } },
+      { ...record.feature, properties: { alias: '', revision: record.detail.revision, id: record.detail.id, name: record.detail.name, color: record.detail.color } },
     ]));
     const source = state.result.current.featureCollection;
     act(() => state.result.current.toggle(record.detail.id, false));

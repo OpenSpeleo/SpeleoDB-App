@@ -7,7 +7,7 @@ import {
 import { OfflineOpStore } from './OfflineOpStore';
 import { snapshotFromApi } from './landmarkSnapshot';
 import type { LandmarkApiObject } from '../types/landmark';
-import type { LandmarkSnapshot, SerializedOfflineOp } from '../types/offlineOp';
+import type { LandmarkSnapshot, OfflineOpView, SerializedOfflineOp } from '../types/offlineOp';
 import type { GpsTrackSnapshot, RemoteGpsTrack } from '../types/gpsTrack';
 
 // ---- Fakes ----------------------------------------------------------------
@@ -1070,5 +1070,200 @@ describe('OfflineOpQueue GPS tracks', () => {
       expect.objectContaining({ id: 'g1', name: 'Server Changed' }),
     );
     expect(queue.count).toBe(0);
+  });
+});
+
+describe('landmark icon durable intent', () => {
+  let store: OfflineOpStore;
+  beforeEach(async () => { store = new OfflineOpStore(); await store.clear(); });
+  const server = (icon: 'DEFAULT' | 'CAVE' | 'UNKNOWN' = 'DEFAULT') => fc([{
+    ...landmarkFeature('lm-1', SERVER_LANDMARK, SERVER_LANDMARK.longitude, SERVER_LANDMARK.latitude),
+    properties: { ...SERVER_LANDMARK, icon },
+  }]);
+
+  it('persists icon-only changes, coalesces them and replays the final value after restart', async () => {
+    const port = createPort({ fetchLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: server() })),
+      patchLandmark: vi.fn(async () => ({ status: 200, data: {} })) });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueUpdate('lm-1', baselineSnapshot(), { ...baselineSnapshot(), icon: 'CAVE' });
+    await queue.enqueueUpdate('lm-1', baselineSnapshot(), { ...baselineSnapshot(), icon: 'ATTENTION' });
+    const reopened = new OfflineOpQueue(new OfflineOpStore(), port);
+    await reopened.load();
+    expect((await store.list())).toHaveLength(1);
+    expect(reopened.foldOver(server()).features[0].properties?.icon).toBe('ATTENTION');
+    expect(reopened.views()[0].changes).toContainEqual({ field: 'icon', label: 'Icon', from: 'Default', to: 'Attention' });
+    expect((await reopened.syncAll()).succeeded).toBe(1);
+    expect(port.patchLandmark).toHaveBeenCalledWith('lm-1', expect.objectContaining({ icon: 'ATTENTION' }));
+    expect(port.applyUpsert).toHaveBeenCalledWith(expect.objectContaining({ icon: 'ATTENTION' }));
+    expect(await store.list()).toEqual([]);
+  });
+
+  it('retains a selected create icon after an offline edit and restart', async () => {
+    const port = createPort();
+    const queue = new OfflineOpQueue(store, port);
+    const created = { ...optimisticCreate(), icon: 'CAVE' as const };
+    await queue.enqueueCreate(created);
+    await queue.enqueueUpdate(created.id, null, { ...snapshotFromApi(created), icon: 'NOGO' });
+    const reopened = new OfflineOpQueue(new OfflineOpStore(), port);
+    await reopened.load();
+    expect(reopened.foldOver(fc([])).features[0].properties?.icon).toBe('NOGO');
+    await reopened.syncAll();
+    expect(port.postLandmark).toHaveBeenCalledWith(expect.objectContaining({ icon: 'NOGO' }));
+  });
+
+  it.each(['local', 'server'] as const)('detects icon-only server conflicts and resolves %s', async choice => {
+    const port = createPort({ fetchLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: server('UNKNOWN') })),
+      patchLandmark: vi.fn(async () => ({ status: 200, data: {} })) });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueUpdate('lm-1', baselineSnapshot(), { ...baselineSnapshot(), icon: 'CAVE' });
+    const result = await queue.syncAll();
+    expect(result.conflicted).toBe(1);
+    expect(port.patchLandmark).not.toHaveBeenCalled();
+    expect(queue.views()[0].conflict?.rows).toContainEqual({ field: 'icon', label: 'Icon', local: 'Cave', server: 'Unknown' });
+    await queue.resolveConflict(result.conflictIds[0], choice);
+    expect(port.applyUpsert).toHaveBeenCalledWith(expect.objectContaining({ icon: choice === 'local' ? 'CAVE' : 'UNKNOWN' }));
+  });
+
+  it('does not overwrite a server icon when restoring an old edit with no icon intent', async () => {
+    const baseline = { ...baselineSnapshot() }; delete baseline.icon;
+    await store.put({ id: 'legacy', entityType: 'landmark', kind: 'update', seq: 1, createdAt: 1,
+      status: 'pending', targetId: 'lm-1', baseline, next: { ...baseline, name: 'Renamed' } });
+    const port = createPort({ fetchLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: server('CAVE') })),
+      patchLandmark: vi.fn(async () => ({ status: 200, data: {} })) });
+    const queue = new OfflineOpQueue(new OfflineOpStore(), port); await queue.load();
+    expect(queue.foldOver(server('CAVE')).features[0].properties?.icon).toBe('CAVE');
+    expect((await queue.syncAll()).succeeded).toBe(1);
+    expect(vi.mocked(port.patchLandmark).mock.calls[0][1]).not.toHaveProperty('icon');
+    expect(port.applyUpsert).toHaveBeenCalledWith(expect.objectContaining({ name: 'Renamed', icon: 'CAVE' }));
+  });
+
+  const committedCreate = () => ({
+    ...landmarkFeature('created-real', optimisticCreate(), 20, 10),
+    properties: { ...optimisticCreate('created-real'), icon: 'CAVE' },
+  });
+
+  it.each(['before-post', 'missing-response', 'duplicate-response'] as const)(
+    'preserves a coalesced create icon through %s adoption, restart and explicit resolution', async path => {
+      const existing = committedCreate();
+      const fetchLandmarksGeoJSON = vi.fn(async () => ({ status: 200, data: fc([existing]) }));
+      if (path !== 'before-post') fetchLandmarksGeoJSON.mockResolvedValueOnce({ status: 200, data: fc([]) });
+      const port = createPort({ fetchLandmarksGeoJSON,
+        postLandmark: vi.fn(async () => path === 'duplicate-response'
+          ? { status: 400, data: { error: 'A landmark for GPS coordinate (10, 20) already exists or is invalid.' } }
+          : { status: 201, data: {} }),
+        patchLandmark: vi.fn(async () => ({ status: 200, data: {} })),
+      });
+      const queue = new OfflineOpQueue(store, port);
+      const created = { ...optimisticCreate(), icon: 'CAVE' as const };
+      await queue.enqueueCreate(created);
+      await queue.enqueueUpdate(created.id, null, { ...snapshotFromApi(created), icon: 'NOGO' });
+      const [{ id }] = queue.views();
+
+      expect(await queue.syncAll()).toMatchObject({ succeeded: 0, conflicted: 1, conflictIds: [id], remaining: 1 });
+      expect(port.patchLandmark).not.toHaveBeenCalled();
+      expect(await store.list()).toEqual([expect.objectContaining({
+        id, kind: 'update', targetId: 'created-real', requiresConflictReview: true,
+        baseline: expect.objectContaining({ icon: 'CAVE' }), next: expect.objectContaining({ icon: 'NOGO' }),
+      })]);
+      expect(queue.foldOver(fc([existing])).features).toEqual([expect.objectContaining({
+        id: 'created-real', properties: expect.objectContaining({ icon: 'NOGO' }),
+      })]);
+
+      const reopened = new OfflineOpQueue(new OfflineOpStore(), port);
+      await reopened.load();
+      // A second local edit must not turn identity ambiguity into permission to overwrite.
+      await reopened.enqueueUpdate('created-real', snapshotFromApi({ ...created, icon: 'CAVE' }), {
+        ...snapshotFromApi(created), icon: 'ATTENTION',
+      });
+      expect((await reopened.syncAll()).conflicted).toBe(1);
+      expect(reopened.views()[0].conflict?.rows).toContainEqual({ field: 'icon', label: 'Icon', local: 'Attention', server: 'Cave' });
+      expect(port.patchLandmark).not.toHaveBeenCalled();
+      await reopened.resolveConflict(id, path === 'duplicate-response' ? 'server' : 'local');
+      if (path === 'duplicate-response') {
+        expect(port.patchLandmark).not.toHaveBeenCalled();
+        expect(port.applyUpsert).toHaveBeenLastCalledWith(expect.objectContaining({ icon: 'CAVE' }));
+      } else {
+        expect(port.patchLandmark).toHaveBeenCalledWith('created-real', expect.objectContaining({ icon: 'ATTENTION' }));
+      }
+      expect(await store.list()).toEqual([]);
+    },
+  );
+
+  it('recovers a lost create response without dropping a subsequent icon edit', async () => {
+    let committed = false;
+    const port = createPort({
+      fetchLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: fc(committed ? [committedCreate()] : []) })),
+      postLandmark: vi.fn(async () => { committed = true; throw new Error('Response lost'); }),
+    });
+    const queue = new OfflineOpQueue(store, port);
+    const created = { ...optimisticCreate(), icon: 'CAVE' as const };
+    await queue.enqueueCreate(created);
+    expect((await queue.syncAll()).reason).toBe('pull_failed');
+    await queue.enqueueUpdate(created.id, null, { ...snapshotFromApi(created), icon: 'NOGO' });
+    const reopened = new OfflineOpQueue(new OfflineOpStore(), port);
+    expect((await reopened.syncAll()).conflicted).toBe(1);
+    expect(port.postLandmark).toHaveBeenCalledOnce();
+    expect(port.patchLandmark).not.toHaveBeenCalled();
+    expect(reopened.views()[0].conflict?.rows).toContainEqual({ field: 'icon', label: 'Icon', local: 'No go', server: 'Cave' });
+  });
+
+  it.each([undefined, 'CAVE'] as const)('adopts an existing create with %s icon intent without changing it', async icon => {
+    const port = createPort({ fetchLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: fc([committedCreate()]) })) });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueCreate({ ...optimisticCreate(), ...(icon ? { icon } : {}) });
+    expect((await queue.syncAll()).succeeded).toBe(1);
+    expect(port.patchLandmark).not.toHaveBeenCalled();
+    expect(port.applyUpsert).toHaveBeenCalledWith(expect.objectContaining({ icon: 'CAVE' }));
+    expect(await store.list()).toEqual([]);
+  });
+
+  it('retains the original create when atomic conversion cannot be committed', async () => {
+    const port = createPort({ fetchLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: fc([committedCreate()]) })) });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueCreate({ ...optimisticCreate(), icon: 'NOGO' });
+    vi.spyOn(store, 'replace').mockRejectedValueOnce(new Error('Storage full'));
+    await expect(queue.syncAll()).rejects.toBeInstanceOf(OfflineOpPersistenceError);
+    expect(await store.list()).toEqual([expect.objectContaining({ kind: 'create', created: expect.objectContaining({ icon: 'NOGO' }) })]);
+    expect(port.applyUpsert).not.toHaveBeenCalled();
+    const reopened = new OfflineOpQueue(new OfflineOpStore(), port);
+    expect((await reopened.syncAll()).conflicted).toBe(1);
+    expect(port.patchLandmark).not.toHaveBeenCalled();
+  });
+
+  it('completes a converted conflict idempotently when the server reaches the intended icon', async () => {
+    const existing = committedCreate();
+    const port = createPort({ fetchLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: fc([existing]) })) });
+    const queue = new OfflineOpQueue(store, port);
+    await queue.enqueueCreate({ ...optimisticCreate(), icon: 'NOGO' });
+    expect((await queue.syncAll()).conflicted).toBe(1);
+    vi.mocked(port.fetchLandmarksGeoJSON).mockResolvedValue({ status: 200, data: fc([{
+      ...existing, properties: { ...existing.properties, icon: 'NOGO' },
+    }]) });
+    const reopened = new OfflineOpQueue(new OfflineOpStore(), port);
+    expect((await reopened.syncAll()).succeeded).toBe(1);
+    expect(port.patchLandmark).not.toHaveBeenCalled();
+    expect(await store.list()).toEqual([]);
+  });
+
+  it('retains a visible, restart-safe conflict when cache publication fails after conversion', async () => {
+    const port = createPort({ fetchLandmarksGeoJSON: vi.fn(async () => ({ status: 200, data: fc([committedCreate()]) })),
+      applyUpsert: vi.fn(async () => { throw new Error('Cache write failed'); }),
+    });
+    const published: OfflineOpView[][] = [];
+    const queue = new OfflineOpQueue(store, port, () => { published.push(queue.views()); });
+    await queue.enqueueCreate({ ...optimisticCreate(), icon: 'NOGO' });
+    published.length = 0;
+    await expect(queue.syncAll()).rejects.toThrow('Cache write failed');
+    expect(queue.views()[0]).toMatchObject({ kind: 'update', status: 'conflict', conflict: {
+      rows: [{ field: 'icon', label: 'Icon', local: 'No go', server: 'Cave' }],
+    } });
+    expect(published).toEqual([[expect.objectContaining({ kind: 'update', status: 'conflict', conflict: expect.objectContaining({
+      rows: [{ field: 'icon', label: 'Icon', local: 'No go', server: 'Cave' }],
+    }) })]]);
+    expect(queue.foldOver(fc([])).features[0]).toMatchObject({ id: 'created-real', properties: { icon: 'NOGO' } });
+    const reopened = new OfflineOpQueue(new OfflineOpStore(), port);
+    expect((await reopened.syncAll()).conflicted).toBe(1);
+    expect(port.patchLandmark).not.toHaveBeenCalled();
+    expect(await store.list()).toEqual([expect.objectContaining({ kind: 'update', targetId: 'created-real', requiresConflictReview: true })]);
   });
 });

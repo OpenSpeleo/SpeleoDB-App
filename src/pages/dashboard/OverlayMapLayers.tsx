@@ -1,8 +1,8 @@
-import { createLandmarkLayers, createStationLayers, createSurfaceStationLayers } from '@speleodb/map-viewer';
+import { createLandmarkLayers, createStationLayers, createSurfaceStationLayers, landmarkColorExpression, landmarkHaloExpression } from '@speleodb/map-viewer';
 import { Layer, Source } from 'react-map-gl/maplibre';
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { landmarkCollectionsFilter, visibleIdsFilter } from '../../utils/viewerFilters';
-import { COLORS, MAP_OVERLAYS } from '../../constants';
+import { MAP_OVERLAYS } from '../../constants';
 import type { MapDisplayPreferences } from '../../types/mapDisplayPreferences';
 import type {
   MapOverlayGeoJsonRecord,
@@ -14,20 +14,8 @@ import type {
   OverlayIconId,
 } from './dashboardMapUtils';
 
-const LANDMARK_COLLECTION_COLOR_EXPRESSION = [
-  // Offline personal landmarks have no server-assigned collection color yet.
-  // `to-color` skips blank/malformed values and keeps their symbols renderable.
-  'to-color',
-  ['get', 'collection_color'],
-  COLORS.FALLBACK,
-] as ExpressionSpecification;
-
-const LANDMARK_COLLECTION_HALO_EXPRESSION = [
-  'case',
-  ['==', ['downcase', ['coalesce', ['get', 'collection_color'], '']], '#ffffff'],
-  '#0f172a',
-  '#ffffff',
-] as ExpressionSpecification;
+const LANDMARK_COLLECTION_COLOR_EXPRESSION = landmarkColorExpression();
+const LANDMARK_COLLECTION_HALO_EXPRESSION = landmarkHaloExpression();
 
 function markerMinZoom(overlayId: MapOverlayId): number {
   return MAP_OVERLAYS.find((overlay) => overlay.id === overlayId)!.markerMinZoom;
@@ -47,9 +35,10 @@ interface VisibleOverlayMapLayersProps {
   visible: boolean;
   filter?: ExpressionSpecification;
   data?: GeoJSON.FeatureCollection;
+  availableIconIds?: readonly string[];
 }
 
-function LandmarkMapLayers({ visible, data, filter }: VisibleOverlayMapLayersProps) {
+function LandmarkMapLayers({ visible, data, filter, availableIconIds }: VisibleOverlayMapLayersProps) {
   if (!data) return null;
   const sizes = overlaySizes('landmarks');
   const layers = createLandmarkLayers({
@@ -57,7 +46,7 @@ function LandmarkMapLayers({ visible, data, filter }: VisibleOverlayMapLayersPro
     markerMinZoom: markerMinZoom('landmarks'), labelMinZoom: labelMinZoom('landmarks'),
     markerSize: sizes.markerTextSize!, labelSize: sizes.labelTextSize!,
     color: LANDMARK_COLLECTION_COLOR_EXPRESSION, haloColor: LANDMARK_COLLECTION_HALO_EXPRESSION,
-    visible, filter,
+    visible, filter, availableIconIds,
   });
   return (
     <Source id="landmarks-source" type="geojson" data={data}>
@@ -288,6 +277,7 @@ export interface OverlayMapLayersProps {
   collectionVisibility?: Readonly<Record<string, boolean>>;
   iconsLoaded: boolean;
   iconAvailability: OverlayIconAvailability;
+  availableLandmarkIconIds?: readonly string[];
 }
 
 export function OverlayMapLayers({
@@ -298,10 +288,11 @@ export function OverlayMapLayers({
   mapDisplayPreferences,
   iconsLoaded,
   iconAvailability,
+  availableLandmarkIconIds,
 }: OverlayMapLayersProps) {
   return (
     <>
-      <LandmarkMapLayers visible={mapDisplayPreferences.categories.landmarks} data={visibleLandmarksGeoJSON} filter={landmarkCollectionsFilter(collectionVisibility)} />
+      <LandmarkMapLayers visible={mapDisplayPreferences.categories.landmarks} data={visibleLandmarksGeoJSON} availableIconIds={availableLandmarkIconIds} filter={landmarkCollectionsFilter(collectionVisibility)} />
       <SurfaceStationMapLayers
         visible={mapDisplayPreferences.categories.surfaceStations}
         data={visibleOverlayGeoJsonData.surfaceStations}

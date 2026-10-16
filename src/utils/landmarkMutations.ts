@@ -14,6 +14,7 @@
  * See docs/landmark-crud.md.
  */
 
+import { isLandmarkIcon, normalizeLandmarkIcon, type LandmarkIcon } from '@speleodb/map-core';
 import {
   LandmarkMutationError,
   type LandmarkApiObject,
@@ -26,6 +27,7 @@ export const LANDMARK_NAME_MAX_LENGTH = 100;
 
 /** Raw form values (lat/lon may still be strings from inputs). */
 export interface LandmarkInputDraft {
+  icon?: LandmarkIcon;
   name: string;
   description?: string;
   latitude: string | number;
@@ -34,6 +36,7 @@ export interface LandmarkInputDraft {
 }
 
 export interface NormalizedLandmarkInput {
+  icon: LandmarkIcon;
   name: string;
   description: string;
   latitude: number;
@@ -68,6 +71,7 @@ function parseCoordinate(value: string | number): number | null {
  */
 export function validateLandmarkInput(draft: LandmarkInputDraft): LandmarkValidationResult {
   const fieldErrors: Record<string, string> = {};
+  if (draft.icon !== undefined && !isLandmarkIcon(draft.icon)) fieldErrors.icon = 'Choose a valid icon.';
 
   const name = typeof draft.name === 'string' ? draft.name.trim() : '';
   if (!name) {
@@ -106,6 +110,7 @@ export function validateLandmarkInput(draft: LandmarkInputDraft): LandmarkValida
     ok: true,
     fieldErrors: {},
     value: {
+      icon: normalizeLandmarkIcon(draft.icon),
       name,
       description,
       latitude: latitude as number,
@@ -141,6 +146,7 @@ export function buildLandmarkFeatureFromApi(
     },
     properties: {
       id: landmark.id,
+      icon: normalizeLandmarkIcon(landmark.icon),
       name: landmark.name,
       description: landmark.description ?? '',
       collection: landmark.collection,

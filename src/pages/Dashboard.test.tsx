@@ -1,3 +1,4 @@
+import { createExpression, latest, type StylePropertySpecification } from '@maplibre/maplibre-gl-style-spec';
 import { createDefaultMapDisplayPreferences, mergeMapDisplayPreferences, type MapDisplayPreferencesPatch } from '../types/mapDisplayPreferences';
 import { DownloadAreaType, EMPTY_DOWNLOAD_AREAS, type DownloadArea, type DownloadAreasSnapshot } from '../types/downloadArea';
 import { EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT } from '../services/OfflineMapSyncStore';
@@ -1924,7 +1925,15 @@ describe('Dashboard', () => {
     );
     // Collection-driven color (mirrors the web map viewer), not a hardcoded hex.
     expect(layer?.getAttribute('data-layer-text-color')).toBe('');
-    expect(expression).toEqual(['to-color', ['get', 'collection_color'], '#94a3b8']);
+    const compiled = createExpression(expression, 'text-color', latest.paint_symbol['text-color'] as StylePropertySpecification);
+    expect(compiled.result).toBe('success');
+    if (compiled.result !== 'success') throw new Error('Invalid landmark color expression');
+    const evaluate = (collection_color: string) => compiled.value.evaluateWithoutErrorHandling(
+      { zoom: 15 }, { type: 'Point', properties: { collection_color } }, {}, undefined,
+    ).toString();
+    expect(evaluate('#123456')).toBe('rgba(18,52,86,1)');
+    expect(evaluate('')).toBe('rgba(148,163,184,1)');
+    expect(evaluate('#FFFFFF')).toBe('rgba(255,255,255,1)');
   });
 
   it('flies to a landmark from the panel without opening the details modal', async () => {

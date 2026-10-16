@@ -190,7 +190,7 @@ for (const kind of ['GIS', 'GPS'] as const) {
           const id = new URL(route.request().url()).pathname.split('/')[4];
           const index = metadata.findIndex(item => item.id === id);
           return route.fulfill({ headers, json: id ? {
-            ...metadata[index], geojson: lines[index], bbox_area_m2: 0, vertex_count: vertexCount,
+            ...metadata[index], description: '', geojson: lines[index], bbox_area_m2: 0, vertex_count: vertexCount,
           } : metadata });
         });
       } else {

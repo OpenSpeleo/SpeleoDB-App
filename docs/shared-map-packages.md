@@ -53,20 +53,17 @@ bundles. `dist/` is ignored in the packages and is neither installed nor
 required. Bun installation does not compile dependencies or run package build
 hooks.
 
-`package.json` and `bun.lock` retain full Git commit SHAs, with the core
-override matching its direct dependency. Vite, Vitest, editors and the
-TypeScript wrapper always enable `speleodb-source` for compatibility with older
-pinned revisions that ship source under that condition. New revisions need no
-custom condition. The same source API is checked and bundled in standalone and
-local builds.
+Standalone manifests and locks pin the published npm package versions. The
+monorepo uses native Bun workspace overrides to consume live local packages;
+`bun ci` installs the integration graph without rewriting child manifests. The
+package source remains the public build interface in both contexts. Root and
+standalone locks are maintained independently, using the repository's canonical
+lock command. Vite and TypeScript validate the resolved source graph.
 
-The monorepo's `bun run install:local` projection links live package checkouts.
-The wrapper verifies installed source realpaths and the viewer-to-core
-dependency edge; an archived `src/` directory cannot pass as a live checkout.
-`SPELEODB_LOCAL_PACKAGES=0` selects installed source packages; `1` requires
-local checkouts. This flag changes workspace validation, never source versus
-compiled exports. Missing local checkouts fail explicitly instead of falling
-back to an older published version.
+Standalone rollout of the geometry-label and landmark-icon exports requires
+publishing compatible map-core and map-viewer releases, then updating the app's
+exact package pins and standalone lock. Live workspace builds and isolated
+packed-package validation do not publish releases or change registry pins.
 
 Shared renderer code stays in the authenticated lazy graph. Package code must
 remain compatible with the existing Chromium 111 and Safari/iOS 16.4 targets and
@@ -138,3 +135,10 @@ This command requires the monorepo. Standalone clones retain native
 `bun install --lockfile-only --ignore-scripts` and the existing independent
 lockfile check. Shared utility validation uses isolated resolver fixtures;
 application and native runtime behavior is unaffected.
+
+The shared geometry alias contract and label-anchor algorithm are consumed by
+both viewers. Mobile owns strict live parsing, versioned durable-cache upgrades,
+detail-only descriptions and the persisted label preference. Shared landmark
+icon values and artwork drive the form, panel and map; mobile retains queue
+serialization, legacy omitted-field intent and conflict policy. The browser
+registry is imported only by authenticated map/form code.

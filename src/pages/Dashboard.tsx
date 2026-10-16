@@ -31,6 +31,7 @@ import { useGisGeometries } from '../hooks/useGisGeometries';
 import { useDashboardGisGeometryActions } from './dashboard/useDashboardGisGeometryActions';
 import AppTabBar from '../components/AppTabBar';
 import type { MapColorMode } from '../types/mapColorMode';
+import { GisGeometryDetailsModal } from '../components/GisGeometryDetailsModal';
 import type { MapDisplayPreferences, MapDisplayPreferencesPatch } from '../types/mapDisplayPreferences';
 import type { MeasurementUnit } from '../types/measurementUnit';
 import { useDepthProbe } from '../hooks/useDepthProbe';
@@ -405,7 +406,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   }), [savedTrackFeatureCollection, appliedTrackVisibility, appliedGpsTrackColors, currentTrackFeatureCollection, gpsRecordingState]);
   const gisLayers = useMemo(() => ({
     featureCollection: gisActions.featureCollection, visibility: gisActions.appliedVisibility,
-  }), [gisActions.featureCollection, gisActions.appliedVisibility]);
+    showLabels: appliedDisplay.mapDisplayPreferences.showGeometryLabels,
+  }), [gisActions.featureCollection, gisActions.appliedVisibility, appliedDisplay.mapDisplayPreferences.showGeometryLabels]);
   const cancelGisZoom = gisActions.cancelPendingZoom;
   const handleUserNavigation = useCallback(() => {
     didFitRef.current = true;
@@ -425,6 +427,8 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <IonPage>
+      <GisGeometryDetailsModal item={gisActions.inspectedItem} snapshot={gisGeometrySnapshot}
+        onClose={gisActions.closeInspection} onRetry={gisActions.retry} />
       <IonContent fullscreen className="ion-no-padding" scrollY={false}>
         <div className="flex flex-col w-full h-full">
           <div className="relative flex-1 min-h-0 dashboard-map-container">
@@ -476,6 +480,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             isOpen={activeDashboardPanel === 'gis-geometries'}
             onClose={closeGisPanel}
             snapshot={gisGeometrySnapshot}
+            onInspect={gisActions.inspect}
             offline={isOfflineLocked}
             visibility={gisActions.visibility}
             visibleCount={gisActions.visibleCount}

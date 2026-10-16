@@ -4,6 +4,7 @@ export type GisGeometryShape = GeoJSON.LineString | GeoJSON.Polygon;
 export interface GisGeometryMetadata {
   id: string;
   name: string;
+  alias: string;
   color: string;
   created_by: string;
   geometry_type: 'LineString' | 'Polygon';
@@ -17,11 +18,14 @@ export interface GisGeometryMetadata {
   modified_date: string;
 }
 export interface GisGeometryDetail extends GisGeometryMetadata {
+  description: string;
   geojson: GisGeometryShape;
   bbox_area_m2: number;
   vertex_count: number;
 }
 export interface GisGeometryMapRecord {
+  /** Schema-v1 cache entries remain usable offline but require one online refresh. */
+  needsMetadataRefresh?: boolean;
   detail: GisGeometryDetail;
   bounds: ProjectGeoJSONBounds;
   feature: GeoJSON.Feature<GisGeometryShape>;

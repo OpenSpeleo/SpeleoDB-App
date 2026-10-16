@@ -105,7 +105,7 @@ vi.mock('../../components/LongPressRing', () => ({
 
 function landmark(name: string): LandmarkDetails {
   return {
-    type: 'landmark',
+    type: 'landmark', icon: 'DEFAULT', collectionColor: '#123456',
     id: 'landmark-1',
     name,
     description: '',

@@ -435,3 +435,12 @@ The shareable type set is defined as `SHAREABLE_TYPES` in
 - `src/pages/Dashboard.test.tsx`
 - `src/utils/overlayMarkerDetails.test.ts`
 - `src/components/OverlayMarkerDetailsModal.test.tsx`
+
+Landmark symbols use the shared map-viewer icon registry. `useLandmarkMapIcons`
+owns its map lifetime and disposes it on unmount. The registry prepares bundled
+artwork for each used icon/collection-color combination, deduplicates work and
+restores images after style changes. `createLandmarkLayers` preserves the
+existing interactive marker layer ID. All five symbols, including the Default
+triangle, share image sizing and halo treatment; the triangle font glyph remains
+only the loading/failure fallback. Local assets work through Capacitor's asset
+server while offline. No source GeoJSON is mutated for rendering.

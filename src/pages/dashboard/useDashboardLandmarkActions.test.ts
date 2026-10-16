@@ -78,7 +78,7 @@ const LONG_PRESS: OverlayMarkerDetails = {
 };
 
 const LANDMARK: LandmarkDetails = {
-  type: 'landmark',
+  type: 'landmark', icon: 'DEFAULT', collectionColor: '#123456',
   id: 'lm-1',
   name: 'Entrance',
   description: 'Main entrance',
@@ -93,6 +93,7 @@ const LANDMARK: LandmarkDetails = {
 };
 
 const INPUT: NormalizedLandmarkInput = {
+  icon: 'DEFAULT',
   name: 'Renamed',
   description: 'Updated',
   latitude: 45.1,
@@ -273,7 +274,7 @@ describe('useDashboardLandmarkActions collections and toast', () => {
     const hook = renderActions({ initialVisibility: { 'collection-1': false, '__personal__': false } });
     const landmark = {
       id: 'lm-1', name: 'Entrance', description: '', longitude: -73, latitude: 45,
-      collectionId: 'collection-1', collectionName: 'Survey A', collectionColor: '#123456', isPersonalCollection: false,
+      icon: 'DEFAULT' as const, collectionId: 'collection-1', collectionName: 'Survey A', collectionColor: '#123456', isPersonalCollection: false,
     };
     act(() => hook.result.current.locateLandmark(landmark));
     expect(hook.onRevealLandmarks).toHaveBeenCalledOnce();

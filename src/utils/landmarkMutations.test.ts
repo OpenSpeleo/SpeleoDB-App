@@ -22,6 +22,7 @@ describe('validateLandmarkInput', () => {
     const result = validateLandmarkInput({ ...valid, collection: 'col-1' });
     expect(result.ok).toBe(true);
     expect(result.value).toEqual({
+      icon: 'DEFAULT',
       name: 'Camp',
       description: 'desc',
       latitude: 45,

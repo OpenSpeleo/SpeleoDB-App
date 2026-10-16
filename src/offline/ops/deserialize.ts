@@ -73,6 +73,7 @@ export function deserializeOfflineOp(raw: unknown): OfflineOp | null {
           targetId: record.targetId,
           baseline: record.baseline ?? null,
           next: record.next,
+          requiresConflictReview: record.requiresConflictReview === true,
         });
       case 'delete':
         if (!record.targetId) return null;

@@ -195,7 +195,7 @@ describe('overlayMarkerDetails utilities', () => {
         },
         geometry: { type: 'Point', coordinates: [2.3, 46.6] },
       })).toEqual({
-        type: 'landmark',
+        type: 'landmark', icon: 'DEFAULT', collectionColor: '',
         id: 'lm-1',
         name: 'Big Entrance',
         description: 'Main cave entrance',
@@ -223,7 +223,7 @@ describe('overlayMarkerDetails utilities', () => {
         },
         geometry: { type: 'Point', coordinates: [2.3, 46.6] },
       })).toMatchObject({
-        type: 'landmark',
+        type: 'landmark', icon: 'DEFAULT', collectionColor: '',
         canWrite: true,
         canDelete: true,
         collectionId: 'col-7',
@@ -238,7 +238,7 @@ describe('overlayMarkerDetails utilities', () => {
         properties: { id: 'lm-3', name: 'Camp', collection_type: 'PERSONAL' },
         geometry: { type: 'Point', coordinates: [2.3, 46.6] },
       })).toEqual({
-        type: 'landmark',
+        type: 'landmark', icon: 'DEFAULT', collectionColor: '',
         id: 'lm-3',
         name: 'Camp',
         description: 'N/A',
@@ -258,7 +258,7 @@ describe('overlayMarkerDetails utilities', () => {
         layer: { id: 'landmarks-layer' },
         properties: {},
       })).toEqual({
-        type: 'landmark',
+        type: 'landmark', icon: 'DEFAULT', collectionColor: '',
         id: 'unknown',
         name: 'N/A',
         description: 'N/A',

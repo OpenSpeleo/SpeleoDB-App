@@ -8,9 +8,13 @@
  * See docs/landmark-crud.md.
  */
 
+import type { LandmarkIcon } from '@speleodb/map-core';
+
 // ==================== API objects ====================
 
 export interface LandmarkApiObject {
+  /** Absent only in durable records saved before icon support. */
+  icon?: LandmarkIcon;
   id: string;
   name: string;
   description: string;
@@ -38,6 +42,7 @@ export interface LandmarkCollection {
 // ==================== Mutation inputs ====================
 
 export interface LandmarkCreateInput {
+  icon?: LandmarkIcon;
   name: string;
   description?: string;
   latitude: number;
@@ -47,6 +52,7 @@ export interface LandmarkCreateInput {
 }
 
 export interface LandmarkUpdateInput {
+  icon?: LandmarkIcon;
   name?: string;
   description?: string;
   latitude?: number;

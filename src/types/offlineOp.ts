@@ -15,6 +15,7 @@
  * See docs/offline-op-queue.md.
  */
 
+import type { LandmarkIcon } from '@speleodb/map-core';
 import type { LandmarkApiObject } from './landmark';
 import type { GpsTrackSnapshot } from './gpsTrack';
 
@@ -38,6 +39,8 @@ export type OfflineOpStatus = 'pending' | 'syncing' | 'conflict' | 'error';
  * (canonicalized) rather than relying on a server timestamp.
  */
 export interface LandmarkSnapshot {
+  /** Absent legacy intent must not overwrite a subsequently chosen server icon. */
+  icon?: LandmarkIcon;
   name: string;
   description: string;
   latitude: number;
@@ -61,6 +64,8 @@ export interface SerializedOfflineOp {
   baseline?: LandmarkSnapshot | null;
   /** update: the new landmark values the user intends. */
   next?: LandmarkSnapshot;
+  /** update: an adopted create identity needs explicit local/server resolution. */
+  requiresConflictReview?: boolean;
   // ---- gps track ----
   /** create: the recorded local track being uploaded (id + display fields). */
   createdGpsTrack?: { id: string; name: string; color: string };

@@ -55,7 +55,7 @@ const MapDisplaySettings: React.FC<MapDisplaySettingsProps> = ({
   const resetPointerDown = useRef(false);
   const depthDisclosure = useRef<HTMLDetailsElement>(null);
   const depthInput = useRef<HTMLInputElement>(null);
-  const allShown = MAP_DISPLAY_CATEGORIES.every(({ id }) => preferences.categories[id])
+  const allShown = preferences.showGeometryLabels && MAP_DISPLAY_CATEGORIES.every(({ id }) => preferences.categories[id])
     && MAP_STATION_TYPES.every(({ id }) => preferences.stationTypes[id]);
   const selectedTypeCount = MAP_STATION_TYPES.filter(({ id }) => preferences.stationTypes[id]).length;
   const depthValue = depthDraft ?? (preferences.depthLimitFeet === null
@@ -248,6 +248,14 @@ const MapDisplaySettings: React.FC<MapDisplaySettingsProps> = ({
           <p className="map-settings-description map-settings-visibility-help">
             Individual selections are preserved. Markers appear at the appropriate zoom.
           </p>
+          <IonItem>
+            <IonToggle
+              checked={preferences.showGeometryLabels}
+              justify="space-between"
+              onIonChange={(event) => changeVisibility({ showGeometryLabels: event.detail.checked })}
+              data-testid="geometry-label-toggle"
+            >Geometry labels</IonToggle>
+          </IonItem>
           {MAP_DISPLAY_CATEGORIES.map(({ id, label }) => (
             <React.Fragment key={id}>
               <IonItem>
@@ -295,8 +303,8 @@ const MapDisplaySettings: React.FC<MapDisplaySettingsProps> = ({
               className="app-btn app-btn--secondary map-settings-reset"
               disabled={allShown}
               onClick={() => {
-                const { categories, stationTypes } = createDefaultMapDisplayPreferences();
-                changeVisibility({ categories, stationTypes });
+                const { categories, stationTypes, showGeometryLabels } = createDefaultMapDisplayPreferences();
+                changeVisibility({ categories, stationTypes, showGeometryLabels });
               }}
             >Reset visibility</button>
           </div>

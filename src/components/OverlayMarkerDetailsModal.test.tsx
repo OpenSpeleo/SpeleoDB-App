@@ -32,7 +32,7 @@ vi.mock('@ionic/react', () => ({
 // ==================== Fixtures ====================
 
 const landmarkDetail: OverlayMarkerDetails = {
-  type: 'landmark',
+  type: 'landmark', icon: 'DEFAULT', collectionColor: '#123456',
   id: 'lm-1',
   name: 'Blue Spring',
   description: 'Natural spring',
@@ -47,7 +47,7 @@ const landmarkDetail: OverlayMarkerDetails = {
 };
 
 const personalLandmarkDetail: OverlayMarkerDetails = {
-  type: 'landmark',
+  type: 'landmark', icon: 'DEFAULT', collectionColor: '#123456',
   id: 'lm-2',
   name: 'Camp',
   description: 'My waypoint',

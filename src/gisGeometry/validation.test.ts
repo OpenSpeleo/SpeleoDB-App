@@ -71,4 +71,14 @@ describe('GIS Geometry API validation', () => {
     expect(() => inspectGisGeometry({ type: 'Feature', geometry: geometryDetail().geojson })).toThrow();
     expect(() => inspectGisGeometry(JSON.stringify(geometryDetail().geojson))).toThrow();
   });
+  it('requires current-server metadata while accepting optional blank alias and description', () => {
+    expect(parseGisGeometryDetail(geometryDetail({ alias: '', description: '' })).detail.description).toBe('');
+    for (const alias of [undefined, null, 3, 'x'.repeat(33)]) {
+      expect(() => parseGisGeometryList([geometryMetadata({ alias })])).toThrow();
+    }
+    expect(parseGisGeometryList([geometryMetadata({ alias: '🦇'.repeat(32) })])[0].alias).toBe('🦇'.repeat(32));
+    expect(() => parseGisGeometryDetail(geometryDetail({ description: undefined }))).toThrow();
+    expect(() => parseGisGeometryDetail(geometryDetail({ description: null }))).toThrow();
+  });
+
 });

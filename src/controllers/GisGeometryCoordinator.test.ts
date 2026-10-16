@@ -566,4 +566,38 @@ describe('GIS Geometry shared read coordinator', () => {
     expect(h.revoked).not.toHaveBeenCalledWith([GEOMETRY_ID], expect.anything(), expect.anything());
   });
 
+  it('keeps upgraded cache usable offline then refreshes missing fields once at the same revision', async () => {
+    const legacy = { ...geometryDetail() } as Record<string, unknown>;
+    delete legacy.alias; delete legacy.description;
+    await store.set('projects', 'gis-geometry:account-a:catalog', { data: {
+      schemaVersion: 1, scope: 'account-a', items: [geometryMetadata()], revokedIds: [],
+    }, cachedAt: 1 });
+    await store.set('geojson', `gis-geometry:account-a:${GEOMETRY_ID}`, { data: {
+      schemaVersion: 1, scope: 'account-a', detail: legacy,
+    }, cachedAt: 1 });
+    const h = harness(); h.setOnline(false);
+    await h.coordinator.load();
+    expect((await h.coordinator.ensureDetail(GEOMETRY_ID)).needsMetadataRefresh).toBe(true);
+    expect(h.service.getGisGeometry).not.toHaveBeenCalled();
+    h.setOnline(true);
+    h.service.getGisGeometries.mockResolvedValue({ status: 200, data: [geometryMetadata({ alias: 'Center' })] });
+    h.service.getGisGeometry.mockResolvedValue({ status: 200, data: geometryDetail({ alias: 'Center', description: 'Survey notes' }) });
+    await h.coordinator.refresh(); await h.coordinator.waitForIdle();
+    expect(h.coordinator.getSnapshot().records[GEOMETRY_ID].detail).toMatchObject({ revision: 1, alias: 'Center', description: 'Survey notes' });
+    await h.coordinator.refresh(); await h.coordinator.waitForIdle();
+    expect(h.service.getGisGeometry).toHaveBeenCalledTimes(1);
+    expect((await h.cache.getDetail('account-a', GEOMETRY_ID))?.needsMetadataRefresh).toBeUndefined();
+  });
+
+  it('does not roll back a newer alias when an older list arrives after detail publication', async () => {
+    const h = harness();
+    h.service.getGisGeometry.mockResolvedValue({ status: 200, data: geometryDetail({ revision: 2, alias: 'New', description: 'New notes' }) });
+    await h.coordinator.refresh(); await h.coordinator.waitForIdle();
+    h.service.getGisGeometries.mockResolvedValue({ status: 200, data: [geometryMetadata({ revision: 1, alias: 'Old' })] });
+    await h.coordinator.refresh(); await h.coordinator.waitForIdle();
+    expect(h.coordinator.getSnapshot().items[0]).toMatchObject({ revision: 2, alias: 'New' });
+    expect(h.coordinator.getSnapshot().records[GEOMETRY_ID].detail).toMatchObject({ alias: 'New', description: 'New notes' });
+    expect((await h.cache.getCatalog('account-a'))?.items[0].alias).toBe('New');
+  });
+
 });

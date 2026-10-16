@@ -1,3 +1,4 @@
+import { normalizeLandmarkIcon } from '@speleodb/map-core';
 import { DownloadAreaType, type ManualDownloadAreaInput } from '../types/downloadArea';
 /**
  * SpeleoDBController -- the "center of the app".
@@ -1407,6 +1408,7 @@ export class SpeleoDBController {
     }
     return {
       id,
+      icon: next.icon,
       name: next.name,
       description: next.description,
       latitude: next.latitude,
@@ -1457,6 +1459,7 @@ export class SpeleoDBController {
     fallback: LandmarkSnapshot | null,
   ): LandmarkSnapshot {
     return {
+      icon: input.icon ?? normalizeLandmarkIcon(fallback?.icon),
       name: input.name ?? fallback?.name ?? '',
       description: input.description ?? fallback?.description ?? '',
       latitude: roundCoordinate(input.latitude ?? fallback?.latitude ?? 0),
@@ -1491,6 +1494,7 @@ export class SpeleoDBController {
     }
     return {
       id: generateLocalLandmarkId(),
+      icon: normalizeLandmarkIcon(input.icon),
       name: input.name,
       description: input.description ?? '',
       latitude: roundCoordinate(input.latitude),

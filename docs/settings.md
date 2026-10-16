@@ -360,3 +360,9 @@ describes the shared union across enabled layers; the manager lists colored
 areas with per-area completion states and direct show/hide, edit, and delete
 icons. **Add new offline area** opens boundary selection with Cancel/Save and no
 name entry.
+
+Geometry labels are a display-only switch under Map visibility. They default on
+when older preferences lack the field, persist through the normal preference
+write queue, and are included in Reset visibility. Geometry selections remain
+session-scoped and independent. Switching labels never fetches coordinates or
+rebuilds offline map coverage.

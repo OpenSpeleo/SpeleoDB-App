@@ -108,7 +108,9 @@ export class GisGeometryCoordinator {
             const record = await this.cache.getDetail(catalog.scope, item.id);
             validate();
             if (record && record.detail.revision >= item.revision) {
-              const metadata = record.detail.revision === item.revision ? item : this.withAccess(this.metadata(record), item);
+              const metadata = record.detail.revision === item.revision
+                ? { ...item, ...(catalog.schemaVersion === 1 && !record.needsMetadataRefresh ? { alias: record.detail.alias } : {}) }
+                : this.withAccess(this.metadata(record), item);
               restored.set(item.id, metadata);
               records[item.id] = this.withMetadata(record, metadata);
             }
@@ -166,7 +168,7 @@ export class GisGeometryCoordinator {
           const items = received.filter(item => prior.has(item.id)
             || readSequence >= (this.accessReads.get(item.id) ?? 0)).map(item => {
             const old = prior.get(item.id);
-            let merged = old && old.revision > item.revision ? { ...item, name: old.name, color: old.color, geometry_type: old.geometry_type, revision: old.revision } : item;
+            let merged = old && old.revision > item.revision ? { ...item, name: old.name, alias: old.alias, color: old.color, geometry_type: old.geometry_type, revision: old.revision } : item;
             if (old && readSequence < (this.accessReads.get(item.id) ?? 0)) merged = this.withAccess(merged, old);
             return merged;
           });
@@ -178,7 +180,7 @@ export class GisGeometryCoordinator {
           const membership = new Set(items.map(item => item.id));
           const removed = this.snapshot.items.filter(item => !membership.has(item.id)).map(item => item.id);
           const revokedIds = [...new Set([...(this.catalog?.revokedIds ?? []), ...removed])].filter(id => !membership.has(id));
-          const catalog: GisGeometryCatalog = { schemaVersion: 1, scope: session.cacheScopeId, items, revokedIds };
+          const catalog: GisGeometryCatalog = { schemaVersion: 2, scope: session.cacheScopeId, items, revokedIds };
           // An authenticated omission revokes usable access immediately, even
           // when the independent persistence work fails.
           if (removed.length) this.applyRevocation(removed, session.cacheScopeId, readSequence);
@@ -216,7 +218,8 @@ export class GisGeometryCoordinator {
     const item = this.snapshot.items.find(value => value.id === id);
     if (!item) return Promise.reject(new Error(UNAVAILABLE));
     const cached = this.snapshot.records[id];
-    if (cached?.detail.revision === item.revision) return Promise.resolve(cached);
+    if (cached?.detail.revision === item.revision
+      && (!cached.needsMetadataRefresh || !this.dependencies.hasNetworkAccess())) return Promise.resolve(cached);
     let task = this.tasks.get(id);
     if (!task) {
       let resolve!: DetailTask['resolve'], reject!: DetailTask['reject'];
@@ -291,7 +294,7 @@ export class GisGeometryCoordinator {
           validate();
         }
         const items = this.snapshot.items.map(value => value.id === id ? this.metadata(record) : value);
-        const catalog: GisGeometryCatalog = { schemaVersion: 1, scope: session.cacheScopeId, items, revokedIds: this.catalog?.revokedIds ?? [] };
+        const catalog: GisGeometryCatalog = { schemaVersion: 2, scope: session.cacheScopeId, items, revokedIds: this.catalog?.revokedIds ?? [] };
         await this.cache.putCatalog(catalog, signal, validate);
         validate();
         this.catalog = catalog;
@@ -329,7 +332,7 @@ export class GisGeometryCoordinator {
   private applyRevocation(ids: string[], scope: string, readSequence: number): GisGeometryCatalog {
     const removing = new Set(ids);
     const items = this.snapshot.items.filter(item => !removing.has(item.id));
-    const catalog: GisGeometryCatalog = { schemaVersion: 1, scope, items,
+    const catalog: GisGeometryCatalog = { schemaVersion: 2, scope, items,
       revokedIds: [...new Set([...(this.catalog?.revokedIds ?? []), ...ids])] };
     for (const id of ids) {
       this.epochs.set(id, (this.epochs.get(id) ?? 0) + 1);
@@ -478,7 +481,7 @@ export class GisGeometryCoordinator {
     return parseGisGeometryList([record.detail])[0];
   }
   private withMetadata(record: GisGeometryMapRecord, metadata: GisGeometryMetadata): GisGeometryMapRecord {
-    return { ...record, detail: { ...record.detail, ...metadata }, feature: { ...record.feature, properties: { name: metadata.name } } };
+    return { ...record, detail: { ...record.detail, ...metadata }, feature: { ...record.feature, properties: { name: metadata.name, alias: metadata.alias } } };
   }
   private waitForCaller<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
     if (!signal) return promise;

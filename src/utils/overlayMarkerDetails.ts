@@ -1,3 +1,5 @@
+import { normalizeLandmarkIcon, type LandmarkIcon } from '@speleodb/map-core';
+
 export type InteractiveOverlayLayerId =
   | 'exploration-leads-icon-layer'
   | 'exploration-leads-fallback-layer'
@@ -67,6 +69,8 @@ export interface SurfaceStationDetails {
 }
 
 export interface LandmarkDetails {
+  icon: LandmarkIcon;
+  collectionColor: string;
   type: 'landmark';
   id: string;
   name: string;
@@ -280,6 +284,8 @@ function parseLandmark(feature: InteractiveOverlayFeature): LandmarkDetails {
   const latitude = coordinates && Number.isFinite(coordinates[1]) ? coordinates[1] : null;
   return {
     type: 'landmark',
+    icon: normalizeLandmarkIcon(properties.icon),
+    collectionColor: typeof properties.collection_color === 'string' ? properties.collection_color : '',
     id: getFeatureId(feature),
     name: normalizeStringProperty(properties.name),
     description: normalizeStringProperty(properties.description),

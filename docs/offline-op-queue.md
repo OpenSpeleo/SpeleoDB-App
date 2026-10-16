@@ -218,7 +218,9 @@ command rejects.
   adopt an existing result (covers a prior server success followed by local
   transaction failure); otherwise POST. A 2xx captures id + upserts; a
   `400 duplicate` triggers one fresh pull, then identity-match + adopt; other
-  4xx -> `error`; 5xx/transport -> abort rest.
+  4xx -> `error`; 5xx/transport -> abort rest. Adoption preserves a different
+  known icon as a durable update conflict requiring an explicit local/server
+  choice; matching identity alone never authorizes overwriting that icon.
 - **landmark update/delete** -> idempotent short-circuit, then baseline compare,
   then PATCH/DELETE (404 on delete = success).
 - **gps create** -> `uploadGpsTrack(localId)` builds the GPX and PUTs it to
@@ -300,3 +302,35 @@ See `docs/gps-tracks.md`.
 - Components: `src/pages/PendingOps.test.tsx`,
   `src/components/OfflineOpConflictModal.test.tsx`,
   `src/components/AppTabBar.test.tsx`.
+
+## Icon intent and older pending operations
+
+New landmark snapshots include icon in the conflict footprint and human-readable
+field diffs. An icon-only edit persists, folds onto the map and replays exactly
+like a name edit; icon-only server changes produce a conflict. Coalescing a
+create followed by an edit retains the final selected symbol.
+
+Older persisted snapshots can lack icon. That absence means the edit did not
+observe or modify icon: comparison ignores the unknown field, optimistic folding
+retains the current base icon, and replay omits icon from PATCH. In contrast, an
+old cached landmark displayed without icon renders Default. This distinction
+prevents a pending edit made before upgrade from resetting a symbol subsequently
+chosen on the web. The existing IndexedDB object store and transaction protocol
+remain unchanged; no queue records are discarded on upgrade. Real IndexedDB
+restart tests cover legacy edits, final coalesced values and both conflict
+choices.
+
+A pending create can already exist on the server after a lost response. Matching
+its name and coordinates proves existence, but does not prove that a different
+server icon should be overwritten. If its explicitly selected icon differs,
+adoption atomically converts the create into an update targeting the real ID,
+preserving local intent and requiring the normal local/server conflict choice.
+The observed server snapshot remains the baseline; a separate durable review
+flag preserves the ambiguity through restart and subsequent local edits. An
+already-matching end state still completes idempotently. Legacy creates without
+icon intent retain the server symbol.
+
+Conversion is committed before the independent ground-truth cache write. A
+failed conversion leaves the original create; a later cache failure leaves the
+converted conflict recoverable, with no temporary-ID create resurrected. No
+automatic PATCH occurs solely because a matching identity was found.

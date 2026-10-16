@@ -11,6 +11,7 @@ export interface GisGeometryPanelProps {
   visibleCount: number;
   onToggle(id: string, visible: boolean): void;
   onZoom(id: string): void;
+  onInspect?(id: string): void;
   onRetry(id: string): void;
   onRefresh(): void;
   onShowAll(): void;
@@ -45,6 +46,10 @@ function GeometryRow({ item, props }: { item: GisGeometryMetadata; props: GisGeo
             </div>
           </button>
         </div>
+        {props.onInspect && <button
+          type="button" className="app-btn app-btn--compact app-btn--secondary shrink-0"
+          aria-label={`Details for ${item.name}`} onClick={() => props.onInspect?.(item.id)}
+        >Info</button>}
         {loading && <span role="status" aria-label={`Loading ${item.name}`} className="h-4 w-4 shrink-0 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />}
         <IonToggle
           checked={individualOn}

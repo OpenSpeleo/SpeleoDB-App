@@ -18,7 +18,8 @@
  *    keeps the pending list readable.
  *
  * 3. Replay is idempotent. A create that the server already has (e.g. a flaky
- *    "200 to nothing" tunnel) is matched by identity and treated as success; a
+ *    "200 to nothing" tunnel) is matched by identity; differing known icon
+ *    intent requires conflict resolution before adoption can complete. A
  *    re-PATCH of identical values is a 200; a re-DELETE of a missing landmark is
  *    a 404, treated as success. Ground truth is written only after the server
  *    confirms, and the op is removed only after ground truth is written, so a
@@ -34,6 +35,7 @@
  * See docs/offline-op-queue.md.
  */
 
+import { normalizeLandmarkIcon } from '@speleodb/map-core';
 import type {
   LandmarkApiObject,
   LandmarkCreateInput,
@@ -391,6 +393,7 @@ export class OfflineOpQueue {
         lastError: create.lastError,
         landmark: {
           ...create.landmark,
+          ...(next.icon !== undefined ? { icon: next.icon } : {}),
           name: next.name,
           description: next.description,
           latitude: next.latitude,
@@ -415,6 +418,7 @@ export class OfflineOpQueue {
         targetId,
         baseline: existingUpdate.baseline,
         next,
+        requiresConflictReview: existingUpdate.requiresConflictReview,
       });
       await this.replaceOp(existingUpdate, replacement);
       this.emitChange();
@@ -783,8 +787,7 @@ export class OfflineOpQueue {
       snapshotFromApi(op.landmark),
     );
     if (existingBeforePost) {
-      await this.finalizeCreate(op, landmarkApiObjectFromFeature(existingBeforePost));
-      return 'success';
+      return this.adoptExistingCreate(op, existingBeforePost);
     }
 
     let response: { status: number; data: unknown };
@@ -800,8 +803,7 @@ export class OfflineOpQueue {
         const freshServer = await this.fetchServerLandmarks();
         const existing = findLandmarkFeatureByIdentity(freshServer, snapshotFromApi(op.landmark));
         if (existing) {
-          await this.finalizeCreate(op, landmarkApiObjectFromFeature(existing));
-          return 'success';
+          return this.adoptExistingCreate(op, existing);
         }
         return this.markError(
           op,
@@ -823,8 +825,7 @@ export class OfflineOpQueue {
         snapshotFromApi(op.landmark),
       );
       if (existing) {
-        await this.finalizeCreate(op, landmarkApiObjectFromFeature(existing));
-        return 'success';
+        return this.adoptExistingCreate(op, existing);
       }
     }
     return this.markError(op, parsed.message);
@@ -849,6 +850,12 @@ export class OfflineOpQueue {
         await this.removeOp(op.id);
         return 'success';
       }
+    }
+    // Identity adoption proves existence, not that this is our original create
+    // or that overwriting its different symbol is safe. Re-derive the conflict
+    // after restart until the user chooses a side (or the server equals next).
+    if (op.requiresConflictReview) {
+      return this.markConflict(op, serverFeature ? snapshotFromFeature(serverFeature) : null, serverFeature);
     }
     // Conflict detection compares the op's footprint (last known server state)
     // against the freshly pulled server state. A `null` footprint means we never
@@ -1071,7 +1078,7 @@ export class OfflineOpQueue {
         throw new OfflineNetworkInterruption();
       }
       if (isSuccessfulStatus(response.status)) {
-        const landmark = extractLandmarkObject(response.data) ?? this.buildLandmark(op.targetId, op.next, null);
+        const landmark = extractLandmarkObject(response.data) ?? this.buildLandmark(op.targetId, op.next, this.conflicts.get(op.id)?.serverFeature ?? null);
         await this.port.applyUpsert(landmark);
         await this.removeOp(op.id);
         return 'success';
@@ -1168,6 +1175,40 @@ export class OfflineOpQueue {
 
   // ---- Helpers --------------------------------------------------------------
 
+  private async adoptExistingCreate(
+    op: CreateLandmarkOp,
+    feature: GeoJSON.Feature,
+  ): Promise<'success' | 'conflict'> {
+    const landmark = landmarkApiObjectFromFeature(feature);
+    // Legacy creates have no icon intent. A matching identity can still satisfy
+    // those, but must never silently discard a newer explicitly selected icon.
+    if (op.landmark.icon === undefined || op.landmark.icon === landmark.icon) {
+      await this.finalizeCreate(op, landmark);
+      return 'success';
+    }
+    const server = snapshotFromApi(landmark);
+    const replacement = new UpdateLandmarkOp({
+      id: op.id,
+      seq: op.seq,
+      createdAt: op.createdAt,
+      status: 'conflict',
+      targetId: landmark.id,
+      baseline: server,
+      next: snapshotFromApi(op.landmark),
+      requiresConflictReview: true,
+    });
+    // One atomic queue replacement retains intent under the real ID. It occurs
+    // before the independent cache write, so a failure or crash cannot lose the
+    // chosen icon or resurrect the optimistic temporary-ID create on restart.
+    await this.replaceOp(op, replacement);
+    this.conflicts.set(replacement.id, { server, serverFeature: feature });
+    // Pending UI is revision-driven. Publish the durable conversion even if
+    // the independent cache write rejects before runReplay's final notification.
+    this.emitChange();
+    await this.port.applyUpsert(landmark);
+    return 'conflict';
+  }
+
   private async finalizeCreate(op: CreateLandmarkOp, landmark: LandmarkApiObject): Promise<void> {
     const tempId = op.landmark.id;
     const realId = landmark.id;
@@ -1221,6 +1262,7 @@ export class OfflineOpQueue {
 
   private toCreateInput(landmark: LandmarkApiObject): LandmarkCreateInput {
     return {
+      icon: normalizeLandmarkIcon(landmark.icon),
       name: landmark.name,
       description: landmark.description,
       latitude: landmark.latitude,
@@ -1231,6 +1273,7 @@ export class OfflineOpQueue {
 
   private toUpdateInput(next: LandmarkSnapshot): LandmarkUpdateInput {
     return {
+      ...(next.icon !== undefined ? { icon: next.icon } : {}),
       name: next.name,
       description: next.description,
       latitude: next.latitude,
@@ -1250,6 +1293,7 @@ export class OfflineOpQueue {
         : {};
     return {
       id,
+      icon: next.icon ?? normalizeLandmarkIcon(props.icon),
       name: next.name,
       description: next.description,
       latitude: next.latitude,

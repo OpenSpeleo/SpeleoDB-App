@@ -730,7 +730,7 @@ describe('Settings page', () => {
     expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('All shown');
     expect(screen.getByRole('button', { name: 'Reset visibility' })).toBeDisabled();
     const { categories, stationTypes } = createDefaultMapDisplayPreferences();
-    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ categories, stationTypes });
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ categories, stationTypes, showGeometryLabels: true });
     expect(screen.getByTestId('depth-limit-summary')).toHaveTextContent('123.5 ft');
     expect(screen.getByTestId('color-mode-selector')).toHaveValue('depth');
     expect(screen.getByTestId('measurement-unit-selector')).toHaveValue('feet');

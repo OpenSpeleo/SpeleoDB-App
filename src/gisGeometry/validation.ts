@@ -1,4 +1,4 @@
-import { validateGeometry } from '@speleodb/map-core/geometry';
+import { isGeometryAliasValid, validateGeometry } from '@speleodb/map-core';
 import { GIS_GEOMETRY_CONTRACT as rules } from './constants';
 import type { GisGeometryDetail, GisGeometryMapRecord, GisGeometryMetadata, GisGeometryShape } from '../types/gisGeometry';
 
@@ -15,7 +15,7 @@ function date(value: unknown): value is string {
 export function parseGisGeometryMetadata(value: unknown): GisGeometryMetadata {
   const v = object(value);
   const levels = ['READ_ONLY', 'READ_AND_WRITE', 'ADMIN'];
-  if (!isGisGeometryId(v.id) || typeof v.name !== 'string' || !v.name.trim() || Array.from(v.name).length > rules.name_max_length
+  if (!isGisGeometryId(v.id) || !isGeometryAliasValid(v.alias) || typeof v.name !== 'string' || !v.name.trim() || Array.from(v.name).length > rules.name_max_length
     || typeof v.color !== 'string' || !/^#[\da-f]{6}$/i.test(v.color)
     || typeof v.created_by !== 'string' || !rules.types.includes(v.geometry_type as string)
     || !Number.isSafeInteger(v.revision) || (v.revision as number) < 1
@@ -25,7 +25,7 @@ export function parseGisGeometryMetadata(value: unknown): GisGeometryMetadata {
     || v.can_delete !== (v.user_permission_level === 3) || v.can_manage_permissions !== (v.user_permission_level === 3)
     || !date(v.creation_date) || !date(v.modified_date)) invalid();
   return {
-    id: v.id as string, name: v.name as string, color: v.color as string, created_by: v.created_by as string,
+    id: v.id as string, name: v.name as string, alias: v.alias as string, color: v.color as string, created_by: v.created_by as string,
     geometry_type: v.geometry_type as GisGeometryMetadata['geometry_type'], revision: v.revision as number,
     user_permission_level: v.user_permission_level as GisGeometryMetadata['user_permission_level'],
     user_permission_level_label: v.user_permission_level_label as GisGeometryMetadata['user_permission_level_label'],
@@ -64,10 +64,10 @@ export function inspectGisGeometry(value: unknown) {
 export function parseGisGeometryDetail(value: unknown, expectedId?: string): GisGeometryMapRecord {
   const metadata = parseGisGeometryMetadata(value), v = object(value);
   const analysis = inspectGisGeometry(v.geojson);
-  if ((expectedId && metadata.id !== expectedId) || metadata.geometry_type !== analysis.geometry.type
+  if (typeof v.description !== 'string' || (expectedId && metadata.id !== expectedId) || metadata.geometry_type !== analysis.geometry.type
     || typeof v.bbox_area_m2 !== 'number' || !Number.isFinite(v.bbox_area_m2) || v.bbox_area_m2 < 0 || v.bbox_area_m2 > rules.max_area_m2
     || v.vertex_count !== analysis.vertexCount
     || Math.abs(v.bbox_area_m2 - analysis.areaM2) > Math.max(1e-6, analysis.areaM2 * 1e-12)) invalid();
-  const detail: GisGeometryDetail = { ...metadata, geojson: analysis.geometry, bbox_area_m2: v.bbox_area_m2, vertex_count: analysis.vertexCount };
-  return { detail, bounds: analysis.bounds, feature: { type: 'Feature', id: detail.id, properties: { name: detail.name }, geometry: detail.geojson } };
+  const detail: GisGeometryDetail = { ...metadata, description: v.description as string, geojson: analysis.geometry, bbox_area_m2: v.bbox_area_m2, vertex_count: analysis.vertexCount };
+  return { detail, bounds: analysis.bounds, feature: { type: 'Feature', id: detail.id, properties: { name: detail.name, alias: detail.alias }, geometry: detail.geojson } };
 }

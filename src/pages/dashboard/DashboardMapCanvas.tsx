@@ -1,3 +1,4 @@
+import { useLandmarkMapIcons } from './useLandmarkMapIcons';
 import { DownloadAreaMapLayers } from './DownloadAreaMapLayers';
 import { GisGeometryMapLayers, type GisGeometryMapLayersProps } from './GisGeometryMapLayers';
 import type { DownloadArea } from '../../types/downloadArea';
@@ -76,6 +77,7 @@ interface MapViewportProps {
   toolbarVisible: boolean;
   iconsLoaded: boolean;
   iconAvailability: OverlayMapLayersProps['iconAvailability'];
+  availableLandmarkIconIds: readonly string[];
   gestures: DashboardMapGestures;
   onLoad: () => void;
   onMoveStart: NonNullable<React.ComponentProps<typeof Map>['onMoveStart']>;
@@ -98,6 +100,7 @@ function MapViewport({
   toolbarVisible,
   iconsLoaded,
   iconAvailability,
+  availableLandmarkIconIds,
   gestures,
   onLoad,
   onMoveStart,
@@ -135,6 +138,7 @@ function MapViewport({
         {...overlayLayers}
         iconsLoaded={iconsLoaded}
         iconAvailability={iconAvailability}
+        availableLandmarkIconIds={availableLandmarkIconIds}
       />
       <GpsMapLayers {...gpsLayers} />
       <UserLocationIndicator location={userLocation} headingActive={headingActive} />
@@ -262,6 +266,8 @@ export const DashboardMapCanvas = memo(function DashboardMapCanvas({
   dependencies,
 }: DashboardMapCanvasProps) {
   const [compassVisible, setCompassVisible] = useState(false);
+  const landmarkIcons = useLandmarkMapIcons(mapRef, overlayLayers.visibleLandmarksGeoJSON);
+  const loadLandmarkIcons = landmarkIcons.load;
   const shell = useDashboardMapShell({
     mapRef,
     selectedMapLayerId,
@@ -276,8 +282,9 @@ export const DashboardMapCanvas = memo(function DashboardMapCanvas({
   const handleShellMapLoad = shell.handleMapLoad;
   const handleMapLoad = useCallback(() => {
     handleShellMapLoad();
+    loadLandmarkIcons();
     onMapReady?.();
-  }, [handleShellMapLoad, onMapReady]);
+  }, [handleShellMapLoad, loadLandmarkIcons, onMapReady]);
   const handleMoveStart = useCallback<NonNullable<React.ComponentProps<typeof Map>['onMoveStart']>>((event) => {
     if (event.originalEvent) onUserNavigation?.();
   }, [onUserNavigation]);
@@ -311,6 +318,7 @@ export const DashboardMapCanvas = memo(function DashboardMapCanvas({
           toolbarVisible={!editingArea}
           iconsLoaded={shell.overlayIconsLoaded}
           iconAvailability={shell.overlayIconAvailability}
+          availableLandmarkIconIds={landmarkIcons.available}
           gestures={gestures}
           onLoad={handleMapLoad}
           onMoveStart={handleMoveStart}

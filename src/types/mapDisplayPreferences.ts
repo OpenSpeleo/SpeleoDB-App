@@ -20,6 +20,7 @@ export type MapDisplayCategory = (typeof MAP_DISPLAY_CATEGORIES)[number]['id'];
 export type MapStationType = (typeof MAP_STATION_TYPES)[number]['id'];
 
 export interface MapDisplayPreferences {
+  showGeometryLabels: boolean;
   categories: Record<MapDisplayCategory, boolean>;
   stationTypes: Record<MapStationType, boolean>;
   /** Physical depth in feet; null uses the visible surveys' full range. */
@@ -27,6 +28,7 @@ export interface MapDisplayPreferences {
 }
 
 export interface MapDisplayPreferencesPatch {
+  showGeometryLabels?: boolean;
   categories?: Partial<MapDisplayPreferences['categories']>;
   stationTypes?: Partial<MapDisplayPreferences['stationTypes']>;
   depthLimitFeet?: number | null;
@@ -34,6 +36,7 @@ export interface MapDisplayPreferencesPatch {
 
 export function createDefaultMapDisplayPreferences(): MapDisplayPreferences {
   return {
+    showGeometryLabels: true,
     categories: {
       caveEntrances: true,
       surveyStations: true,
@@ -62,6 +65,7 @@ export function normalizeMapDisplayPreferences(
   const categories = asRecord(record.categories);
   const stationTypes = asRecord(record.stationTypes);
   const result = createDefaultMapDisplayPreferences();
+  if (typeof record.showGeometryLabels === 'boolean') result.showGeometryLabels = record.showGeometryLabels;
   for (const { id } of MAP_DISPLAY_CATEGORIES) {
     if (typeof categories[id] === 'boolean') result.categories[id] = categories[id];
   }
@@ -84,6 +88,7 @@ export function mergeMapDisplayPreferences(
   patch: MapDisplayPreferencesPatch,
 ): MapDisplayPreferences {
   return normalizeMapDisplayPreferences({
+    showGeometryLabels: patch.showGeometryLabels ?? current.showGeometryLabels,
     categories: { ...current.categories, ...patch.categories },
     stationTypes: { ...current.stationTypes, ...patch.stationTypes },
     depthLimitFeet: patch.depthLimitFeet === undefined ? current.depthLimitFeet : patch.depthLimitFeet,

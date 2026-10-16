@@ -13,6 +13,7 @@
  */
 
 import React from 'react';
+import { LandmarkIconPreview } from './LandmarkIconPreview';
 import { IonToggle } from '@ionic/react';
 import type {
   LandmarkCollectionGroup,
@@ -165,15 +166,9 @@ const LandmarkPanel: React.FC<LandmarkPanelProps> = ({
             title={`Locate ${landmark.name}`}
             data-testid={`landmark-row-${landmark.id}`}
           >
-            <span
-              className="w-3 h-3 rounded-full flex-shrink-0 ring-1 ring-white/20"
-              style={{
-                backgroundColor: collectionOn ? landmark.collectionColor : 'transparent',
-                borderWidth: collectionOn ? 0 : 2,
-                borderColor: landmark.collectionColor,
-                borderStyle: 'solid',
-              }}
-            />
+            <span style={{ opacity: collectionOn ? 1 : 0.45 }}>
+              <LandmarkIconPreview icon={landmark.icon} color={landmark.collectionColor} />
+            </span>
             <div className="min-w-0 flex-1">
               <span
                 className={`block text-sm truncate ${

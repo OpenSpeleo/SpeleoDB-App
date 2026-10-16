@@ -12,8 +12,8 @@ const POLYGON = gisMetadata({
 const radians = Math.PI / 180;
 const polygonArea = 6371008.8 ** 2 * (0.001 * radians) * 2 * Math.cos(20.1005 * radians) * Math.sin(0.001 * radians / 2);
 const DETAILS = {
-  [LINE.id]: { ...LINE, geojson: { type: 'LineString', coordinates: [[-87.5, 20.1], [-87.499, 20.1]] }, bbox_area_m2: 0, vertex_count: 2 },
-  [POLYGON.id]: { ...POLYGON, geojson: { type: 'Polygon', coordinates: [[[-87.5, 20.1], [-87.499, 20.1], [-87.499, 20.101], [-87.5, 20.1]]] }, bbox_area_m2: polygonArea, vertex_count: 3 },
+  [LINE.id]: { ...LINE, description: 'Reference line notes', geojson: { type: 'LineString', coordinates: [[-87.5, 20.1], [-87.499, 20.1]] }, bbox_area_m2: 0, vertex_count: 2 },
+  [POLYGON.id]: { ...POLYGON, description: 'Reference polygon notes', geojson: { type: 'Polygon', coordinates: [[[-87.5, 20.1], [-87.499, 20.1], [-87.499, 20.101], [-87.5, 20.1]]] }, bbox_area_m2: polygonArea, vertex_count: 3 },
 };
 
 async function geometryFixture(page: Page, holdDetails = false) {
@@ -141,17 +141,18 @@ async function colorPixels(page: Page, screenshot: Buffer) {
     const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
     const cyan = { count: 0, left: canvas.width, right: 0, top: canvas.height, bottom: 0 };
     let magenta = 0;
+    const magentaRows = new Set<number>();
     for (let y = 0; y < canvas.height; y++) for (let x = 0; x < canvas.width; x++) {
       const i = (y * canvas.width + x) * 4;
       const [r, g, b] = pixels.subarray(i, i + 3);
-      if (r > 150 && b > 150 && g < 120) magenta++;
+      if (r > 150 && b > 150 && g < 120) { magenta++; magentaRows.add(y); }
       if (r < 90 && g > 150 && b > 150) {
         cyan.count++;
         cyan.left = Math.min(cyan.left, x); cyan.right = Math.max(cyan.right, x);
         cyan.top = Math.min(cyan.top, y); cyan.bottom = Math.max(cyan.bottom, y);
       }
     }
-    return { cyan, magenta, width: canvas.width, height: canvas.height };
+    return { cyan, magenta, magentaRows: magentaRows.size, width: canvas.width, height: canvas.height };
   }, `data:image/png;base64,${screenshot.toString('base64')}`);
 }
 
@@ -401,4 +402,55 @@ test('healthy geometry and landmark tiles finish while a GPS source is still pen
     objectId: trackId, sourceKey: `gps-track-server:${trackId}`, sourceRevision: 'current-track-content',
   });
   expect(app.errors).toEqual([]);
+});
+
+test('shows alias labels by default, persists their switch and reads descriptions offline', async ({ page }) => {
+  const app = await geometryFixture(page);
+  let offline = false;
+  const openLabelSettings = async () => {
+    await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+    await expect(page.getByTestId('map-visibility-summary')).toBeVisible();
+    if (!await page.getByTestId('map-visibility-disclosure').evaluate(element => (element as HTMLDetailsElement).open)) {
+      await page.getByTestId('map-visibility-summary').click();
+    }
+  };
+  const line = { ...LINE, alias: 'LINE MIDPOINT' };
+  const polygon = { ...POLYGON, alias: 'POLYGON CENTER' };
+  await page.route('https://offline-maps.test/api/v2/gis-geometries/**', route => {
+    const id = new URL(route.request().url()).pathname.split('/')[4];
+    if (offline) return route.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' }, json: {} });
+    return route.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: id
+      ? { ...DETAILS[id], alias: id === LINE.id ? line.alias : polygon.alias }
+      : [line, polygon] });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/dashboard');
+  let panel = await openGis(page);
+  await expect.poll(() => offlineGeometryReady(page)).toBe(true);
+  await panel.getByRole('button', { name: 'Show all geometries' }).click();
+  await panel.getByRole('button', { name: 'Zoom to Reference polygon' }).click();
+  await waitForClosedPanel(panel);
+  await openLabelSettings();
+  await expect(page.getByTestId('geometry-label-toggle')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('geometry-label-toggle').click();
+  await page.getByRole('tab', { name: 'Map', exact: true }).click();
+  // With labels hidden only the horizontal line occupies magenta pixel rows.
+  await expect.poll(async () => (await colorPixels(page, await captureMapCanvas(page))).magentaRows).toBeLessThanOrEqual(5);
+  await openLabelSettings();
+  await page.getByTestId('geometry-label-toggle').click();
+  await page.getByRole('tab', { name: 'Map', exact: true }).click();
+  await expect.poll(async () => (await colorPixels(page, await captureMapCanvas(page))).magentaRows).toBeGreaterThan(5);
+  await openLabelSettings();
+  await page.getByTestId('geometry-label-toggle').click();
+  offline = true;
+  app.offline();
+  await page.reload();
+  await page.getByRole('button', { name: 'Go Offline', exact: true }).click();
+  await openLabelSettings();
+  await expect(page.getByTestId('geometry-label-toggle')).toHaveAttribute('aria-checked', 'false');
+  panel = await openGis(page);
+  await panel.getByRole('button', { name: 'Details for Reference polygon' }).click();
+  await expect(page.getByText('POLYGON CENTER', { exact: true })).toBeVisible();
+  await expect(page.getByText('Reference polygon notes', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
 });

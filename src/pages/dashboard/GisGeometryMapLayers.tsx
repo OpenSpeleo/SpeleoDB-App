@@ -1,4 +1,6 @@
-import { createVectorOverlayLayers } from '@speleodb/map-viewer';
+import { useMemo } from 'react';
+import { GeometryLabelFeatureCache } from './geometryLabelFeatureCache';
+import { createGeometryLabelLayer, createVectorOverlayLayers } from '@speleodb/map-viewer';
 import { visibleRecordsFilter } from '../../utils/viewerFilters';
 import { Layer, Source } from 'react-map-gl/maplibre';
 import { GIS_GEOMETRY_RENDER } from '../../gisGeometry/constants';
@@ -10,10 +12,16 @@ const LINE_WIDTH = createGeoJSONLineWidth(GIS_GEOMETRY_RENDER.LINE_WIDTH);
 export interface GisGeometryMapLayersProps {
   featureCollection: GeoJSON.FeatureCollection;
   visibility?: Readonly<Record<string, boolean>>;
+  showLabels?: boolean;
 }
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
-export function GisGeometryMapLayers({ featureCollection = EMPTY, visibility }: Partial<GisGeometryMapLayersProps>) {
+export function GisGeometryMapLayers({ featureCollection = EMPTY, visibility, showLabels = true }: Partial<GisGeometryMapLayersProps>) {
+  const labelCache = useMemo(() => new GeometryLabelFeatureCache(), []);
+  const labels = useMemo(() => labelCache.prepare(featureCollection), [featureCollection, labelCache]);
+  const labelLayer = createGeometryLabelLayer({ sourceId: 'gis-geometry-labels-source',
+    layerId: 'gis-geometry-labels', visible: showLabels,
+    filter: visibility ? visibleRecordsFilter(visibility) : undefined });
   const layers = createVectorOverlayLayers({
     sourceId: 'gis-geometries-source',
     layerIds: { fill: 'gis-geometries-fill', outline: 'gis-geometries-outline', line: 'gis-geometries-line' },
@@ -28,6 +36,9 @@ export function GisGeometryMapLayers({ featureCollection = EMPTY, visibility }: 
       </Source>
       <Source id="gis-geometries-source" type="geojson" data={featureCollection} {...GEOJSON_LINE_SOURCE_OPTIONS}>
         {layers.map(layer => <Layer key={layer.id} {...layer} beforeId="gis-geometry-order-anchor" />)}
+      </Source>
+      <Source id="gis-geometry-labels-source" type="geojson" data={labels}>
+        <Layer {...labelLayer} beforeId="gis-geometry-order-anchor" />
       </Source>
     </>
   );
