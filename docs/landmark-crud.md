@@ -246,9 +246,29 @@ contrast treatment. Default keeps its triangle shape and uses the same sizing
 and halo pipeline as the other symbols. Collection changes update previews
 without resetting the selected symbol.
 
-The form grows with its contents inside Ionic's scroll owner. Short, landscape,
-keyboard-sized and enlarged-text viewports keep the first field reachable at the
-scroll origin and allow scrolling to every icon and both actions.
+The shared create/edit form groups the name and collection first, followed by
+the symbol picker, optional description, and coordinates. Solid field surfaces,
+sentence-case labels, and a separated action row establish a consistent visual
+hierarchy. Inputs use a 16px default font to avoid iOS focus zoom; validation
+messages are associated with their fields and announced as alerts.
+
+The symbol picker uses compact, equal-width cards and equal-height grid rows,
+with centered symbols directly on the card and labels below. A purple border,
+tinted surface, and checkmark make selection visible without changing the
+collection-colored symbol. Unlayered, scoped styles keep shared button padding
+and typography from changing the card geometry. Container queries use the
+available form width and text size: two columns for enlarged text, three on
+narrow phones, and five on standard phone widths and larger screens. Partial
+rows stay centered. All cards retain solid backgrounds and visible keyboard
+focus. This is CSS layout only; it adds no resize listeners or dependencies.
+
+The form centers vertically in the available space inside Ionic's scroll owner.
+Its minimum height fills the viewport, but it grows with its contents so short,
+landscape, keyboard-sized and enlarged-text viewports keep the first field at
+the reachable scroll origin and allow scrolling to every icon and both actions.
+The Chromium and WebKit browser checks measure vertical centering when the form
+fits, card dimensions, artwork/label alignment, partial-row centering, and
+overflow in both form modes, alongside selection and collection-color behavior.
 
 Icon travels through the existing mutation/cache seam and the same offline queue
 as other landmark fields. GPS-averaged-point creation uses this form too.

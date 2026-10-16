@@ -166,24 +166,24 @@ const LandmarkFormModal: React.FC<LandmarkFormModalProps> = ({
   return (
     <IonModal
       isOpen={isOpen}
+      className="landmark-form-modal"
+      aria-labelledby="landmark-form-title"
       onDidDismiss={() => {
         if (!busy) onCancel();
       }}
       canDismiss={!busy}
       backdropDismiss={!busy}
     >
-      <IonContent className="ion-padding">
-        <div
-          data-testid="landmark-form-modal"
-          className="flex flex-col min-h-full justify-center max-w-sm mx-auto"
-        >
-          <h2 className="text-xl font-semibold text-slate-100 mb-5 text-center">{title}</h2>
+      <IonContent className="landmark-form-content">
+        <div data-testid="landmark-form-modal" className="landmark-form">
+          <header className="landmark-form__header">
+            <h2 id="landmark-form-title">{title}</h2>
+            <p>{mode === 'create' ? 'Add a point of interest to your map.' : 'Update this point of interest.'}</p>
+          </header>
 
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="landmark-name" className="block text-xs uppercase tracking-wide text-slate-400 mb-1">
-                Name
-              </label>
+          <div className="landmark-form__fields">
+            <div className="landmark-form__field">
+              <label htmlFor="landmark-name" className="landmark-form__label">Name</label>
               <input
                 id="landmark-name"
                 data-testid="landmark-name-input"
@@ -192,113 +192,142 @@ const LandmarkFormModal: React.FC<LandmarkFormModalProps> = ({
                 maxLength={120}
                 disabled={busy}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-2.5 text-sm text-slate-200 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-500 disabled:opacity-50"
-                placeholder="Landmark name"
+                className="landmark-form__input"
+                placeholder="e.g. North cave entrance"
+                aria-invalid={!!fieldErrors.name}
+                aria-describedby={fieldErrors.name ? 'landmark-name-error' : undefined}
               />
               {fieldErrors.name && (
-                <p data-testid="landmark-name-error" className="text-red-400 text-xs mt-1">{fieldErrors.name}</p>
+                <p id="landmark-name-error" data-testid="landmark-name-error" className="landmark-form__error" role="alert">
+                  {fieldErrors.name}
+                </p>
               )}
             </div>
 
-            <div>
-              <fieldset className="mb-4" disabled={busy}>
-                <legend className="block text-xs uppercase tracking-wide text-slate-400 mb-2">Icon</legend>
-                <div className="flex flex-wrap gap-2">
-                  {LANDMARK_ICON_OPTIONS.map(option => (
-                    <button key={option.value} type="button"
-                      className={`app-btn ${icon === option.value ? 'app-btn--primary' : 'app-btn--secondary'} flex flex-col items-center gap-1`}
-                      aria-pressed={icon === option.value} aria-label={`Icon: ${option.label}`}
-                      onClick={() => setIcon(option.value)}>
-                      <LandmarkIconPreview icon={option.value} color={iconColor} />
-                      <span>{option.label}</span>
-                    </button>
+            <div className="landmark-form__field">
+              <label htmlFor="landmark-collection" className="landmark-form__label">Collection</label>
+              <div className="landmark-form__select">
+                <select
+                  id="landmark-collection"
+                  data-testid="landmark-collection-select"
+                  value={collection}
+                  disabled={busy}
+                  onChange={(e) => {
+                    collectionTouchedRef.current = true;
+                    setCollection(e.target.value);
+                  }}
+                  className="landmark-form__input"
+                >
+                  {options.map((opt) => (
+                    <option key={opt.value || '__personal__'} value={opt.value}>
+                      {opt.label}
+                    </option>
                   ))}
-                </div>
-                {fieldErrors.icon && <p role="alert" className="text-red-400 text-xs mt-1">{fieldErrors.icon}</p>}
-              </fieldset>
-              <label htmlFor="landmark-description" className="block text-xs uppercase tracking-wide text-slate-400 mb-1">
-                Description
+                </select>
+                <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
+                  <path d="m6 8 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+            </div>
+
+            <fieldset className="landmark-form__symbols" disabled={busy} aria-describedby="landmark-icon-hint">
+              <legend className="landmark-form__label">Map icon</legend>
+              <p id="landmark-icon-hint" className="landmark-form__hint">Choose a symbol. Color follows the collection.</p>
+              <div className="landmark-form__icon-grid">
+                {LANDMARK_ICON_OPTIONS.map(option => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`app-btn ${icon === option.value ? 'app-btn--primary' : 'app-btn--secondary'} landmark-form__icon-card`}
+                    aria-pressed={icon === option.value}
+                    aria-label={`Icon: ${option.label}`}
+                    onClick={() => setIcon(option.value)}
+                  >
+                    {icon === option.value && (
+                      <svg className="landmark-form__icon-check" aria-hidden="true" viewBox="0 0 16 16" fill="none">
+                        <path d="m4 8 2.5 2.5L12 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                    <div className="landmark-form__icon-artwork">
+                      <LandmarkIconPreview icon={option.value} color={iconColor} />
+                    </div>
+                    <span className="landmark-form__icon-label">{option.label}</span>
+                  </button>
+                ))}
+              </div>
+              {fieldErrors.icon && <p role="alert" className="landmark-form__error">{fieldErrors.icon}</p>}
+            </fieldset>
+
+            <div className="landmark-form__field">
+              <label htmlFor="landmark-description" className="landmark-form__label">
+                Description <span className="landmark-form__optional">Optional</span>
               </label>
               <textarea
                 id="landmark-description"
                 data-testid="landmark-description-input"
                 value={description}
-                rows={3}
+                rows={2}
                 disabled={busy}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-4 py-2.5 text-sm text-slate-200 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors placeholder:text-slate-500 disabled:opacity-50 resize-none"
-                placeholder="Optional description"
+                className="landmark-form__input landmark-form__description"
+                placeholder="Access notes, directions, or useful details…"
               />
             </div>
 
-            <div>
-              <label htmlFor="landmark-collection" className="block text-xs uppercase tracking-wide text-slate-400 mb-1">
-                Collection
-              </label>
-              <select
-                id="landmark-collection"
-                data-testid="landmark-collection-select"
-                value={collection}
-                disabled={busy}
-                onChange={(e) => {
-                  collectionTouchedRef.current = true;
-                  setCollection(e.target.value);
-                }}
-                className="w-full px-4 py-2.5 text-sm text-slate-200 bg-slate-900 border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors disabled:opacity-50"
-              >
-                {options.map((opt) => (
-                  <option key={opt.value || '__personal__'} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="landmark-latitude" className="block text-xs uppercase tracking-wide text-slate-400 mb-1">
-                  Latitude
-                </label>
-                <input
-                  id="landmark-latitude"
-                  data-testid="landmark-latitude-input"
-                  type="text"
-                  inputMode="decimal"
-                  value={latitude}
-                  disabled={busy}
-                  onChange={(e) => setLatitude(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm text-slate-200 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors disabled:opacity-50"
-                />
-                {fieldErrors.latitude && (
-                  <p data-testid="landmark-latitude-error" className="text-red-400 text-xs mt-1">{fieldErrors.latitude}</p>
-                )}
+            <fieldset className="landmark-form__location" disabled={busy}>
+              <legend className="landmark-form__label">Coordinates</legend>
+              <div className="landmark-form__coordinates">
+                <div className="landmark-form__field">
+                  <label htmlFor="landmark-latitude" className="landmark-form__coordinate-label">Latitude</label>
+                  <input
+                    id="landmark-latitude"
+                    data-testid="landmark-latitude-input"
+                    type="text"
+                    inputMode="decimal"
+                    value={latitude}
+                    disabled={busy}
+                    onChange={(e) => setLatitude(e.target.value)}
+                    className="landmark-form__input landmark-form__coordinate-input"
+                    aria-invalid={!!fieldErrors.latitude}
+                    aria-describedby={fieldErrors.latitude ? 'landmark-latitude-error' : undefined}
+                  />
+                  {fieldErrors.latitude && (
+                    <p id="landmark-latitude-error" data-testid="landmark-latitude-error" className="landmark-form__error" role="alert">
+                      {fieldErrors.latitude}
+                    </p>
+                  )}
+                </div>
+                <div className="landmark-form__field">
+                  <label htmlFor="landmark-longitude" className="landmark-form__coordinate-label">Longitude</label>
+                  <input
+                    id="landmark-longitude"
+                    data-testid="landmark-longitude-input"
+                    type="text"
+                    inputMode="decimal"
+                    value={longitude}
+                    disabled={busy}
+                    onChange={(e) => setLongitude(e.target.value)}
+                    className="landmark-form__input landmark-form__coordinate-input"
+                    aria-invalid={!!fieldErrors.longitude}
+                    aria-describedby={fieldErrors.longitude ? 'landmark-longitude-error' : undefined}
+                  />
+                  {fieldErrors.longitude && (
+                    <p id="landmark-longitude-error" data-testid="landmark-longitude-error" className="landmark-form__error" role="alert">
+                      {fieldErrors.longitude}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div>
-                <label htmlFor="landmark-longitude" className="block text-xs uppercase tracking-wide text-slate-400 mb-1">
-                  Longitude
-                </label>
-                <input
-                  id="landmark-longitude"
-                  data-testid="landmark-longitude-input"
-                  type="text"
-                  inputMode="decimal"
-                  value={longitude}
-                  disabled={busy}
-                  onChange={(e) => setLongitude(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm text-slate-200 bg-transparent border border-slate-700 rounded-lg focus:outline-none focus:border-purple-500 transition-colors disabled:opacity-50"
-                />
-                {fieldErrors.longitude && (
-                  <p data-testid="landmark-longitude-error" className="text-red-400 text-xs mt-1">{fieldErrors.longitude}</p>
-                )}
-              </div>
-            </div>
+            </fieldset>
 
             {submitError && (
-              <p data-testid="landmark-submit-error" className="text-red-400 text-sm">{submitError}</p>
+              <p data-testid="landmark-submit-error" className="landmark-form__error landmark-form__submit-error" role="alert">
+                {submitError}
+              </p>
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mt-6">
+          <footer className="landmark-form__actions">
             <button
               type="button"
               disabled={busy}
@@ -317,7 +346,7 @@ const LandmarkFormModal: React.FC<LandmarkFormModalProps> = ({
             >
               {busy ? `${submitLabel}\u2026` : submitLabel}
             </button>
-          </div>
+          </footer>
         </div>
       </IonContent>
     </IonModal>

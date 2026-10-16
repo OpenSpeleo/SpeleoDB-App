@@ -1,8 +1,73 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { fixture } from './fixtures/app';
 import { captureMapCanvas } from './fixtures/mapCanvas';
 
 const ICONS = ['DEFAULT', 'CAVE', 'UNKNOWN', 'ATTENTION', 'NOGO'] as const;
+
+async function expectVerticallyCenteredForm(form: Locator) {
+  const spacing = await form.evaluate(async element => {
+    const content = element.closest('ion-content') as HTMLElement & { getScrollElement(): Promise<HTMLElement> };
+    const scroller = await content.getScrollElement();
+    const viewport = scroller.getBoundingClientRect();
+    const style = getComputedStyle(scroller);
+    const top = viewport.top + parseFloat(style.paddingTop);
+    const bottom = viewport.bottom - parseFloat(style.paddingBottom);
+    const header = element.querySelector('header')!.getBoundingClientRect();
+    const footer = element.querySelector('footer')!.getBoundingClientRect();
+    return {
+      fits: footer.bottom - header.top <= bottom - top,
+      top: header.top - top,
+      bottom: bottom - footer.bottom,
+    };
+  });
+  if (spacing.fits) {
+    expect(Math.abs(spacing.top - spacing.bottom)).toBeLessThan(1);
+  } else {
+    // Overflow must start at the reachable scroll origin, never above it.
+    expect(Math.abs(spacing.top)).toBeLessThan(1);
+  }
+}
+
+async function expectAlignedIconCards(form: Locator) {
+  const cards = await form.getByRole('button', { name: /^Icon:/ }).evaluateAll(buttons => buttons.map(button => {
+    const bounds = button.getBoundingClientRect();
+    const artwork = button.querySelector('span[aria-hidden]')!.getBoundingClientRect();
+    const label = button.lastElementChild!.getBoundingClientRect();
+    const grid = button.parentElement!.getBoundingClientRect();
+    return {
+      x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+      center: bounds.x + bounds.width / 2,
+      artworkCenter: artwork.x + artwork.width / 2,
+      labelCenter: label.x + label.width / 2,
+      artworkTop: artwork.top - bounds.top,
+      labelBottom: label.bottom - bounds.top,
+      gridCenter: grid.x + grid.width / 2,
+      overflows: button.scrollWidth > button.clientWidth || button.scrollHeight > button.clientHeight,
+      background: getComputedStyle(button).backgroundColor,
+    };
+  }));
+  expect(cards).toHaveLength(ICONS.length);
+  const first = cards[0];
+  for (const card of cards) {
+    expect(Math.abs(card.width - first.width)).toBeLessThan(1);
+    expect(Math.abs(card.height - first.height)).toBeLessThan(1);
+    expect(Math.abs(card.center - card.artworkCenter)).toBeLessThan(1);
+    expect(Math.abs(card.center - card.labelCenter)).toBeLessThan(1);
+    expect(Math.abs(card.artworkTop - first.artworkTop)).toBeLessThan(1);
+    expect(Math.abs(card.labelBottom - first.labelBottom)).toBeLessThan(1);
+    expect(card.width).toBeGreaterThanOrEqual(44);
+    expect(card.height).toBeGreaterThanOrEqual(44);
+    expect(card.overflows).toBe(false);
+    expect(card.background).not.toBe('rgba(0, 0, 0, 0)');
+  }
+  // The incomplete row must be centered too, not stranded at the left edge.
+  for (const top of new Set(cards.map(card => Math.round(card.y)))) {
+    const row = cards.filter(card => Math.round(card.y) === top);
+    const center = (row[0].x + row.at(-1)!.x + row.at(-1)!.width) / 2;
+    expect(Math.abs(center - first.gridCenter)).toBeLessThan(1);
+  }
+  return cards;
+}
 
 async function magentaShapes(page: Page, region: 'icons' | 'canvas' = 'icons') {
   const screenshot = await captureMapCanvas(page);
@@ -121,8 +186,19 @@ for (const mode of ['create', 'edit'] as const) {
     }
     const form = page.getByTestId('landmark-form-modal');
     await expect(form).toBeVisible();
+    const nameHeight = (await page.getByTestId('landmark-name-input').boundingBox())!.height;
+    const collectionHeight = (await page.getByTestId('landmark-collection-select').boundingBox())!.height;
+    expect(Math.abs(nameHeight - collectionHeight)).toBeLessThan(1);
     await expect(form.getByRole('button', { name: mode === 'edit' ? 'Icon: Cave' : 'Icon: Default' }))
       .toHaveAttribute('aria-pressed', 'true');
+    await testInfo.attach(`${mode}-phone`, {
+      // Finish Ionic's shadow-DOM entrance animation for a settled preview.
+      body: await page.screenshot({ path: testInfo.outputPath(`${mode}-phone.png`), animations: 'disabled' }), contentType: 'image/png',
+    });
+    const phoneCards = await expectAlignedIconCards(form);
+    await expectVerticallyCenteredForm(form);
+    expect(new Set(phoneCards.map(card => Math.round(card.y))).size).toBe(1);
+    expect(phoneCards[0].height).toBeLessThanOrEqual(72);
     await page.getByTestId('landmark-name-input').fill('Layout landmark');
     await form.getByRole('button', { name: 'Icon: No go' }).click();
     await page.getByTestId('landmark-collection-select').selectOption('cyan');
@@ -144,6 +220,8 @@ for (const mode of ['create', 'edit'] as const) {
     // browser focus-restoration scrolling after the viewport/font changes.
     await form.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     for (const layout of [
+      { name: 'compact-phone', width: 360, height: 640, fontSize: 16 },
+      { name: 'tablet', width: 820, height: 1180, fontSize: 16 },
       { name: 'short', width: 320, height: 568, fontSize: 16 },
       { name: 'landscape', width: 568, height: 320, fontSize: 16 },
       { name: 'keyboard', width: 320, height: 300, fontSize: 16 },
@@ -155,6 +233,11 @@ for (const mode of ['create', 'edit'] as const) {
       await expect(form.getByRole('heading', { name: mode === 'edit' ? 'Edit Landmark' : 'Create Landmark' })).toBeInViewport({ ratio: 1 });
       await expect(page.getByTestId('landmark-name-input')).toBeInViewport({ ratio: 1 });
       expect(await owner.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      await expectVerticallyCenteredForm(form);
+      await expectAlignedIconCards(form);
+      await testInfo.attach(`${mode}-${layout.name}-top`, {
+        body: await page.screenshot({ path: testInfo.outputPath(`${mode}-${layout.name}-top.png`) }), contentType: 'image/png',
+      });
       for (const label of ['Default', 'Cave', 'Unknown', 'Attention', 'No go']) {
         const button = form.getByRole('button', { name: `Icon: ${label}` });
         // Center the choice instead of leaving a fractional pixel clipped by

@@ -121,6 +121,10 @@ describe('LandmarkFormModal', () => {
     const { props } = renderForm();
     await user.click(screen.getByTestId('landmark-form-submit'));
     expect(screen.getByTestId('landmark-name-error')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveAccessibleDescription(
+      screen.getByTestId('landmark-name-error').textContent!,
+    );
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
 
@@ -197,6 +201,9 @@ describe('LandmarkFormModal', () => {
     expect(screen.getByTestId('landmark-name-input')).toBeDisabled();
     expect(screen.getByTestId('landmark-form-submit')).toBeDisabled();
     expect(screen.getByTestId('landmark-form-cancel')).toBeDisabled();
+    for (const button of screen.getAllByRole('button', { name: /^Icon:/ })) {
+      expect(button).toBeDisabled();
+    }
   });
 
   it('does not submit again while a submit is in flight (busy)', async () => {
