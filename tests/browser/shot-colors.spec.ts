@@ -37,7 +37,7 @@ async function pixels(page: Page) {
   }, `data:image/png;base64,${screenshot.toString('base64')}`);
 }
 
-test('By Shot renders source colors and fallback, persists, and works after offline reload', async ({ page }, testInfo) => {
+test('By Section renders source colors and fallback, persists, and works after offline reload', async ({ page }, testInfo) => {
   const app = await fixture(page);
   let online = true;
   const errors: string[] = [];
@@ -56,8 +56,8 @@ test('By Shot renders source colors and fallback, persists, and works after offl
   await expect.poll(async () => (await pixels(page)).red).toBeGreaterThan(20);
   await page.getByRole('tab', { name: 'Settings', exact: true }).tap();
   const selector = page.getByRole('combobox', { name: 'Color mode', exact: true });
-  await selector.selectOption('shot');
-  await expect(page.getByText(/Shots without a color use their project color/)).toBeVisible();
+  await selector.selectOption({ label: 'By Section' });
+  await expect(page.getByText(/Sections without a color use their project color/)).toBeVisible();
   await page.getByRole('tab', { name: 'Map', exact: true }).tap();
   await expect(page.getByTestId('depth-gauge')).toHaveCount(0);
   await expect.poll(async () => {
@@ -71,7 +71,7 @@ test('By Shot renders source colors and fallback, persists, and works after offl
   await page.getByRole('tab', { name: 'Map', exact: true }).tap();
   await expect(page.getByTestId('depth-gauge')).toBeVisible();
   await page.getByRole('tab', { name: 'Settings', exact: true }).tap();
-  await selector.selectOption('shot');
+  await selector.selectOption({ label: 'By Section' });
   // Finish automatic offline preparation before disconnecting and reloading;
   // otherwise navigation aborts tile requests still owned by the online page.
   await expect(page.getByTestId('sync-pct')).toHaveText('100%');

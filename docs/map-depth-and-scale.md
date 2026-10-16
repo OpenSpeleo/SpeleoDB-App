@@ -30,7 +30,7 @@ mobile implementation remains usable in a standalone clone and offline.
 Map color mode is controlled from `Settings` -> `Map Settings`:
 
 - Selector label: `Color mode`.
-- Options: `By Project` (default value), `By Depth`, and `By Shot`.
+- Options: `By Project` (default value), `By Depth`, and `By Section`.
 - Persistence key: `UserPreferences.colorMode` via `PreferencesService`.
 - Default when missing or invalid: `project`.
 
@@ -115,7 +115,7 @@ Project line/fill layers support three modes:
   - fallback to project color when feature depth is missing.
 
 - `shot` mode uses feature `properties.color` with a per-feature project-color
-  fallback. See [Shot colors](shot-colors.md) for source colors, alpha, and
+  fallback. See [Section colors](shot-colors.md) for source colors, alpha, and
   artifact refresh behavior.
 
 Depth domain (`min`, `max`) is computed from active (visible) project feature

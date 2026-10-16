@@ -84,7 +84,7 @@ export function buildTourSteps(
       },
       popover: {
         title: 'Color mode',
-        description: 'Color surveys by project, by depth, or by shot. Shots without a color use their project color.',
+        description: 'Color surveys by project, by depth, or by section. Sections without a color use their project color.',
         side: 'bottom',
         align: 'center',
         showButtons: ['next', 'close'],

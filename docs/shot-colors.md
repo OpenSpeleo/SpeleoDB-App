@@ -1,9 +1,9 @@
-# Shot colors and artifact refresh
+# Section colors and artifact refresh
 
 ## Intent and user experience
 
 Settings → Map Settings → Color mode offers **By Project**, **By Depth**, and
-**By Shot**. Project coloring remains the default. By Shot preserves colors
+**By Section**. Project coloring remains the default. By Section preserves colors
 assigned to Ariane shots and colors assigned to Compass sections by the survey
 exporter. The app never assigns section colors itself: topology and palette
 assignment belong to the exporter so web and mobile use the same artifact.
@@ -21,10 +21,11 @@ valid color.
 
 Both lines and passage fills/outlines use the same expression. Entrance stars,
 other overlays, and project-panel dots retain their existing styles. The depth
-gauge and probing are available only in By Depth. By Shot remains selectable
+gauge and probing are available only in By Depth. By Section remains selectable
 with old files and while offline, and Settings explains the project fallback.
-The existing `UserPreferences.colorMode` value stores `shot`; invalid/missing
-preferences continue to select `project`.
+The By Section label uses the existing `UserPreferences.colorMode` value
+`shot`, so saved selections remain unchanged; invalid/missing preferences
+continue to select `project`.
 
 ## Ownership and performance
 
@@ -38,6 +39,10 @@ the color property.
 
 ## Refreshing exported artifacts
 
+Older GeoJSON exports without `properties.color` must be regenerated with a
+color-capable exporter. Changing the color mode or downloading the same old
+artifact again cannot add section colors.
+
 The projects/geojson API may return `geojson_revision`, an opaque artifact token
 independent of the source commit and signed download URL. A server reexport can
 change the token without changing `latest_commit.id`. Mobile stores the revision
@@ -48,7 +53,7 @@ download. Older servers without a token retain commit-based freshness.
 Missing revision metadata does not invalidate a previously validated cache
 entry. An old artifact from the current source commit remains available offline,
 while an online replacement is pending, and after replacement failure. Its
-properties may lack colors; By Shot then uses project colors. Data from a
+properties may lack colors; By Section then uses project colors. Data from a
 different source commit remains hidden. An offline audit of legacy bytes retains
 their original or absent revision instead of incorrectly stamping a newly
 advertised token.

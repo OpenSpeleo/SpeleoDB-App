@@ -112,11 +112,11 @@ to its summary.
 
 The controls appear in this order:
 
-- **Color mode**: `By Project` / `By Depth` / `By Shot`, default `project`.
+- **Color mode**: `By Project` / `By Depth` / `By Section`, default `project`.
   Project mode uses the model-stored project color. Depth mode shows the depth
-  gauge and **Depth limit** disclosure. Shot mode uses exported feature colors
+  gauge and **Depth limit** disclosure. Section mode uses exported feature colors
   with project-color fallback, including offline; see
-  [Shot colors](shot-colors.md).
+  [Section colors](shot-colors.md).
 - **Depth limit**, present only in By Depth: collapsed by default with a **Full
   range** or formatted maximum summary. Expansion exposes **Maximum depth**, a
   decimal-keyboard input, explanatory text, and **Reset to full range**. The

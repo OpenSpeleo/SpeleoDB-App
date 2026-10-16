@@ -11,7 +11,7 @@ expand the Dashboard state machine.
 
 - `ProjectMapLayers.tsx` owns the ordering anchor and per-project fill, line,
   and point layers, including depth and shot-color expressions (see
-  [Shot colors](shot-colors.md)).
+  [Section colors](shot-colors.md)).
 - `OverlayMapLayers.tsx` owns landmark, surface/subsurface station, exploration
   lead, and cylinder layers, labels, icon availability, and visual fallbacks.
 - `GpsMapLayers.tsx` owns saved-track and active-recording line sources/layers.

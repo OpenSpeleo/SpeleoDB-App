@@ -940,16 +940,16 @@ describe('Settings page', () => {
     expect(selector.value).toBe('project');
     expect(screen.getByRole('option', { name: 'By Project' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'By Depth' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'By Shot' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'By Section' })).toBeInTheDocument();
   });
 
-  it('selects shot mode offline and explains the project fallback', async () => {
+  it('selects By Section offline and explains the project fallback', async () => {
     const user = userEvent.setup();
     renderSettings(false, '/settings', 'depth');
-    await user.selectOptions(screen.getByTestId('color-mode-selector'), 'shot');
+    await user.selectOptions(screen.getByTestId('color-mode-selector'), 'By Section');
     expect(mockPersistColorMode).toHaveBeenCalledWith('shot');
     expect(screen.getByTestId('color-mode-selector')).toHaveValue('shot');
-    expect(screen.getByText(/Shots without a color use their project color/)).toBeVisible();
+    expect(screen.getByText(/Sections without a color use their project color/)).toBeVisible();
   });
 
   it('updates color mode selector state when changed', async () => {

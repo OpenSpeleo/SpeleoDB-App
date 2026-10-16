@@ -99,7 +99,7 @@ a replacement of the same source commit is rejected, an active record retains
 safe geometry and stores a revision-specific `rejectedReplacement` marker. The
 marker has independent acknowledgement and does not disable the validated
 fallback. Missing revision metadata remains compatible with existing active
-entries; see [Shot colors](shot-colors.md).
+entries; see [Section colors](shot-colors.md).
 
 Project GeoJSON continues to use its existing key in the `geojson` IndexedDB
 store; no database-version migration is required. Validation metadata schema

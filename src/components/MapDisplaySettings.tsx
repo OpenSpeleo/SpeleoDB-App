@@ -119,7 +119,7 @@ const MapDisplaySettings: React.FC<MapDisplaySettingsProps> = ({
           >
             <option value="project">By Project</option>
             <option value="depth">By Depth</option>
-            <option value="shot">By Shot</option>
+            <option value="shot">By Section</option>
           </select>
           <IonIcon icon={chevronDownOutline} className="map-settings-select-chevron" aria-hidden="true" />
         </div>
@@ -127,7 +127,7 @@ const MapDisplaySettings: React.FC<MapDisplaySettingsProps> = ({
 
       {colorMode === 'shot' && (
         <p className="map-settings-description map-settings-visibility-help">
-          Shots without a color use their project color.
+          Sections without a color use their project color.
         </p>
       )}
 
