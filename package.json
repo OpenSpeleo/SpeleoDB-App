@@ -56,8 +56,8 @@
     "react-router": "^5.3.4",
     "react-router-dom": "^5.3.4",
     "tslib": "2.8.1",
-    "@speleodb/map-core": "0.1.0",
-    "@speleodb/map-viewer": "0.1.0"
+    "@speleodb/map-core": "0.2.0",
+    "@speleodb/map-viewer": "0.2.0"
   },
   "devDependencies": {
     "@capacitor/cli": "8.5.2",
@@ -112,6 +112,6 @@
     "fsevents"
   ],
   "overrides": {
-    "@speleodb/map-core": "0.1.0"
+    "@speleodb/map-core": "0.2.0"
   }
 }
