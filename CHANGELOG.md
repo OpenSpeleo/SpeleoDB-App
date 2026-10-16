@@ -8,6 +8,8 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ### UI/UX
 
+- Create and edit landmarks with a cleaner, centered form and compact, aligned
+  icon choices. `6c47c13`
 - Find map visibility options alphabetically, with clearly grouped station types
   and readable geometry details on small screens. `f2f5147`
 
