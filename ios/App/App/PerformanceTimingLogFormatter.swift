@@ -49,7 +49,7 @@ enum PerformanceTimingLogFormatter {
 
         let duration = durationMs.map {
             String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), $0)
-        } ?? "skipped"
+        } ?? "unmeasured"
         return "[\(scope)] run=\(runId) phase=\(phase) durationMs=\(duration) status=\(status)"
     }
 }

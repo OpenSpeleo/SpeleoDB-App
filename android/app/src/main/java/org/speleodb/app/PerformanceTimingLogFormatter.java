@@ -59,7 +59,7 @@ final class PerformanceTimingLogFormatter {
         }
 
         String duration = durationMs == null
-            ? "skipped"
+            ? "unmeasured"
             : String.format(Locale.US, "%.1f", durationMs);
         return String.format(
             Locale.US,

@@ -15,7 +15,7 @@ final class PerformanceTimingLogFormatterTests: XCTestCase {
         )
     }
 
-    func testFormatsSkippedDurationWithoutInventingAValue() {
+    func testQueuedWorkDoesNotClaimToBeSkipped() {
         XCTAssertEqual(
             PerformanceTimingLogFormatter.format(
                 scope: "project-sync",
@@ -24,7 +24,27 @@ final class PerformanceTimingLogFormatterTests: XCTestCase {
                 durationMs: nil,
                 status: "applied"
             ),
-            "[project-sync] run=3 phase=tile_prefetch durationMs=skipped status=applied"
+            "[project-sync] run=3 phase=tile_prefetch durationMs=unmeasured status=applied"
+        )
+    }
+
+    func testSkippedWorkRetainsItsStatusWithoutInventingADuration() {
+        XCTAssertEqual(
+            PerformanceTimingLogFormatter.format(
+                scope: "project-sync", runId: 3, phase: "tile_prefetch",
+                durationMs: nil, status: "skipped"
+            ),
+            "[project-sync] run=3 phase=tile_prefetch durationMs=unmeasured status=skipped"
+        )
+    }
+
+    func testMeasuredZeroIsDistinctFromUnmeasuredWork() {
+        XCTAssertEqual(
+            PerformanceTimingLogFormatter.format(
+                scope: "project-geojson", runId: 3, phase: "download_work",
+                durationMs: 0, status: "applied"
+            ),
+            "[project-geojson] run=3 phase=download_work durationMs=0.0 status=applied"
         )
     }
 

@@ -44,6 +44,19 @@ Example native line:
 [project-sync] run=7 phase=project_refresh durationMs=12.3 status=applied
 ```
 
+An absent duration prints as `durationMs=unmeasured`. It does not mean that the
+phase was skipped: the independent `status` field describes the outcome. For
+example, foreground synchronization logs queued background tile work as:
+
+```text
+[project-sync] run=7 phase=tile_prefetch durationMs=unmeasured status=applied
+```
+
+Here `applied` means the background work was queued, not that tile downloads
+finished. Genuinely skipped work has `status=skipped`. A measured zero remains
+`durationMs=0.0`, distinct from an absent measurement. Both native formatter
+test suites cover queued, skipped, and measured-zero records.
+
 The foreground `total` ends after durable project, overlay, and GPS publication.
 Offline-map `coverage_source_collection` and `plan_schedule` are separate
 background timings and do not keep the Syncing action active.

@@ -15,9 +15,9 @@ public class PerformanceTimingLogFormatterTest {
     }
 
     @Test
-    public void formatsSkippedDurationWithoutInventingAValue() {
+    public void queuedWorkDoesNotClaimToBeSkipped() {
         assertEquals(
-            "[project-sync] run=3 phase=tile_prefetch durationMs=skipped status=applied",
+            "[project-sync] run=3 phase=tile_prefetch durationMs=unmeasured status=applied",
             PerformanceTimingLogFormatter.format(
                 "project-sync",
                 3,
@@ -25,6 +25,22 @@ public class PerformanceTimingLogFormatterTest {
                 null,
                 "applied"
             )
+        );
+    }
+
+    @Test
+    public void skippedWorkRetainsItsStatusWithoutInventingADuration() {
+        assertEquals(
+            "[project-sync] run=3 phase=tile_prefetch durationMs=unmeasured status=skipped",
+            PerformanceTimingLogFormatter.format("project-sync", 3, "tile_prefetch", null, "skipped")
+        );
+    }
+
+    @Test
+    public void measuredZeroIsDistinctFromUnmeasuredWork() {
+        assertEquals(
+            "[project-geojson] run=3 phase=download_work durationMs=0.0 status=applied",
+            PerformanceTimingLogFormatter.format("project-geojson", 3, "download_work", 0.0, "applied")
         );
     }
 
