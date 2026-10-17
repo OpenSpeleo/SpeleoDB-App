@@ -15,6 +15,8 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ### Fixes
 
+- Keep map dragging in the expected direction and responsive after pinch zooms.
+  `013c9be`
 - Prevent the app from getting stuck on the splash screen during launch.
   `51d06ee`
 - Keep the map on your selected survey while background maps finish loading.
