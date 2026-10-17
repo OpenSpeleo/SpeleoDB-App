@@ -1,10 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { IonButton, IonContent, IonModal } from '@ionic/react'
+import { IonButton, IonContent, IonModal, setupIonicReact } from '@ionic/react'
 
 import logoPng from '../assets/media/logo.png'
 import { MAP } from '../constants'
 import type { StartupUiCoordinatorResult } from './useStartupUiCoordinator'
 import { useSpeleoDB } from './useSpeleoDB'
+
+// Initialize inside the lazy module. A separate dynamic import of Ionic's barrel
+// can split its component classes from their Stencil runtime in a circular chunk.
+setupIonicReact({ mode: 'ios' })
 
 interface SpeleoDBStartupModalsProps {
   startupUi: StartupUiCoordinatorResult

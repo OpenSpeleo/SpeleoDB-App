@@ -25,6 +25,7 @@ vi.mock('./useSpeleoDB', () => ({
 }));
 
 vi.mock('@ionic/react', () => ({
+  setupIonicReact: vi.fn(),
   IonModal: ({
     children,
     isOpen,

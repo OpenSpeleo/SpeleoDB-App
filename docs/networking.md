@@ -61,6 +61,15 @@ from a passive connectivity event:
   `SplashScreen.hide()` and the stored-session redirect to `/dashboard` would
   never run. The gate keeps splash dismissal and validation in the main graph;
   heavier Ionic modals load lazily from `SpeleoDBStartupModals`.
+- The lazy modal module owns its static Ionic imports and initialization. Do not
+  also dynamically import the `@ionic/react` barrel from the startup gate: that
+  creates a separate production entry which can circularly initialize Ionic
+  component classes before their Stencil superclass. The production browser
+  startup test holds back the authenticated shell to exercise this load order.
+- If rendering or a lazy module fails, `AppErrorBoundary` also dismisses the
+  native splash so its recovery screen is visible. Splash dismissal failure is
+  contained and logged without native error details; exception reporting still
+  runs. This does not change session validation, credentials, or cached data.
 - Startup validation uses `NETWORK.STARTUP_AUTH_TIMEOUT_MS` (10s) so spotty
   networks get a fair attempt before falling back to offline.
 - An unreadable in-process secure-session snapshot fails closed as

@@ -7,11 +7,7 @@ import { useStartupUiCoordinator } from './useStartupUiCoordinator'
 import { useSpeleoDB } from './useSpeleoDB'
 
 const SpeleoDBStartupModals = lazy(async () => {
-  const [{ setupIonicReact }, modals] = await Promise.all([
-    import('@ionic/react'),
-    import('./SpeleoDBStartupModals'),
-  ])
-  setupIonicReact({ mode: 'ios' })
+  const modals = await import('./SpeleoDBStartupModals')
   return { default: modals.SpeleoDBStartupModals }
 })
 

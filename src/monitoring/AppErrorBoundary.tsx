@@ -1,4 +1,5 @@
 import React from 'react'
+import { SplashScreen } from '@capacitor/splash-screen'
 import { captureSentryException } from './sentry'
 import { errorToLogDetails, sanitizeDiagnosticStack } from '../utils/errorDiagnostics'
 
@@ -23,6 +24,11 @@ export class AppErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
+    // A failed lazy module can unmount the startup gate before it hides the
+    // native splash. The recovery screen must remain visible above that failure.
+    void SplashScreen.hide().catch(() => {
+      console.warn('[splash] Failed to reveal the application error screen.')
+    })
     const componentStack = info.componentStack ?? undefined
     console.error('[AppErrorBoundary] Uncaught render error:', {
       ...errorToLogDetails(error),
