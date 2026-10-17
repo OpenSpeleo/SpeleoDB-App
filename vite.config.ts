@@ -15,9 +15,14 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { useLocalSharedMapPackages } from './scripts/shared-map-packages.mjs'
+import { patchMapLibre } from '@speleodb/map-viewer/tooling/maplibre-gestures'
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url))
 const maplibrePackageRoot = path.dirname(createRequire(import.meta.url).resolve('maplibre-gl/package.json'))
+
+// Existing workspace installs can skip a changed postinstall script. Verify the
+// engine before dev, tests, or native/web builds can consume either ESM entry.
+patchMapLibre(maplibrePackageRoot)
 
 // Custom logger that drops a single class of third-party noise while leaving
 // every other build message intact: lightningcss (Vite 8's CSS minifier) does

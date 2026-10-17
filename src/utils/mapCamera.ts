@@ -1,5 +1,6 @@
 import type { FitBoundsOptions, LngLatBoundsLike } from 'maplibre-gl';
 import type { MapRef } from 'react-map-gl/maplibre';
+import { computeCameraPadding } from '@speleodb/map-viewer/camera-padding';
 
 /** Shared camera behavior when selecting an item in a map panel. */
 export function zoomToMapBounds(
@@ -14,13 +15,12 @@ export function zoomToMapBounds(
     const visibleHeight = Math.min(viewport.height, Math.max(0, panelTop - viewport.top));
     if (viewport.width > 0 && visibleHeight > 0) {
       // Leave useful fitting space even when a short viewport needs smaller margins.
-      const margin = Math.min(60, viewport.width / 4, visibleHeight / 4);
-      padding = {
-        top: margin,
-        bottom: viewport.height - visibleHeight + margin,
-        left: margin,
-        right: margin,
-      };
+      padding = computeCameraPadding(viewport, {
+        left: viewport.left,
+        right: viewport.right,
+        top: viewport.top,
+        bottom: viewport.top + visibleHeight,
+      }, { padding: 60, marginRatio: 0.25 });
     }
   }
   map.fitBounds(bounds, { padding, maxZoom: 16, duration: 800 });

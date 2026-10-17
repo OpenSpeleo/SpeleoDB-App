@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { writePackagePatch } from './write-package-patch.mjs';
+import { writePackagePatch } from '@speleodb/map-viewer/tooling/package-patch';
 
 // Lifecycle cwd selects the installed workspace, including local source projections.
 const repoRoot = process.cwd();

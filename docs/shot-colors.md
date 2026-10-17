@@ -3,14 +3,14 @@
 ## Intent and user experience
 
 Settings → Map Settings → Color mode offers **By Project**, **By Depth**, and
-**By Section**. Project coloring remains the default. By Section preserves colors
-assigned to Ariane shots and colors assigned to Compass sections by the survey
-exporter. The app never assigns section colors itself: topology and palette
-assignment belong to the exporter so web and mobile use the same artifact.
-Compass section colors are assigned randomly during export and may change when
-the GeoJSON is regenerated. Mobile does not seed, hash, or version that palette
-assignment. The artifact revision described below tracks the exported file, not
-a coloring algorithm version.
+**By Section**. Project coloring remains the default. By Section preserves
+colors assigned to Ariane shots and colors assigned to Compass sections by the
+survey exporter. The app never assigns section colors itself: topology and
+palette assignment belong to the exporter so web and mobile use the same
+artifact. Compass section colors are assigned randomly during export and may
+change when the GeoJSON is regenerated. Mobile does not seed, hash, or version
+that palette assignment. The artifact revision described below tracks the
+exported file, not a coloring algorithm version.
 
 Each project line or passage feature uses its GeoJSON `properties.color` when
 MapLibre can parse it; absent, empty, or malformed values fall back to that
@@ -23,9 +23,9 @@ Both lines and passage fills/outlines use the same expression. Entrance stars,
 other overlays, and project-panel dots retain their existing styles. The depth
 gauge and probing are available only in By Depth. By Section remains selectable
 with old files and while offline, and Settings explains the project fallback.
-The By Section label uses the existing `UserPreferences.colorMode` value
-`shot`, so saved selections remain unchanged; invalid/missing preferences
-continue to select `project`.
+The By Section label uses the existing `UserPreferences.colorMode` value `shot`,
+so saved selections remain unchanged; invalid/missing preferences continue to
+select `project`.
 
 ## Ownership and performance
 

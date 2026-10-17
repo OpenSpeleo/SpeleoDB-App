@@ -100,3 +100,12 @@ My Location cancel pending row locate actions; programmatic movement does not
 invalidate its own completion. See
 [Responsive viewer updates](viewer-update-scheduling.md) for scheduling, source
 retention, persistence and cancellation contracts.
+
+## Shared renderer mechanisms
+
+The shell uses map-viewer's `normalizeGlobeStyle` to retain globe projection and
+strip provider camera metadata without copying sources or layers. Async style
+selection, native foreground gating, cached styles and React publication remain
+mobile responsibilities. `zoomToMapBounds` measures the mobile panel and passes
+its visible-height rectangle to shared `computeCameraPadding`, retaining the
+60-pixel cap, one-quarter margin, maximum zoom and animation duration.

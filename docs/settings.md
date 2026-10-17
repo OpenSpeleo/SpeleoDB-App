@@ -114,8 +114,8 @@ The controls appear in this order:
 
 - **Color mode**: `By Project` / `By Depth` / `By Section`, default `project`.
   Project mode uses the model-stored project color. Depth mode shows the depth
-  gauge and **Depth limit** disclosure. Section mode uses exported feature colors
-  with project-color fallback, including offline; see
+  gauge and **Depth limit** disclosure. Section mode uses exported feature
+  colors with project-color fallback, including offline; see
   [Section colors](shot-colors.md).
 - **Depth limit**, present only in By Depth: collapsed by default with a **Full
   range** or formatted maximum summary. Expansion exposes **Maximum depth**, a

@@ -1,4 +1,5 @@
-import { attachGlobeAtmosphere } from '@speleodb/map-viewer';
+import { announceMapCreated, attachGlobeAtmosphere } from '@speleodb/map-viewer';
+import { normalizeGlobeStyle } from '@speleodb/map-viewer/style';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre';
@@ -76,10 +77,7 @@ function useMapStyle(
       if (cancelled) return;
       // Provider metadata must never reset the application's camera on a switch.
       // Copy only the style root; retain cache URLs, source and layer identity.
-      const presentationStyle = { ...style, projection: { type: 'globe' } };
-      for (const key of ['center', 'zoom', 'bearing', 'pitch', 'roll']) {
-        delete (presentationStyle as Record<string, unknown>)[key];
-      }
+      const presentationStyle = normalizeGlobeStyle(style);
       setResolved({ layerId: selectedMapLayerId, style: presentationStyle });
     }).catch(error => { if (!cancelled) dependencies.reportStyleError(error); });
     return () => { cancelled = true; };
@@ -154,6 +152,9 @@ export function useDashboardMapShell({
     if (map && appearance.current?.map !== map) {
       appearance.current?.dispose();
       appearance.current = { map, dispose: dependencies.attachAtmosphere(map) };
+      // Observers can inspect the real renderer without replacing constructors,
+      // camera methods, or exposing a persistent application global.
+      announceMapCreated(map);
       // MapLibre initializes the globe camera from initialViewState. Loading
       // tiles can finish after navigation; never replace that newer camera.
     }

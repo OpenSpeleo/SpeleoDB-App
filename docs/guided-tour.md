@@ -84,8 +84,9 @@ descriptive Settings steps (3-5) advanced via Next, then completion.
 
 - **Target**: `[data-tour="settings-color-mode"]` (the `<IonItem>` row wrapping
   the color mode `<select>`).
-- **Popover**: Bottom-center. Explains project, depth, and section coloring, with
-  project-color fallback for sections without a color; includes a Next button.
+- **Popover**: Bottom-center. Explains project, depth, and section coloring,
+  with project-color fallback for sections without a color; includes a Next
+  button.
 - **Interaction**: User taps Next; no gesture detection on the row itself.
 
 ### Step 4: "Map unit"

@@ -7,11 +7,14 @@ control never waits for geometry preparation or map source work to finish.
 ## Ownership and scheduling
 
 `useAppliedViewerState` separates control state from applied display state.
-`scheduleViewerUpdate` admits work after two animation frames, with a
-cancellable 100 ms fallback when a WebView stops issuing frames. New intent
-cancels pending application. Hidden/backgrounded dashboards retain their last
-applied display and apply only the newest intent on return. Native foreground
-state has one owner in Dashboard and is also passed to the map shell.
+`scheduleViewerUpdate` configures map-viewer's shared `createPaintScheduler` to
+admit work on the second animation frame, with a cancellable 100 ms fallback
+when a WebView stops issuing frames. The app owns the hidden-document gate and
+performance instrumentation; the shared implementation owns cancellation and
+frame/task cleanup. New intent cancels pending application. Hidden/backgrounded
+dashboards retain their last applied display and apply only the newest intent on
+return. Native foreground state has one owner in Dashboard and is also passed to
+the map shell.
 
 This is an explicit scheduling boundary: the installed react-map-gl components
 mutate MapLibre during render, so speculative React transitions cannot safely

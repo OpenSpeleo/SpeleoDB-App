@@ -25,8 +25,8 @@
         "@ionic/react-router": "^8.8.19",
         "@sentry/capacitor": "^4.4.0",
         "@sentry/react": "10.69.0",
-        "@speleodb/map-core": "0.2.0",
-        "@speleodb/map-viewer": "0.2.0",
+        "@speleodb/map-core": "0.3.0",
+        "@speleodb/map-viewer": "0.3.0",
         "@turf/helpers": "^7.4.0",
         "@types/react-router": "^5.1.20",
         "@types/react-router-dom": "^5.3.3",
@@ -87,7 +87,7 @@
     "@sentry/capacitor",
   ],
   "overrides": {
-    "@speleodb/map-core": "0.2.0",
+    "@speleodb/map-core": "0.3.0",
   },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
@@ -516,9 +516,9 @@
 
     "@sentry/types": ["@sentry/types@10.69.0", "", { "dependencies": { "@sentry/core": "10.69.0" } }, "sha512-sWOH1SrpGecTWVygZy3tI3D4WmJQd1/CEcR+1GJr0MltNHK6u8GbTF/Zl+aOR7EfYxPR9vZWUYTjNpdpFt7HeA=="],
 
-    "@speleodb/map-core": ["@speleodb/map-core@0.2.0", "", { "dependencies": { "@types/geojson": "7946.0.16", "@types/polylabel": "2.0.0", "polylabel": "2.1.0" } }, "sha512-0SL3Y2HQm7RUhVkooUDcnZZfHfqIkgzRmhrntq2a9J0S/cX1tvneuz3WpunVTJtp+jQRMj4aFqFmhQtKFBxLxw=="],
+    "@speleodb/map-core": ["@speleodb/map-core@0.3.0", "", { "dependencies": { "@types/geojson": "7946.0.16", "@types/polylabel": "2.0.0", "polylabel": "2.1.0" } }, "sha512-KU1HdMR256bpI6wa+dGw/JQB2kPLSWDTRgFsAZX2cMheL+rNl9GMr8oNdONV2AsfGRaAGKWyArusf0WInX/cTw=="],
 
-    "@speleodb/map-viewer": ["@speleodb/map-viewer@0.2.0", "", { "dependencies": { "@speleodb/map-core": ">=0.2.0 <1.0.0" }, "peerDependencies": { "maplibre-gl": ">=6.10.0 <7.0.0" } }, "sha512-CHLanoO19M1VOJL4ns9FjqJucOsJgU7Qmha2RNi8RJBT3lSbdPxTl4x7r/xOOFS9AFGjkve+voPBnZly3LT0lg=="],
+    "@speleodb/map-viewer": ["@speleodb/map-viewer@0.3.0", "", { "dependencies": { "@jridgewell/remapping": "2.3.5", "@speleodb/map-core": ">=0.3.0 <1.0.0", "magic-string": "1.4.3" }, "peerDependencies": { "@playwright/test": ">=1.63.0 <2.0.0", "maplibre-gl": ">=6.10.0 <7.0.0" }, "optionalPeers": ["@playwright/test"] }, "sha512-Z3M9MfF1sexc7v+f9NmnmsXsYsJ7vZNaTTFVblG7aFnaCMiQm2LSC+5xjsAq1b3gfW3SPY1rHW0xNUkZkXcDMA=="],
 
     "@stencil/core": ["@stencil/core@4.45.2", "", { "optionalDependencies": { "@rollup/rollup-darwin-arm64": "4.44.0", "@rollup/rollup-darwin-x64": "4.44.0", "@rollup/rollup-linux-arm64-gnu": "4.44.0", "@rollup/rollup-linux-arm64-musl": "4.44.0", "@rollup/rollup-linux-x64-gnu": "4.44.0", "@rollup/rollup-linux-x64-musl": "4.44.0", "@rollup/rollup-win32-arm64-msvc": "4.44.0", "@rollup/rollup-win32-x64-msvc": "4.44.0" }, "bin": { "stencil": "bin/stencil" } }, "sha512-CNkPVZsqyNMjFMX9bEkMJsvBbQxjLw480OaoamoqiLPdQCFjJQReeOjnWX1A5ivSn3UYEIJ6MoN5VXDkaHGt8Q=="],
 

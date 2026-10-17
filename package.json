@@ -17,7 +17,7 @@
     "test:browser": "playwright test",
     "test.unit": "bash ./scripts/run-vitest.sh",
     "lint": "eslint",
-    "postinstall": "bun scripts/patch-native-dependencies.mjs && bun scripts/patch-capgo-compass-package.mjs",
+    "postinstall": "bun scripts/patch-native-dependencies.mjs && bun scripts/patch-capgo-compass-package.mjs && bun scripts/patch-maplibre-gestures.mjs",
     "check:shared-packages": "bun scripts/check-shared-package-pins.mjs",
     "cap": "bun --preserve-symlinks ./node_modules/@capacitor/cli/bin/capacitor",
     "dev:ios": "bun scripts/ios-live.mjs"
@@ -43,6 +43,8 @@
     "@ionic/react-router": "^8.8.19",
     "@sentry/capacitor": "^4.4.0",
     "@sentry/react": "10.69.0",
+    "@speleodb/map-core": "0.3.0",
+    "@speleodb/map-viewer": "0.3.0",
     "@turf/helpers": "^7.4.0",
     "@types/react-router": "^5.1.20",
     "@types/react-router-dom": "^5.3.3",
@@ -55,9 +57,7 @@
     "react-map-gl": "^8.1.3",
     "react-router": "^5.3.4",
     "react-router-dom": "^5.3.4",
-    "tslib": "2.8.1",
-    "@speleodb/map-core": "0.2.0",
-    "@speleodb/map-viewer": "0.2.0"
+    "tslib": "2.8.1"
   },
   "devDependencies": {
     "@capacitor/cli": "8.5.2",
@@ -79,6 +79,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-legacy": "^8.2.3",
     "@vitejs/plugin-react": "^6.1.2",
+    "@vitest/coverage-istanbul": "5.0.1",
     "autoprefixer": "^10.6.1",
     "eslint": "^9.39.5",
     "eslint-plugin-react": "^7.37.5",
@@ -95,8 +96,7 @@
     "typescript": "~6.0.3",
     "typescript-eslint": "8.71.1",
     "vite": "8.3.4",
-    "vitest": "5.0.4",
-    "@vitest/coverage-istanbul": "5.0.1"
+    "vitest": "5.0.4"
   },
   "lint-staged": {
     "*.{ts,tsx}": "eslint --fix"
@@ -112,6 +112,6 @@
     "fsevents"
   ],
   "overrides": {
-    "@speleodb/map-core": "0.2.0"
+    "@speleodb/map-core": "0.3.0"
   }
 }

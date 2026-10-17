@@ -222,6 +222,27 @@ describe('useDashboardMapShell', () => {
     expect(dependencies.loadIcons).toHaveBeenCalledOnce();
   });
 
+  it('announces an initialized map once despite repeat load callbacks', async () => {
+    const map = { flyTo: vi.fn(), jumpTo: vi.fn() } as unknown as OverlayImageMap & { flyTo: ReturnType<typeof vi.fn> };
+    const mapRef = createMapRef(map);
+    const dependencies = createDependencies();
+    const received: unknown[] = [];
+    const listener = (event: Event) => received.push((event as CustomEvent).detail.map);
+    window.addEventListener('speleo:map-created', listener);
+    try {
+      const { result, unmount } = renderHook(() => useDashboardMapShell({
+        mapRef, selectedMapLayerId: 'esri-satellite', onSelectedMapLayerIdChange: vi.fn(),
+        dependencies,
+      }));
+      await waitFor(() => expect(result.current.mapStyle).not.toBeNull());
+      act(() => { result.current.handleMapLoad(); result.current.handleMapLoad(); });
+      expect(received).toEqual([map]);
+      unmount();
+    } finally {
+      window.removeEventListener('speleo:map-created', listener);
+    }
+  });
+
   it('persists valid layer selections and falls back for unknown identifiers', async () => {
     const dependencies = createDependencies();
     const onChange = vi.fn();
