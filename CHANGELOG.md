@@ -15,6 +15,8 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ### Fixes
 
+- Prevent the app from getting stuck on the splash screen during launch.
+  `51d06ee`
 - Keep the map on your selected survey while background maps finish loading.
   `340ecae`
 - Keep survey lines, GIS layers, and GPS tracks clear when zooming out.
