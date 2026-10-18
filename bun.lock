@@ -26,14 +26,14 @@
         "@sentry/capacitor": "^4.4.0",
         "@sentry/react": "10.69.0",
         "@speleodb/map-core": "0.3.0",
-        "@speleodb/map-viewer": "0.3.0",
+        "@speleodb/map-viewer": "0.3.1",
         "@turf/helpers": "^7.4.0",
         "@types/react-router": "^5.1.20",
         "@types/react-router-dom": "^5.3.3",
         "driver.js": "^1.9.0",
         "gpx-builder": "^6.0.0",
         "ionicons": "^8.1.0",
-        "maplibre-gl": "6.10.0",
+        "maplibre-gl": "github:DEKHTIARJonathan/maplibre-gl-js#hotpatch",
         "react": "19.2.8",
         "react-dom": "19.2.8",
         "react-map-gl": "^8.1.3",
@@ -518,7 +518,7 @@
 
     "@speleodb/map-core": ["@speleodb/map-core@0.3.0", "", { "dependencies": { "@types/geojson": "7946.0.16", "@types/polylabel": "2.0.0", "polylabel": "2.1.0" } }, "sha512-KU1HdMR256bpI6wa+dGw/JQB2kPLSWDTRgFsAZX2cMheL+rNl9GMr8oNdONV2AsfGRaAGKWyArusf0WInX/cTw=="],
 
-    "@speleodb/map-viewer": ["@speleodb/map-viewer@0.3.0", "", { "dependencies": { "@jridgewell/remapping": "2.3.5", "@speleodb/map-core": ">=0.3.0 <1.0.0", "magic-string": "1.4.3" }, "peerDependencies": { "@playwright/test": ">=1.63.0 <2.0.0", "maplibre-gl": ">=6.10.0 <7.0.0" }, "optionalPeers": ["@playwright/test"] }, "sha512-Z3M9MfF1sexc7v+f9NmnmsXsYsJ7vZNaTTFVblG7aFnaCMiQm2LSC+5xjsAq1b3gfW3SPY1rHW0xNUkZkXcDMA=="],
+    "@speleodb/map-viewer": ["@speleodb/map-viewer@0.3.1", "", { "dependencies": { "@speleodb/map-core": ">=0.3.0 <1.0.0" }, "peerDependencies": { "@playwright/test": ">=1.63.0 <2.0.0", "maplibre-gl": ">=6.14.0 <7.0.0" }, "optionalPeers": ["@playwright/test"] }, "sha512-Cbp6MNYngB2TNQN+1hZnuXdbkXbMsej72CAEiFl7FP9Kq3CHOoEWv/aEje1WagmxPfuhTV4hSIJJM1QvRTbyOA=="],
 
     "@stencil/core": ["@stencil/core@4.45.2", "", { "optionalDependencies": { "@rollup/rollup-darwin-arm64": "4.44.0", "@rollup/rollup-darwin-x64": "4.44.0", "@rollup/rollup-linux-arm64-gnu": "4.44.0", "@rollup/rollup-linux-arm64-musl": "4.44.0", "@rollup/rollup-linux-x64-gnu": "4.44.0", "@rollup/rollup-linux-x64-musl": "4.44.0", "@rollup/rollup-win32-arm64-msvc": "4.44.0", "@rollup/rollup-win32-x64-msvc": "4.44.0" }, "bin": { "stencil": "bin/stencil" } }, "sha512-CNkPVZsqyNMjFMX9bEkMJsvBbQxjLw480OaoamoqiLPdQCFjJQReeOjnWX1A5ivSn3UYEIJ6MoN5VXDkaHGt8Q=="],
 
@@ -1106,7 +1106,7 @@
 
     "magicast": ["magicast@0.5.5", "", { "dependencies": { "@babel/parser": "^7.29.7", "@babel/types": "^7.29.7", "source-map-js": "^1.2.1" } }, "sha512-UicdXN8zQ3JHlxVq+28afMXPr1z7WNY6+7EJnzTdQWkTAlMLF5fNCCKxJHBQwGaNGR11581EiQmQzx73+MvszA=="],
 
-    "maplibre-gl": ["maplibre-gl@6.10.0", "", { "dependencies": { "@mapbox/point-geometry": "^1.1.0", "@mapbox/tiny-sdf": "^2.2.0", "@mapbox/unitbezier": "^1.0.0", "@mapbox/vector-tile": "^3.0.0", "@maplibre/geojson-vt": "^6.1.1", "@maplibre/maplibre-gl-style-spec": "^26.4.4", "@maplibre/mlt": "^1.3.0", "@maplibre/vt-pbf": "^4.3.2", "@types/geojson": "^7946.0.16", "bidi-js": "^1.1.0", "earcut": "^3.2.3", "gl-matrix": "^3.4.4", "kdbush": "^4.1.0", "murmurhash-js": "^1.0.0", "pbf": "^5.1.2", "potpack": "^2.1.0", "quickselect": "^3.0.0", "tinyqueue": "^3.0.0" } }, "sha512-pZIJ1/rsB1jDjT3eBTfMaeSY45lRKdCuZtqXqTnkUrn0UJO9IwtbywT5ym3/cz57MGEELwAwQSYjB/Fj9TlktQ=="],
+    "maplibre-gl": ["maplibre-gl@github:DEKHTIARJonathan/maplibre-gl-js#0566606", { "dependencies": { "@mapbox/point-geometry": "^1.1.0", "@mapbox/tiny-sdf": "^2.2.0", "@mapbox/unitbezier": "^1.0.0", "@mapbox/vector-tile": "^3.0.0", "@maplibre/geojson-vt": "^6.1.2", "@maplibre/maplibre-gl-style-spec": "^26.4.4", "@maplibre/mlt": "^1.3.0", "@maplibre/vt-pbf": "^4.3.2", "@types/geojson": "^7946.0.16", "bidi-js": "^1.1.0", "earcut": "^3.2.4", "gl-matrix": "^3.4.4", "kdbush": "^4.1.0", "murmurhash-js": "^1.0.0", "pbf": "^5.1.2", "potpack": "^2.1.0", "quickselect": "^3.0.0", "tinyqueue": "^3.0.0" } }, "DEKHTIARJonathan-maplibre-gl-js-0566606", "sha512-4+dCQp0zbj50FRrJZTfBPZc7Kq+rRRSUjy/3vFyLKN5P3PblWX05PLnnOw6HPoq+ogeUdmlnqyoqrdjEEQLVww=="],
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 

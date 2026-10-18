@@ -85,29 +85,24 @@ zoom 11–12). North-up bearing and pitch stay zero. Fresh survey data must not
 change this contract. Displayed distances depend on viewport and latitude and
 are not a reliable substitute for the engine zoom when reproducing a failure.
 
-The shared `@speleodb/map-viewer/tooling/maplibre-gestures` entry owns the
-MapLibre 6.10.0 backport and artifact tests. Its
+Mobile uses MapLibre 6.14.0 from
+[`DEKHTIARJonathan/maplibre-gl-js#hotpatch`](https://github.com/DEKHTIARJonathan/maplibre-gl-js/tree/hotpatch),
+matching web and the shared viewer package. Frozen locks pin the fork commit.
+The fork includes the requested-projection synchronization and partial-pinch
+release fixes, including suppression of north-snapping while a contact remains
+active. These corrections are built into the renderer before distribution.
+
+The shared viewer's
 [gesture documentation](https://github.com/OpenSpeleo/SpeleoDB-TS-MapViewer/blob/master/docs/gestures.md)
-explains the stale requested projection, Camera event ownership, source-map
-integrity and upgrade contract. The projection and event-cleanup defects arise
-with the camera update callback installed by `react-map-gl`; GeoJSON timing can
-expose them but is not the cause. A further partial-release fix prevents pinch
-inertia from resetting the finger still held on the map. That defect also exists
-in web's engine version. Desktop mouse input in this app is affected as well as
-touch.
+explains both defects and the browser regression contract. The projection
+mismatch in stock 6.14.0 also reproduces with a plain renderer and a no-op
+camera callback; GeoJSON timing can expose it but is not its cause.
 
-Mobile owns only installation wiring: `scripts/patch-maplibre-gestures.mjs`
-invokes the shared patch from postinstall, and Vite configuration verifies it
-before dev, tests and builds. This also covers existing workspace installs that
-skip a changed lifecycle script. Mapping dependencies belong to map-viewer and
-stay outside the browser bundle. The version/hash guards require explicit review
-during engine upgrades. Mobile retains its pinned renderer and camera,
-orientation, discrete-zoom and lifecycle policies.
-
-The app pins the published map-viewer 0.3.0 release that provides these shared
-exports. Future shared changes must be published before this app's exact
-registry pin and standalone lock advance. Workspace and packed-candidate
-validation do not prove compatibility with previously published shared code.
+Mobile consumes the fork's compiled modules, workers, CSS and declarations.
+There is no MapLibre postinstall patch or Vite patch hook. The app retains its
+north-up camera, discrete-zoom and lifecycle policies. Unrelated native
+dependency patches remain in the mobile postinstall command. Engine corrections
+no longer depend on a new map-viewer release.
 
 ## Navigation regression coverage
 
