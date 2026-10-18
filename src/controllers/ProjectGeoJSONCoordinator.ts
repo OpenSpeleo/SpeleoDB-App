@@ -4,7 +4,7 @@ import {
   ProjectGeoJSONAnalysisError,
   type ProjectGeoJSONAnalyzerPort,
 } from '../services/ProjectGeoJSONAnalyzer';
-import type { Project } from '../types/project';
+import { hasProjectCommit, type Project, type ProjectWithCommit } from '../types/project';
 import type {
   ProjectGeoJSONAcknowledgementResult,
   ProjectGeoJSONAnalysis,
@@ -79,7 +79,7 @@ export class ProjectGeoJSONCoordinator {
   ): Promise<ProjectGeoJSONMapData | null> {
     throwIfAborted(signal);
     const project = projects.find((candidate) => candidate.id === projectId);
-    if (!project) return null;
+    if (!project || !hasProjectCommit(project)) return null;
     const commitId = project.latest_commit.id;
     const disposition = this.blockedCommits.get(this.key(projectId, commitId, project.geojson_revision));
     if (disposition && !disposition.preserveActive) return null;
@@ -132,7 +132,7 @@ export class ProjectGeoJSONCoordinator {
     projects: Project[],
     allowDownloads: boolean,
   ): Promise<GeoJSONSyncPhaseResult> {
-    const eligible = projects.filter((project) => project.geojson_file && !project.exclude_geojson);
+    const eligible = projects.filter(hasProjectCommit).filter((project) => project.geojson_file && !project.exclude_geojson);
     if (eligible.length === 0) {
       this.reset();
       return createSkippedGeoJSONPhase('no_geojson_candidates');
@@ -186,7 +186,7 @@ export class ProjectGeoJSONCoordinator {
 
   private async processProject(
     context: CancellationContext,
-    project: Project,
+    project: ProjectWithCommit,
     allowDownloads: boolean,
   ): Promise<ProjectOutcome> {
     const disposition = await this.applySessionDisposition(context, project, allowDownloads);
@@ -230,7 +230,7 @@ export class ProjectGeoJSONCoordinator {
 
   private async applySessionDisposition(
     context: CancellationContext,
-    project: Project,
+    project: ProjectWithCommit,
     allowDownloads: boolean,
   ): Promise<ProjectOutcome | null> {
     const commitKey = this.key(project.id, project.latest_commit.id, project.geojson_revision);
@@ -250,7 +250,7 @@ export class ProjectGeoJSONCoordinator {
 
   private async blockUnavailableRecord(
     context: CancellationContext,
-    project: Project,
+    project: ProjectWithCommit,
     retryWhenOnline: boolean,
   ): Promise<ProjectOutcome> {
     const diagnostics = this.emptyDiagnostics();
@@ -263,7 +263,7 @@ export class ProjectGeoJSONCoordinator {
 
   private async processCurrentRecord(
     context: CancellationContext,
-    project: Project,
+    project: ProjectWithCommit,
     record: ProjectGeoJSONCacheRecord,
     allowDownloads: boolean,
   ): Promise<ProjectOutcome | null> {
@@ -326,7 +326,7 @@ export class ProjectGeoJSONCoordinator {
 
   private async downloadAndValidate(
     context: CancellationContext,
-    project: Project,
+    project: ProjectWithCommit,
     preserveActive: boolean,
   ): Promise<ProjectOutcome> {
     const response = await this.runTiming.measure(
@@ -356,7 +356,7 @@ export class ProjectGeoJSONCoordinator {
 
   private async validateOutcome(
     context: CancellationContext,
-    project: Project,
+    project: ProjectWithCommit,
     featureCollection: GeoJSON.FeatureCollection,
     downloaded: number,
     preserveActive = false,
@@ -369,7 +369,7 @@ export class ProjectGeoJSONCoordinator {
 
   private async validate(
     context: CancellationContext,
-    project: Project,
+    project: ProjectWithCommit,
     featureCollection: GeoJSON.FeatureCollection,
     preserveActive: boolean,
   ): Promise<'active' | 'quarantined'> {
@@ -434,7 +434,7 @@ export class ProjectGeoJSONCoordinator {
 
   private async quarantine(
     context: CancellationContext,
-    project: Project,
+    project: ProjectWithCommit,
     reason: ProjectGeoJSONFailureReason,
     diagnostics: ProjectGeoJSONFailureDiagnostics,
     preserveActive = false,
@@ -493,7 +493,7 @@ export class ProjectGeoJSONCoordinator {
     context.throwIfAborted();
   }
 
-  private pruneStaleState(projects: Project[]): void {
+  private pruneStaleState(projects: ProjectWithCommit[]): void {
     const currentProjects = new Map(projects.map((project) => [project.id, project]));
     const isCurrent = (projectId: string, commitId: string, revision?: string | null): boolean => {
       const project = currentProjects.get(projectId);
@@ -516,7 +516,7 @@ export class ProjectGeoJSONCoordinator {
   }
 
   private addWarning(
-    project: Project,
+    project: ProjectWithCommit,
     reason: ProjectGeoJSONFailureReason,
     diagnostics: ProjectGeoJSONFailureDiagnostics,
     persistent: boolean,
@@ -557,7 +557,7 @@ export class ProjectGeoJSONCoordinator {
   }
 
   private blockForSession(
-    project: Project,
+    project: ProjectWithCommit,
     reason: ProjectGeoJSONFailureReason,
     diagnostics: ProjectGeoJSONFailureDiagnostics,
     retryWhenOnline = false,
@@ -573,7 +573,7 @@ export class ProjectGeoJSONCoordinator {
   }
 
   private log(
-    project: Project,
+    project: ProjectWithCommit,
     diagnostics: ProjectGeoJSONAnalysis | ProjectGeoJSONFailureDiagnostics,
     source: 'computed' | 'cache',
     status: 'active' | 'quarantined',

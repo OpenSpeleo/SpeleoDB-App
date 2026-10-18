@@ -10,7 +10,7 @@ import { Router } from 'react-router-dom';
 import { createMemoryHistory } from 'history';
 import Dashboard from './Dashboard';
 import { MAP } from '../constants';
-import type { Project } from '../types/project';
+import type { Project, ProjectWithCommit } from '../types/project';
 import type { GpsTrackListItem, RecordedPoint } from '../types/gpsTrack';
 import type { DashboardPanel } from '../types/dashboardPanel';
 import { LandmarkMutationError } from '../types/landmark';
@@ -516,7 +516,7 @@ const mockGetProjectMapData = vi.fn(async (projectId: string) => {
   if (!featureCollection) return null;
   try {
     return {
-      commitId: mockProjects.find((project) => project.id === projectId)?.latest_commit.id ?? 'commit-1',
+      commitId: mockProjects.find((project) => project.id === projectId)?.latest_commit?.id ?? 'commit-1',
       featureCollection,
       bounds: measureProjectGeoJSONBounds(featureCollection).bounds,
     };
@@ -705,7 +705,7 @@ async function settleAsyncEffects(): Promise<void> {
   });
 }
 
-function makeProject(overrides: Partial<Project> = {}): Project {
+function makeProject(overrides: Partial<ProjectWithCommit> = {}): ProjectWithCommit {
   return {
     id: 'p1',
     name: 'Test Project',
@@ -902,7 +902,7 @@ describe('Dashboard', () => {
       if (!featureCollection) return null;
       try {
         return {
-          commitId: mockProjects.find((project) => project.id === projectId)?.latest_commit.id ?? 'commit-1',
+          commitId: mockProjects.find((project) => project.id === projectId)?.latest_commit?.id ?? 'commit-1',
           featureCollection,
           bounds: measureProjectGeoJSONBounds(featureCollection).bounds,
         };

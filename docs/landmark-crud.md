@@ -126,9 +126,10 @@ cached collection so the optimistic view needs no extra UI wiring.
 
 ## Key APIs / concepts
 
-- **Constants:** `API.LANDMARKS_ENDPOINT`, `API.LANDMARK_COLLECTIONS_ENDPOINT`,
-  `API.landmarkDetailEndpoint(id)`, and `MAP.LONG_PRESS_*` ring constants
-  (`src/constants.ts`).
+- **API contract:** generated landmark operations and wire types come from
+  `@speleodb/api`; the mobile service supplies credentials and transport policy.
+  `MAP.LONG_PRESS_*` ring constants remain in `src/constants.ts`. See
+  [api-client.md](api-client.md) for package maintenance and transport tests.
 - **Types:** `LandmarkApiObject`, `LandmarkCollection`, `LandmarkCreateInput`,
   `LandmarkUpdateInput`, `LandmarkMutationError` (`src/types/landmark.ts`).
 - **Service:** `createLandmark`, `updateLandmark`, `deleteLandmark`,

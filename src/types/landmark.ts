@@ -1,35 +1,20 @@
+import type { Landmark, LandmarkRequest, PatchedLandmarkRequest } from '@speleodb/api';
+
 /**
- * Type definitions for landmark CRUD against the SpeleoDB backend.
- *
- * - `LandmarkApiObject` mirrors the `{ landmark: {...} }` payload returned by
- *   POST /api/v2/landmarks/ and PATCH /api/v2/landmarks/<id>/.
- * - `LandmarkCollection` mirrors an entry from GET /api/v2/landmark-collections/.
- *
- * See docs/landmark-crud.md.
+ * Durable normalized landmark snapshot. Metadata and icon were absent in older
+ * records; collection is normalized to a string by the storage admission layer.
+ * These compatibility differences do not weaken the generated wire contract.
  */
-
-import type { LandmarkIcon } from '@speleodb/map-core';
-
-// ==================== API objects ====================
-
-export interface LandmarkApiObject {
-  /** Absent only in durable records saved before icon support. */
-  icon?: LandmarkIcon;
-  id: string;
-  name: string;
-  description: string;
-  latitude: number;
-  longitude: number;
+type SnapshotMetadata = Pick<Landmark,
+  'icon' | 'collection_name' | 'collection_color' | 'can_write' | 'can_delete'
+  | 'created_by' | 'creation_date' | 'modified_date'
+>;
+export type LandmarkApiObject = Pick<Landmark,
+  'id' | 'name' | 'description' | 'latitude' | 'longitude'
+> & Partial<{ [K in keyof SnapshotMetadata]: NonNullable<SnapshotMetadata[K]> }> & {
   collection: string;
-  collection_name?: string;
-  collection_color?: string;
   is_personal_collection?: boolean;
-  can_write?: boolean;
-  can_delete?: boolean;
-  created_by?: string;
-  creation_date?: string;
-  modified_date?: string;
-}
+};
 
 export interface LandmarkCollection {
   id: string;
@@ -41,24 +26,15 @@ export interface LandmarkCollection {
 
 // ==================== Mutation inputs ====================
 
-export interface LandmarkCreateInput {
-  icon?: LandmarkIcon;
-  name: string;
-  description?: string;
+/** UI and durable queue inputs normalize coordinate strings to numbers. */
+export type LandmarkCreateInput = Omit<LandmarkRequest, 'latitude' | 'longitude'> & {
   latitude: number;
   longitude: number;
-  /** Omit or set null to use the user's personal collection. */
-  collection?: string | null;
-}
-
-export interface LandmarkUpdateInput {
-  icon?: LandmarkIcon;
-  name?: string;
-  description?: string;
+};
+export type LandmarkUpdateInput = Omit<PatchedLandmarkRequest, 'latitude' | 'longitude'> & {
   latitude?: number;
   longitude?: number;
-  collection?: string | null;
-}
+};
 
 // ==================== Errors ====================
 

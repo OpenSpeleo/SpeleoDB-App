@@ -159,7 +159,7 @@ describe('HttpClient (web transport)', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('returns empty object when JSON parsing fails', async () => {
+  it('preserves an empty 204 response without parsing JSON', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       status: 204,
       json: async () => { throw new Error('no body'); },
@@ -168,7 +168,7 @@ describe('HttpClient (web transport)', () => {
     const res = await client.request({ url: 'https://api.test/v2', method: 'DELETE' });
 
     expect(res.status).toBe(204);
-    expect(res.data).toEqual({});
+    expect(res.data).toBeUndefined();
   });
 
   it('propagates fetch errors (e.g. network failure)', async () => {

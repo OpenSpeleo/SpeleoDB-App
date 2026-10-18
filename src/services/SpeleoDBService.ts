@@ -1,455 +1,168 @@
-/**
- * Pure API layer for the SpeleoDB backend.
- *
- * - Stateless: every method receives all the data it needs.
- * - Delegates HTTP transport to the injected HttpClient.
- * - Knows the API contract (endpoints, request/response shapes) but nothing else.
- */
-
-import { API, GPS, HEADERS } from '../constants';
-import { GIS_GEOMETRY_ENDPOINT } from '../gisGeometry/constants';
+/** Application facade over generated SpeleoDB operations and the native transport. */
+import {
+  createApiClient,
+  v2UserAuthTokenCreateWithJson,
+  v2UserAuthTokenRetrieve,
+  v2ProjectsGeojsonList,
+  v2LandmarksGeojsonRetrieve,
+  v2LandmarkCollectionsList,
+  v2LandmarksCreateWithJson,
+  v2LandmarksPartialUpdateWithJson,
+  v2LandmarksDestroy,
+  v2GpsTracksList,
+  v2GpsTracksPartialUpdateWithJson,
+  v2GpsTracksDestroy,
+  v2ImportGpxUpdate,
+  v2StationsSubsurfaceGeojsonRetrieve,
+  v2StationsSurfaceGeojsonRetrieve,
+  v2ExplorationLeadsGeojsonRetrieve,
+  v2CylinderInstallsGeojsonRetrieve,
+  v2GisGeometriesList,
+  v2GisGeometriesRetrieve,
+  type ApiRequestOptions,
+  type ApiTransportResponse,
+  type PatchedGPSTrackRequest,
+  type V2ImportGpxUpdate200,
+} from '@speleodb/api';
+import { GPS, HEADERS, NETWORK } from '../constants';
 import { isGisGeometryId } from '../gisGeometry/validation';
 import { getInstanceBaseUrl } from '../utils/instanceUrl';
-import type { HttpClient, HttpResponse, HttpRequest } from './HttpClient';
-import type { AuthTokenResponse } from '../types';
-import type { Project } from '../types/project';
-import type {
-  LandmarkApiObject,
-  LandmarkCreateInput,
-  LandmarkUpdateInput,
-} from '../types/landmark';
+import { createAbortError } from '../utils/abort';
+import type { HttpClient, HttpResponse } from './HttpClient';
+import { createMobileApiTransport } from './apiTransport';
+import type { LandmarkApiObject, LandmarkCreateInput, LandmarkUpdateInput } from '../types/landmark';
 
 export interface ServiceRequestOptions {
-  signal?: AbortSignal
-  timeoutMs?: number
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
-/** Response envelope for a single landmark mutation. */
 export interface LandmarkMutationResponse {
   landmark: LandmarkApiObject;
 }
 
-/** Server response from a successful GPX import. */
-export interface GpxImportResponse {
-  landmarks_created: number;
-  gps_tracks_created: number;
-}
+export type GpxImportResponse = Required<Pick<V2ImportGpxUpdate200, 'landmarks_created' | 'gps_tracks_created'>>;
 
-/** Editable fields of a server GPS track (PATCH body). */
-export interface GpsTrackUpdateInput {
-  name?: string;
-  color?: string;
-}
+export type GpsTrackUpdateInput = PatchedGPSTrackRequest;
 
 export class SpeleoDBService {
-  constructor(private http: HttpClient) {}
+  private readonly transport;
 
-  // ==================== Auth ====================
-
-  /**
-   * POST /api/v2/user/auth-token/
-   *
-   * Sends JSON on every transport (native and web). The Django endpoint
-   * accepts application/json.
-   */
-  async authenticate(
-    instance: string,
-    email: string,
-    password: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<AuthTokenResponse | unknown>> {
-    const baseUrl = getInstanceBaseUrl(instance);
-    const url = baseUrl + API.AUTH_TOKEN_ENDPOINT;
-
-    return this.http.request<AuthTokenResponse | unknown>({
-      url,
-      method: 'POST',
-      headers: { [HEADERS.CONTENT_TYPE]: HEADERS.APPLICATION_JSON_UTF8 },
-      data: { email, password },
-      timeoutMs: options.timeoutMs,
-      signal: options.signal,
-    });
+  constructor(private readonly http: HttpClient) {
+    this.transport = createMobileApiTransport(http);
   }
 
-  /**
-   * GET /api/v2/user/auth-token/  (with Token header)
-   *
-   * Used at app startup to validate a stored token is still valid.
-   */
-  async validateToken(
-    instance: string,
-    token: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<unknown>> {
-    const baseUrl = getInstanceBaseUrl(instance);
-    const url = baseUrl + API.AUTH_TOKEN_ENDPOINT;
-
-    return this.http.request({
-      url,
-      method: 'GET',
-      headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
-      timeoutMs: options.timeoutMs,
-      signal: options.signal,
-    });
+  authenticate(instance: string, email: string, password: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, undefined, options, (request) =>
+      v2UserAuthTokenCreateWithJson({ email, password }, request));
   }
 
-  /** Metadata-first, token-only GIS reads. No permission or mutation operations. */
-  async getGisGeometries(instance: string, token: string, options: ServiceRequestOptions = {}): Promise<HttpResponse<unknown>> {
-    return this.gisGeometryGet(instance, token, GIS_GEOMETRY_ENDPOINT, options);
+  validateToken(instance: string, token: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, v2UserAuthTokenRetrieve);
   }
 
-  async getGisGeometry(instance: string, token: string, id: string, options: ServiceRequestOptions = {}): Promise<HttpResponse<unknown>> {
+  getProjectsGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, v2ProjectsGeojsonList);
+  }
+
+  getLandmarksGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, v2LandmarksGeojsonRetrieve);
+  }
+
+  getLandmarkCollections(instance: string, token: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, v2LandmarkCollectionsList);
+  }
+
+  createLandmark(instance: string, token: string, input: LandmarkCreateInput, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, (request) => v2LandmarksCreateWithJson(input, request));
+  }
+
+  updateLandmark(instance: string, token: string, id: string, input: LandmarkUpdateInput, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, (request) => v2LandmarksPartialUpdateWithJson(id, input, request));
+  }
+
+  deleteLandmark(instance: string, token: string, id: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, (request) => v2LandmarksDestroy(id, request));
+  }
+
+  getGpsTracks(instance: string, token: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, v2GpsTracksList);
+  }
+
+  updateGpsTrack(instance: string, token: string, id: string, input: GpsTrackUpdateInput, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, (request) => v2GpsTracksPartialUpdateWithJson(id, input, request));
+  }
+
+  deleteGpsTrack(instance: string, token: string, id: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, (request) => v2GpsTracksDestroy(id, request));
+  }
+
+  uploadGpx(instance: string, token: string, gpxText: string, fileName: string, collection?: string | null, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, (request) => v2ImportGpxUpdate({
+      file: new File([gpxText], fileName, { type: GPS.GPX_CONTENT_TYPE }),
+      ...(collection ? { collection } : {}),
+    }, request));
+  }
+
+  getSubsurfaceStationsGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, v2StationsSubsurfaceGeojsonRetrieve);
+  }
+
+  getSurfaceStationsGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, v2StationsSurfaceGeojsonRetrieve);
+  }
+
+  getExplorationLeadsGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, v2ExplorationLeadsGeojsonRetrieve);
+  }
+
+  getCylinderInstallsGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, v2CylinderInstallsGeojsonRetrieve);
+  }
+
+  getGisGeometries(instance: string, token: string, options: ServiceRequestOptions = {}) {
+    return this.execute(instance, token, options, (request) => v2GisGeometriesList({
+      ...request, responsePolicy: 'status-first-json', cookiePolicy: 'omit',
+    }));
+  }
+
+  async getGisGeometry(instance: string, token: string, id: string, options: ServiceRequestOptions = {}) {
     if (!isGisGeometryId(id)) throw new TypeError('Invalid GIS Geometry identifier.');
-    return this.gisGeometryGet(instance, token, `${GIS_GEOMETRY_ENDPOINT}${id}/`, options);
+    return this.execute(instance, token, options, (request) => v2GisGeometriesRetrieve(id, {
+      ...request, responsePolicy: 'status-first-json', cookiePolicy: 'omit',
+    }));
   }
 
-  private gisGeometryGet(instance: string, token: string, endpoint: string, options: ServiceRequestOptions): Promise<HttpResponse<unknown>> {
-    return this.http.request({
-      url: getInstanceBaseUrl(instance) + endpoint,
-      method: 'GET',
-      headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}`, Accept: 'application/json' },
-      signal: options.signal,
-      timeoutMs: options.timeoutMs,
-      requireJson: true,
-      cookiePolicy: 'omit',
-    });
+  /** Signed storage URLs are outside the API contract and carry their own credentials. */
+  downloadJSON<T = unknown>(url: string, options: ServiceRequestOptions = {}): Promise<HttpResponse<T>> {
+    return this.http.request<T>({ url, method: 'GET', signal: options.signal, timeoutMs: options.timeoutMs });
   }
 
-  // ==================== Projects ====================
-
-  /**
-   * GET /api/v2/projects/geojson/  (with Token header)
-   *
-   * Returns the full project list with geojson metadata as a bare `Project[]`.
-   */
-  async getProjectsGeoJSON(
+  private async execute(
     instance: string,
-    token: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<Project[] | unknown>> {
-    return this.getAuthorized<Project[]>(
-      instance,
-      token,
-      API.PROJECTS_GEOJSON_ENDPOINT,
-      options,
-    );
-  }
-
-  /**
-   * GET /api/v2/landmarks/geojson/  (with Token header)
-   */
-  async getLandmarksGeoJSON(
-    instance: string,
-    token: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<GeoJSON.FeatureCollection | unknown>> {
-    return this.getAuthorized<GeoJSON.FeatureCollection>(
-      instance,
-      token,
-      API.LANDMARKS_GEOJSON_ENDPOINT,
-      options,
-    );
-  }
-
-  // ==================== Landmark CRUD ====================
-
-  /**
-   * GET /api/v2/landmark-collections/  (with Token header)
-   *
-   * Returns the user's landmark collections (used to populate the create/edit
-   * collection picker). Shape is backend-defined; callers map it.
-   */
-  async getLandmarkCollections(
-    instance: string,
-    token: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<unknown>> {
-    return this.authorizedRequest(
-      'GET',
-      instance,
-      token,
-      API.LANDMARK_COLLECTIONS_ENDPOINT,
-      options,
-    );
-  }
-
-  /**
-   * POST /api/v2/landmarks/  (with Token header)
-   *
-   * Creates a landmark. Omit `collection` (or send null) to use the user's
-   * personal collection.
-   */
-  async createLandmark(
-    instance: string,
-    token: string,
-    input: LandmarkCreateInput,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<LandmarkMutationResponse | unknown>> {
-    return this.authorizedRequest<LandmarkMutationResponse>(
-      'POST',
-      instance,
-      token,
-      API.LANDMARKS_ENDPOINT,
-      { ...options, data: input },
-    );
-  }
-
-  /**
-   * PATCH /api/v2/landmarks/<id>/  (with Token header)
-   *
-   * Partially updates a landmark. Only provided fields are changed.
-   */
-  async updateLandmark(
-    instance: string,
-    token: string,
-    id: string,
-    input: LandmarkUpdateInput,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<LandmarkMutationResponse | unknown>> {
-    return this.authorizedRequest<LandmarkMutationResponse>(
-      'PATCH',
-      instance,
-      token,
-      API.landmarkDetailEndpoint(id),
-      { ...options, data: input },
-    );
-  }
-
-  /**
-   * DELETE /api/v2/landmarks/<id>/  (with Token header)
-   */
-  async deleteLandmark(
-    instance: string,
-    token: string,
-    id: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<unknown>> {
-    return this.authorizedRequest(
-      'DELETE',
-      instance,
-      token,
-      API.landmarkDetailEndpoint(id),
-      options,
-    );
-  }
-
-  // ==================== GPS tracks ====================
-
-  /**
-   * GET /api/v2/gps_tracks/  (with Token header)
-   *
-   * Returns the user's server-stored GPS tracks as a bare array of
-   * `{ id, name, color, file, sha256_hash, creation_date, modified_date }`
-   * (`file` is a pre-signed GeoJSON URL). Synced like projects/landmarks.
-   */
-  async getGpsTracks(
-    instance: string,
-    token: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<unknown>> {
-    return this.getAuthorized<unknown>(
-      instance,
-      token,
-      API.GPS_TRACKS_ENDPOINT,
-      options,
-    );
-  }
-
-  /**
-   * PATCH /api/v2/gps_tracks/<id>/  (with Token header)
-   *
-   * Edits a server GPS track's name and/or color. Returns the updated object
-   * `{ id, name, color, creation_date, modified_date }`.
-   */
-  async updateGpsTrack(
-    instance: string,
-    token: string,
-    id: string,
-    input: GpsTrackUpdateInput,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<unknown>> {
-    return this.authorizedRequest(
-      'PATCH',
-      instance,
-      token,
-      API.gpsTrackDetailEndpoint(id),
-      { ...options, data: input },
-    );
-  }
-
-  /**
-   * DELETE /api/v2/gps_tracks/<id>/  (with Token header)
-   */
-  async deleteGpsTrack(
-    instance: string,
-    token: string,
-    id: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<unknown>> {
-    return this.authorizedRequest(
-      'DELETE',
-      instance,
-      token,
-      API.gpsTrackDetailEndpoint(id),
-      options,
-    );
-  }
-
-  /**
-   * PUT /api/v2/import/gpx/  (with Token header, multipart/form-data)
-   *
-   * Uploads a GPX document. The backend converts waypoints to Landmarks and
-   * tracks to GPSTrack rows and returns the created counts. Uses the
-   * cross-platform multipart path so it works on native and web. An optional
-   * `collection` id targets a specific landmark collection for waypoints.
-   */
-  async uploadGpx(
-    instance: string,
-    token: string,
-    gpxText: string,
-    fileName: string,
-    collection?: string | null,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<GpxImportResponse | unknown>> {
-    const baseUrl = getInstanceBaseUrl(instance);
-    const url = baseUrl + API.GPX_IMPORT_ENDPOINT;
-
-    return this.http.request<GpxImportResponse | unknown>({
-      url,
-      method: 'PUT',
-      headers: { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` },
-      multipart: {
-        fields: collection ? { collection } : undefined,
-        file: {
-          fieldName: 'file',
-          fileName,
-          contentType: GPS.GPX_CONTENT_TYPE,
-          content: gpxText,
-        },
+    token: string | undefined,
+    options: ServiceRequestOptions,
+    operation: (request: ApiRequestOptions) => Promise<ApiTransportResponse>,
+  ): Promise<HttpResponse> {
+    const client = createApiClient({
+      baseUrl: getInstanceBaseUrl(instance),
+      transport: this.transport,
+      timeoutMs: NETWORK.REQUEST_TIMEOUT_MS,
+      headers: {
+        [HEADERS.ACCEPT]: HEADERS.APPLICATION_JSON,
+        ...(token ? { [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}` } : {}),
       },
-      signal: options.signal,
-      timeoutMs: options.timeoutMs,
     });
-  }
-
-  /**
-   * GET /api/v2/stations/subsurface/geojson/  (with Token header)
-   */
-  async getSubsurfaceStationsGeoJSON(
-    instance: string,
-    token: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<GeoJSON.FeatureCollection | unknown>> {
-    return this.getAuthorized<GeoJSON.FeatureCollection>(
-      instance,
-      token,
-      API.SUBSURFACE_STATIONS_GEOJSON_ENDPOINT,
-      options,
-    );
-  }
-
-  /**
-   * GET /api/v2/stations/surface/geojson/  (with Token header)
-   */
-  async getSurfaceStationsGeoJSON(
-    instance: string,
-    token: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<GeoJSON.FeatureCollection | unknown>> {
-    return this.getAuthorized<GeoJSON.FeatureCollection>(
-      instance,
-      token,
-      API.SURFACE_STATIONS_GEOJSON_ENDPOINT,
-      options,
-    );
-  }
-
-  /**
-   * GET /api/v2/exploration-leads/geojson/  (with Token header)
-   */
-  async getExplorationLeadsGeoJSON(
-    instance: string,
-    token: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<GeoJSON.FeatureCollection | unknown>> {
-    return this.getAuthorized<GeoJSON.FeatureCollection>(
-      instance,
-      token,
-      API.EXPLORATION_LEADS_GEOJSON_ENDPOINT,
-      options,
-    );
-  }
-
-  /**
-   * GET /api/v2/cylinder-installs/geojson/  (with Token header)
-   */
-  async getCylinderInstallsGeoJSON(
-    instance: string,
-    token: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<GeoJSON.FeatureCollection | unknown>> {
-    return this.getAuthorized<GeoJSON.FeatureCollection>(
-      instance,
-      token,
-      API.CYLINDER_INSTALLS_GEOJSON_ENDPOINT,
-      options,
-    );
-  }
-
-  /**
-   * GET any URL and return parsed JSON.
-   *
-   * Used to download pre-signed CloudFront geojson files. No auth header
-   * is needed because the URL itself carries the signature.
-   */
-  async downloadJSON<T = unknown>(url: string, options: ServiceRequestOptions = {}): Promise<HttpResponse<T>> {
-    return this.http.request<T>({
-      url,
-      method: 'GET',
-      signal: options.signal,
-      timeoutMs: options.timeoutMs,
-    });
-  }
-
-  private async getAuthorized<T>(
-    instance: string,
-    token: string,
-    endpoint: string,
-    options: ServiceRequestOptions = {},
-  ): Promise<HttpResponse<T | unknown>> {
-    return this.authorizedRequest<T>('GET', instance, token, endpoint, options);
-  }
-
-  /**
-   * Issue an authenticated request (Token header) to an instance endpoint.
-   *
-   * Generalizes the read-only `getAuthorized` so the same auth/URL logic backs
-   * landmark create/update/delete. Pass `data` for a JSON body.
-   */
-  private async authorizedRequest<T>(
-    method: HttpRequest['method'],
-    instance: string,
-    token: string,
-    endpoint: string,
-    options: ServiceRequestOptions & { data?: unknown } = {},
-  ): Promise<HttpResponse<T | unknown>> {
-    const baseUrl = getInstanceBaseUrl(instance);
-    const url = baseUrl + endpoint;
-
-    const headers: Record<string, string> = {
-      [HEADERS.AUTHORIZATION]: `${HEADERS.TOKEN_PREFIX}${token}`,
-    };
-    if (options.data !== undefined) {
-      headers[HEADERS.CONTENT_TYPE] = HEADERS.APPLICATION_JSON_UTF8;
+    try {
+      // Coordinators validate unknown server data before durable writes. Keep
+      // that admission boundary even when the generated documented branch is typed.
+      return await operation({ client, ...options });
+    } catch (error) {
+      // Existing session/queue coordinators classify deadlines as AbortError.
+      if (error && typeof error === 'object' && 'name' in error && error.name === 'TimeoutError') {
+        throw createAbortError();
+      }
+      throw error;
     }
-
-    return this.http.request<T | unknown>({
-      url,
-      method,
-      headers,
-      data: options.data,
-      signal: options.signal,
-      timeoutMs: options.timeoutMs,
-    });
   }
 }

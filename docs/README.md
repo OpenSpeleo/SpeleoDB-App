@@ -5,6 +5,9 @@ behaviors.
 
 ## Available docs
 
+- [api-client.md](api-client.md): generated API ownership, transport invariants,
+  dependency updates, verification, and troubleshooting.
+
 - `shared-map-packages.md`: shared TypeScript geography and renderer ownership,
   app-specific policy boundaries, source/artifact builds and verification.
 

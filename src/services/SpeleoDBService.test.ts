@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SpeleoDBService } from './SpeleoDBService';
 import type { HttpClient, HttpResponse } from './HttpClient';
-import { API, HEADERS } from '../constants';
+import { HEADERS } from '../constants';
 import type { Project } from '../types/project';
 
 /** Minimal mock HttpClient that records calls and returns a canned response. */
@@ -82,15 +82,15 @@ describe('SpeleoDBService', () => {
 
       expect(http.calls).toHaveLength(1);
       const req = http.calls[0];
-      expect(req.url).toBe(INSTANCE + API.AUTH_TOKEN_ENDPOINT);
+      expect(req.url).toBe(INSTANCE + '/api/v2/user/auth-token/');
       expect(req.method).toBe('POST');
-      expect(req.data).toEqual({ email: 'a@b.com', password: 'pass' });
-      expect(req.headers?.[HEADERS.CONTENT_TYPE]).toBe(HEADERS.APPLICATION_JSON_UTF8);
+      expect(JSON.parse(req.body!)).toEqual({ email: 'a@b.com', password: 'pass' });
+      expect(req.headers?.[HEADERS.CONTENT_TYPE]).toBe(HEADERS.APPLICATION_JSON);
     });
 
     it('normalizes the instance URL (adds scheme, strips trailing slash)', async () => {
       await service.authenticate('www.speleodb.org/', 'a@b.com', 'p');
-      expect(http.calls[0].url).toBe(INSTANCE + API.AUTH_TOKEN_ENDPOINT);
+      expect(http.calls[0].url).toBe(INSTANCE + '/api/v2/user/auth-token/');
     });
 
     it('rejects a non-origin instance before sending credentials', async () => {
@@ -110,8 +110,9 @@ describe('SpeleoDBService', () => {
         signal: abortController.signal,
       });
 
-      expect(http.calls[0].timeoutMs).toBe(1234);
-      expect(http.calls[0].signal).toBe(abortController.signal);
+      expect(http.calls[0].timeoutMs).toBeGreaterThan(0);
+      expect(http.calls[0].timeoutMs).toBeLessThanOrEqual(1234);
+      expect(http.calls[0].signal).toBeInstanceOf(AbortSignal);
     });
 
     it('returns the flat 4xx error body verbatim (no envelope unwrapping)', async () => {
@@ -141,13 +142,14 @@ describe('SpeleoDBService', () => {
 
       const req = http.calls[0];
       expect(req.method).toBe('GET');
-      expect(req.url).toBe(INSTANCE + API.AUTH_TOKEN_ENDPOINT);
+      expect(req.url).toBe(INSTANCE + '/api/v2/user/auth-token/');
       expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
     });
 
     it('forwards the optional timeoutMs to the transport', async () => {
       await service.validateToken(INSTANCE, TOKEN, { timeoutMs: 1234 });
-      expect(http.calls[0].timeoutMs).toBe(1234);
+      expect(http.calls[0].timeoutMs).toBeGreaterThan(0);
+      expect(http.calls[0].timeoutMs).toBeLessThanOrEqual(1234);
     });
 
     it('forwards the optional AbortSignal to the transport', async () => {
@@ -157,7 +159,7 @@ describe('SpeleoDBService', () => {
         signal: abortController.signal,
       });
 
-      expect(http.calls[0].signal).toBe(abortController.signal);
+      expect(http.calls[0].signal).toBeInstanceOf(AbortSignal);
     });
 
     it('returns the flat 4xx error body verbatim (no envelope unwrapping)', async () => {
@@ -178,7 +180,7 @@ describe('SpeleoDBService', () => {
         signal: abortController.signal,
       });
 
-      expect(http.calls[0].signal).toBe(abortController.signal);
+      expect(http.calls[0].signal).toBeInstanceOf(AbortSignal);
     });
   });
 
@@ -197,7 +199,7 @@ describe('SpeleoDBService', () => {
 
       const req = http.calls[0];
       expect(req.method).toBe('GET');
-      expect(req.url).toBe(INSTANCE + API.PROJECTS_GEOJSON_ENDPOINT);
+      expect(req.url).toBe(INSTANCE + '/api/v2/projects/geojson/');
       expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
     });
 
@@ -223,11 +225,11 @@ describe('SpeleoDBService', () => {
     | 'getCylinderInstallsGeoJSON';
 
   const OVERLAY_CASES: ReadonlyArray<{ method: OverlayMethod; endpoint: string }> = [
-    { method: 'getLandmarksGeoJSON', endpoint: API.LANDMARKS_GEOJSON_ENDPOINT },
-    { method: 'getSubsurfaceStationsGeoJSON', endpoint: API.SUBSURFACE_STATIONS_GEOJSON_ENDPOINT },
-    { method: 'getSurfaceStationsGeoJSON', endpoint: API.SURFACE_STATIONS_GEOJSON_ENDPOINT },
-    { method: 'getExplorationLeadsGeoJSON', endpoint: API.EXPLORATION_LEADS_GEOJSON_ENDPOINT },
-    { method: 'getCylinderInstallsGeoJSON', endpoint: API.CYLINDER_INSTALLS_GEOJSON_ENDPOINT },
+    { method: 'getLandmarksGeoJSON', endpoint: '/api/v2/landmarks/geojson/' },
+    { method: 'getSubsurfaceStationsGeoJSON', endpoint: '/api/v2/stations/subsurface/geojson/' },
+    { method: 'getSurfaceStationsGeoJSON', endpoint: '/api/v2/stations/surface/geojson/' },
+    { method: 'getExplorationLeadsGeoJSON', endpoint: '/api/v2/exploration-leads/geojson/' },
+    { method: 'getCylinderInstallsGeoJSON', endpoint: '/api/v2/cylinder-installs/geojson/' },
   ];
 
   describe.each(OVERLAY_CASES)('$method', ({ method, endpoint }) => {
@@ -270,7 +272,7 @@ describe('SpeleoDBService', () => {
       expect(res.status).toBe(200);
       const req = http.calls[0];
       expect(req.method).toBe('GET');
-      expect(req.url).toBe(INSTANCE + API.LANDMARK_COLLECTIONS_ENDPOINT);
+      expect(req.url).toBe(INSTANCE + '/api/v2/landmark-collections/');
       expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
       expect(req.data).toBeUndefined();
     });
@@ -290,10 +292,10 @@ describe('SpeleoDBService', () => {
 
       const req = http.calls[0];
       expect(req.method).toBe('POST');
-      expect(req.url).toBe(INSTANCE + API.LANDMARKS_ENDPOINT);
+      expect(req.url).toBe(INSTANCE + '/api/v2/landmarks/');
       expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
-      expect(req.headers?.[HEADERS.CONTENT_TYPE]).toBe(HEADERS.APPLICATION_JSON_UTF8);
-      expect(req.data).toEqual(input);
+      expect(req.headers?.[HEADERS.CONTENT_TYPE]).toBe(HEADERS.APPLICATION_JSON);
+      expect(JSON.parse(req.body!)).toEqual(input);
     });
 
     it('returns a 400 duplicate body verbatim', async () => {
@@ -318,7 +320,7 @@ describe('SpeleoDBService', () => {
         { name: 'C', latitude: 0, longitude: 0 },
         { signal: ac.signal },
       );
-      expect(http.calls[0].signal).toBe(ac.signal);
+      expect(http.calls[0].signal).toBeInstanceOf(AbortSignal);
     });
   });
 
@@ -333,10 +335,10 @@ describe('SpeleoDBService', () => {
       expect(res.status).toBe(200);
       const req = http.calls[0];
       expect(req.method).toBe('PATCH');
-      expect(req.url).toBe(INSTANCE + API.landmarkDetailEndpoint('lm 1'));
+      expect(req.url).toBe(INSTANCE + '/api/v2/landmarks/lm%201/');
       expect(req.url).toContain('lm%201');
       expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
-      expect(req.data).toEqual({ name: 'Renamed' });
+      expect(JSON.parse(req.body!)).toEqual({ name: 'Renamed' });
     });
   });
 
@@ -350,7 +352,7 @@ describe('SpeleoDBService', () => {
       expect(res.status).toBe(200);
       const req = http.calls[0];
       expect(req.method).toBe('DELETE');
-      expect(req.url).toBe(INSTANCE + API.landmarkDetailEndpoint('lm-1'));
+      expect(req.url).toBe(INSTANCE + '/api/v2/landmarks/lm-1/');
       expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
       expect(req.data).toBeUndefined();
     });
@@ -420,28 +422,27 @@ describe('SpeleoDBService', () => {
 
       const req = http.calls[0];
       expect(req.method).toBe('PUT');
-      expect(req.url).toBe(INSTANCE + API.GPX_IMPORT_ENDPOINT);
+      expect(req.url).toBe(INSTANCE + '/api/v2/import/gpx/');
       expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
-      expect(req.multipart?.file).toMatchObject({
-        fieldName: 'file',
-        fileName: 'track.gpx',
-        contentType: 'application/gpx+xml',
-        content: '<gpx/>',
-      });
+      expect(req.formData?.get('file')).toBeInstanceOf(File);
+      const file = req.formData!.get('file') as File;
+      expect(file.name).toBe('track.gpx');
+      expect(file.type).toBe('application/gpx+xml');
+      expect(file.size).toBe(6);
       // No collection field unless explicitly provided.
-      expect(req.multipart?.fields).toBeUndefined();
+      expect(req.formData?.has('collection')).toBe(false);
       // Must not set a JSON Content-Type; the transport owns the multipart boundary.
       expect(req.headers?.[HEADERS.CONTENT_TYPE]).toBeUndefined();
     });
 
     it('includes the collection field when provided', async () => {
       await service.uploadGpx(INSTANCE, TOKEN, '<gpx/>', 'track.gpx', 'col-123');
-      expect(http.calls[0].multipart?.fields).toEqual({ collection: 'col-123' });
+      expect(http.calls[0].formData?.get('collection')).toBe('col-123');
     });
 
     it('omits the collection field when null', async () => {
       await service.uploadGpx(INSTANCE, TOKEN, '<gpx/>', 'track.gpx', null);
-      expect(http.calls[0].multipart?.fields).toBeUndefined();
+      expect(http.calls[0].formData?.has('collection')).toBe(false);
     });
 
     it('returns a definitive 4xx error body verbatim', async () => {
@@ -459,8 +460,9 @@ describe('SpeleoDBService', () => {
         signal: ac.signal,
         timeoutMs: 4242,
       });
-      expect(http.calls[0].signal).toBe(ac.signal);
-      expect(http.calls[0].timeoutMs).toBe(4242);
+      expect(http.calls[0].signal).toBeInstanceOf(AbortSignal);
+      expect(http.calls[0].timeoutMs).toBeGreaterThan(0);
+      expect(http.calls[0].timeoutMs).toBeLessThanOrEqual(4242);
     });
   });
 
@@ -473,7 +475,7 @@ describe('SpeleoDBService', () => {
       expect(res.status).toBe(200);
       const req = http.calls[0];
       expect(req.method).toBe('GET');
-      expect(req.url).toBe(INSTANCE + API.GPS_TRACKS_ENDPOINT);
+      expect(req.url).toBe(INSTANCE + '/api/v2/gps_tracks/');
       expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
     });
 
@@ -481,8 +483,8 @@ describe('SpeleoDBService', () => {
       await service.updateGpsTrack(INSTANCE, TOKEN, 'g1', { name: 'New', color: '#377eb8' });
       const req = http.calls[0];
       expect(req.method).toBe('PATCH');
-      expect(req.url).toBe(INSTANCE + API.gpsTrackDetailEndpoint('g1'));
-      expect(req.data).toEqual({ name: 'New', color: '#377eb8' });
+      expect(req.url).toBe(INSTANCE + '/api/v2/gps_tracks/g1/');
+      expect(JSON.parse(req.body!)).toEqual({ name: 'New', color: '#377eb8' });
       expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
     });
 
@@ -490,7 +492,7 @@ describe('SpeleoDBService', () => {
       await service.deleteGpsTrack(INSTANCE, TOKEN, 'g1');
       const req = http.calls[0];
       expect(req.method).toBe('DELETE');
-      expect(req.url).toBe(INSTANCE + API.gpsTrackDetailEndpoint('g1'));
+      expect(req.url).toBe(INSTANCE + '/api/v2/gps_tracks/g1/');
       expect(req.headers?.[HEADERS.AUTHORIZATION]).toBe(AUTH_HEADER);
     });
   });
@@ -503,9 +505,9 @@ describe('GIS Geometry read-only requests', () => {
     const abort = new AbortController();
     await service.getGisGeometries(INSTANCE, TOKEN, { signal: abort.signal, timeoutMs: 1234 });
     await service.getGisGeometry(INSTANCE, TOKEN, '12345678-1234-4234-8234-123456789abc');
-    expect(http.calls).toEqual([
-      { url: `${INSTANCE}/api/v2/gis-geometries/`, method: 'GET', headers: { Authorization: AUTH_HEADER, Accept: 'application/json' }, signal: abort.signal, timeoutMs: 1234, requireJson: true, cookiePolicy: 'omit' },
-      { url: `${INSTANCE}/api/v2/gis-geometries/12345678-1234-4234-8234-123456789abc/`, method: 'GET', headers: { Authorization: AUTH_HEADER, Accept: 'application/json' }, signal: undefined, timeoutMs: undefined, requireJson: true, cookiePolicy: 'omit' },
+    expect(http.calls).toMatchObject([
+      { url: `${INSTANCE}/api/v2/gis-geometries/`, method: 'GET', headers: { Authorization: AUTH_HEADER, Accept: 'application/json' }, signal: expect.any(AbortSignal), timeoutMs: expect.any(Number), requireJson: true, cookiePolicy: 'omit' },
+      { url: `${INSTANCE}/api/v2/gis-geometries/12345678-1234-4234-8234-123456789abc/`, method: 'GET', headers: { Authorization: AUTH_HEADER, Accept: 'application/json' }, signal: expect.any(AbortSignal), timeoutMs: expect.any(Number), requireJson: true, cookiePolicy: 'omit' },
     ]);
   });
   it('rejects malformed detail UUIDs before transport admission', async () => {

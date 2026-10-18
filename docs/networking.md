@@ -232,8 +232,10 @@ Implementation notes:
 - Direct token login reuses `SpeleoDBService.validateToken`; `2xx` establishes
   an identity-free session, while every failure remains unauthenticated and
   never falls back offline.
-- Endpoint URLs and the v2 base path live in `src/constants.ts`
-  (`API.BASE_PATH = '/api/v2'`).
+- Endpoint paths and wire types are generated in `@speleodb/api` from the web
+  application's canonical `OpenAPI.yaml`. `SpeleoDBService` invokes generated
+  operations through the mobile transport adapter; see
+  [api-client.md](api-client.md) for ownership, upgrades, and verification.
 
 ## Implementation expectations
 

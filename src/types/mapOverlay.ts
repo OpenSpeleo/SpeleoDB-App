@@ -35,7 +35,6 @@ export interface MapOverlaySizes {
 export interface MapOverlayDefinition {
   id: MapOverlayId;
   label: string;
-  endpoint: string;
   markerMinZoom: number;
   labelMinZoom: number | null;
   sizes: MapOverlaySizes;

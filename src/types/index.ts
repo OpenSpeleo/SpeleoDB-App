@@ -41,10 +41,7 @@ export interface AuthResponse {
 /**
  * Shape returned by the Django auth-token endpoint.
  */
-export interface AuthTokenResponse {
-  user: string;
-  token: string;
-}
+export type { AuthTokenResponse } from '@speleodb/api';
 
 export type {
   MapOverlayDefinition,

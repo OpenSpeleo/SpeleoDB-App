@@ -60,6 +60,10 @@ package source remains the public build interface in both contexts. Root and
 standalone locks are maintained independently, using the repository's canonical
 lock command. Vite and TypeScript validate the resolved source graph.
 
+Standalone commands do not require a parent manifest. An absent, unreadable or
+malformed ancestor manifest is ignored; explicitly enabling
+`SPELEODB_LOCAL_PACKAGES=1` still requires the live package links to validate.
+
 Standalone rollout of the geometry-label and landmark-icon exports requires
 publishing compatible map-core and map-viewer releases, then updating the app's
 exact package pins and standalone lock. Live workspace builds and isolated

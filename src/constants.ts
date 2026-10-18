@@ -7,37 +7,6 @@ import type { MapOverlayDefinition, ProjectLayerConfig } from './types/mapOverla
 import type { MapLayerDefinition } from './types/mapLayer';
 import { createGeoJSONLineWidth } from './utils/geojsonLineRendering';
 
-// ==================== API ENDPOINTS ====================
-const BASE_PATH = '/api/v2';
-export const API = {
-  BASE_PATH,
-  AUTH_TOKEN_ENDPOINT: BASE_PATH + '/user/auth-token/',
-  PROJECTS_GEOJSON_ENDPOINT: BASE_PATH + '/projects/geojson/',
-  LANDMARKS_GEOJSON_ENDPOINT: BASE_PATH + '/landmarks/geojson/',
-  // Landmark CRUD: POST creates, and `${LANDMARKS_ENDPOINT}${id}/` is the
-  // detail endpoint for PATCH/DELETE. See docs/landmark-crud.md.
-  LANDMARKS_ENDPOINT: BASE_PATH + '/landmarks/',
-  LANDMARK_COLLECTIONS_ENDPOINT: BASE_PATH + '/landmark-collections/',
-  SUBSURFACE_STATIONS_GEOJSON_ENDPOINT: BASE_PATH + '/stations/subsurface/geojson/',
-  SURFACE_STATIONS_GEOJSON_ENDPOINT: BASE_PATH + '/stations/surface/geojson/',
-  EXPLORATION_LEADS_GEOJSON_ENDPOINT: BASE_PATH + '/exploration-leads/geojson/',
-  CYLINDER_INSTALLS_GEOJSON_ENDPOINT: BASE_PATH + '/cylinder-installs/geojson/',
-  // GPS tracks: a recorded track is uploaded to SpeleoDB as a GPX file via the
-  // GPX import endpoint (PUT multipart `file`, optional `collection`). The
-  // backend turns waypoints into Landmarks and tracks into GPSTrack rows and
-  // returns `{ landmarks_created, gps_tracks_created }`. See docs/gps-tracks.md.
-  GPX_IMPORT_ENDPOINT: BASE_PATH + '/import/gpx/',
-  GPS_TRACKS_ENDPOINT: BASE_PATH + '/gps_tracks/',
-  /** Detail endpoint for a single landmark (PATCH/DELETE). */
-  landmarkDetailEndpoint(id: string): string {
-    return `${BASE_PATH}/landmarks/${encodeURIComponent(id)}/`;
-  },
-  /** Detail endpoint for a single GPS track (GET/PATCH/DELETE). */
-  gpsTrackDetailEndpoint(id: string): string {
-    return `${BASE_PATH}/gps_tracks/${encodeURIComponent(id)}/`;
-  },
-} as const;
-
 // ==================== HTTP STATUS CODES ====================
 export const HTTP_STATUS = {
   OK: 200,
@@ -364,7 +333,6 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
   {
     id: 'landmarks',
     label: 'Landmarks',
-    endpoint: API.LANDMARKS_GEOJSON_ENDPOINT,
     markerMinZoom: 12,
     labelMinZoom: 14,
     sizes: {
@@ -384,7 +352,6 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
   {
     id: 'subsurfaceStations',
     label: 'Subsurface Stations',
-    endpoint: API.SUBSURFACE_STATIONS_GEOJSON_ENDPOINT,
     markerMinZoom: 12,
     labelMinZoom: 14,
     sizes: {
@@ -428,7 +395,6 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
   {
     id: 'surfaceStations',
     label: 'Surface Stations',
-    endpoint: API.SURFACE_STATIONS_GEOJSON_ENDPOINT,
     markerMinZoom: 12,
     labelMinZoom: 14,
     sizes: {
@@ -448,7 +414,6 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
   {
     id: 'explorationLeads',
     label: 'Exploration Leads',
-    endpoint: API.EXPLORATION_LEADS_GEOJSON_ENDPOINT,
     markerMinZoom: 12,
     labelMinZoom: null,
     sizes: {
@@ -467,7 +432,6 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
   {
     id: 'cylinderInstalls',
     label: 'Cylinder Installs',
-    endpoint: API.CYLINDER_INSTALLS_GEOJSON_ENDPOINT,
     markerMinZoom: 12,
     labelMinZoom: 14,
     sizes: {

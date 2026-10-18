@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { observeGestureMap } from '@speleodb/map-viewer/testing/gestures';
 import { fixture } from './fixtures/app';
 import { captureMapCanvas } from './fixtures/mapCanvas';
 
@@ -104,6 +105,7 @@ async function locateCenter(page: Page) {
 
 test('renders distinct collection-colored landmark icons after style changes and offline reload', async ({ page }, testInfo) => {
   const app = await fixture(page);
+  await observeGestureMap(page);
   let offline = false;
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -124,9 +126,19 @@ test('renders distinct collection-colored landmark icons after style changes and
   await testInfo.attach('landmark-icons.png', { body: await captureMapCanvas(page), contentType: 'image/png' });
   await page.getByTestId('map-layer-button').click();
   await page.getByTestId('map-layer-option-esri-world-hillshade').click();
+  await expect.poll(() => page.evaluate(() => {
+    const map = window.__speleoGesture.map;
+    return Boolean(map.getStyle().sources['esri-world-hillshade']) && map.loaded();
+  })).toBe(true);
   await expect.poll(async () => (await magentaShapes(page)).length).toBe(5);
   await page.getByTestId('map-layer-button').click();
   await page.getByTestId('map-layer-option-esri-satellite').click();
+  // Marker pixels can precede the selected basemap's tile decoding. Establish
+  // the requested style and completed loads before testing offline restoration.
+  await expect.poll(() => page.evaluate(() => {
+    const map = window.__speleoGesture.map;
+    return Boolean(map.getStyle().sources['esri-satellite']) && map.loaded();
+  })).toBe(true);
   await expect.poll(async () => new Set((await magentaShapes(page)).map(shape => `${shape.width}:${shape.pixels}`)).size).toBeGreaterThanOrEqual(4);
   offline = true; app.disconnect();
   await page.reload();

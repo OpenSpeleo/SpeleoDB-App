@@ -19,6 +19,7 @@
     "lint": "eslint",
     "postinstall": "bun scripts/patch-native-dependencies.mjs && bun scripts/patch-capgo-compass-package.mjs",
     "check:shared-packages": "bun scripts/check-shared-package-pins.mjs",
+    "check:api": "bun scripts/audit-api.mjs",
     "cap": "bun --preserve-symlinks ./node_modules/@capacitor/cli/bin/capacitor",
     "dev:ios": "bun scripts/ios-live.mjs"
   },
@@ -43,6 +44,7 @@
     "@ionic/react-router": "^8.8.19",
     "@sentry/capacitor": "^4.4.0",
     "@sentry/react": "10.69.0",
+    "@speleodb/api": "0.1.0",
     "@speleodb/map-core": "0.3.0",
     "@speleodb/map-viewer": "0.3.1",
     "@turf/helpers": "^7.4.0",

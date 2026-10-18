@@ -58,6 +58,19 @@ function warning(reason = 'invalid_geojson', source = 'computed') {
 beforeEach(async () => { await new ProjectCacheService().clearAll(); });
 
 describe('GeoJSON artifact refresh through durable cache', () => {
+  it('does not load or prefetch an empty project without a latest commit', async () => {
+    const { cache, coordinator, download, analyze, removePrefetchTarget } = setup();
+    await seed(cache, 'old');
+    const empty: Project = { ...project(), latest_commit: null };
+    const result = await coordinator.sync(new CancellationContext(1, 'empty project'), [empty], true);
+    expect(result).toMatchObject({ status: 'skipped', reason: 'no_geojson_candidates' });
+    expect(await coordinator.getMapData([empty], empty.id)).toBeNull();
+    expect(download).not.toHaveBeenCalled();
+    expect(analyze).not.toHaveBeenCalled();
+    expect(removePrefetchTarget).not.toHaveBeenCalled();
+    expect(await cache.getProjectGeoJSONRecord(empty.id)).toMatchObject({ state: 'active', data: oldData });
+  });
+
   it('uses legacy validated bytes offline and does not relabel their artifact revision', async () => {
     const { cache, coordinator, download, analyze } = setup();
     await seed(cache);

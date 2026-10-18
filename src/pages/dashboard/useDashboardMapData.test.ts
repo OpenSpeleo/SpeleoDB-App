@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MapOverlayGeoJsonRecord, MapOverlayId } from '../../types/mapOverlay';
-import type { Project } from '../../types/project';
+import type { Project, ProjectWithCommit } from '../../types/project';
 import type { ProjectGeoJSONMapData } from '../../types/projectGeoJSON';
 import {
   createRenderingBatcher,
@@ -16,8 +16,8 @@ const BOUNDS = { west: -1, east: 1, south: -1, north: 1, crossesDateline: false 
 function createProject(
   id: string,
   name = id,
-  overrides: Partial<Project> = {},
-): Project {
+  overrides: Partial<ProjectWithCommit> = {},
+): ProjectWithCommit {
   return {
     id,
     name,
@@ -68,7 +68,7 @@ function collection(...features: GeoJSON.Feature[]): GeoJSON.FeatureCollection {
 }
 
 function mapData(
-  project: Project,
+  project: ProjectWithCommit,
   featureCollection = collection(pointFeature(`feature-${project.id}`)),
   commitId = project.latest_commit.id,
 ): ProjectGeoJSONMapData {

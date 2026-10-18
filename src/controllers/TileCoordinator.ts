@@ -15,7 +15,7 @@ import type { OfflineMapSyncSnapshot } from '../types/offlineMapSync';
 import type { LocalGpsTrack } from '../types/gpsTrack';
 import type { MapLayerDefinition } from '../types/mapLayer';
 import type { MapOverlayId } from '../types/mapOverlay';
-import type { Project } from '../types/project';
+import { hasProjectCommit, type Project } from '../types/project';
 import type { TilePrefetchProjectInput } from '../types/tilePrefetch';
 import type { TilePrefetchPhaseResult } from '../types/sync';
 import { isAbortError } from '../utils/abort';
@@ -544,7 +544,7 @@ export class TileCoordinator {
     context: CancellationContext,
     projects: Project[],
   ): Promise<BuiltProjectInputs> {
-    const eligible = projects.filter((project) => project.geojson_file && !project.exclude_geojson);
+    const eligible = projects.filter(hasProjectCommit).filter((project) => project.geojson_file && !project.exclude_geojson);
     const inputs: Array<TilePrefetchProjectInput | undefined> = new Array(eligible.length);
     const failedCount = 0;
     let cursor = 0;

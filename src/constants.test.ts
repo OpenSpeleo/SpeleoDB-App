@@ -1,18 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { API, HTTP_STATUS, HEADERS, PREFERENCES, NETWORK, MAP, COLORS } from './constants';
+import { HTTP_STATUS, HEADERS, PREFERENCES, NETWORK, MAP, COLORS } from './constants';
 
 describe('constants', () => {
-  describe('API', () => {
-    it('has BASE_PATH /api/v2', () => {
-      expect(API.BASE_PATH).toBe('/api/v2');
-    });
-
-    it('has AUTH_TOKEN_ENDPOINT containing /user/auth-token/', () => {
-      expect(API.AUTH_TOKEN_ENDPOINT).toContain('/user/auth-token/');
-      expect(API.AUTH_TOKEN_ENDPOINT).toBe('/api/v2/user/auth-token/');
-    });
-  });
-
   describe('HTTP_STATUS', () => {
     it('has expected status codes', () => {
       expect(HTTP_STATUS.OK).toBe(200);

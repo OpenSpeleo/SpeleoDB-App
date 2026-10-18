@@ -4,7 +4,7 @@ import type {
   MapOverlayGeoJsonRecord,
   MapOverlayId,
 } from '../../types/mapOverlay';
-import type { Project } from '../../types/project';
+import { hasProjectCommit, type Project } from '../../types/project';
 import type { ProjectGeoJSONMapData } from '../../types/projectGeoJSON';
 import type { DepthDomain } from '../../utils/depthColoring';
 import { prepareProjectDepth } from '../../utils/prepareProjectDepth';
@@ -71,8 +71,8 @@ async function normalizeProjectMapData(
   yieldWork: MainThreadYield,
 ): Promise<PreparedProjectMapData | null> {
   const featureCollection = normalizeGeoJSON(mapData?.featureCollection);
-  if (!featureCollection || featureCollection.features.length === 0) return null;
-  if (mapData?.commitId !== project.latest_commit.id) return null;
+  if (!mapData || !featureCollection || featureCollection.features.length === 0) return null;
+  if (mapData?.commitId !== project.latest_commit?.id) return null;
   const prepared = await prepareProjectDepth(featureCollection, isStale, yieldWork);
   if (!prepared) return null;
   return {
@@ -326,7 +326,7 @@ export function useDashboardMapData({
   );
   const geoJsonProjects = useMemo(
     () => sortedProjects.filter((project) => (
-      !project.exclude_geojson && Boolean(project.geojson_file)
+      hasProjectCommit(project) && !project.exclude_geojson && Boolean(project.geojson_file)
     )),
     [sortedProjects],
   );
@@ -342,7 +342,7 @@ export function useDashboardMapData({
     const next: ProjectMapDataRecord = {};
     for (const project of geoJsonProjects) {
       const loaded = projectMapData[project.id];
-      if (loaded?.commitId === project.latest_commit.id) next[project.id] = loaded;
+      if (loaded?.commitId === project.latest_commit?.id) next[project.id] = loaded;
     }
     return next;
   }, [geoJsonProjects, projectMapData]);
