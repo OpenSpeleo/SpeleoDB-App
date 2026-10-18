@@ -4,6 +4,8 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ## Unreleased
 
+## v2026.10.18
+
 ### Features
 
 ### UI/UX
@@ -15,6 +17,8 @@ Highlights from SpeleoDB’s mobile app releases.
 
 ### Fixes
 
+- Prevent map loading errors for projects without a first survey commit.
+  `e5ead1b`
 - Keep map dragging in the expected direction and responsive after pinch zooms.
   `013c9be`
 - Prevent the app from getting stuck on the splash screen during launch.
