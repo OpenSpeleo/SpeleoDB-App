@@ -40,7 +40,7 @@ describe('generated operations through the mobile transport', () => {
       timeoutMs: null,
       transport: createMobileApiTransport(http),
     });
-    await expect(v2UserAuthTokenRetrieve({ client }))
+    await expect(v2UserAuthTokenRetrieve(undefined, { client }))
       .rejects.toThrow('The mobile API transport requires a finite timeoutMs.');
     expect(metadata).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();

@@ -54,81 +54,81 @@ export class SpeleoDBService {
 
   authenticate(instance: string, email: string, password: string, options: ServiceRequestOptions = {}) {
     return this.execute(instance, undefined, options, (request) =>
-      v2UserAuthTokenCreateWithJson({ email, password }, request));
+      v2UserAuthTokenCreateWithJson({ email, password }, undefined, request));
   }
 
   validateToken(instance: string, token: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, v2UserAuthTokenRetrieve);
+    return this.execute(instance, token, options, (request) => v2UserAuthTokenRetrieve(undefined, request));
   }
 
   getProjectsGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, v2ProjectsGeojsonList);
+    return this.execute(instance, token, options, (request) => v2ProjectsGeojsonList(undefined, request));
   }
 
   getLandmarksGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, v2LandmarksGeojsonRetrieve);
+    return this.execute(instance, token, options, (request) => v2LandmarksGeojsonRetrieve(undefined, request));
   }
 
   getLandmarkCollections(instance: string, token: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, v2LandmarkCollectionsList);
+    return this.execute(instance, token, options, (request) => v2LandmarkCollectionsList(undefined, request));
   }
 
   createLandmark(instance: string, token: string, input: LandmarkCreateInput, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, (request) => v2LandmarksCreateWithJson(input, request));
+    return this.execute(instance, token, options, (request) => v2LandmarksCreateWithJson(input, undefined, request));
   }
 
   updateLandmark(instance: string, token: string, id: string, input: LandmarkUpdateInput, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, (request) => v2LandmarksPartialUpdateWithJson(id, input, request));
+    return this.execute(instance, token, options, (request) => v2LandmarksPartialUpdateWithJson(id, input, undefined, request));
   }
 
   deleteLandmark(instance: string, token: string, id: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, (request) => v2LandmarksDestroy(id, request));
+    return this.execute(instance, token, options, (request) => v2LandmarksDestroy(id, undefined, request));
   }
 
   getGpsTracks(instance: string, token: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, v2GpsTracksList);
+    return this.execute(instance, token, options, (request) => v2GpsTracksList(undefined, request));
   }
 
   updateGpsTrack(instance: string, token: string, id: string, input: GpsTrackUpdateInput, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, (request) => v2GpsTracksPartialUpdateWithJson(id, input, request));
+    return this.execute(instance, token, options, (request) => v2GpsTracksPartialUpdateWithJson(id, input, undefined, request));
   }
 
   deleteGpsTrack(instance: string, token: string, id: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, (request) => v2GpsTracksDestroy(id, request));
+    return this.execute(instance, token, options, (request) => v2GpsTracksDestroy(id, undefined, request));
   }
 
   uploadGpx(instance: string, token: string, gpxText: string, fileName: string, collection?: string | null, options: ServiceRequestOptions = {}) {
     return this.execute(instance, token, options, (request) => v2ImportGpxUpdate({
       file: new File([gpxText], fileName, { type: GPS.GPX_CONTENT_TYPE }),
       ...(collection ? { collection } : {}),
-    }, request));
+    }, undefined, request));
   }
 
   getSubsurfaceStationsGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, v2StationsSubsurfaceGeojsonRetrieve);
+    return this.execute(instance, token, options, (request) => v2StationsSubsurfaceGeojsonRetrieve(undefined, request));
   }
 
   getSurfaceStationsGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, v2StationsSurfaceGeojsonRetrieve);
+    return this.execute(instance, token, options, (request) => v2StationsSurfaceGeojsonRetrieve(undefined, request));
   }
 
   getExplorationLeadsGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, v2ExplorationLeadsGeojsonRetrieve);
+    return this.execute(instance, token, options, (request) => v2ExplorationLeadsGeojsonRetrieve(undefined, request));
   }
 
   getCylinderInstallsGeoJSON(instance: string, token: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, v2CylinderInstallsGeojsonRetrieve);
+    return this.execute(instance, token, options, (request) => v2CylinderInstallsGeojsonRetrieve(undefined, request));
   }
 
   getGisGeometries(instance: string, token: string, options: ServiceRequestOptions = {}) {
-    return this.execute(instance, token, options, (request) => v2GisGeometriesList({
+    return this.execute(instance, token, options, (request) => v2GisGeometriesList(undefined, {
       ...request, responsePolicy: 'status-first-json', cookiePolicy: 'omit',
     }));
   }
 
   async getGisGeometry(instance: string, token: string, id: string, options: ServiceRequestOptions = {}) {
     if (!isGisGeometryId(id)) throw new TypeError('Invalid GIS Geometry identifier.');
-    return this.execute(instance, token, options, (request) => v2GisGeometriesRetrieve(id, {
+    return this.execute(instance, token, options, (request) => v2GisGeometriesRetrieve(id, undefined, {
       ...request, responsePolicy: 'status-first-json', cookiePolicy: 'omit',
     }));
   }

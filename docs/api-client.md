@@ -106,7 +106,15 @@ For a consumer update:
 3. Update calls in `SpeleoDBService` and import wire types from the package. Use
    the generated JSON variant for JSON bodies and the multipart variant for file
    uploads. Generated operation options receive the per-call client; avoid
-   reconstructing paths with URL helper exports.
+   reconstructing paths with URL helper exports. Read each generated signature:
+   version 0.3.0 introduces optional query parameters, including DRF's `format`,
+   before the final request-options argument. Pass `undefined` for unused query
+   parameters, for example `v2UserAuthTokenRetrieve(undefined, { client })`. For
+   mutations, keep the path/body arguments first and request options last.
+   Passing request options in the query slot loses the per-call client and its
+   cancellation, deadline, and transport policies. Mobile continues using its
+   JSON Accept header without adding query parameters to GIS URLs, preserving
+   the cookie-free native transport's URL admission rules.
 4. Preserve durable cache/queue types where older stored records omit fields.
    Derive their shared fields from generated models, document compatibility
    differences, and test old records before changing persistence semantics.
