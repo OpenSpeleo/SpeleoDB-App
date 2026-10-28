@@ -107,7 +107,7 @@ For a consumer update:
    the generated JSON variant for JSON bodies and the multipart variant for file
    uploads. Generated operation options receive the per-call client; avoid
    reconstructing paths with URL helper exports. Read each generated signature:
-   version 0.3.0 introduces optional query parameters, including DRF's `format`,
+   operations can include optional query parameters, including DRF's `format`,
    before the final request-options argument. Pass `undefined` for unused query
    parameters, for example `v2UserAuthTokenRetrieve(undefined, { client })`. For
    mutations, keep the path/body arguments first and request options last.
