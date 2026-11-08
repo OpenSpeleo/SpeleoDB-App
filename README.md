@@ -66,7 +66,9 @@ Bun executable path (or launch the IDE from a shell where Bun is on `PATH`).
 
 ## Make Targets
 
-Run `make help` to see all targets. Here is the full reference:
+Run `make help` to see all targets. Use `prek run --all-files` for linting, type
+checking, and build checks. Run `make quality` for the tracked-file quality
+inventory and `make test-ci` for the full one-shot test suite with coverage.
 
 ### Web Development
 
@@ -76,7 +78,6 @@ Run `make help` to see all targets. Here is the full reference:
 | `make dev`     | Start Vite dev server (live reload)          |
 | `make build`   | Build the web app for production             |
 | `make clean`   | Remove `dist/`, `build/`, Vite cache         |
-| `make lint`    | Run ESLint                                   |
 
 ### Testing
 

@@ -18,8 +18,7 @@ DEVICE_UDID     = $(shell bun scripts/resolve-ios-simulator.mjs "$(SIMULATOR)" 2
 SIMULATOR_LABEL = $(if $(SIMULATOR),$(SIMULATOR),auto-selected iPhone)
 BUILD_DIR       := build
 
-.PHONY: help install clean dev build quality lint typecheck test test-ci ci \
-        pre-commit \
+.PHONY: help install clean dev build quality test test-ci \
         sync ios-open ios-build ios-release ios-sim ios-sim-run ios-sim-boot \
         ios-sim-shutdown ios-device ios-live ios-log cap-doctor \
         dependencies update
@@ -48,14 +47,8 @@ clean: ## Remove build artifacts
 	rm -rf dist $(BUILD_DIR) node_modules/.vite
 	@echo "Cleaned dist/, $(BUILD_DIR)/, and Vite cache."
 
-lint: ## Run ESLint
-	bun run lint
-
 quality: ## Verify every tracked file has a quality classification
 	bun run quality:inventory
-
-typecheck: ## Run TypeScript type checking
-	bun run typecheck
 
 # ── Tests ─────────────────────────────────────────────────────
 test: ## Run unit tests (Vitest)
@@ -63,13 +56,6 @@ test: ## Run unit tests (Vitest)
 
 test-ci: ## Run unit tests (Vitest, one-shot)
 	bun run test:ci
-
-# ── CI ────────────────────────────────────────────────────────
-ci: quality lint typecheck test-ci build ## Run the full web CI pipeline locally
-
-# ── Git hooks (prek) ──────────────────────────────────────────
-pre-commit: ## Run all pre-commit hooks against the entire repo
-	bunx --bun prek run --all-files
 
 # ── Capacitor ─────────────────────────────────────────────────
 sync: build ## Build web + sync to both native platforms

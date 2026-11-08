@@ -281,10 +281,11 @@ with those runtime APIs. Do not bypass resolution with `--force` or
 `quality/dependency-update.test.ts` executes the actual Make target with local
 package-manager doubles to verify the update policy, install ordering, and
 failure propagation without registry traffic. Real `bun install`,
-`test -s bun.lock && bun install --frozen-lockfile`, `bun pm ls`, and `make ci`
-provide resolution and application verification after an update. Native
-dependency changes additionally require the native/device gates above. The
-update policy adds no application runtime work.
+`test -s bun.lock && bun install --frozen-lockfile`, `bun pm ls`,
+`prek run --all-files`, `make quality`, and `make test-ci` provide resolution
+and application verification after an update. Native dependency changes
+additionally require the native/device gates above. The update policy adds no
+application runtime work.
 
 ### Application checks
 
@@ -292,8 +293,9 @@ Before changing CI-sensitive code, run the same core commands locally:
 
 ```bash
 bun --version # exact version from .bun-version
-make ci
-PREK_HOME=/private/tmp/prek bunx --bun prek run -a --show-diff-on-failure
+prek run --all-files --show-diff-on-failure
+make quality
+make test-ci
 ```
 
 CI, local scripts and native asset wrappers use the exact `.bun-version`
@@ -302,10 +304,11 @@ dependency linker. Gradle and Xcode discover `BUN_BINARY`, PATH or standard Bun
 install locations; they do not require a separate Node runtime for the web-asset
 phase.
 
-`make ci` verifies the tracked-file quality inventory, lint, type checking, the
-full one-shot Vitest suite with coverage and serialized test files, and the
-production web build. For the browser layout gate, additionally run
-`bunx --bun playwright install chromium webkit` once, then
+`prek run --all-files` runs the repository checks, including lint, type
+checking, and the production web build. `make quality` verifies the tracked-file
+quality inventory; `make test-ci` runs the full one-shot Vitest suite with
+coverage and serialized test files. For the browser layout gate, additionally
+run `bunx --bun playwright install chromium webkit` once, then
 `bun run test:browser` after the build. Playwright is a development-only
 dependency and its browsers are not shipped in native/web bundles. Run Android
 Gradle and iOS `xcodebuild` locally when changing native configuration or
