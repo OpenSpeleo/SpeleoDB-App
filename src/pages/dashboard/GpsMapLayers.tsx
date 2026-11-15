@@ -1,3 +1,4 @@
+import { MAP_LAYER_MIN_ZOOM } from '@speleodb/map-viewer';
 import { visibleRecordsFilter } from '../../utils/viewerFilters';
 import { Layer, Source } from 'react-map-gl/maplibre';
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
@@ -24,6 +25,7 @@ function SavedGpsTrackLayer({ featureCollection, visibility, colors }: SavedGpsT
         id="gps-tracks-line"
         filter={visibility && visibleRecordsFilter(visibility)}
         type="line"
+        minzoom={MAP_LAYER_MIN_ZOOM.GPS_TRACK_LINE}
         layout={GEOJSON_LINE_LAYOUT}
         paint={{
           'line-color': color,
@@ -51,6 +53,7 @@ function RecordingGpsTrackLayer({
       <Layer
         id="gps-recording-track-line"
         type="line"
+        minzoom={MAP_LAYER_MIN_ZOOM.GPS_TRACK_LINE}
         layout={GEOJSON_LINE_LAYOUT}
         paint={{
           'line-color': '#ef4444',

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { MAP_LAYER_MIN_ZOOM } from '@speleodb/map-viewer';
 
 import {
   buildLayerStyle,
@@ -65,7 +66,7 @@ describe('MapLayersService', () => {
       const style = buildLayerStyle('esri-world-hillshade') as {
         version: number;
         sources: Record<string, { type: string; tiles: string[]; maxzoom: number }>;
-        layers: Array<{ id: string; type: string; source: string; maxzoom: number }>;
+        layers: Array<{ id: string; type: string; source: string; minzoom: number; maxzoom: number }>;
       };
 
       expect(style.version).toBe(8);
@@ -75,6 +76,7 @@ describe('MapLayersService', () => {
       // offline parity); display layer overzooms beyond it.
       expect(style.sources['esri-world-hillshade'].maxzoom).toBe(18);
       expect(style.layers[0].source).toBe('esri-world-hillshade');
+      expect(style.layers[0].minzoom).toBe(MAP_LAYER_MIN_ZOOM.BASEMAP_RASTER);
       expect(style.layers[0].maxzoom).toBeGreaterThanOrEqual(Math.ceil(MAP.MAX_ZOOM));
     });
 

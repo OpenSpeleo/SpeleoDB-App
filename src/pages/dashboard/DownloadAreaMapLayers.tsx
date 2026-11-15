@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type RefObject } from 'react';
+import { MAP_LAYER_MIN_ZOOM } from '@speleodb/map-viewer';
 import { Layer, Source, type MapRef } from 'react-map-gl/maplibre';
 import type { DownloadArea } from '../../types/downloadArea';
 import { areaFeatureCollection } from '../../services/downloadAreaGeometry';
@@ -59,11 +60,13 @@ export function DownloadAreaMapLayers({
       <Layer
         id="download-areas-fill"
         type="fill"
+        minzoom={MAP_LAYER_MIN_ZOOM.DOWNLOAD_AREA}
         paint={{ 'fill-color': ['get', 'color'], 'fill-opacity': 0.18 }}
       />
       <Layer
         id="download-areas-stripes"
         type="fill"
+        minzoom={MAP_LAYER_MIN_ZOOM.DOWNLOAD_AREA}
         paint={
           patternReady
             ? { 'fill-pattern': 'offline-area-stripes' }
@@ -73,6 +76,7 @@ export function DownloadAreaMapLayers({
       <Layer
         id="download-areas-outline"
         type="line"
+        minzoom={MAP_LAYER_MIN_ZOOM.DOWNLOAD_AREA}
         layout={GEOJSON_LINE_LAYOUT}
         paint={{
           'line-color': ['get', 'color'],

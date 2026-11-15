@@ -83,8 +83,10 @@ measurement unit settings are documented in `docs/map-depth-and-scale.md`.
 
 ### Project GeoJSON layer zooms
 
-- Project line/polygon outline minimum zoom: `PROJECT_LAYERS.lineMinZoom = 0`
-- Project point/star minimum zoom: `PROJECT_LAYERS.entrySymbolMinZoom = 5`
+- Project line/polygon outline minimum zoom:
+  `MAP_LAYER_MIN_ZOOM.PROJECT_LINE = 0`
+- Project point/star minimum zoom:
+  `MAP_LAYER_MIN_ZOOM.PROJECT_ENTRY_SYMBOL = 10`
 - Project point/star text size: `PROJECT_LAYERS.entrySymbolTextSize` (zoom
   interpolation)
 
@@ -110,28 +112,30 @@ per-item selections, or the camera. See [Settings](settings.md).
     when the collection color is white so the marker stays visible (mirrors the
     web map viewer). See `docs/landmark-collections.md`.
   - marker min zoom `12`,
-  - label layer (`name`) from zoom `14`.
+  - label layer (`name`) from zoom `16`.
 - Surface stations:
   - symbol marker `◆`,
   - color from `properties.color` (normalized from station/tag color), fallback
     `#fb923c`,
   - marker min zoom `12`,
-  - label layer (`name`) from zoom `14`.
+  - label layer (`name`) from zoom `16`.
 - Subsurface stations:
   - sensor/no-type points rendered as circles with color fallback `#fb923c`,
   - `type=biology|bone|artifact|geology` rendered with icon images,
   - marker min zoom `12`,
-  - label layer (`name`) from zoom `14`.
+  - label layer (`name`) from zoom `16`.
 - Exploration leads:
   - `exploration-lead-icon` symbol layer,
   - fallback to red circle when icon cannot load,
-  - marker min zoom `12`,
+  - icons, fallback markers and direction cones share zoom `15` through
+    `MAP_LAYER_MIN_ZOOM.EXPLORATION_LEAD_SYMBOL` from `@speleodb/map-viewer`,
+    also used by web; the cone builder applies this threshold directly,
   - no dedicated label layer.
 - Cylinder installs:
   - `cylinder-icon` symbol layer,
   - fallback to orange bullet symbol when icon cannot load,
   - marker min zoom `12`,
-  - label layer from zoom `14` with `install_date @ pressure unit`.
+  - label layer from zoom `16` with `install_date @ pressure unit`.
 
 ## Icon assets
 
@@ -209,6 +213,7 @@ pattern `/^project-.+-point$/`.
 
 - **Exploration lead** (title: "Exploration Lead"):
   - Description (fallback: `No description available.`)
+  - Up to three saved directions, selected through tabs on a read-only compass.
 - **Cylinder install** (title: "Cylinder Install"):
   - Pressure + unit (`pressure` + `pressure_unit_system`, with
     `imperial => PSI`, otherwise `BAR`)
@@ -241,6 +246,49 @@ pattern `/^project-.+-point$/`.
   - GPS coordinate (extracted from feature geometry as `lat, lng`)
 - **Map long press** (title: "Map Point"):
   - GPS coordinate (converted from pixel position via `map.unproject()`)
+
+### Exploration lead directions
+
+Lead GeoJSON carries `properties.headings`, a numeric array with up to three
+clockwise bearings from north in `[0, 360)`. The existing overlay cache
+preserves the array unchanged, including when offline. Previously cached
+payloads without the property show "No direction set". Rendered-feature hit
+results can contain the array as JSON text; the details parser decodes it before
+validating values.
+
+`ExplorationLeadCompass` mounts the shared framework-neutral compass from
+`@speleodb/map-viewer/heading-compass` in read-only mode. It uses the saved
+values only and never subscribes to device heading. Adding, editing and removing
+directions remain web operations. The phone's live map compass and blue location
+cone are independent. The dial uses "Lead 1", "Lead 2" and "Lead 3" tabs to
+inspect existing headings, displaying only the selected direction's red needle
+and its whole-degree reading in the center. Saved fractional bearings are
+rounded for this display only, with a rounded full turn shown as north; opening
+the compass or switching tabs never changes the cached values. Selecting a tab
+changes the needle and degree reading without replacing the compass or changing
+the saved directions. An unset lead displays its empty-state text without
+reserving space for a dial. Keyboard arrows and Home/End also select tabs.
+
+`OverlayMapLayers` memoizes shared `buildExplorationLeadCones` output when lead
+data changes. The derived source contains a fifteen-metre, 45-degree sector for
+each heading, rendered red at 80% opacity above the lead icons. The shared
+source options disable simplification. This metric size intentionally shrinks at
+lower zooms. Cones share lead minimum zoom, category and project visibility,
+remain non-interactive, and do not create offline coverage areas or cache
+records.
+
+The cone source mounts first. Icon and fallback layers explicitly insert before
+the cone layer, keeping cones above them when image loading finishes late or the
+map style is rebuilt. JSX sibling order alone does not preserve MapLibre's
+insertion order when conditional marker layers mount later.
+
+Tests cover durable cache readback, renderer-array decoding, read-only modal
+lifecycle, source injection, renderer insertion order and visibility without
+rebuilding geometry. Shared package tests own geometry and paint contracts;
+browser interaction tests own pointer behavior of the editable shared compass.
+No native sensor or persistence schema changed, so no native API test is
+required by this feature; builds do not establish physical-device rendering
+evidence.
 
 ### Fallback values
 
@@ -319,26 +367,31 @@ just the GPS coordinate of the pressed point.
 - The tap candidate ref is nulled when the long-press fires, preventing the
   subsequent `pointerup` from also triggering a marker tap query.
 
-Zoom levels and marker sizes are sourced from `MAP_OVERLAYS` in
-`src/constants.ts` (`markerMinZoom`, `labelMinZoom`, `sizes`).
+Layer minimum zooms come from `MAP_LAYER_MIN_ZOOM` in `@speleodb/map-viewer`,
+shared with the web viewer. The shared marker builders apply them directly;
+app-owned project, GPS, cylinder and lead marker layers use the same table.
+`MAP_OVERLAYS` retains sizes and legend metadata only. Visibility zooms are no
+longer stored in mobile constants or passed as builder overrides.
 
 ### Overlay zoom matrix
 
-- `landmarks`:
-  - `markerMinZoom = 12`
-  - `labelMinZoom = 14`
-- `surfaceStations`:
-  - `markerMinZoom = 12`
-  - `labelMinZoom = 14`
-- `subsurfaceStations`:
-  - `markerMinZoom = 12`
-  - `labelMinZoom = 14`
-- `explorationLeads`:
-  - `markerMinZoom = 12`
-  - `labelMinZoom = null` (no label layer)
-- `cylinderInstalls`:
-  - `markerMinZoom = 12`
-  - `labelMinZoom = 14`
+| Overlay                     | Marker minimum zoom | Label minimum zoom |
+| --------------------------- | ------------------- | ------------------ |
+| Landmarks                   | 12                  | 16                 |
+| Surface stations            | 12                  | 16                 |
+| Subsurface stations         | 12                  | 16                 |
+| Exploration leads and cones | 15                  | No label layer     |
+| Cylinder installs           | 12                  | 16                 |
+
+Project lines and saved/recorded GPS lines use zoom 0; cave entrance stars use
+zoom 10. Project line labels, where rendered, use zoom 14. Camera navigation,
+interaction thresholds and offline tile coverage remain separate policies.
+Raster basemaps, GIS geometry/aliases and download-area layers also read their
+minimum zoom from the shared table. Test assertions and fixtures import the
+corresponding keys rather than maintaining numeric copies. Regression tests
+inspect generated layers alongside source binding, icon fallbacks and
+category/project gating, so a visibility change does not bypass those existing
+controls.
 
 ## Offline/cache/resync/logout lifecycle
 

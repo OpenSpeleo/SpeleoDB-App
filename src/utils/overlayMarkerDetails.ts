@@ -1,4 +1,4 @@
-import { normalizeLandmarkIcon, type LandmarkIcon } from '@speleodb/map-core';
+import { explorationLeadHeadings, normalizeLandmarkIcon, type LandmarkIcon } from '@speleodb/map-core';
 
 export type InteractiveOverlayLayerId =
   | 'exploration-leads-icon-layer'
@@ -42,6 +42,7 @@ export interface ExplorationLeadDetails {
   type: 'explorationLead';
   id: string;
   description: string;
+  headings: number[];
 }
 
 export interface CylinderInstallDetails {
@@ -217,6 +218,11 @@ export function parseOverlayMarkerDetails(
 
 function parseExplorationLead(feature: InteractiveOverlayFeature): ExplorationLeadDetails {
   const properties = feature.properties ?? {};
+  // MapLibre serializes array properties in rendered-feature query results.
+  let headings: unknown = properties.headings;
+  if (typeof headings === 'string') {
+    try { headings = JSON.parse(headings); } catch { headings = []; }
+  }
   const description = typeof properties.description === 'string' && properties.description.trim()
     ? properties.description.trim()
     : 'No description available.';
@@ -225,6 +231,7 @@ function parseExplorationLead(feature: InteractiveOverlayFeature): ExplorationLe
     type: 'explorationLead',
     id: getFeatureId(feature),
     description,
+    headings: explorationLeadHeadings(headings),
   };
 }
 

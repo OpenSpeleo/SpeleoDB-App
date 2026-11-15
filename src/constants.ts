@@ -321,9 +321,7 @@ export const COLORS = {
 // ==================== PROJECT LAYERS ====================
 
 export const PROJECT_LAYERS: ProjectLayerConfig = {
-  lineMinZoom: 0,
   lineWidth: createGeoJSONLineWidth(2.5),
-  entrySymbolMinZoom: 5,
   entrySymbolTextSize: ['interpolate', ['linear'], ['zoom'], 8, 18, 14, 24],
 } as const;
 
@@ -333,8 +331,6 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
   {
     id: 'landmarks',
     label: 'Landmarks',
-    markerMinZoom: 12,
-    labelMinZoom: 14,
     sizes: {
       markerTextSize: ['interpolate', ['linear'], ['zoom'], 6, 8, 10, 12, 14, 16, 18, 22],
       labelTextSize: ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 12, 18, 14],
@@ -352,8 +348,6 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
   {
     id: 'subsurfaceStations',
     label: 'Subsurface Stations',
-    markerMinZoom: 12,
-    labelMinZoom: 14,
     sizes: {
       markerCircleRadius: ['interpolate', ['linear'], ['zoom'], 14, 5, 18, 8],
       markerIconSize: ['interpolate', ['linear'], ['zoom'], 14, 0.6, 18, 1.0],
@@ -395,8 +389,6 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
   {
     id: 'surfaceStations',
     label: 'Surface Stations',
-    markerMinZoom: 12,
-    labelMinZoom: 14,
     sizes: {
       markerTextSize: ['interpolate', ['linear'], ['zoom'], 14, 16, 18, 24],
       labelTextSize: 12,
@@ -414,8 +406,6 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
   {
     id: 'explorationLeads',
     label: 'Exploration Leads',
-    markerMinZoom: 12,
-    labelMinZoom: null,
     sizes: {
       markerIconSize: ['interpolate', ['linear'], ['zoom'], 14, 0.4, 18, 0.6],
       fallbackCircleRadius: ['interpolate', ['linear'], ['zoom'], 14, 8, 18, 12],
@@ -432,8 +422,6 @@ export const MAP_OVERLAYS: readonly MapOverlayDefinition[] = [
   {
     id: 'cylinderInstalls',
     label: 'Cylinder Installs',
-    markerMinZoom: 12,
-    labelMinZoom: 14,
     sizes: {
       markerIconSize: ['interpolate', ['linear'], ['zoom'], 14, 0.8, 18, 1.2],
       fallbackTextSize: ['interpolate', ['linear'], ['zoom'], 14, 18, 18, 26],

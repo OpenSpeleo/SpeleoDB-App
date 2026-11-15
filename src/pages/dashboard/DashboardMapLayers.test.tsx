@@ -1,3 +1,4 @@
+import { MAP_LAYER_MIN_ZOOM } from '@speleodb/map-viewer';
 import React from 'react';
 import { render } from '@testing-library/react';
 import { createExpression, latest } from '@maplibre/maplibre-gl-style-spec';
@@ -12,7 +13,7 @@ import { ProjectMapLayers } from './ProjectMapLayers';
 import { GisGeometryMapLayers } from './GisGeometryMapLayers';
 import { DownloadAreaMapLayers } from './DownloadAreaMapLayers';
 
-const sourceInputs = vi.hoisted(() => ({ record: vi.fn() }));
+const sourceInputs = vi.hoisted(() => ({ record: vi.fn(), leadLayerOrder: [] as string[] }));
 
 vi.mock('react-map-gl/maplibre', () => ({
   Source: ({
@@ -46,7 +47,17 @@ vi.mock('react-map-gl/maplibre', () => ({
     layout?: unknown;
     beforeId?: string;
     minzoom?: number;
-  }) => (
+  }) => {
+    // MapLibre appends newly mounted layers unless beforeId names an existing layer.
+    // JSX order alone cannot represent icons that become available after the cones.
+    React.useLayoutEffect(() => {
+      if (!id.startsWith('exploration-leads-')) return;
+      const index = beforeId ? sourceInputs.leadLayerOrder.indexOf(beforeId) : sourceInputs.leadLayerOrder.length;
+      if (index < 0) throw new Error(`Missing layer order target: ${beforeId}`);
+      sourceInputs.leadLayerOrder.splice(index, 0, id);
+      return () => { sourceInputs.leadLayerOrder.splice(sourceInputs.leadLayerOrder.indexOf(id), 1); };
+    }, [id, beforeId]);
+    return (
     <div
       data-layer-id={id}
       data-layer-source-id={source}
@@ -58,7 +69,8 @@ vi.mock('react-map-gl/maplibre', () => ({
       data-minzoom={minzoom}
       data-text-color-expression={JSON.stringify(paint?.['text-color'])}
     />
-  ),
+    );
+  },
 }));
 
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -151,7 +163,7 @@ describe('Dashboard map layers', () => {
     expect(source).toHaveAttribute('data-tolerance', '0');
     const line = container.querySelector(`[data-layer-id="project-${PROJECT.id}-line"]`)!;
     expect(line).toHaveAttribute('data-layer-source-id', `project-${PROJECT.id}`);
-    expect(line).toHaveAttribute('data-minzoom', '0');
+    expect(line).toHaveAttribute('data-minzoom', String(MAP_LAYER_MIN_ZOOM.PROJECT_LINE));
     expect(layoutFor(container, `project-${PROJECT.id}-line`)).toEqual({
       'line-cap': 'round', 'line-join': 'round', visibility: 'visible',
     });
@@ -177,6 +189,7 @@ describe('Dashboard map layers', () => {
       colorMode: 'depth' as const, depthDomain: { min: 0, max: 50 },
     };
     const { container, rerender } = render(<ProjectMapLayers {...props} showCaveEntrances />);
+    expect(container.querySelector(`[data-layer-id="project-${PROJECT.id}-point"]`)).toHaveAttribute('data-minzoom', String(MAP_LAYER_MIN_ZOOM.PROJECT_ENTRY_SYMBOL));
     const source = container.querySelector(`[data-source-id="project-${PROJECT.id}"]`);
     const line = container.querySelector(`[data-layer-id="project-${PROJECT.id}-line"]`);
     const originalPaint = line?.getAttribute('data-paint');
@@ -193,16 +206,34 @@ describe('Dashboard map layers', () => {
   });
 
   it.each([
-    ['landmarks', ['landmarks-layer', 'landmarks-labels']],
-    ['surfaceStations', ['surface-stations-layer', 'surface-stations-labels']],
-    ['surveyStations', ['subsurface-stations-circles', 'subsurface-stations-biology-icons', 'subsurface-stations-bone-icons', 'subsurface-stations-artifact-icons', 'subsurface-stations-geology-icons', 'subsurface-stations-labels']],
-    ['explorationLeads', ['exploration-leads-icon-layer']],
-    ['cylinders', ['cylinder-installs-icon-layer', 'cylinder-installs-labels']],
-  ] as const)('composes the %s gate across its layers while retaining the source data', (category, layerIds) => {
+    ['landmarks', ['landmarks-layer', 'landmarks-labels'], [MAP_LAYER_MIN_ZOOM.LANDMARK_SYMBOL, MAP_LAYER_MIN_ZOOM.LANDMARK_LABEL]],
+    ['surfaceStations', ['surface-stations-layer', 'surface-stations-labels'], [MAP_LAYER_MIN_ZOOM.SURFACE_STATION_SYMBOL, MAP_LAYER_MIN_ZOOM.SURFACE_STATION_LABEL]],
+    ['surveyStations', [
+      'subsurface-stations-circles',
+      'subsurface-stations-biology-icons',
+      'subsurface-stations-bone-icons',
+      'subsurface-stations-artifact-icons',
+      'subsurface-stations-geology-icons',
+      'subsurface-stations-labels',
+    ], [
+      MAP_LAYER_MIN_ZOOM.SUBSURFACE_STATION_SYMBOL,
+      MAP_LAYER_MIN_ZOOM.SUBSURFACE_STATION_SYMBOL,
+      MAP_LAYER_MIN_ZOOM.SUBSURFACE_STATION_SYMBOL,
+      MAP_LAYER_MIN_ZOOM.SUBSURFACE_STATION_SYMBOL,
+      MAP_LAYER_MIN_ZOOM.SUBSURFACE_STATION_SYMBOL,
+      MAP_LAYER_MIN_ZOOM.SUBSURFACE_STATION_LABEL,
+    ]],
+    ['explorationLeads', ['exploration-leads-icon-layer', 'exploration-leads-cones-layer'], [MAP_LAYER_MIN_ZOOM.EXPLORATION_LEAD_SYMBOL, MAP_LAYER_MIN_ZOOM.EXPLORATION_LEAD_SYMBOL]],
+    ['cylinders', ['cylinder-installs-icon-layer', 'cylinder-installs-labels'], [MAP_LAYER_MIN_ZOOM.CYLINDER_INSTALL_SYMBOL, MAP_LAYER_MIN_ZOOM.CYLINDER_INSTALL_LABEL]],
+  ] as const)('composes the %s gate across its layers while retaining the source data', (category, layerIds, minimumZooms) => {
     const { container, rerender } = render(allOverlays(DEFAULT_DISPLAY));
+    layerIds.forEach((layerId, index) => {
+      expect(container.querySelector(`[data-layer-id="${layerId}"]`)).toHaveAttribute('data-minzoom', String(minimumZooms[index]));
+    });
     const sources = [...container.querySelectorAll('[data-source-id]')];
     const layers = [...container.querySelectorAll('[data-layer-id]')];
     const hidden = { ...DEFAULT_DISPLAY, categories: { ...DEFAULT_DISPLAY.categories, [category]: false } };
+    const sourceData = new Map(sourceInputs.record.mock.calls.map(([id, data]) => [id, data]));
     sourceInputs.record.mockClear();
     rerender(allOverlays(hidden));
     for (const layerId of layerIds) {
@@ -216,7 +247,7 @@ describe('Dashboard map layers', () => {
       }
     }
     expect([...container.querySelectorAll('[data-source-id]')]).toEqual(sources);
-    for (const [, data] of sourceInputs.record.mock.calls) expect(data).toBe(POINT_FEATURE_COLLECTION);
+    for (const [id, data] of sourceInputs.record.mock.calls) expect(data).toBe(sourceData.get(id));
     rerender(allOverlays(DEFAULT_DISPLAY));
     for (const layerId of layerIds) expect(layoutFor(container, layerId).visibility).toBe('visible');
   });
@@ -228,6 +259,9 @@ describe('Dashboard map layers', () => {
       iconsLoaded={false} iconAvailability={NO_ICONS}
     />);
     rerender(allOverlays(preferences, NO_ICONS));
+    expect(container.querySelector('[data-layer-id="exploration-leads-fallback-layer"]')).toHaveAttribute('data-minzoom', String(MAP_LAYER_MIN_ZOOM.EXPLORATION_LEAD_SYMBOL));
+    expect(container.querySelector('[data-layer-id="cylinder-installs-fallback-layer"]')).toHaveAttribute('data-minzoom', String(MAP_LAYER_MIN_ZOOM.CYLINDER_INSTALL_SYMBOL));
+    expect(container.querySelector('[data-layer-id="cylinder-installs-labels"]')).toHaveAttribute('data-minzoom', String(MAP_LAYER_MIN_ZOOM.CYLINDER_INSTALL_LABEL));
     for (const id of ['exploration-leads-fallback-layer', 'cylinder-installs-fallback-layer', 'cylinder-installs-labels']) {
       expect(layoutFor(container, id).visibility).toBe('none');
     }
@@ -377,22 +411,23 @@ describe('Dashboard map layers', () => {
         currentTrackFeatureCollection={POINT_FEATURE_COLLECTION} recordingState="recording" />
       <DownloadAreaMapLayers areas={[]} mapRef={{ current: null }} />
     </>);
-    const expectedDetailWidths: Record<string, [number, number]> = {
-      [`project-${PROJECT.id}-line`]: [2.5, 2.5],
-      'gis-geometries-line': [2.5, 2.5],
-      'gis-geometries-outline': [1.5, 1.5],
-      'gps-tracks-line': [6, 7],
-      'gps-recording-track-line': [4, 4],
-      'download-areas-outline': [1.5, 1.5],
+    const expectedLineSettings: Record<string, [detailWidth: number, closeWidth: number, minimumZoom: number]> = {
+      [`project-${PROJECT.id}-line`]: [2.5, 2.5, MAP_LAYER_MIN_ZOOM.PROJECT_LINE],
+      'gis-geometries-line': [2.5, 2.5, MAP_LAYER_MIN_ZOOM.GIS_GEOMETRY],
+      'gis-geometries-outline': [1.5, 1.5, MAP_LAYER_MIN_ZOOM.GIS_GEOMETRY],
+      'gps-tracks-line': [6, 7, MAP_LAYER_MIN_ZOOM.GPS_TRACK_LINE],
+      'gps-recording-track-line': [4, 4, MAP_LAYER_MIN_ZOOM.GPS_TRACK_LINE],
+      'download-areas-outline': [1.5, 1.5, MAP_LAYER_MIN_ZOOM.DOWNLOAD_AREA],
     };
     const lines = [...container.querySelectorAll('[data-layer-type="line"]')];
-    expect(lines).toHaveLength(Object.keys(expectedDetailWidths).length);
+    expect(lines).toHaveLength(Object.keys(expectedLineSettings).length);
     for (const line of lines) {
       const id = line.getAttribute('data-layer-id')!;
       const sourceId = line.getAttribute('data-layer-source-id');
       expect(sourceId).toBeTruthy();
       expect(container.querySelector(`[data-source-id="${sourceId}"]`)).toHaveAttribute('data-tolerance', '0');
-      expect(Number(line.getAttribute('data-minzoom') ?? 0)).toBe(0);
+      const [at16, at18, minimumZoom] = expectedLineSettings[id];
+      expect(line).toHaveAttribute('data-minzoom', String(minimumZoom));
       expect(layoutFor(container, id)).toMatchObject({ 'line-cap': 'round', 'line-join': 'round' });
       const paint = JSON.parse(line.getAttribute('data-paint')!);
       const expression = createExpression(paint['line-width'], 'line-width', latest.paint_line['line-width'] as StylePropertySpecification);
@@ -401,7 +436,6 @@ describe('Dashboard map layers', () => {
       const widthAt = (zoom: number) => expression.value.evaluateWithoutErrorHandling({ zoom });
       for (const zoom of [0, 4, 8]) expect(widthAt(zoom)).toBe(1);
       expect(widthAt(10.5)).toBeCloseTo(1.3125);
-      const [at16, at18] = expectedDetailWidths[id];
       expect(widthAt(12)).toBe(1.5);
       expect(widthAt(14)).toBe(Math.min(2, at16));
       expect(widthAt(16)).toBe(at16);
@@ -563,6 +597,51 @@ describe('Dashboard map layers', () => {
 });
 
 describe('viewer source identity and filter contracts', () => {
+  it.each([true, false])('binds lead cones above markers at the shared minimum zoom with icon available: %s', (iconAvailable) => {
+    const leads: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [{
+      type: 'Feature', id: 'lead', properties: { project: '42', headings: [0, 90, 337.5] },
+      geometry: { type: 'Point', coordinates: [2, 46] },
+    }] };
+    const props = { visibleOverlayGeoJsonData: { explorationLeads: leads },
+      visibleLandmarksGeoJSON: EMPTY_FEATURE_COLLECTION, iconsLoaded: true,
+      iconAvailability: iconAvailable ? ALL_ICONS : NO_ICONS, activeProjectIds: new Set(['42']) };
+    const { container, rerender } = render(<OverlayMapLayers {...props} mapDisplayPreferences={DEFAULT_DISPLAY} />);
+    const cone = container.querySelector('[data-layer-id="exploration-leads-cones-layer"]')!;
+    expect(cone).toHaveAttribute('data-layer-source-id', 'exploration-leads-cones-source');
+    expect(cone).toHaveAttribute('data-minzoom', String(MAP_LAYER_MIN_ZOOM.EXPLORATION_LEAD_SYMBOL));
+    const marker = container.querySelector(`[data-layer-id="exploration-leads-${iconAvailable ? 'icon' : 'fallback'}-layer"]`)!;
+    expect(marker).toHaveAttribute('data-minzoom', String(MAP_LAYER_MIN_ZOOM.EXPLORATION_LEAD_SYMBOL));
+    expect(sourceInputs.leadLayerOrder.indexOf('exploration-leads-cones-layer')).toBeGreaterThan(
+      sourceInputs.leadLayerOrder.indexOf(`exploration-leads-${iconAvailable ? 'icon' : 'fallback'}-layer`),
+    );
+    expect(accepts(container, 'exploration-leads-cones-layer', { project: '42' })).toBe(true);
+    expect(accepts(container, 'exploration-leads-cones-layer', { project: 'hidden' })).toBe(false);
+    const derived = sourceInputs.record.mock.calls.filter(([id]) => id === 'exploration-leads-cones-source').at(-1)![1] as GeoJSON.FeatureCollection;
+    expect(derived.features).toHaveLength(3);
+    rerender(<OverlayMapLayers {...props} mapDisplayPreferences={{ ...DEFAULT_DISPLAY,
+      categories: { ...DEFAULT_DISPLAY.categories, explorationLeads: false } }} />);
+    expect(layoutFor(container, 'exploration-leads-cones-layer').visibility).toBe('none');
+    expect(sourceInputs.record.mock.calls.filter(([id]) => id === 'exploration-leads-cones-source').at(-1)![1]).toBe(derived);
+  });
+
+  it.each([true, false])('keeps cones above delayed lead markers and restored layers with icon available: %s', (iconAvailable) => {
+    const props = {
+      visibleOverlayGeoJsonData: { explorationLeads: POINT_FEATURE_COLLECTION },
+      visibleLandmarksGeoJSON: EMPTY_FEATURE_COLLECTION,
+      iconAvailability: iconAvailable ? ALL_ICONS : NO_ICONS,
+      mapDisplayPreferences: DEFAULT_DISPLAY,
+    };
+    const view = render(<OverlayMapLayers {...props} iconsLoaded={false} />);
+    expect(sourceInputs.leadLayerOrder).toEqual(['exploration-leads-cones-layer']);
+    view.rerender(<OverlayMapLayers {...props} iconsLoaded />);
+    const expected = [`exploration-leads-${iconAvailable ? 'icon' : 'fallback'}-layer`, 'exploration-leads-cones-layer'];
+    expect(sourceInputs.leadLayerOrder).toEqual(expected);
+    view.unmount();
+    expect(sourceInputs.leadLayerOrder).toEqual([]);
+    render(<OverlayMapLayers {...props} iconsLoaded />);
+    expect(sourceInputs.leadLayerOrder).toEqual(expected);
+  });
+
   function accepts(container: HTMLElement, id: string, properties: Record<string, unknown>): boolean {
     const expression = JSON.parse(container.querySelector(`[data-layer-id="${id}"]`)!.getAttribute('data-filter')!);
     const compiled = createExpression(expression, 'filter', { type: 'boolean' } as StylePropertySpecification);

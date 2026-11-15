@@ -1,4 +1,6 @@
-import { createLandmarkLayers, createStationLayers, createSurfaceStationLayers, landmarkColorExpression, landmarkHaloExpression } from '@speleodb/map-viewer';
+import { MAP_LAYER_MIN_ZOOM, EXPLORATION_LEAD_CONE_SOURCE_OPTIONS, createExplorationLeadConeLayer, createLandmarkLayers, createStationLayers, createSurfaceStationLayers, landmarkColorExpression, landmarkHaloExpression } from '@speleodb/map-viewer';
+import { buildExplorationLeadCones } from '@speleodb/map-core';
+import { useMemo } from 'react';
 import { Layer, Source } from 'react-map-gl/maplibre';
 import type { ExpressionSpecification } from '@maplibre/maplibre-gl-style-spec';
 import { landmarkCollectionsFilter, visibleIdsFilter } from '../../utils/viewerFilters';
@@ -17,16 +19,6 @@ import type {
 const LANDMARK_COLLECTION_COLOR_EXPRESSION = landmarkColorExpression();
 const LANDMARK_COLLECTION_HALO_EXPRESSION = landmarkHaloExpression();
 
-function markerMinZoom(overlayId: MapOverlayId): number {
-  return MAP_OVERLAYS.find((overlay) => overlay.id === overlayId)!.markerMinZoom;
-}
-
-type LabeledOverlayId = Exclude<MapOverlayId, 'explorationLeads'>;
-
-function labelMinZoom(overlayId: LabeledOverlayId): number {
-  return MAP_OVERLAYS.find((overlay) => overlay.id === overlayId)!.labelMinZoom!;
-}
-
 function overlaySizes(overlayId: MapOverlayId): MapOverlaySizes {
   return MAP_OVERLAYS.find((overlay) => overlay.id === overlayId)!.sizes;
 }
@@ -43,7 +35,6 @@ function LandmarkMapLayers({ visible, data, filter, availableIconIds }: VisibleO
   const sizes = overlaySizes('landmarks');
   const layers = createLandmarkLayers({
     sourceId: 'landmarks-source', markerId: 'landmarks-layer', labelId: 'landmarks-labels',
-    markerMinZoom: markerMinZoom('landmarks'), labelMinZoom: labelMinZoom('landmarks'),
     markerSize: sizes.markerTextSize!, labelSize: sizes.labelTextSize!,
     color: LANDMARK_COLLECTION_COLOR_EXPRESSION, haloColor: LANDMARK_COLLECTION_HALO_EXPRESSION,
     visible, filter, availableIconIds,
@@ -60,7 +51,6 @@ function SurfaceStationMapLayers({ visible, data }: VisibleOverlayMapLayersProps
   const sizes = overlaySizes('surfaceStations');
   const layers = createSurfaceStationLayers({
     sourceId: 'surface-stations-source', markerId: 'surface-stations-layer', labelId: 'surface-stations-labels',
-    markerMinZoom: markerMinZoom('surfaceStations'), labelMinZoom: labelMinZoom('surfaceStations'),
     markerSize: sizes.markerTextSize!, labelSize: sizes.labelTextSize!,
     color: ['coalesce', ['get', 'color'], '#fb923c'], visible,
   });
@@ -121,7 +111,6 @@ function SubsurfaceStationMapLayers({
     sourceId: 'subsurface-stations-source', circleId: 'subsurface-stations-circles',
     labelId: 'subsurface-stations-labels', color: ['coalesce', ['get', 'color'], '#fb923c'],
     markerSize: sizes.markerCircleRadius!, iconSize: sizes.markerIconSize!, labelSize: sizes.labelTextSize!,
-    markerMinZoom: markerMinZoom('subsurfaceStations'), labelMinZoom: labelMinZoom('subsurfaceStations'),
     visible, filter, stationTypes,
     icons: SUBSURFACE_ICON_LAYERS.map(icon => ({
       ...icon, available: iconsLoaded && iconAvailability[icon.iconId],
@@ -149,43 +138,54 @@ function ExplorationLeadMapLayers({
   iconsLoaded,
   iconAvailable,
 }: IconFallbackMapLayerProps) {
+  const cones = useMemo(() => data ? buildExplorationLeadCones(data) : null, [data]);
   if (!data) return null;
   const sizes = overlaySizes('explorationLeads');
   return (
-    <Source id="exploration-leads-source" type="geojson" data={data}>
-      {iconsLoaded && iconAvailable && (
-        <Layer
-          id="exploration-leads-icon-layer"
-        filter={filter}
-          type="symbol"
-          minzoom={markerMinZoom('explorationLeads')}
-          layout={{
-            visibility: visible ? 'visible' : 'none',
-            'icon-image': 'exploration-lead-icon',
-            'icon-size': sizes.markerIconSize,
-            'icon-allow-overlap': true,
-            'icon-ignore-placement': true,
-          }}
-          paint={{ 'icon-opacity': 1 }}
-        />
-      )}
-      {iconsLoaded && !iconAvailable && (
-        <Layer
-          id="exploration-leads-fallback-layer"
-        filter={filter}
-          type="circle"
-          minzoom={markerMinZoom('explorationLeads')}
-          layout={{ visibility: visible ? 'visible' : 'none' }}
-          paint={{
-            'circle-radius': sizes.fallbackCircleRadius,
-            'circle-color': '#EF4444',
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#ffffff',
-            'circle-opacity': 1,
-          }}
-        />
-      )}
-    </Source>
+    <>
+      <Source id="exploration-leads-cones-source" type="geojson" data={cones!} {...EXPLORATION_LEAD_CONE_SOURCE_OPTIONS}>
+        <Layer {...createExplorationLeadConeLayer({
+          sourceId: 'exploration-leads-cones-source', layerId: 'exploration-leads-cones-layer',
+          visible, filter,
+        })} />
+      </Source>
+      <Source id="exploration-leads-source" type="geojson" data={data}>
+        {iconsLoaded && iconAvailable && (
+          <Layer
+            id="exploration-leads-icon-layer"
+            beforeId="exploration-leads-cones-layer"
+            filter={filter}
+            type="symbol"
+            minzoom={MAP_LAYER_MIN_ZOOM.EXPLORATION_LEAD_SYMBOL}
+            layout={{
+              visibility: visible ? 'visible' : 'none',
+              'icon-image': 'exploration-lead-icon',
+              'icon-size': sizes.markerIconSize,
+              'icon-allow-overlap': true,
+              'icon-ignore-placement': true,
+            }}
+            paint={{ 'icon-opacity': 1 }}
+          />
+        )}
+        {iconsLoaded && !iconAvailable && (
+          <Layer
+            id="exploration-leads-fallback-layer"
+            beforeId="exploration-leads-cones-layer"
+            filter={filter}
+            type="circle"
+            minzoom={MAP_LAYER_MIN_ZOOM.EXPLORATION_LEAD_SYMBOL}
+            layout={{ visibility: visible ? 'visible' : 'none' }}
+            paint={{
+              'circle-radius': sizes.fallbackCircleRadius,
+              'circle-color': '#EF4444',
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#ffffff',
+              'circle-opacity': 1,
+            }}
+          />
+        )}
+      </Source>
+    </>
   );
 }
 
@@ -205,7 +205,7 @@ function CylinderInstallMapLayers({
           id="cylinder-installs-icon-layer"
         filter={filter}
           type="symbol"
-          minzoom={markerMinZoom('cylinderInstalls')}
+          minzoom={MAP_LAYER_MIN_ZOOM.CYLINDER_INSTALL_SYMBOL}
           layout={{
             visibility: visible ? 'visible' : 'none',
             'icon-image': 'cylinder-icon',
@@ -221,7 +221,7 @@ function CylinderInstallMapLayers({
           id="cylinder-installs-fallback-layer"
         filter={filter}
           type="symbol"
-          minzoom={markerMinZoom('cylinderInstalls')}
+          minzoom={MAP_LAYER_MIN_ZOOM.CYLINDER_INSTALL_SYMBOL}
           layout={{
             visibility: visible ? 'visible' : 'none',
             'text-field': '●',
@@ -241,7 +241,7 @@ function CylinderInstallMapLayers({
         id="cylinder-installs-labels"
         filter={filter}
         type="symbol"
-        minzoom={labelMinZoom('cylinderInstalls')}
+        minzoom={MAP_LAYER_MIN_ZOOM.CYLINDER_INSTALL_LABEL}
         layout={{
           visibility: visible ? 'visible' : 'none',
           'text-field': [

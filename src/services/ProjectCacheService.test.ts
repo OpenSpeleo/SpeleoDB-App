@@ -709,6 +709,18 @@ describe('ProjectCacheService overlay cache', () => {
     expect(await cache.getOverlayGeoJSON('explorationLeads')).toBeNull();
   });
 
+  it('retains all lead headings through durable offline cache reads', async () => {
+    await cache.setOverlayGeoJSON('explorationLeads', {
+      type: 'FeatureCollection', features: [{ type: 'Feature', id: 'lead',
+        properties: { description: 'Three passages', headings: [0, 90, 337.5] },
+        geometry: { type: 'Point', coordinates: [2, 46] } }],
+    });
+    const reopened = new ProjectCacheService();
+    expect(await reopened.getOverlayGeoJSON('explorationLeads')).toMatchObject({
+      features: [{ properties: { headings: [0, 90, 337.5] } }],
+    });
+  });
+
   it('atomically serializes concurrent overlay feature mutations', async () => {
     await cache.setOverlayGeoJSON('landmarks', {
       type: 'FeatureCollection',

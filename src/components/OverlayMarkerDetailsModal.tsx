@@ -3,6 +3,7 @@ import { IonContent, IonModal } from '@ionic/react';
 import { Share } from '@capacitor/share';
 import type { OverlayMarkerDetails } from '../utils/overlayMarkerDetails';
 import { isShareCancellation } from '../utils/share';
+import { ExplorationLeadCompass } from './map/ExplorationLeadCompass';
 
 interface OverlayMarkerDetailsModalProps {
   detail: OverlayMarkerDetails | null;
@@ -95,6 +96,7 @@ function renderDetailFields(detail: OverlayMarkerDetails) {
       return (
         <DetailCard>
           <DetailField label="Description" testId="overlay-marker-description" value={detail.description} />
+          <ExplorationLeadCompass headings={detail.headings} />
         </DetailCard>
       );
 

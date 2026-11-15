@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import OverlayMarkerDetailsModal from './OverlayMarkerDetailsModal';
 import type { OverlayMarkerDetails } from '../utils/overlayMarkerDetails';
@@ -80,6 +80,7 @@ const explorationLeadDetail: OverlayMarkerDetails = {
   type: 'explorationLead',
   id: 'el-1',
   description: 'Narrow passage to explore',
+  headings: [0, 90, 337.5],
 };
 
 const projectPointDetail: OverlayMarkerDetails = {
@@ -125,6 +126,11 @@ describe('OverlayMarkerDetailsModal', () => {
   it('renders correct title for exploration lead', () => {
     render(<OverlayMarkerDetailsModal detail={explorationLeadDetail} onClose={vi.fn()} />);
     expect(screen.getByText('Exploration Lead')).toBeInTheDocument();
+    expect(screen.getByText('0°')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Lead 3' }));
+    expect(screen.getByText('338°')).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add direction' })).not.toBeInTheDocument();
   });
 
   it('renders correct title for project point', () => {

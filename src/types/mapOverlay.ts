@@ -35,16 +35,12 @@ export interface MapOverlaySizes {
 export interface MapOverlayDefinition {
   id: MapOverlayId;
   label: string;
-  markerMinZoom: number;
-  labelMinZoom: number | null;
   sizes: MapOverlaySizes;
   legendItems: MapOverlayLegendItem[];
 }
 
 export interface ProjectLayerConfig {
-  lineMinZoom: number;
   lineWidth: ExpressionSpecification;
-  entrySymbolMinZoom: number;
   entrySymbolTextSize: MarkerSizeExpression;
 }
 

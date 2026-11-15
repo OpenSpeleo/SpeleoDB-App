@@ -125,6 +125,21 @@ describe('overlayMarkerDetails utilities', () => {
   });
 
   describe('parseOverlayMarkerDetails', () => {
+    it('keeps all saved lead directions, including north, in marker details', () => {
+      expect(parseOverlayMarkerDetails({
+        id: 'lead', layer: { id: 'exploration-leads-icon-layer' },
+        properties: { description: 'Three passages', headings: [0, 90, 337.5] },
+      })).toMatchObject({ headings: [0, 90, 337.5] });
+    });
+
+    it('reads headings serialized by the renderer and rejects malformed values', () => {
+      for (const [headings, expected] of [['[0,90,337.5]', [0, 90, 337.5]], ['invalid', []]] as const) {
+        expect(parseOverlayMarkerDetails({
+          layer: { id: 'exploration-leads-icon-layer' }, properties: { headings },
+        })).toMatchObject({ headings: expected });
+      }
+    });
+
     it('parses exploration lead details from marker feature', () => {
       expect(parseOverlayMarkerDetails({
         id: 'feature-1',
@@ -136,6 +151,7 @@ describe('overlayMarkerDetails utilities', () => {
       })).toEqual({
         type: 'explorationLead',
         id: 'lead-123',
+        headings: [],
         description: 'lead ne, but might just go to the line',
       });
     });

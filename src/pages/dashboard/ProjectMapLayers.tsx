@@ -1,4 +1,4 @@
-import { createShotColorExpression } from '@speleodb/map-viewer';
+import { MAP_LAYER_MIN_ZOOM, createShotColorExpression } from '@speleodb/map-viewer';
 import { memo, useLayoutEffect, useState } from 'react';
 import { scheduleViewerUpdate } from '../../utils/scheduleViewerUpdate';
 import { Layer, Source } from 'react-map-gl/maplibre';
@@ -63,7 +63,7 @@ const ProjectMapSource = memo(function ProjectMapSource({
         id={`${sourceId}-line`}
         type="line"
         beforeId="project-layer-order-anchor"
-        minzoom={PROJECT_LAYERS.lineMinZoom}
+        minzoom={MAP_LAYER_MIN_ZOOM.PROJECT_LINE}
         filter={[
           'match',
           ['geometry-type'],
@@ -85,7 +85,7 @@ const ProjectMapSource = memo(function ProjectMapSource({
           true,
           false,
         ]}
-        minzoom={PROJECT_LAYERS.entrySymbolMinZoom}
+        minzoom={MAP_LAYER_MIN_ZOOM.PROJECT_ENTRY_SYMBOL}
         layout={{
           visibility: visible && showCaveEntrances ? 'visible' : 'none',
           'text-field': '★',

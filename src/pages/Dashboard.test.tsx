@@ -1,4 +1,5 @@
 import { createExpression, latest, type StylePropertySpecification } from '@maplibre/maplibre-gl-style-spec';
+import { MAP_LAYER_MIN_ZOOM } from '@speleodb/map-viewer';
 import { createDefaultMapDisplayPreferences, mergeMapDisplayPreferences, type MapDisplayPreferencesPatch } from '../types/mapDisplayPreferences';
 import { DownloadAreaType, EMPTY_DOWNLOAD_AREAS, type DownloadArea, type DownloadAreasSnapshot } from '../types/downloadArea';
 import { EMPTY_OFFLINE_MAP_SYNC_SNAPSHOT } from '../services/OfflineMapSyncStore';
@@ -662,22 +663,26 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function simulatePointerTap(
+async function simulatePointerTap(
   element: Element,
   clientX = 120,
   clientY = 80,
-): void {
-  fireEvent.pointerDown(element, {
-    pointerId: 1,
-    pointerType: 'touch',
-    clientX,
-    clientY,
-  });
-  fireEvent.pointerUp(element, {
-    pointerId: 1,
-    pointerType: 'touch',
-    clientX,
-    clientY,
+): Promise<void> {
+  // Opening details also queues map pattern and icon updates. Await the whole
+  // interaction so assertions and cleanup happen after React commits them.
+  await act(async () => {
+    fireEvent.pointerDown(element, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX,
+      clientY,
+    });
+    fireEvent.pointerUp(element, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX,
+      clientY,
+    });
   });
 }
 
@@ -1198,7 +1203,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    act(() => {
+    await act(async () => {
       const mapProps = mapPropsRef.current as Record<string, unknown>;
       const onMouseMove = mapProps.onMouseMove as ((event: { point: { x: number; y: number } }) => void) | undefined;
       onMouseMove?.({ point: { x: 120, y: 80 } });
@@ -1226,17 +1231,21 @@ describe('Dashboard', () => {
     ]);
 
     const surface = getMapTouchSurface();
-    fireEvent.pointerDown(surface, {
-      pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
-    });
-    fireEvent.pointerMove(surface, {
-      pointerId: 1, pointerType: 'touch', clientX: 122, clientY: 82,
+    await act(async () => {
+      fireEvent.pointerDown(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 120, clientY: 80,
+      });
+      fireEvent.pointerMove(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 122, clientY: 82,
+      });
     });
 
     expect(screen.getByTestId('depth-gauge-current')).toHaveTextContent('-30 ft');
 
-    fireEvent.pointerUp(surface, {
-      pointerId: 1, pointerType: 'touch', clientX: 122, clientY: 82,
+    await act(async () => {
+      fireEvent.pointerUp(surface, {
+        pointerId: 1, pointerType: 'touch', clientX: 122, clientY: 82,
+      });
     });
 
     expect(screen.getByTestId('depth-gauge-current')).toHaveTextContent('');
@@ -1261,7 +1270,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    act(() => {
+    await act(async () => {
       const mapProps = mapPropsRef.current as Record<string, unknown>;
       const onMouseMove = mapProps.onMouseMove as ((event: { point: { x: number; y: number } }) => void) | undefined;
       onMouseMove?.({ point: { x: 120, y: 80 } });
@@ -1397,7 +1406,7 @@ describe('Dashboard', () => {
       ) as HTMLElement | null;
       expect(pointLayer).not.toBeNull();
       expect(pointLayer?.dataset.layerText).toContain('★');
-      expect(pointLayer?.dataset.layerMinzoom).toBe('5');
+      expect(pointLayer?.dataset.layerMinzoom).toBe(String(MAP_LAYER_MIN_ZOOM.PROJECT_ENTRY_SYMBOL));
     });
   });
 
@@ -1412,7 +1421,7 @@ describe('Dashboard', () => {
         '[data-layer-id="project-p-line-line"]',
       ) as HTMLElement | null;
       expect(lineLayer).not.toBeNull();
-      expect(lineLayer?.dataset.layerMinzoom).toBe('0');
+      expect(lineLayer?.dataset.layerMinzoom).toBe(String(MAP_LAYER_MIN_ZOOM.PROJECT_LINE));
     });
   });
 
@@ -1565,7 +1574,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(mockQueryRenderedFeatures).toHaveBeenCalled();
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
@@ -1584,7 +1593,7 @@ describe('Dashboard', () => {
       properties: { name: 'Entrance' },
       geometry: { type: 'Point', coordinates: [-87.5, 20.1] },
     }]);
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     act(() => view.setDashboardActive(false));
     expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
@@ -1641,7 +1650,7 @@ describe('Dashboard', () => {
       expect(document.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).not.toBeNull();
     });
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(mockQueryRenderedFeatures).not.toHaveBeenCalled();
     expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
@@ -1671,7 +1680,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(mockQueryRenderedFeatures).toHaveBeenCalled();
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
@@ -1707,7 +1716,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent(
@@ -1745,7 +1754,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.getByTestId('overlay-marker-pressure')).toHaveTextContent('3000 PSI');
@@ -1784,7 +1793,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.getByTestId('overlay-marker-pressure')).toHaveTextContent('N/A');
@@ -1810,7 +1819,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(screen.queryByTestId('overlay-marker-details-modal')).not.toBeInTheDocument();
   });
@@ -1855,10 +1864,10 @@ describe('Dashboard', () => {
         },
       ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
     expect(screen.getByTestId('overlay-marker-description')).toHaveTextContent('first marker detail');
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
     expect(screen.queryByTestId('overlay-marker-description')).not.toBeInTheDocument();
     expect(screen.getByTestId('overlay-marker-pressure')).toHaveTextContent('220 BAR');
     expect(screen.getByTestId('overlay-marker-gas-mix')).toHaveTextContent('Air');
@@ -1897,7 +1906,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('Big Entrance');
@@ -1981,7 +1990,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('Station Alpha');
@@ -2014,7 +2023,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('Sensor Room');
@@ -2047,7 +2056,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('Fossil Site');
@@ -2072,7 +2081,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.getByTestId('overlay-marker-project-name')).toHaveTextContent('Cave Alpha');
@@ -2103,7 +2112,7 @@ describe('Dashboard', () => {
       },
     ]);
 
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
 
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.getByTestId('overlay-marker-name')).toHaveTextContent('N/A');
@@ -3653,7 +3662,7 @@ describe('Dashboard -- Landmark CRUD', () => {
     mockDeleteLandmark.mockResolvedValue(undefined);
   });
 
-  function tapLandmark(props: Record<string, unknown> = {}) {
+  async function tapLandmark(props: Record<string, unknown> = {}) {
     mockQueryRenderedFeatures.mockReturnValueOnce([
       {
         layer: { id: 'landmarks-layer' },
@@ -3661,7 +3670,7 @@ describe('Dashboard -- Landmark CRUD', () => {
         geometry: { type: 'Point', coordinates: [2.3, 46.6] },
       },
     ]);
-    simulatePointerTap(getMapTouchSurface());
+    await simulatePointerTap(getMapTouchSurface());
   }
 
   it('renders a pending offline landmark from the folded overlay', async () => {
@@ -3907,7 +3916,7 @@ describe('Dashboard -- Landmark CRUD', () => {
       expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
     });
 
-    tapLandmark();
+    await tapLandmark();
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('edit-landmark-button'));
@@ -3938,7 +3947,7 @@ describe('Dashboard -- Landmark CRUD', () => {
       expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
     });
 
-    tapLandmark();
+    await tapLandmark();
     fireEvent.click(screen.getByTestId('delete-landmark-button'));
 
     expect(screen.getByTestId('delete-landmark-confirm')).toBeInTheDocument();
@@ -3965,7 +3974,7 @@ describe('Dashboard -- Landmark CRUD', () => {
 
     // Pattern registration queues a state update even when no mutation occurs.
     // Flush effects from each interaction before checking the cancelled flow.
-    await act(async () => { tapLandmark(); });
+    await tapLandmark();
     await userEvent.click(screen.getByTestId('delete-landmark-button'));
     expect(screen.getByTestId('delete-landmark-confirm')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('delete-landmark-confirm-cancel'));
@@ -3983,7 +3992,7 @@ describe('Dashboard -- Landmark CRUD', () => {
       expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
     });
 
-    tapLandmark();
+    await tapLandmark();
     fireEvent.click(screen.getByTestId('delete-landmark-button'));
     fireEvent.click(screen.getByTestId('delete-landmark-confirm-confirm'));
     await act(async () => { await Promise.resolve(); });
@@ -4001,7 +4010,7 @@ describe('Dashboard -- Landmark CRUD', () => {
       expect(document.querySelector('[data-layer-id="landmarks-layer"]')).not.toBeNull();
     });
 
-    tapLandmark({ can_write: false, can_delete: false });
+    await tapLandmark({ can_write: false, can_delete: false });
     expect(screen.getByTestId('overlay-marker-details-modal')).toBeInTheDocument();
     expect(screen.queryByTestId('edit-landmark-button')).not.toBeInTheDocument();
     expect(screen.queryByTestId('delete-landmark-button')).not.toBeInTheDocument();

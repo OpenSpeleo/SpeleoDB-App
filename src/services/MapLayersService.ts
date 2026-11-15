@@ -14,6 +14,7 @@
  */
 
 import { DEFAULT_MAP_LAYER_ID, MAP, MAP_LAYERS } from '../constants';
+import { MAP_LAYER_MIN_ZOOM } from '@speleodb/map-viewer';
 import type { MapLayerDefinition, MapLayerId } from '../types/mapLayer';
 import { isMapLayerId } from '../types/mapLayer';
 
@@ -120,7 +121,7 @@ export function buildLayerStyle(layerId: string): Record<string, unknown> {
         id: layer.id,
         type: 'raster',
         source: layer.id,
-        minzoom: 0,
+        minzoom: MAP_LAYER_MIN_ZOOM.BASEMAP_RASTER,
         maxzoom: DISPLAY_LAYER_MAX_ZOOM,
         paint: {
           'raster-fade-duration': 0,
