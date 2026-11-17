@@ -222,11 +222,12 @@ describe('dashboardMapUtils', () => {
     vi.stubGlobal('Image', FakeImage);
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:rejected');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(revokeObjectURL);
-    const fallbackImage = { width: 10 };
+    const fallbackImage = { width: 1, height: 1, data: new Uint8Array([239, 68, 68, 255]) };
     const map = imageMap({ loadedImage: fallbackImage });
 
     await expect(loadMapImage(map, 'exploration-lead-icon', '/icon.png')).resolves.toBe(true);
     expect(map.addImage).toHaveBeenCalledWith('exploration-lead-icon', fallbackImage);
+    expect(map.addImage).toHaveBeenCalledWith('exploration-lead-checked-icon', expect.objectContaining({ width: 1, height: 1, data: expect.any(Uint8Array) }));
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:rejected');
   });
 

@@ -1,4 +1,4 @@
-import { MAP_LAYER_MIN_ZOOM, EXPLORATION_LEAD_CONE_SOURCE_OPTIONS, createExplorationLeadConeLayer, createLandmarkLayers, createStationLayers, createSurfaceStationLayers, landmarkColorExpression, landmarkHaloExpression } from '@speleodb/map-viewer';
+import { MAP_LAYER_MIN_ZOOM, EXPLORATION_LEAD_CONE_SOURCE_OPTIONS, createExplorationLeadConeLayer, createExplorationLeadMarkerLayer, createLandmarkLayers, createStationLayers, createSurfaceStationLayers, landmarkColorExpression, landmarkHaloExpression } from '@speleodb/map-viewer';
 import { buildExplorationLeadCones } from '@speleodb/map-core';
 import { useMemo } from 'react';
 import { Layer, Source } from 'react-map-gl/maplibre';
@@ -132,12 +132,13 @@ interface IconFallbackMapLayerProps {
 }
 
 function ExplorationLeadMapLayers({
+  showChecked,
   filter,
   visible,
   data,
   iconsLoaded,
   iconAvailable,
-}: IconFallbackMapLayerProps) {
+}: IconFallbackMapLayerProps & { showChecked: boolean }) {
   const cones = useMemo(() => data ? buildExplorationLeadCones(data) : null, [data]);
   if (!data) return null;
   const sizes = overlaySizes('explorationLeads');
@@ -150,38 +151,20 @@ function ExplorationLeadMapLayers({
         })} />
       </Source>
       <Source id="exploration-leads-source" type="geojson" data={data}>
-        {iconsLoaded && iconAvailable && (
+        {iconsLoaded && (
           <Layer
-            id="exploration-leads-icon-layer"
+            key={iconAvailable ? 'exploration-leads-icon-layer' : 'exploration-leads-fallback-layer'}
+            {...createExplorationLeadMarkerLayer({
+              sourceId: 'exploration-leads-source',
+              layerId: iconAvailable ? 'exploration-leads-icon-layer' : 'exploration-leads-fallback-layer',
+              visible,
+              filter,
+              showChecked,
+              iconAvailable,
+              iconSize: sizes.markerIconSize!,
+              circleRadius: sizes.fallbackCircleRadius!,
+            })}
             beforeId="exploration-leads-cones-layer"
-            filter={filter}
-            type="symbol"
-            minzoom={MAP_LAYER_MIN_ZOOM.EXPLORATION_LEAD_SYMBOL}
-            layout={{
-              visibility: visible ? 'visible' : 'none',
-              'icon-image': 'exploration-lead-icon',
-              'icon-size': sizes.markerIconSize,
-              'icon-allow-overlap': true,
-              'icon-ignore-placement': true,
-            }}
-            paint={{ 'icon-opacity': 1 }}
-          />
-        )}
-        {iconsLoaded && !iconAvailable && (
-          <Layer
-            id="exploration-leads-fallback-layer"
-            beforeId="exploration-leads-cones-layer"
-            filter={filter}
-            type="circle"
-            minzoom={MAP_LAYER_MIN_ZOOM.EXPLORATION_LEAD_SYMBOL}
-            layout={{ visibility: visible ? 'visible' : 'none' }}
-            paint={{
-              'circle-radius': sizes.fallbackCircleRadius,
-              'circle-color': '#EF4444',
-              'circle-stroke-width': 2,
-              'circle-stroke-color': '#ffffff',
-              'circle-opacity': 1,
-            }}
           />
         )}
       </Source>
@@ -306,6 +289,7 @@ export function OverlayMapLayers({
         iconAvailability={iconAvailability}
       />
       <ExplorationLeadMapLayers
+        showChecked={mapDisplayPreferences.showCheckedExplorationLeads}
         visible={mapDisplayPreferences.categories.explorationLeads}
         data={visibleOverlayGeoJsonData.explorationLeads}
         filter={activeProjectIds && visibleIdsFilter(activeProjectIds, 'project')}

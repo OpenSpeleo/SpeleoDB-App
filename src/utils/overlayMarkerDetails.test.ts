@@ -128,16 +128,18 @@ describe('overlayMarkerDetails utilities', () => {
     it('keeps all saved lead directions, including north, in marker details', () => {
       expect(parseOverlayMarkerDetails({
         id: 'lead', layer: { id: 'exploration-leads-icon-layer' },
-        properties: { description: 'Three passages', headings: [0, 90, 337.5] },
-      })).toMatchObject({ headings: [0, 90, 337.5] });
+        properties: { description: 'Three passages', directions: [{ heading: 0, checked: true }, { heading: 90, checked: false }, { heading: 337.5, checked: false }] },
+      })).toMatchObject({ directions: [{ heading: 0, checked: true }, { heading: 90, checked: false }, { heading: 337.5, checked: false }] });
     });
 
-    it('reads headings serialized by the renderer and rejects malformed values', () => {
-      for (const [headings, expected] of [['[0,90,337.5]', [0, 90, 337.5]], ['invalid', []]] as const) {
-        expect(parseOverlayMarkerDetails({
-          layer: { id: 'exploration-leads-icon-layer' }, properties: { headings },
-        })).toMatchObject({ headings: expected });
-      }
+    it('reads directions and checked states serialized by the renderer', () => {
+      const directions = [{ heading: null, checked: true }, { heading: 337.5, checked: false }];
+      expect(parseOverlayMarkerDetails({
+        layer: { id: 'exploration-leads-icon-layer' }, properties: { directions: JSON.stringify(directions) },
+      })).toMatchObject({ directions });
+      expect(parseOverlayMarkerDetails({
+        layer: { id: 'exploration-leads-icon-layer' }, properties: { directions: 'invalid' },
+      })).toMatchObject({ directions: [{ heading: null, checked: false }] });
     });
 
     it('parses exploration lead details from marker feature', () => {
@@ -151,7 +153,7 @@ describe('overlayMarkerDetails utilities', () => {
       })).toEqual({
         type: 'explorationLead',
         id: 'lead-123',
-        headings: [],
+        directions: [{ heading: null, checked: false }],
         description: 'lead ne, but might just go to the line',
       });
     });

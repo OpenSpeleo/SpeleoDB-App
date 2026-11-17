@@ -80,7 +80,7 @@ const explorationLeadDetail: OverlayMarkerDetails = {
   type: 'explorationLead',
   id: 'el-1',
   description: 'Narrow passage to explore',
-  headings: [0, 90, 337.5],
+  directions: [{ heading: 0, checked: false }, { heading: 90, checked: false }, { heading: 337.5, checked: false }],
 };
 
 const projectPointDetail: OverlayMarkerDetails = {
@@ -126,9 +126,9 @@ describe('OverlayMarkerDetailsModal', () => {
   it('renders correct title for exploration lead', () => {
     render(<OverlayMarkerDetailsModal detail={explorationLeadDetail} onClose={vi.fn()} />);
     expect(screen.getByText('Exploration Lead')).toBeInTheDocument();
-    expect(screen.getByText('0°')).toBeInTheDocument();
+    expect(screen.getByText('0')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Lead 3' }));
-    expect(screen.getByText('338°')).toBeInTheDocument();
+    expect(screen.getByText('338')).toBeInTheDocument();
     expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add direction' })).not.toBeInTheDocument();
   });

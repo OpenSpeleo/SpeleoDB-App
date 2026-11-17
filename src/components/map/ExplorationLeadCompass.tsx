@@ -1,12 +1,13 @@
+import type { ExplorationLeadDirection } from '@speleodb/map-core';
 import { useEffect, useRef } from 'react';
 import { createHeadingCompass } from '@speleodb/map-viewer/heading-compass';
 
 /** Saved survey directions never subscribe to the phone's compass sensor. */
-export function ExplorationLeadCompass({ headings }: { headings: readonly number[] }) {
+export function ExplorationLeadCompass({ directions }: { directions: readonly ExplorationLeadDirection[] }) {
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const compass = createHeadingCompass(container.current!, { headings, readOnly: true });
+    const compass = createHeadingCompass(container.current!, { directions, readOnly: true });
     return () => compass.dispose();
-  }, [headings]);
+  }, [directions]);
   return <div ref={container} />;
 }

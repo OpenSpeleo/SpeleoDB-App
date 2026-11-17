@@ -3,6 +3,7 @@ import { fixture } from './fixtures/app';
 import { captureMapCanvas } from './fixtures/mapCanvas';
 import { gisMetadata } from '../../src/test/gisGeometryFixtures';
 import type { Project } from '../../src/types/project';
+import { observeGestureMap, setGestureCamera } from '@speleodb/map-viewer/testing/gestures';
 
 const survey: Project = {
   id: 'display-cave', name: 'Display Cave', description: '', country: 'US', color: '#ff0000',
@@ -71,6 +72,89 @@ async function openSettings(page: Page) {
   await page.getByRole('tab', { name: 'Settings', exact: true }).tap();
   await expect(page.getByTestId('map-visibility-summary')).toBeVisible();
 }
+
+test('checked leads stay hidden by default and retain read-only statuses offline', async ({ page }, testInfo) => {
+  await observeGestureMap(page);
+  const leads: GeoJSON.FeatureCollection = {
+    type: 'FeatureCollection', features: [
+      { type: 'Feature', id: 'partial-lead', properties: {
+        id: 'partial-lead', project: survey.id, description: 'One checked passage, one open passage',
+        directions: [{ heading: 0, checked: true }, { heading: 90, checked: false }], is_fully_checked: false,
+      }, geometry: { type: 'Point', coordinates: [-87.4953, 20.1] } },
+      { type: 'Feature', id: 'checked-lead', properties: {
+        id: 'checked-lead', project: survey.id, description: 'Checked passage',
+        directions: [{ heading: null, checked: true }], is_fully_checked: true,
+      }, geometry: { type: 'Point', coordinates: [-87.4947, 20.1] } },
+    ],
+  };
+  const writes: string[] = [];
+  page.on('request', request => {
+    if (request.url().includes('/exploration-leads/') && request.method() !== 'GET') writes.push(request.method());
+  });
+  const app = await setupMap(page, geometry, async () => {
+    await page.route('https://offline-maps.test/api/v2/exploration-leads/geojson/', route => route.fulfill({
+      headers: { 'access-control-allow-origin': '*' }, json: leads,
+    }));
+  });
+  await setGestureCamera(page, [-87.495, 20.1], 17);
+  const renderedIds = () => page.evaluate(() => {
+    const map = window.__speleoGesture.map;
+    const layer = 'exploration-leads-icon-layer';
+    return map.getLayer(layer)
+      ? [...new Set(map.queryRenderedFeatures({ layers: [layer] }).map(feature => feature.id))].sort()
+      : [];
+  });
+  await expect.poll(renderedIds).toEqual(['partial-lead']);
+  const coneIds = await page.evaluate(async () => {
+    const source = window.__speleoGesture.map.getSource('exploration-leads-cones-source') as import('maplibre-gl').GeoJSONSource;
+    const data = await source.getData() as GeoJSON.FeatureCollection;
+    return data.features.map(feature => feature.id);
+  });
+  expect(coneIds).toEqual(['partial-lead:heading:1']);
+  const canvas = (await page.locator('.maplibregl-canvas').boundingBox())!;
+  const location = await page.evaluate(() => {
+    const point = window.__speleoGesture.map.project([-87.4953, 20.1]);
+    return { x: point.x, y: point.y };
+  });
+  await page.touchscreen.tap(canvas.x + location.x, canvas.y + location.y);
+  const modal = page.getByTestId('overlay-marker-details-modal');
+  await expect(modal).toBeVisible();
+  await expect(modal.getByText('One checked passage, one open passage')).toBeVisible();
+  await expect(modal.getByRole('tab', { name: 'Lead 1' })).toHaveAttribute('aria-description', 'Checked');
+  await modal.getByRole('tab', { name: 'Lead 2' }).click();
+  await expect(modal.getByRole('tab', { name: 'Lead 2' })).toHaveAttribute('aria-description', 'Unchecked');
+  await expect(modal.getByRole('checkbox')).toHaveCount(0);
+  await expect(modal.getByRole('button', { name: /Mark checked|Mark unchecked|Check all|Uncheck all|Set direction|Add direction|Remove direction/ })).toHaveCount(0);
+  await testInfo.attach('read-only-lead-statuses', { body: await page.screenshot(), contentType: 'image/png' });
+  await modal.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await openSettings(page);
+  await expect(page.getByTestId('sync-pct')).toHaveText('100%');
+  await page.getByTestId('map-visibility-summary').tap();
+  const showChecked = page.getByRole('switch', { name: 'Checked Exploration Leads', exact: true });
+  await expect(showChecked).not.toBeChecked();
+  await showChecked.tap();
+  await page.getByRole('tab', { name: 'Map', exact: true }).tap();
+  await expect.poll(renderedIds).toEqual(['checked-lead', 'partial-lead']);
+  await testInfo.attach('checked-leads-visible', { body: await captureMapCanvas(page), contentType: 'image/png' });
+
+  app.disconnect();
+  await page.reload();
+  await page.getByRole('button', { name: 'Go Offline', exact: true }).tap();
+  await page.getByRole('tab', { name: 'Projects', exact: true }).tap();
+  await page.getByRole('button', { name: survey.name, exact: true }).tap();
+  await setGestureCamera(page, [-87.495, 20.1], 17);
+  await expect.poll(renderedIds).toEqual(['checked-lead', 'partial-lead']);
+  await openSettings(page);
+  await page.getByTestId('map-visibility-summary').tap();
+  await expect(showChecked).toBeChecked();
+  await page.getByRole('button', { name: 'Reset visibility', exact: true }).tap();
+  await expect(showChecked).not.toBeChecked();
+  await page.getByRole('tab', { name: 'Map', exact: true }).tap();
+  await expect.poll(renderedIds).toEqual(['partial-lead']);
+  expect(writes).toEqual([]);
+  expect(app.errors).toEqual([]);
+});
 
 async function overviewPixels(page: Page) {
   const screenshot = await captureMapCanvas(page);

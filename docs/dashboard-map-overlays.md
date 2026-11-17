@@ -97,12 +97,13 @@ Project GeoJSON drawing order is pinned below marker-oriented layers:
 
 Settings → Map Settings → Map visibility controls cave entrance stars, survey
 stations, surface stations, landmarks, exploration leads, and safety cylinders.
-All default shown. Survey stations has independent Sensor, Biology, Bones,
-Artifact, and Geology switches. Category gates apply to every matching symbol,
-label, and icon fallback; station labels additionally filter enabled types,
-treating missing/null types as Sensor. Parent off/on retains subtype choices.
-Existing project/country and landmark-collection visibility remain independent
-gates. These local preferences work offline and never change sync, cached data,
+All categories default shown; fully checked exploration leads default hidden.
+Survey stations has independent Sensor, Biology, Bones, Artifact, and Geology
+switches. Category gates apply to every matching symbol, label, and icon
+fallback; station labels additionally filter enabled types, treating
+missing/null types as Sensor. Parent off/on retains subtype choices. Existing
+project/country and landmark-collection visibility remain independent gates.
+These local preferences work offline and never change sync, cached data,
 per-item selections, or the camera. See [Settings](settings.md).
 
 - Landmarks:
@@ -126,7 +127,7 @@ per-item selections, or the camera. See [Settings](settings.md).
   - label layer (`name`) from zoom `16`.
 - Exploration leads:
   - `exploration-lead-icon` symbol layer,
-  - fallback to red circle when icon cannot load,
+  - fallback to a status-colored circle when either icon variant cannot load,
   - icons, fallback markers and direction cones share zoom `15` through
     `MAP_LAYER_MIN_ZOOM.EXPLORATION_LEAD_SYMBOL` from `@speleodb/map-viewer`,
     also used by web; the cone builder applies this threshold directly,
@@ -249,41 +250,74 @@ pattern `/^project-.+-point$/`.
 
 ### Exploration lead directions
 
-Lead GeoJSON carries `properties.headings`, a numeric array with up to three
-clockwise bearings from north in `[0, 360)`. The existing overlay cache
-preserves the array unchanged, including when offline. Previously cached
-payloads without the property show "No direction set". Rendered-feature hit
-results can contain the array as JSON text; the details parser decodes it before
-validating values.
+Lead GeoJSON carries `properties.directions`, an ordered list of one to three
+objects containing `heading` (a clockwise bearing in `[0, 360)`, or `null`) and
+`checked` (a boolean). `is_fully_checked` is the server-derived aggregate. An
+undirected lead remains a real checkable entry with a null heading. The overlay
+cache preserves entries, order, checked flags and descriptions unchanged.
+Rendered-feature hit results can contain the list as JSON text; the details
+parser decodes it through the shared strict parser.
+
+Existing cached numeric `headings` arrays migrate locally to unchecked entries;
+empty/missing headings become one undirected unchecked entry. This conversion
+runs inside the existing cache transaction, preserves the original freshness
+stamp and unrelated caches, and never overwrites a newer sync result. It is only
+a persisted-data migration: new live payloads must use the directions contract.
+Invalid entries or an inconsistent aggregate reject that overlay replacement,
+retaining the last good data. Normal overlay synchronization picks up
+checked-state changes independently of survey commit changes. Offline status
+reflects the last successful synchronization.
 
 `ExplorationLeadCompass` mounts the shared framework-neutral compass from
-`@speleodb/map-viewer/heading-compass` in read-only mode. It uses the saved
-values only and never subscribes to device heading. Adding, editing and removing
-directions remain web operations. The phone's live map compass and blue location
-cone are independent. The dial uses "Lead 1", "Lead 2" and "Lead 3" tabs to
-inspect existing headings, displaying only the selected direction's red needle
-and its whole-degree reading in the center. Saved fractional bearings are
-rounded for this display only, with a rounded full turn shown as north; opening
-the compass or switching tabs never changes the cached values. Selecting a tab
-changes the needle and degree reading without replacing the compass or changing
-the saved directions. An unset lead displays its empty-state text without
-reserving space for a dial. Keyboard arrows and Home/End also select tabs.
+`@speleodb/map-viewer/heading-compass` in read-only mode. It uses saved values
+and never subscribes to device heading. Adding, editing, removing and checking
+leads remain web operations. The phone's live map compass and blue location cone
+are independent. "Lead 1", "Lead 2" and "Lead 3" tabs display checked indicators
+and select a single saved bearing. Fractional bearings are rounded for display
+only; opening or switching tabs never changes cached values. Read-only mode has
+no editing, checking or bulk-action controls. Undirected leads show "No
+direction set" plus their status. Keyboard arrows and Home/End retain tab
+navigation.
 
 `OverlayMapLayers` memoizes shared `buildExplorationLeadCones` output when lead
-data changes. The derived source contains a fifteen-metre, 45-degree sector for
-each heading, rendered red at 80% opacity above the lead icons. The shared
-source options disable simplification. This metric size intentionally shrinks at
-lower zooms. Cones share lead minimum zoom, category and project visibility,
-remain non-interactive, and do not create offline coverage areas or cache
-records.
+data changes. Only unchecked entries with non-null bearings generate cones:
+fifteen-metre, 45-degree red sectors at 80% opacity, above the marker. The
+shared source options disable simplification. Cones share the lead minimum zoom,
+category and project visibility, remain non-interactive, and create no extra
+offline coverage areas or cache records.
+
+The read-only compass identifies checked leads with muted green tab text and a
+fine bottom accent. A Directions section label follows the description. The
+central reading matches the web editor's three-character width and typography,
+with no degree suffix, and remains non-editable. Selection retains its separate
+filled-tab treatment. Users
+can switch lead tabs; each tab also exposes its Checked or Unchecked state to
+assistive technology. The web editor's bulk buttons and entire bottom status
+panel are omitted on mobile.
+
+**Checked Exploration Leads** is a local, persisted visibility preference, default OFF.
+An ExplorationLead with any unchecked entry retains its normal red marker; a
+fully checked ExplorationLead is hidden by default. Enabling the setting shows
+fully checked markers in green at 75% opacity, with no cones. The normal and
+checked icon rasters are registered together through the shared map-viewer image
+helper; fallback circles use the same shared color, opacity and filter policy,
+including their outlines. The existing category and project/country gates still
+apply. Hidden markers are excluded from rendered-feature hit tests. Changing
+this setting filters existing layers without fetching or deleting cached data or
+rebuilding cone geometry. Parent category off/on retains the checked-visibility
+choice; reset restores OFF. See [Settings](settings.md).
 
 The cone source mounts first. Icon and fallback layers explicitly insert before
 the cone layer, keeping cones above them when image loading finishes late or the
 map style is rebuilt. JSX sibling order alone does not preserve MapLibre's
-insertion order when conditional marker layers mount later.
+insertion order when conditional marker layers mount later. Changing icon
+availability replaces the marker layer instance because MapLibre layer IDs and
+types are fixed at mount; the lead and cone sources remain mounted.
 
-Tests cover durable cache readback, renderer-array decoding, read-only modal
-lifecycle, source injection, renderer insertion order and visibility without
+Tests cover durable cache migration/readback, real HTTP through the generated
+SDK into overlay synchronization, malformed replacement preservation,
+renderer-array decoding, read-only status/tab navigation, settings persistence
+and reset, source injection, renderer insertion order and visibility without
 rebuilding geometry. Shared package tests own geometry and paint contracts;
 browser interaction tests own pointer behavior of the editable shared compass.
 No native sensor or persistence schema changed, so no native API test is
@@ -484,10 +518,14 @@ The shareable type set is defined as `SHAREABLE_TYPES` in
 
 - `src/services/SpeleoDBService.test.ts`
 - `src/services/ProjectCacheService.test.ts`
+- `src/controllers/ProjectOverlaySyncCoordinator.test.ts`
 - `src/controllers/SpeleoDBController.test.ts`
 - `src/pages/Dashboard.test.tsx`
+- `src/pages/Settings.test.tsx`
+- `src/pages/dashboard/DashboardMapLayers.test.tsx`
 - `src/utils/overlayMarkerDetails.test.ts`
 - `src/components/OverlayMarkerDetailsModal.test.tsx`
+- `src/components/map/ExplorationLeadCompass.test.tsx`
 
 Landmark symbols use the shared map-viewer icon registry. `useLandmarkMapIcons`
 owns its map lifetime and disposes it on unmount. The registry prepares bundled

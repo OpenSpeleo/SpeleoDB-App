@@ -25,9 +25,9 @@
         "@ionic/react-router": "^8.8.19",
         "@sentry/capacitor": "^4.4.0",
         "@sentry/react": "10.69.0",
-        "@speleodb/api": "0.7.0",
-        "@speleodb/map-core": "0.5.0",
-        "@speleodb/map-viewer": "0.4.0",
+        "@speleodb/api": "0.7.1",
+        "@speleodb/map-core": "0.5.1",
+        "@speleodb/map-viewer": "0.5.1",
         "@turf/helpers": "^7.4.0",
         "@types/react-router": "^5.1.20",
         "@types/react-router-dom": "^5.3.3",
@@ -88,7 +88,7 @@
     "@sentry/capacitor",
   ],
   "overrides": {
-    "@speleodb/map-core": "0.5.0",
+    "@speleodb/map-core": "0.5.1",
   },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
@@ -517,11 +517,11 @@
 
     "@sentry/types": ["@sentry/types@10.69.0", "", { "dependencies": { "@sentry/core": "10.69.0" } }, "sha512-sWOH1SrpGecTWVygZy3tI3D4WmJQd1/CEcR+1GJr0MltNHK6u8GbTF/Zl+aOR7EfYxPR9vZWUYTjNpdpFt7HeA=="],
 
-    "@speleodb/api": ["@speleodb/api@0.7.0", "", {}, "sha512-BVQCmuq9vUge+/8tUyxjoipoGDMHCTgn8/uG6K3DksR5E54xG5YysmkFzcWJAIXlPUfrgES4F+CotiwE0LkfGg=="],
+    "@speleodb/api": ["@speleodb/api@0.7.1", "", {}, "sha512-rntTW/DoA6ePqsGJM6dPNXsojZuBdVimt9NeZ2yjKIuYR9yu8UXwQNiDKbKg6TP1A1csGHr3O+WzCXnBF1O1XA=="],
 
-    "@speleodb/map-core": ["@speleodb/map-core@0.5.0", "", { "dependencies": { "@types/geojson": "7946.0.16", "@types/polylabel": "2.0.0", "polylabel": "2.1.0" } }, "sha512-NJZBCRRrOqVvXDa8w99FrbVCvQRYZ9q+zo30c1Dg5+h9zCYEGJzwcXdUyy52jHZPaxJroPFr65ibkf7ddoPO4g=="],
+    "@speleodb/map-core": ["@speleodb/map-core@0.5.1", "", { "dependencies": { "@types/geojson": "7946.0.16", "@types/polylabel": "2.0.0", "polylabel": "2.1.0" } }, "sha512-qgXOnwbGfgvnmns6O6qZVXA4OHyIHCXUHvfogQliujB6pI8gUu5Wq73Wt98TgzHiB/OxIp7j3yHCjdzu2R1b5A=="],
 
-    "@speleodb/map-viewer": ["@speleodb/map-viewer@0.4.0", "", { "dependencies": { "@speleodb/map-core": ">=0.5.0 <1.0.0" }, "peerDependencies": { "@playwright/test": ">=1.63.0 <2.0.0", "maplibre-gl": ">=6.14.0 <7.0.0" }, "optionalPeers": ["@playwright/test"] }, "sha512-eMNMS3k4MUfOSAWWwqn4KxPiYta7+jGxWYZlPYvvNViNsyX1WVzUBrss6wkDpKKEjBRTsnRpah9LhZ7EFDICIg=="],
+    "@speleodb/map-viewer": ["@speleodb/map-viewer@0.5.1", "", { "dependencies": { "@speleodb/map-core": ">=0.5.1 <1.0.0" }, "peerDependencies": { "@playwright/test": ">=1.63.0 <2.0.0", "maplibre-gl": ">=6.14.0 <7.0.0" }, "optionalPeers": ["@playwright/test"] }, "sha512-5dkt7MO8VMXBIS5aQydkP0k9IWPkCwiBMURibVD6hYybTX3lX2/GQ/fM4W7jIUPhf6ss2YN7VwVyQFG8EYx/mQ=="],
 
     "@stencil/core": ["@stencil/core@4.45.2", "", { "optionalDependencies": { "@rollup/rollup-darwin-arm64": "4.44.0", "@rollup/rollup-darwin-x64": "4.44.0", "@rollup/rollup-linux-arm64-gnu": "4.44.0", "@rollup/rollup-linux-arm64-musl": "4.44.0", "@rollup/rollup-linux-x64-gnu": "4.44.0", "@rollup/rollup-linux-x64-musl": "4.44.0", "@rollup/rollup-win32-arm64-msvc": "4.44.0", "@rollup/rollup-win32-x64-msvc": "4.44.0" }, "bin": { "stencil": "bin/stencil" } }, "sha512-CNkPVZsqyNMjFMX9bEkMJsvBbQxjLw480OaoamoqiLPdQCFjJQReeOjnWX1A5ivSn3UYEIJ6MoN5VXDkaHGt8Q=="],
 

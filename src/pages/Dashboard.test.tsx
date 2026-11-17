@@ -116,7 +116,7 @@ const {
   const mockMapGetLayer = vi.fn((id: string) => ({ id }));
   const mockMapGetZoom = vi.fn(() => 15);
   const mockMapLoadImage = vi.fn((_url: string, callback: (error: Error | null, image?: unknown) => void) => {
-    callback(null, { width: 16, height: 16 });
+    callback(null, { width: 16, height: 16, data: new Uint8Array(16 * 16 * 4) });
   });
   const mockMapUnproject = vi.fn((point: { x: number; y: number }) => ({
     lng: 2.3 + point.x * 0.001,
@@ -942,7 +942,7 @@ describe('Dashboard', () => {
     mockMapGetLayer.mockImplementation((id: string) => ({ id }));
     mockMapGetZoom.mockReturnValue(15);
     mockMapLoadImage.mockImplementation((_url: string, callback: (error: Error | null, image?: unknown) => void) => {
-      callback(null, { width: 16, height: 16 });
+      callback(null, { width: 16, height: 16, data: new Uint8Array(16 * 16 * 4) });
     });
   });
 
@@ -1523,7 +1523,7 @@ describe('Dashboard', () => {
         callback(new Error('image load failed'));
         return;
       }
-      callback(null, { width: 16, height: 16 });
+      callback(null, { width: 16, height: 16, data: new Uint8Array(16 * 16 * 4) });
     });
     mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
       if (overlayId === 'explorationLeads') {
@@ -1694,7 +1694,7 @@ describe('Dashboard', () => {
         callback(new Error('image load failed'));
         return;
       }
-      callback(null, { width: 16, height: 16 });
+      callback(null, { width: 16, height: 16, data: new Uint8Array(16 * 16 * 4) });
     });
     mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
       if (overlayId === 'explorationLeads') {
@@ -1770,7 +1770,7 @@ describe('Dashboard', () => {
         callback(new Error('image load failed'));
         return;
       }
-      callback(null, { width: 16, height: 16 });
+      callback(null, { width: 16, height: 16, data: new Uint8Array(16 * 16 * 4) });
     });
     mockGetOverlayGeoJSON.mockImplementation(async (overlayId: string) => {
       if (overlayId === 'cylinderInstalls') {

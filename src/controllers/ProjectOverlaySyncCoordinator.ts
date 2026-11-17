@@ -1,3 +1,4 @@
+import { isExplorationLeadFullyChecked, parseExplorationLeadDirections } from '@speleodb/map-core';
 import { MAP_OVERLAYS } from '../constants';
 import type { ProjectCacheService } from '../services/ProjectCacheService';
 import type { SpeleoDBService } from '../services/SpeleoDBService';
@@ -89,7 +90,12 @@ export class ProjectOverlaySyncCoordinator {
         return 'failed';
       }
       const normalized = normalizeGeoJSON(response.data);
-      if (!normalized) {
+      const validLeadDirections = overlayId !== 'explorationLeads' || normalized?.features.every((feature) => {
+        const directions = parseExplorationLeadDirections(feature.properties?.directions);
+        return directions !== null
+          && feature.properties?.is_fully_checked === isExplorationLeadFullyChecked(directions);
+      });
+      if (!normalized || !validLeadDirections) {
         console.warn(`Overlay sync skipped for ${overlayId}: malformed 2xx payload`);
         return 'failed';
       }

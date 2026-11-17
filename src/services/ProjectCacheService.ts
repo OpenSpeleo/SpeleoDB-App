@@ -5,6 +5,7 @@
  * details from the rest of the app.
  */
 
+import { createDefaultExplorationLeadDirections, parseExplorationLeadDirections } from '@speleodb/map-core';
 import { CacheStore, type CacheEntry } from './CacheStore';
 import { ProjectGeoJSONRecordMemoryCache } from './ProjectGeoJSONRecordMemoryCache';
 import type { Project } from '../types/project';
@@ -269,6 +270,27 @@ function isFeatureCollection(value: unknown): value is GeoJSON.FeatureCollection
     && (value as { type?: unknown }).type === 'FeatureCollection'
     && Array.isArray((value as { features?: unknown }).features),
   );
+}
+
+/** Upgrade only persisted pre-status overlays; live responses use the new contract. */
+function migrateExplorationLeadDirections(data: unknown): unknown {
+  if (!isFeatureCollection(data)) return data;
+  let changed = false;
+  const features = data.features.map((feature) => {
+    const properties = feature.properties ?? {};
+    if (Object.hasOwn(properties, 'directions')) return feature;
+    const { headings, ...remaining } = properties;
+    const directions = Array.isArray(headings) && headings.length
+      ? parseExplorationLeadDirections(headings.map((heading: unknown) => ({ heading, checked: false })))
+      : createDefaultExplorationLeadDirections();
+    if (!directions) throw new Error('Cached exploration lead headings are invalid.');
+    changed = true;
+    return {
+      ...feature,
+      properties: { ...remaining, directions, is_fully_checked: false },
+    };
+  });
+  return changed ? { ...data, features } : data;
 }
 
 // ==================== Service ====================
@@ -649,7 +671,7 @@ export class ProjectCacheService {
   ): Promise<unknown | null> {
     throwIfAborted(options.signal)
     try {
-      const entry = await this.store.get('geojson', this.getOverlayCacheKey(overlayId));
+      const entry = await this.getOverlayEntry(overlayId, options);
       throwIfAborted(options.signal)
       return entry?.data ?? null;
     } catch (error) {
@@ -667,9 +689,33 @@ export class ProjectCacheService {
     options: CacheOperationOptions = {},
   ): Promise<unknown | null> {
     throwIfAborted(options.signal);
-    const entry = await this.store.get('geojson', this.getOverlayCacheKey(overlayId));
+    const entry = await this.getOverlayEntry(overlayId, options);
     throwIfAborted(options.signal);
     return entry?.data ?? null;
+  }
+
+  private async getOverlayEntry(
+    overlayId: MapOverlayId,
+    options: CacheOperationOptions,
+  ): Promise<CacheEntry | null> {
+    const key = this.getOverlayCacheKey(overlayId);
+    let entry = await this.store.get('geojson', key);
+    throwIfAborted(options.signal);
+    if (overlayId !== 'explorationLeads' || !entry
+      || migrateExplorationLeadDirections(entry.data) === entry.data) return entry;
+
+    // Read the current record inside the existing transaction so a newer sync
+    // or logout cannot be overwritten by bytes from the earlier cache read.
+    await this.store.update('geojson', key, (current) => {
+      entry = current;
+      if (!current) return null;
+      const data = migrateExplorationLeadDirections(current.data);
+      if (data === current.data) return null;
+      entry = { ...current, data };
+      return entry;
+    }, options);
+    throwIfAborted(options.signal);
+    return entry;
   }
 
   /** Write an overlay GeoJSON payload. */

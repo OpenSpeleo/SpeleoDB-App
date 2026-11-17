@@ -118,7 +118,10 @@ never report stale success.
 
 - Offline mode uses cached app data and cached map resources.
 - Dashboard map overlays (landmarks, stations, exploration leads, cylinder
-  installs) are read from cached GeoJSON when offline.
+  installs) are read from cached GeoJSON when offline. Exploration-lead checked
+  states reflect the last successful sync; their local visibility toggle works
+  offline. Older cached heading arrays migrate without clearing maps or changing
+  freshness timestamps. Mobile never queues lead-status mutations.
 - Project survey GeoJSON is shown offline only when its active cache metadata is
   schema-v2 valid and its commit matches the cached project list's
   `latest_commit.id`. A matching-commit legacy record may be audited locally;

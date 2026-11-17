@@ -123,20 +123,29 @@ The controls appear in this order:
   existing Map unit determines its input and display unit.
 - **Map unit**: `Meters` / `Feet`, default `meters`. Controls the distance
   scale, depth gauge, and depth-limit input. Canonical depths remain in feet.
-- **Map visibility**: collapsed by default with **All shown** when every
-  category and station type is on, otherwise **Custom**. These summaries
-  describe preferences, not feature availability at the current zoom.
+- **Map visibility**: collapsed by default with **Default** when every category
+  and station type is on and Checked Exploration Leads is off, otherwise **Custom**.
+  These summaries describe preferences, not feature availability at the current
+  zoom.
 
 Map visibility lists its switches alphabetically: **Cave entrances**,
 **Exploration leads**, **Geometry labels**, **Landmarks**, **Safety cylinders**,
-**Surface stations**, and **Survey stations**. Each defaults on. Cave entrances
-controls the star symbols from project GeoJSONs. The inline **Station types**
-disclosure stays directly under Survey stations, with its switches also sorted:
-**Artifact**, **Biology**, **Bones**, **Geology**, and **Sensor**. Its summary
-reports **N of 5 selected** or **Survey stations off**. Turning the parent off
-disables subtype switches without changing their selections. Alphabetical order
-makes settings easier to locate; sorted presentation copies are created once
-when the component module loads, preserving the shared preference metadata.
+**Surface stations**, and **Survey stations**. Each category defaults on.
+**Checked Exploration Leads** sits directly below Exploration leads and defaults OFF.
+A muted, smaller indented row keeps it visually subordinate to its parent,
+without a separate card or badge. The tooltip and accessible description explain
+the parent gate when disabled; the saved preference remains intact.
+It reveals fully checked markers in green at 75% opacity; checked directions
+have no light cone. Turning Exploration leads off disables this subordinate
+switch while preserving its selection. It works offline using the last synced
+status and does not enable editing on mobile. Cave entrances controls the star
+symbols from project GeoJSONs. The inline **Station types** disclosure stays
+directly under Survey stations, with its switches also sorted: **Artifact**,
+**Biology**, **Bones**, **Geology**, and **Sensor**. Its summary reports **N of
+5 selected** or **Survey stations off**. Turning the parent off disables subtype
+switches without changing their selections. Alphabetical order makes settings
+easier to locate; sorted presentation copies are created once when the component
+module loads, preserving the shared preference metadata.
 
 Station types is an inset group with an indigo left border and a contrasting
 header so it reads as a disclosure belonging to Survey stations. Its small
@@ -153,10 +162,10 @@ existing zoom thresholds still apply. A single light haptic acknowledges a
 visibility change; opening groups and editing text are silent.
 
 **Reset visibility** remains last and restores only the six category flags,
-geometry labels, and five subtype flags. It preserves color mode, map unit,
-depth limit, camera, cache, and individual selections. **Reset to full range**
-clears only the depth cap. Reset actions require no confirmation and are
-disabled when already at their default.
+geometry labels, five subtype flags, and Checked Exploration Leads (OFF). It preserves
+color mode, map unit, depth limit, camera, cache, and individual selections.
+**Reset to full range** clears only the depth cap. Reset actions require no
+confirmation and are disabled when already at their default.
 
 #### Depth editing
 
