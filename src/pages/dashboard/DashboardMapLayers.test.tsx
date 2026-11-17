@@ -48,6 +48,11 @@ vi.mock('react-map-gl/maplibre', () => ({
     beforeId?: string;
     minzoom?: number;
   }) => {
+    // react-map-gl binds one id/type to each mounted Layer instance.
+    const identity = React.useRef({ id, type });
+    if (identity.current.id !== id || identity.current.type !== type) {
+      throw new Error('A mounted renderer layer cannot change its id or type.');
+    }
     // MapLibre appends newly mounted layers unless beforeId names an existing layer.
     // JSX order alone cannot represent icons that become available after the cones.
     React.useLayoutEffect(() => {
@@ -599,7 +604,7 @@ describe('Dashboard map layers', () => {
 describe('viewer source identity and filter contracts', () => {
   it.each([true, false])('binds lead cones above markers at the shared minimum zoom with icon available: %s', (iconAvailable) => {
     const leads: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [{
-      type: 'Feature', id: 'lead', properties: { project: '42', headings: [0, 90, 337.5] },
+      type: 'Feature', id: 'lead', properties: { project: '42', directions: [{ heading: 0, checked: false }, { heading: 90, checked: false }, { heading: 337.5, checked: false }], is_fully_checked: false },
       geometry: { type: 'Point', coordinates: [2, 46] },
     }] };
     const props = { visibleOverlayGeoJsonData: { explorationLeads: leads },
@@ -624,6 +629,36 @@ describe('viewer source identity and filter contracts', () => {
     expect(sourceInputs.record.mock.calls.filter(([id]) => id === 'exploration-leads-cones-source').at(-1)![1]).toBe(derived);
   });
 
+  it.each([true, false])('combines completed-lead visibility with project and category gates: %s', (iconAvailable) => {
+    const leads: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [
+      { type: 'Feature', id: 'partial', geometry: { type: 'Point', coordinates: [2, 46] }, properties: {
+        project: '42', is_fully_checked: false,
+        directions: [{ heading: 0, checked: true }, { heading: 90, checked: false }],
+      } },
+      { type: 'Feature', id: 'checked', geometry: { type: 'Point', coordinates: [2, 46] }, properties: {
+        project: '42', is_fully_checked: true, directions: [{ heading: null, checked: true }],
+      } },
+    ] };
+    const props = { visibleOverlayGeoJsonData: { explorationLeads: leads }, iconsLoaded: true,
+      iconAvailability: iconAvailable ? ALL_ICONS : NO_ICONS, activeProjectIds: new Set(['42']) };
+    const markerId = `exploration-leads-${iconAvailable ? 'icon' : 'fallback'}-layer`;
+    const { container, rerender } = render(<OverlayMapLayers {...props} mapDisplayPreferences={DEFAULT_DISPLAY} />);
+    expect(accepts(container, markerId, { project: '42', is_fully_checked: false })).toBe(true);
+    expect(accepts(container, markerId, { project: '42', is_fully_checked: true })).toBe(false);
+    const cones = sourceInputs.record.mock.calls.filter(([id]) => id === 'exploration-leads-cones-source').at(-1)![1] as GeoJSON.FeatureCollection;
+    expect(cones.features).toHaveLength(1);
+    expect(cones.features[0].id).toBe('partial:heading:1');
+    rerender(<OverlayMapLayers {...props} mapDisplayPreferences={{ ...DEFAULT_DISPLAY, showCheckedExplorationLeads: true }} />);
+    expect(accepts(container, markerId, { project: '42', is_fully_checked: true })).toBe(true);
+    expect(accepts(container, markerId, { project: 'hidden', is_fully_checked: true })).toBe(false);
+    expect(sourceInputs.record.mock.calls.filter(([id]) => id === 'exploration-leads-source').at(-1)![1]).toBe(leads);
+    expect(sourceInputs.record.mock.calls.filter(([id]) => id === 'exploration-leads-cones-source').at(-1)![1]).toBe(cones);
+    rerender(<OverlayMapLayers {...props} mapDisplayPreferences={{ ...DEFAULT_DISPLAY,
+      showCheckedExplorationLeads: true, categories: { ...DEFAULT_DISPLAY.categories, explorationLeads: false } }} />);
+    expect(layoutFor(container, markerId).visibility).toBe('none');
+    expect(layoutFor(container, 'exploration-leads-cones-layer').visibility).toBe('none');
+  });
+
   it.each([true, false])('keeps cones above delayed lead markers and restored layers with icon available: %s', (iconAvailable) => {
     const props = {
       visibleOverlayGeoJsonData: { explorationLeads: POINT_FEATURE_COLLECTION },
@@ -640,6 +675,32 @@ describe('viewer source identity and filter contracts', () => {
     expect(sourceInputs.leadLayerOrder).toEqual([]);
     render(<OverlayMapLayers {...props} iconsLoaded />);
     expect(sourceInputs.leadLayerOrder).toEqual(expected);
+  });
+
+  it('replaces the lead marker when icon availability changes while retaining its sources and visibility filters', () => {
+    const props = {
+      visibleOverlayGeoJsonData: { explorationLeads: POINT_FEATURE_COLLECTION },
+      visibleLandmarksGeoJSON: EMPTY_FEATURE_COLLECTION,
+      mapDisplayPreferences: DEFAULT_DISPLAY,
+      activeProjectIds: new Set(['42']),
+      iconsLoaded: true,
+    };
+    const { container, rerender } = render(<OverlayMapLayers {...props} iconAvailability={NO_ICONS} />);
+    const source = container.querySelector('[data-source-id="exploration-leads-source"]');
+    const cones = container.querySelector('[data-layer-id="exploration-leads-cones-layer"]');
+    const fallback = container.querySelector('[data-layer-id="exploration-leads-fallback-layer"]');
+    rerender(<OverlayMapLayers {...props} iconAvailability={ALL_ICONS} />);
+    expect(fallback).not.toBeInTheDocument();
+    expect(container.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).toHaveAttribute('data-layer-type', 'symbol');
+    expect(sourceInputs.leadLayerOrder).toEqual(['exploration-leads-icon-layer', 'exploration-leads-cones-layer']);
+    expect(accepts(container, 'exploration-leads-icon-layer', { project: '42', is_fully_checked: true })).toBe(false);
+    rerender(<OverlayMapLayers {...props} iconAvailability={NO_ICONS} />);
+    expect(container.querySelector('[data-layer-id="exploration-leads-icon-layer"]')).toBeNull();
+    expect(container.querySelector('[data-layer-id="exploration-leads-fallback-layer"]')).toHaveAttribute('data-layer-type', 'circle');
+    expect(sourceInputs.leadLayerOrder).toEqual(['exploration-leads-fallback-layer', 'exploration-leads-cones-layer']);
+    expect(container.querySelector('[data-source-id="exploration-leads-source"]')).toBe(source);
+    expect(container.querySelector('[data-layer-id="exploration-leads-cones-layer"]')).toBe(cones);
+    expect(accepts(container, 'exploration-leads-fallback-layer', { project: 'hidden', is_fully_checked: false })).toBe(false);
   });
 
   function accepts(container: HTMLElement, id: string, properties: Record<string, unknown>): boolean {

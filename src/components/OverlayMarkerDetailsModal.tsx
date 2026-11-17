@@ -96,7 +96,10 @@ function renderDetailFields(detail: OverlayMarkerDetails) {
       return (
         <DetailCard>
           <DetailField label="Description" testId="overlay-marker-description" value={detail.description} />
-          <ExplorationLeadCompass headings={detail.headings} />
+          <div>
+            <h3 className="text-xs uppercase tracking-wide text-slate-400 mb-1">Directions</h3>
+            <ExplorationLeadCompass directions={detail.directions} />
+          </div>
         </DetailCard>
       );
 

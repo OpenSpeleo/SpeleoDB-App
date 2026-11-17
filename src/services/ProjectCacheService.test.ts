@@ -709,16 +709,50 @@ describe('ProjectCacheService overlay cache', () => {
     expect(await cache.getOverlayGeoJSON('explorationLeads')).toBeNull();
   });
 
-  it('retains all lead headings through durable offline cache reads', async () => {
-    await cache.setOverlayGeoJSON('explorationLeads', {
-      type: 'FeatureCollection', features: [{ type: 'Feature', id: 'lead',
-        properties: { description: 'Three passages', headings: [0, 90, 337.5] },
-        geometry: { type: 'Point', coordinates: [2, 46] } }],
-    });
-    const reopened = new ProjectCacheService();
+  it('migrates old headings offline without changing cache freshness or unrelated overlays', async () => {
+    const store = new CacheStore();
+    const original = {
+      data: {
+        type: 'FeatureCollection', features: [
+          { type: 'Feature', id: 'directed', properties: { description: 'Survey notes', headings: [0, 90, 337.5] },
+            geometry: { type: 'Point', coordinates: [2, 46] } },
+          { type: 'Feature', id: 'undirected', properties: { headings: [] },
+            geometry: { type: 'Point', coordinates: [3, 46] } },
+        ],
+      },
+      cachedAt: 1234,
+      meta: { source: 'previous-app' },
+    };
+    await store.set('geojson', 'overlay:explorationLeads', original);
+    await store.set('geojson', 'overlay:landmarks', original);
+    const reopened = new ProjectCacheService(store);
+
     expect(await reopened.getOverlayGeoJSON('explorationLeads')).toMatchObject({
-      features: [{ properties: { headings: [0, 90, 337.5] } }],
+      features: [
+        { id: 'directed', properties: { description: 'Survey notes', directions: [
+          { heading: 0, checked: false }, { heading: 90, checked: false }, { heading: 337.5, checked: false },
+        ], is_fully_checked: false } },
+        { id: 'undirected', properties: { directions: [{ heading: null, checked: false }], is_fully_checked: false } },
+      ],
     });
+    const stored = await store.get<GeoJSON.FeatureCollection>('geojson', 'overlay:explorationLeads');
+    expect(stored).toMatchObject({ cachedAt: original.cachedAt, meta: original.meta });
+    expect(stored?.data.features[0].properties).not.toHaveProperty('headings');
+    expect(await store.get('geojson', 'overlay:landmarks')).toEqual(original);
+    expect(await new ProjectCacheService(store).getOverlayGeoJSONForOfflineMap('explorationLeads')).toEqual(stored?.data);
+  });
+
+  it('retains checked directions through durable offline cache reads', async () => {
+    const directions = [{ heading: 0, checked: true }, { heading: 90, checked: false }, { heading: 337.5, checked: true }];
+    const payload = {
+      type: 'FeatureCollection', features: [{ type: 'Feature', id: 'lead',
+        properties: { description: 'Three passages', directions, is_fully_checked: false },
+        geometry: { type: 'Point', coordinates: [2, 46] } }],
+    };
+    await cache.setOverlayGeoJSON('explorationLeads', payload);
+    const reopened = new ProjectCacheService();
+    expect(await reopened.getOverlayGeoJSON('explorationLeads')).toEqual(payload);
+    expect(await reopened.getOverlayGeoJSONForOfflineMap('explorationLeads')).toEqual(payload);
   });
 
   it('atomically serializes concurrent overlay feature mutations', async () => {

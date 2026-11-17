@@ -2784,7 +2784,7 @@ describe('SpeleoDBController', () => {
     it('syncs read-only overlay geojson payloads during project sync', async () => {
       const customFeatureCollection: GeoJSON.FeatureCollection = {
         type: 'FeatureCollection',
-        features: [{ type: 'Feature', properties: { test: true }, geometry: { type: 'Point', coordinates: [0, 0] } }],
+        features: [{ type: 'Feature', properties: { test: true, directions: [{ heading: null, checked: false }], is_fully_checked: false }, geometry: { type: 'Point', coordinates: [0, 0] } }],
       };
       service = createMockService({
         getLandmarksGeoJSON: vi.fn(async () => ({

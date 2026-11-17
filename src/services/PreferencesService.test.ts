@@ -374,6 +374,19 @@ describe('PreferencesService', () => {
       expect(getMapDisplayPreferences()).toEqual(createDefaultMapDisplayPreferences());
     });
 
+    it('defaults checked leads off and preserves the saved choice when other preferences change', () => {
+      expect(getMapDisplayPreferences().showCheckedExplorationLeads).toBe(false);
+      setMapDisplayPreferences({ showCheckedExplorationLeads: true });
+      setMapDisplayPreferences({ categories: { explorationLeads: false } });
+      flushViewerPreferences();
+      expect(getMapDisplayPreferences()).toMatchObject({
+        showCheckedExplorationLeads: true,
+        categories: { explorationLeads: false },
+      });
+      expect(JSON.parse(localStorage.getItem(PREFERENCES.STORAGE_KEY)!).mapDisplayPreferences)
+        .toMatchObject({ showCheckedExplorationLeads: true });
+    });
+
     it('migrates hidden landmarks on the next ordinary write without losing unrelated state', () => {
       localStorage.setItem(PREFERENCES.STORAGE_KEY, JSON.stringify({
         showLandmarks: false,

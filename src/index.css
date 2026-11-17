@@ -773,3 +773,35 @@ body {
 .map-control-button svg { width: 20px; height: 20px; flex-shrink: 0; }
 .map-layer-control-slot { position: relative; z-index: 1; }
 .map-layer-control-slot .map-control-button { z-index: 20; }
+
+/* Keep completion visibility quieter than its parent category. */
+.map-settings-checked-leads {
+  --min-height: 36px;
+  --padding-start: 12px;
+  margin: 0 0 6px 20px;
+  border-left: 1px solid var(--color-slate-700);
+}
+
+.map-settings-checked-leads ion-toggle {
+  padding-block: 0;
+}
+
+.map-settings-checked-leads ion-toggle::part(label) {
+  margin-block: 4px;
+  min-width: 0;
+  white-space: normal;
+  color: var(--color-slate-400);
+  font-size: 0.8125rem;
+}
+
+.map-settings-checked-leads ion-toggle::part(track) {
+  transform: scale(0.85);
+  transform-origin: right center;
+}
+
+/* Ionic references this hint with aria-describedby. Keep it out of the
+ * visible row and label name while retaining that explicit description. */
+.map-settings-checked-leads ion-toggle::part(helper-text) {
+  display: none;
+}
+

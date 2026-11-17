@@ -165,23 +165,30 @@ vi.mock('@ionic/react', () => ({
   IonNote: ({ children, ...rest }: { children?: React.ReactNode } & Record<string, unknown>) => (
     <span data-testid={rest['data-testid'] as string}>{children}</span>
   ),
-  IonToggle: ({ checked, onIonChange, children, disabled, ...rest }: {
+  IonToggle: ({ checked, onIonChange, children, disabled, helperText, ...rest }: {
     checked?: boolean;
     onIonChange?: (e: { detail: { checked: boolean } }) => void;
     children?: React.ReactNode;
     disabled?: boolean;
-  } & Record<string, unknown>) => (
-    <label>
-      <input
-        data-testid={rest['data-testid'] as string ?? 'ion-toggle'}
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onIonChange?.({ detail: { checked: e.target.checked } })}
-      />
-      {children}
-    </label>
-  ),
+    helperText?: string;
+  } & Record<string, unknown>) => {
+    const hintId = React.useId();
+    return (
+      <label>
+        <input
+          data-testid={rest['data-testid'] as string ?? 'ion-toggle'}
+          aria-label={rest['aria-label'] as string | undefined}
+          aria-describedby={helperText ? hintId : undefined}
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onIonChange?.({ detail: { checked: e.target.checked } })}
+        />
+        {children}
+        {helperText && <span id={hintId} hidden>{helperText}</span>}
+      </label>
+    );
+  },
   IonModal: ({
     children,
     isOpen,
@@ -646,7 +653,7 @@ describe('Settings page', () => {
     renderSettings();
     const disclosure = screen.getByTestId('map-visibility-disclosure');
     expect(disclosure).not.toHaveAttribute('open');
-    expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('All shown');
+    expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('Default');
     expect(screen.getByTestId('map-visibility-summary')).toHaveAttribute('data-tour', 'settings-map-visibility');
     expect(screen.getByTestId('landmark-toggle')).not.toBeVisible();
     expect(screen.queryByTestId('depth-limit-summary')).not.toBeInTheDocument();
@@ -655,7 +662,7 @@ describe('Settings page', () => {
     const controls = within(disclosure).getAllByRole('checkbox')
       .filter((control) => control.closest('details') === disclosure);
     const labels = [
-      'Cave entrances', 'Exploration leads', 'Geometry labels', 'Landmarks',
+      'Cave entrances', 'Exploration leads', 'Checked Exploration Leads', 'Geometry labels', 'Landmarks',
       'Safety cylinders', 'Surface stations', 'Survey stations',
     ];
     expect(controls).toHaveLength(labels.length);
@@ -696,6 +703,30 @@ describe('Settings page', () => {
     expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('Custom');
     expect(mockSyncProjects).not.toHaveBeenCalled();
     expect(screen.getByTestId('map-visibility-disclosure')).toHaveAttribute('open');
+  });
+
+  it('keeps checked exploration leads hidden by default and retains the choice through its parent gate', async () => {
+    mockIsOfflineLocked.current = true;
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByTestId('map-visibility-summary'));
+    const checked = screen.getByRole('checkbox', { name: 'Checked Exploration Leads' });
+    expect(checked).toHaveAccessibleDescription('Show fully checked leads on the map.');
+    expect(checked).not.toBeChecked();
+    await user.click(checked);
+    expect(mockMapDisplayChange).toHaveBeenLastCalledWith({ showCheckedExplorationLeads: true });
+    await user.click(screen.getByRole('checkbox', { name: 'Exploration leads' }));
+    expect(checked).toBeDisabled();
+    expect(checked).toBeChecked();
+    expect(checked).toHaveAccessibleDescription('Turn on Exploration leads to show checked leads.');
+    await user.click(screen.getByRole('checkbox', { name: 'Exploration leads' }));
+    expect(checked).not.toBeDisabled();
+    expect(checked).toBeChecked();
+    expect(checked).toHaveAccessibleDescription('Show fully checked leads on the map.');
+    await user.click(screen.getByRole('button', { name: 'Reset visibility' }));
+    expect(checked).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Reset visibility' })).toBeDisabled();
+    expect(mockSyncProjects).not.toHaveBeenCalled();
   });
 
   it('preserves subtype choices through the survey-station parent gate', async () => {
@@ -753,10 +784,10 @@ describe('Settings page', () => {
     });
     await user.click(screen.getByTestId('map-visibility-summary'));
     await user.click(screen.getByRole('button', { name: 'Reset visibility' }));
-    expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('All shown');
+    expect(screen.getByTestId('map-visibility-summary')).toHaveTextContent('Default');
     expect(screen.getByRole('button', { name: 'Reset visibility' })).toBeDisabled();
     const { categories, stationTypes } = createDefaultMapDisplayPreferences();
-    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ categories, stationTypes, showGeometryLabels: true });
+    expect(mockMapDisplayChange).toHaveBeenCalledExactlyOnceWith({ categories, stationTypes, showGeometryLabels: true, showCheckedExplorationLeads: false });
     expect(screen.getByTestId('depth-limit-summary')).toHaveTextContent('123.5 ft');
     expect(screen.getByTestId('color-mode-selector')).toHaveValue('depth');
     expect(screen.getByTestId('measurement-unit-selector')).toHaveValue('feet');

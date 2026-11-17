@@ -1,3 +1,5 @@
+import { EXPLORATION_LEAD_SHOW_CHECKED_DEFAULT } from '@speleodb/map-viewer';
+
 /** Local presentation preferences; these never change map data or item selection. */
 export const MAP_DISPLAY_CATEGORIES = [
   { id: 'caveEntrances', label: 'Cave entrances' },
@@ -21,6 +23,7 @@ export type MapStationType = (typeof MAP_STATION_TYPES)[number]['id'];
 
 export interface MapDisplayPreferences {
   showGeometryLabels: boolean;
+  showCheckedExplorationLeads: boolean;
   categories: Record<MapDisplayCategory, boolean>;
   stationTypes: Record<MapStationType, boolean>;
   /** Physical depth in feet; null uses the visible surveys' full range. */
@@ -29,6 +32,7 @@ export interface MapDisplayPreferences {
 
 export interface MapDisplayPreferencesPatch {
   showGeometryLabels?: boolean;
+  showCheckedExplorationLeads?: boolean;
   categories?: Partial<MapDisplayPreferences['categories']>;
   stationTypes?: Partial<MapDisplayPreferences['stationTypes']>;
   depthLimitFeet?: number | null;
@@ -37,6 +41,7 @@ export interface MapDisplayPreferencesPatch {
 export function createDefaultMapDisplayPreferences(): MapDisplayPreferences {
   return {
     showGeometryLabels: true,
+    showCheckedExplorationLeads: EXPLORATION_LEAD_SHOW_CHECKED_DEFAULT,
     categories: {
       caveEntrances: true,
       surveyStations: true,
@@ -66,6 +71,7 @@ export function normalizeMapDisplayPreferences(
   const stationTypes = asRecord(record.stationTypes);
   const result = createDefaultMapDisplayPreferences();
   if (typeof record.showGeometryLabels === 'boolean') result.showGeometryLabels = record.showGeometryLabels;
+  if (typeof record.showCheckedExplorationLeads === 'boolean') result.showCheckedExplorationLeads = record.showCheckedExplorationLeads;
   for (const { id } of MAP_DISPLAY_CATEGORIES) {
     if (typeof categories[id] === 'boolean') result.categories[id] = categories[id];
   }
@@ -89,6 +95,7 @@ export function mergeMapDisplayPreferences(
 ): MapDisplayPreferences {
   return normalizeMapDisplayPreferences({
     showGeometryLabels: patch.showGeometryLabels ?? current.showGeometryLabels,
+    showCheckedExplorationLeads: patch.showCheckedExplorationLeads ?? current.showCheckedExplorationLeads,
     categories: { ...current.categories, ...patch.categories },
     stationTypes: { ...current.stationTypes, ...patch.stationTypes },
     depthLimitFeet: patch.depthLimitFeet === undefined ? current.depthLimitFeet : patch.depthLimitFeet,

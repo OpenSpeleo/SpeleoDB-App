@@ -61,11 +61,14 @@ const MapDisplaySettings: React.FC<MapDisplaySettingsProps> = ({
   const resetPointerDown = useRef(false);
   const depthDisclosure = useRef<HTMLDetailsElement>(null);
   const depthInput = useRef<HTMLInputElement>(null);
-  const allShown = preferences.showGeometryLabels && MAP_DISPLAY_CATEGORIES.every(({ id }) => preferences.categories[id])
+  const defaultVisibility = !preferences.showCheckedExplorationLeads && preferences.showGeometryLabels && MAP_DISPLAY_CATEGORIES.every(({ id }) => preferences.categories[id])
     && MAP_STATION_TYPES.every(({ id }) => preferences.stationTypes[id]);
   const selectedTypeCount = MAP_STATION_TYPES.filter(({ id }) => preferences.stationTypes[id]).length;
   const depthValue = depthDraft ?? (preferences.depthLimitFeet === null
     ? '' : formatDepthLimitInput(preferences.depthLimitFeet, measurementUnit));
+  const checkedLeadsDescription = preferences.categories.explorationLeads
+    ? 'Show fully checked leads on the map.'
+    : 'Turn on Exploration leads to show checked leads.';
 
   const changeVisibility = (patch: MapDisplayPreferencesPatch) => {
     onChange(patch);
@@ -247,7 +250,7 @@ const MapDisplaySettings: React.FC<MapDisplaySettingsProps> = ({
       >
         <summary data-tour="settings-map-visibility" data-testid="map-visibility-summary">
           <span>Map visibility</span>
-          <span className="map-settings-summary-value">{allShown ? 'All shown' : 'Custom'}</span>
+          <span className="map-settings-summary-value">{defaultVisibility ? 'Default' : 'Custom'}</span>
           <DisclosureChevron />
         </summary>
         <div className="map-settings-visibility-body">
@@ -267,6 +270,25 @@ const MapDisplaySettings: React.FC<MapDisplaySettingsProps> = ({
                     ? 'geometry-label-toggle' : id === 'landmarks' ? 'landmark-toggle' : `map-category-${id}`}
                 >{label}</IonToggle>
               </IonItem>
+              {id === 'explorationLeads' && (
+                <IonItem
+                  className="map-settings-checked-leads"
+                  lines="none"
+                >
+                  <IonToggle
+                    checked={preferences.showCheckedExplorationLeads}
+                    disabled={!preferences.categories.explorationLeads}
+                    justify="space-between"
+                    onIonChange={(event) => changeVisibility({ showCheckedExplorationLeads: event.detail.checked })}
+                    data-testid="checked-exploration-leads-toggle"
+                    aria-label="Checked Exploration Leads"
+                    helperText={checkedLeadsDescription}
+                    title={checkedLeadsDescription}
+                  >
+                    Checked Exploration Leads
+                  </IonToggle>
+                </IonItem>
+              )}
               {id === 'surveyStations' && (
                 <details
                   className="map-settings-disclosure map-settings-station-types"
@@ -302,10 +324,10 @@ const MapDisplaySettings: React.FC<MapDisplaySettingsProps> = ({
             <button
               type="button"
               className="app-btn app-btn--secondary map-settings-reset"
-              disabled={allShown}
+              disabled={defaultVisibility}
               onClick={() => {
-                const { categories, stationTypes, showGeometryLabels } = createDefaultMapDisplayPreferences();
-                changeVisibility({ categories, stationTypes, showGeometryLabels });
+                const { categories, stationTypes, showGeometryLabels, showCheckedExplorationLeads } = createDefaultMapDisplayPreferences();
+                changeVisibility({ categories, stationTypes, showGeometryLabels, showCheckedExplorationLeads });
               }}
             >Reset visibility</button>
           </div>

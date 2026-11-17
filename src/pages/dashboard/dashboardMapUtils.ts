@@ -19,7 +19,7 @@ import type {
   OverlayMarkerDetails,
 } from '../../utils/overlayMarkerDetails';
 import { MAP_ICON_URLS } from '@speleodb/map-viewer/icons';
-import { hitQueryBounds } from '@speleodb/map-viewer';
+import { EXPLORATION_LEAD_ICON_IDS, createCheckedExplorationLeadIcon, hitQueryBounds } from '@speleodb/map-viewer';
 
 export type ProjectBoundsRecord = Record<string, ProjectGeoJSONBounds>;
 export type OverlayIconId =
@@ -206,24 +206,33 @@ export async function loadMapImage(
   id: OverlayIconId,
   url: string,
 ): Promise<boolean> {
-  if (map.hasImage(id)) return true;
+  if (map.hasImage(id) && (id !== EXPLORATION_LEAD_ICON_IDS.unchecked || map.hasImage(EXPLORATION_LEAD_ICON_IDS.checked))) return true;
+  const register = (image: unknown) => {
+    if (id === EXPLORATION_LEAD_ICON_IDS.unchecked && !map.hasImage(EXPLORATION_LEAD_ICON_IDS.checked)) {
+      // Native MapLibre and browser decoders return the shared helper's supported raster/image types.
+      const checked = createCheckedExplorationLeadIcon(image as Parameters<typeof createCheckedExplorationLeadIcon>[0]);
+      map.addImage(EXPLORATION_LEAD_ICON_IDS.checked, checked);
+    }
+    if (!map.hasImage(id)) map.addImage(id, image);
+  };
   try {
     const image = await loadImageViaFetch(url);
-    map.addImage(id, image);
+    register(image);
     return true;
   } catch (fetchError) {
     return new Promise((resolve) => {
       map.loadImage(url, (error, image) => {
-        if (error || !image) {
+        try {
+          if (error || !image) throw error ?? fetchError;
+          register(image);
+          resolve(true);
+        } catch (imageError) {
           if (!warnedIconIds.has(id)) {
             warnedIconIds.add(id);
-            console.warn('Failed to load a map icon.', error ?? fetchError);
+            console.warn('Failed to load a map icon.', imageError);
           }
           resolve(false);
-          return;
         }
-        map.addImage(id, image);
-        resolve(true);
       });
     });
   }
