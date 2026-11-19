@@ -117,6 +117,15 @@ Sentry dependencies; a newer React SDK can compile with a type assertion while
 silently dropping errors captured through the native bridge. The integration
 test exercises the real client and transport to guard this seam.
 
+Pin the Capacitor bridge exactly in `package.json`, alongside the exact React,
+browser, and core SDK pins. Upgrade them together against the bridge's declared
+peer and dependency requirements, then refresh both standalone and workspace
+lockfiles. A bridge version range can otherwise select a newer SDK in the
+workspace while the standalone lock still passes. Verify upgrades with
+`src/monitoring/sentryInterop.test.ts` and `src/monitoring/sentry.test.ts`, plus
+type checking and the production build. Keeping one compatible SDK avoids
+duplicate monitoring clients and their bundle overhead.
+
 The only retained event contexts are sanitized React component code locations
 and the browser engine name/version parsed from the local user agent. The full
 user agent, device description, and arbitrary context fields are not forwarded.
