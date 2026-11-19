@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import viteConfig from '../vite.config';
+import manifest from '../package.json';
 
 interface CoverageThresholds {
   statements?: number;
@@ -29,6 +30,11 @@ function configuredThresholds(): CoverageThresholds | undefined {
 }
 
 describe('release coverage thresholds', () => {
+  it('uses the same exact version for Vitest and its coverage provider', () => {
+    expect(manifest.devDependencies['@vitest/coverage-istanbul'])
+      .toBe(manifest.devDependencies.vitest);
+  });
+
   it('enforces audited global non-regression floors', () => {
     expect(configuredThresholds()).toMatchObject({
       statements: 90,

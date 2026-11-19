@@ -81,7 +81,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-legacy": "^8.2.3",
     "@vitejs/plugin-react": "^6.1.2",
-    "@vitest/coverage-istanbul": "5.0.1",
+    "@vitest/coverage-istanbul": "5.0.4",
     "autoprefixer": "^10.6.1",
     "eslint": "^9.39.5",
     "eslint-plugin-react": "^7.37.5",

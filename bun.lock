@@ -62,7 +62,7 @@
         "@types/react-dom": "19.3.0",
         "@vitejs/plugin-legacy": "^8.2.3",
         "@vitejs/plugin-react": "^6.1.2",
-        "@vitest/coverage-istanbul": "5.0.1",
+        "@vitest/coverage-istanbul": "5.0.4",
         "autoprefixer": "^10.6.1",
         "eslint": "^9.39.5",
         "eslint-plugin-react": "^7.37.5",
@@ -627,7 +627,7 @@
 
     "@vitejs/plugin-react": ["@vitejs/plugin-react@6.1.2", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.1" }, "peerDependencies": { "@rolldown/plugin-babel": "^0.1.7 || ^0.2.0", "babel-plugin-react-compiler": "^1.0.0", "oxc-transform-react": "^0.152.0", "vite": "^8.0.0" }, "optionalPeers": ["@rolldown/plugin-babel", "babel-plugin-react-compiler", "oxc-transform-react"] }, "sha512-fhJNGUdscQa4HkI0xFxwonWyhnVReCPDbXI7FH7jmzpnVCrFQI7PRrhWecO263610vOrs9tr2Y4xcf8uAdFxbw=="],
 
-    "@vitest/coverage-istanbul": ["@vitest/coverage-istanbul@5.0.1", "", { "dependencies": { "@jridgewell/gen-mapping": "^0.3.13", "@jridgewell/trace-mapping": "0.3.31", "@vitest/istanbul-lib-coverage": "^1.0.0", "@vitest/istanbul-lib-instrument": "^1.0.0", "@vitest/istanbul-lib-report": "^1.0.0", "@vitest/istanbul-lib-source-maps": "^1.0.0", "magicast": "^0.5.4", "obug": "^2.1.4", "tinyrainbow": "^3.1.1" }, "peerDependencies": { "vitest": "5.0.1" } }, "sha512-JROeZ7Yy4xOMXQALW6CHT3O165LlUCB55F0aQ1LBRuFOCPCnSM1vDx8YxZTs8uPIBW9lcEftfNfOvIj4IJ1i9g=="],
+    "@vitest/coverage-istanbul": ["@vitest/coverage-istanbul@5.0.4", "", { "dependencies": { "@jridgewell/gen-mapping": "^0.3.13", "@jridgewell/trace-mapping": "0.3.31", "@vitest/istanbul-lib-coverage": "^1.0.2", "@vitest/istanbul-lib-instrument": "^1.0.2", "@vitest/istanbul-lib-report": "^1.0.2", "@vitest/istanbul-lib-source-maps": "^1.0.2", "magicast": "^0.5.5", "obug": "^3.0.0", "tinyrainbow": "^3.2.0" }, "peerDependencies": { "vitest": "5.0.4" } }, "sha512-1LKQU3DqjmnMVh2OAF4ZnCjHYbAVo+kvDDV+nnNhmaKsWZ0ceVpsZrUn0AHUmWd+MbwNC1K5mG8a4f66avJ9Dw=="],
 
     "@vitest/istanbul-lib-coverage": ["@vitest/istanbul-lib-coverage@1.0.2", "", {}, "sha512-9J/JMwOf9AoJhAywhrn7ScKTL38hsWQP/qPG60OtaAFcQ5OXPwKsxZFlbnuCKmZ61m8/lGgHYnFpdyQZUvG/iA=="],
 
@@ -1155,7 +1155,7 @@
 
     "object.values": ["object.values@1.2.1", "", { "dependencies": { "call-bind": "^1.0.8", "call-bound": "^1.0.3", "define-properties": "^1.2.1", "es-object-atoms": "^1.0.0" } }, "sha512-gXah6aZrcUxjWg2zR2MwouP2eHlCBzdV4pygudehaKXSGW4v2AsRQUK+lwwXhii6KFZcunEnmSUoYp5CXibxtA=="],
 
-    "obug": ["obug@2.2.1", "", {}, "sha512-XrsrhT5sybtKI6wakr2SPOlGZWWYbUXZ7a0jT8/QOeAPau+1X/bSegNe5YR75oJmEZQbKningirmGOEJCIk61Q=="],
+    "obug": ["obug@3.0.0", "", {}, "sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw=="],
 
     "open": ["open@8.4.2", "", { "dependencies": { "define-lazy-prop": "^2.0.0", "is-docker": "^2.1.1", "is-wsl": "^2.2.0" } }, "sha512-7x81NCL719oNbsq/3mh+hVrAWmFuEYUqrq/Iw3kUzH8ReypT9QQ0BLoJS7/G9k6N81XjW4qHWtjWwe/9eLy1EQ=="],
 
@@ -1557,6 +1557,8 @@
 
     "@vitest/istanbul-lib-instrument/@babel/parser": ["@babel/parser@8.0.7", "", { "dependencies": { "@babel/types": "^8.0.6" }, "bin": "./bin/babel-parser.js" }, "sha512-UkDwEbPO1px2JQSrdh4qIgaH1JgG7GO/pFeJkpxhDxIETkT/QvGpnigXIw75ViHYPtIgKITmVUJqLjiO+JuWjA=="],
 
+    "@vitest/istanbul-lib-source-maps/obug": ["obug@2.2.1", "", {}, "sha512-XrsrhT5sybtKI6wakr2SPOlGZWWYbUXZ7a0jT8/QOeAPau+1X/bSegNe5YR75oJmEZQbKningirmGOEJCIk61Q=="],
+
     "babel-plugin-polyfill-corejs2/semver": ["semver@6.3.1", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
 
     "chalk/ansi-styles": ["ansi-styles@4.3.0", "", { "dependencies": { "color-convert": "^2.0.1" } }, "sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg=="],
@@ -1584,8 +1586,6 @@
     "split-string/extend-shallow": ["extend-shallow@3.0.2", "", { "dependencies": { "assign-symbols": "^1.0.0", "is-extendable": "^1.0.1" } }, "sha512-BwY5b5Ql4+qZoefgMj2NUmx+tehVTH/Kf4k1ZEtOHNFcm2wSxMRo992l6X3TIgni2eZVTZ85xMOjF31fwZAj6Q=="],
 
     "terser/commander": ["commander@2.20.3", "", {}, "sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ=="],
-
-    "vitest/obug": ["obug@3.0.0", "", {}, "sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw=="],
 
     "which-builtin-type/isarray": ["isarray@2.0.5", "", {}, "sha512-xHjhDr3cNBK0BzdUJSPXZntQUx/mwMS5Rw4A7lPJ90XGAO6ISP/ePDNuo0vhqOZU+UD5JoodwCAAoZQd3FeAKw=="],
 
@@ -1636,8 +1636,6 @@
     "@vitest/istanbul-lib-instrument/@babel/core/@babel/traverse": ["@babel/traverse@8.0.7", "", { "dependencies": { "@babel/code-frame": "^8.0.6", "@babel/generator": "^8.0.6", "@babel/helper-globals": "^8.0.6", "@babel/parser": "^8.0.7", "@babel/template": "^8.0.0", "@babel/types": "^8.0.6", "obug": "^3.0.0" } }, "sha512-bVV0brinsTWgc6ptSIoQo3GbITtl0VZAqEUJbHHcyfDPEu+q/fEvlYEa+6H85HoK8IdksKBFtKJbJFZ6Kff+zg=="],
 
     "@vitest/istanbul-lib-instrument/@babel/core/@babel/types": ["@babel/types@8.0.6", "", { "dependencies": { "@babel/helper-string-parser": "^8.0.6", "@babel/helper-validator-identifier": "^8.0.6" } }, "sha512-c+xgSWboV2pdwXP67BUWDVRHi2BO5Q3KwxyFVs7taVTY+fsK47/L51ZXQoV9rozHJDNHvJ4v4WEsI/IlxV2l2A=="],
-
-    "@vitest/istanbul-lib-instrument/@babel/core/obug": ["obug@3.0.0", "", {}, "sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw=="],
 
     "@vitest/istanbul-lib-instrument/@babel/parser/@babel/types": ["@babel/types@8.0.6", "", { "dependencies": { "@babel/helper-string-parser": "^8.0.6", "@babel/helper-validator-identifier": "^8.0.6" } }, "sha512-c+xgSWboV2pdwXP67BUWDVRHi2BO5Q3KwxyFVs7taVTY+fsK47/L51ZXQoV9rozHJDNHvJ4v4WEsI/IlxV2l2A=="],
 

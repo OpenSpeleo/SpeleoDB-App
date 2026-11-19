@@ -15,7 +15,14 @@ builds. The workflow lives in `.github/workflows/ci.yml`.
    The `--run` flag is required in CI so Vitest exits instead of entering watch
    mode. File-level serialization keeps real SpeleoDB integration tests from
    issuing concurrent password-login requests with the same account from a
-   GitHub-hosted runner.
+   GitHub-hosted runner. Vitest and `@vitest/coverage-istanbul` must use the
+   same exact version: the coverage provider requires its matching runner.
+   Update both pins and the standalone and workspace locks together. The
+   coverage contract test guards this tooling invariant without adding
+   application runtime work. If an install changes Bun's dependency paths and
+   setup reports that Vitest cannot find the current suite, run
+   `bun run test.unit --clearCache` to remove transformed modules that still
+   import the previous runner path, then rerun.
 3. **Production Web Build** runs `bun run build` and uploads `dist/` for native
    jobs. Before uploading, it installs Playwright Chromium and WebKit and runs
    `bun run test:browser` against those built assets. The browser suite verifies

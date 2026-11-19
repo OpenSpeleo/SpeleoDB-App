@@ -290,22 +290,22 @@ The read-only compass identifies checked leads with muted green tab text and a
 fine bottom accent. A Directions section label follows the description. The
 central reading matches the web editor's three-character width and typography,
 with no degree suffix, and remains non-editable. Selection retains its separate
-filled-tab treatment. Users
-can switch lead tabs; each tab also exposes its Checked or Unchecked state to
-assistive technology. The web editor's bulk buttons and entire bottom status
-panel are omitted on mobile.
+filled-tab treatment. Users can switch lead tabs; each tab also exposes its
+Checked or Unchecked state to assistive technology. The web editor's bulk
+buttons and entire bottom status panel are omitted on mobile.
 
-**Checked Exploration Leads** is a local, persisted visibility preference, default OFF.
-An ExplorationLead with any unchecked entry retains its normal red marker; a
-fully checked ExplorationLead is hidden by default. Enabling the setting shows
-fully checked markers in green at 75% opacity, with no cones. The normal and
-checked icon rasters are registered together through the shared map-viewer image
-helper; fallback circles use the same shared color, opacity and filter policy,
-including their outlines. The existing category and project/country gates still
-apply. Hidden markers are excluded from rendered-feature hit tests. Changing
-this setting filters existing layers without fetching or deleting cached data or
-rebuilding cone geometry. Parent category off/on retains the checked-visibility
-choice; reset restores OFF. See [Settings](settings.md).
+**Checked Exploration Leads** is a local, persisted visibility preference,
+default OFF. An ExplorationLead with any unchecked entry retains its normal red
+marker; a fully checked ExplorationLead is hidden by default. Enabling the
+setting shows fully checked markers in green at 75% opacity, with no cones. The
+normal and checked icon rasters are registered together through the shared
+map-viewer image helper; fallback circles use the same shared color, opacity and
+filter policy, including their outlines. The existing category and
+project/country gates still apply. Hidden markers are excluded from
+rendered-feature hit tests. Changing this setting filters existing layers
+without fetching or deleting cached data or rebuilding cone geometry. Parent
+category off/on retains the checked-visibility choice; reset restores OFF. See
+[Settings](settings.md).
 
 The cone source mounts first. Icon and fallback layers explicitly insert before
 the cone layer, keeping cones above them when image loading finishes late or the
