@@ -25,7 +25,7 @@
         "@ionic/react-router": "^8.8.19",
         "@sentry/capacitor": "4.4.0",
         "@sentry/react": "10.69.0",
-        "@speleodb/api": "0.7.1",
+        "@speleodb/api": "0.10.0",
         "@speleodb/map-core": "0.5.1",
         "@speleodb/map-viewer": "0.5.1",
         "@turf/helpers": "^7.4.0",
@@ -517,7 +517,7 @@
 
     "@sentry/types": ["@sentry/types@10.69.0", "", { "dependencies": { "@sentry/core": "10.69.0" } }, "sha512-sWOH1SrpGecTWVygZy3tI3D4WmJQd1/CEcR+1GJr0MltNHK6u8GbTF/Zl+aOR7EfYxPR9vZWUYTjNpdpFt7HeA=="],
 
-    "@speleodb/api": ["@speleodb/api@0.7.1", "", {}, "sha512-rntTW/DoA6ePqsGJM6dPNXsojZuBdVimt9NeZ2yjKIuYR9yu8UXwQNiDKbKg6TP1A1csGHr3O+WzCXnBF1O1XA=="],
+    "@speleodb/api": ["@speleodb/api@0.10.0", "", {}, "sha512-2BLipV8dtmGmrz1oLNOiHZtsB3ZZSgNElkDMTWTOnrRFmbXe1EQOer9gfo3dnI+3J4rzgne+fSRw0SYs3FMUgQ=="],
 
     "@speleodb/map-core": ["@speleodb/map-core@0.5.1", "", { "dependencies": { "@types/geojson": "7946.0.16", "@types/polylabel": "2.0.0", "polylabel": "2.1.0" } }, "sha512-qgXOnwbGfgvnmns6O6qZVXA4OHyIHCXUHvfogQliujB6pI8gUu5Wq73Wt98TgzHiB/OxIp7j3yHCjdzu2R1b5A=="],
 
