@@ -52,7 +52,7 @@ jobs:
       - run: >-
           bun run test.unit --run --reporter=verbose
           --coverage --no-file-parallelism
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: coverage
@@ -75,14 +75,14 @@ jobs:
       - run: bun run build
       - run: bunx --bun playwright install --with-deps chromium webkit
       - run: bun run test:browser
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         if: failure()
         with:
           name: browser-test-failures
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: dist
           path: dist/
@@ -147,13 +147,13 @@ jobs:
           --keystorepass="$ANDROID_KEYSTORE_PASS"
           --keystorealias="$ANDROID_KEY_ALIAS"
           --keystorealiaspass="$ANDROID_KEY_ALIAS_PASS"
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: android-ci-smoke-apk
           path: android/app/build/outputs/apk/release/*.apk
           retention-days: 7
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: android-ci-smoke-aab
@@ -292,7 +292,7 @@ jobs:
   #         codesign --verify --deep --strict output/Payload/App.app
   #         cd output
   #         zip -r App-ci-smoke-temporary-signed.ipa Payload
-  #     - uses: actions/upload-artifact@v7.0.1
+  #     - uses: actions/upload-artifact@v7.0.2
   #       if: startsWith(github.ref, 'refs/tags/')
   #       with:
   #         name: ios-ci-smoke-ipa
